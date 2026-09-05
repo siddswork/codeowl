@@ -1,6 +1,6 @@
 # CodeOwl — working conventions
 
-CodeOwl extracts a structural + semantic graph from a codebase and serves LLM-generated specs over MCP. Design lives in `ARCHITECTURE.md` (how it's built) and `REQUIREMENTS.md` (what and for whom). `REVIEW.md` holds an outside review being worked through gap by gap. Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
+CodeOwl extracts a structural + semantic graph from a codebase and serves LLM-generated specs over MCP. Design lives in `ARCHITECTURE.md` (how it's built) and `REQUIREMENTS.md` (what and for whom); `ROADMAP.md` has the build sequence and test repos. Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
 
 ## Hard invariants
 
