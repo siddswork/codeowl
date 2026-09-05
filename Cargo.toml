@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.104"
+blake3 = "1.8.7"
 ignore = "0.4.33"
+oxc_resolver = "11.24.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 tree-sitter = "0.27.0"

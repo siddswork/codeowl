@@ -11,6 +11,7 @@
 
 use tree_sitter::{Node, Parser};
 
+use crate::hash::hash_text;
 use crate::symbol::{Symbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its symbols.
@@ -77,6 +78,8 @@ fn visit_function(decl: Node, outer: Node, source: &str, file: &str, out: &mut V
         return;
     };
     let name = field_text(decl, "name", source).unwrap_or("<anonymous>");
+    let signature = signature_text(decl, body, source);
+    let is_exported = outer.kind() == "export_statement";
     out.push(Symbol {
         id: format!("{file}::{name}"),
         kind: SymbolKind::Function,
@@ -85,9 +88,12 @@ fn visit_function(decl: Node, outer: Node, source: &str, file: &str, out: &mut V
         // `decl`, not `outer` — signature text skips `export`/`export
         // default` for consistency with the const/arrow-function case
         // below, where it's cheaper to just not include it. Whether a
-        // symbol is exported becomes its own `isExported` field in M2.
-        signature: signature_text(decl, body, source),
+        // symbol is exported is now its own `is_exported` field instead.
+        source_hash: hash_text(text(decl, source)),
+        interface_hash: is_exported.then(|| hash_text(&signature)),
+        signature,
         docstring: leading_doc(outer, source),
+        is_exported,
         parent: None,
         children: Vec::new(),
     });
@@ -101,6 +107,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
     let class_id = format!("{file}::{name}");
 
     let mut method_ids = Vec::new();
+    let mut method_source_hashes = Vec::new();
     let mut method_symbols = Vec::new();
     let mut cursor = body.walk();
     for member in body.children(&mut cursor) {
@@ -112,6 +119,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         };
         let m_name = field_text(member, "name", source).unwrap_or("<anonymous>");
         let m_id = format!("{class_id}.{m_name}");
+        let m_source_hash = hash_text(text(member, source));
         method_symbols.push(Symbol {
             id: m_id.clone(),
             kind: SymbolKind::Method,
@@ -119,10 +127,36 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
             lines: node_lines(member),
             signature: signature_text(member, m_body, source),
             docstring: leading_doc(member, source),
+            // A method isn't independently exported/imported — see the
+            // doc comment on Symbol::is_exported.
+            is_exported: false,
+            source_hash: m_source_hash.clone(),
+            interface_hash: None,
             parent: Some(class_id.clone()),
             children: Vec::new(),
         });
         method_ids.push(m_id);
+        method_source_hashes.push(m_source_hash);
+    }
+
+    let signature = signature_text(decl, body, source);
+    let is_exported = outer.kind() == "export_statement";
+
+    // Merkle rollup: the class's own source_hash folds in each method's
+    // source_hash, in declaration order (reordering methods is a real
+    // change too). This is what makes the ancestor-chain hash-propagation
+    // validation in ROADMAP.md's M2 entry hold: edit one method's body,
+    // and both that method's and the class's source_hash move.
+    //
+    // interface_hash deliberately does NOT fold in method signatures —
+    // M2 only resolves file-to-file import edges (a consumer imports the
+    // class itself), not method-level call resolution, so nothing yet
+    // watches a class's members for invalidation purposes. Revisit once a
+    // later milestone adds call-level resolution.
+    let mut rollup_input = signature.clone();
+    for h in &method_source_hashes {
+        rollup_input.push('\n');
+        rollup_input.push_str(h);
     }
 
     out.push(Symbol {
@@ -130,8 +164,11 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         kind: SymbolKind::Class,
         file: file.to_string(),
         lines: node_lines(decl),
-        signature: signature_text(decl, body, source),
+        source_hash: hash_text(&rollup_input),
+        interface_hash: is_exported.then(|| hash_text(&signature)),
+        signature,
         docstring: leading_doc(outer, source),
+        is_exported,
         parent: None,
         children: method_ids,
     });
@@ -170,16 +207,32 @@ fn visit_lexical(decl: Node, outer: Node, source: &str, file: &str, out: &mut Ve
                     format!("const {name} = {}", signature_text(v, body, source)),
                 )
             }
-            _ => (SymbolKind::Const, format!("const {name}")),
+            // A plain const's "shape" is its declared type, if any — e.g.
+            // `const PI: number = 3.14` — not its literal value, which
+            // interface_hash should ignore (below) exactly like a
+            // function's body. Include the type annotation's own text
+            // (which already carries a leading ": "), so a type change is
+            // a real interface_hash change and a value-only edit isn't.
+            _ => {
+                let type_text = declarator
+                    .child_by_field_name("type")
+                    .map(|t| text(t, source))
+                    .unwrap_or("");
+                (SymbolKind::Const, format!("const {name}{type_text}"))
+            }
         };
 
+        let is_exported = outer.kind() == "export_statement";
         out.push(Symbol {
             id,
             kind,
             file: file.to_string(),
             lines: node_lines(declarator),
+            source_hash: hash_text(text(declarator, source)),
+            interface_hash: is_exported.then(|| hash_text(&signature)),
             signature,
             docstring: leading_doc(outer, source),
+            is_exported,
             parent: None,
             children: Vec::new(),
         });
@@ -284,6 +337,51 @@ mod tests {
         assert_eq!(s.docstring, None);
         assert_eq!(s.parent, None);
         assert!(s.children.is_empty());
+        assert!(s.is_exported);
+        assert!(s.interface_hash.is_some());
+        assert!(!s.source_hash.is_empty());
+    }
+
+    #[test]
+    fn non_exported_declarations_have_no_interface_hash() {
+        let src = "function helper(): void {}\n";
+        let symbols = extract_file(src, "a.ts");
+        assert_eq!(symbols.len(), 1);
+        assert!(!symbols[0].is_exported);
+        assert_eq!(symbols[0].interface_hash, None);
+        // source_hash is still computed — non-exported code still needs a
+        // staleness signal, it just can't be a reference-edge target.
+        assert!(!symbols[0].source_hash.is_empty());
+    }
+
+    #[test]
+    fn body_only_edit_changes_source_hash_but_not_interface_hash() {
+        // This is the direct regression test for gap 2: rewriting a
+        // function's implementation must never invalidate its importers.
+        let before = extract_file(
+            "export function add(a: number, b: number): number {\n    return a + b;\n}\n",
+            "a.ts",
+        );
+        let after = extract_file(
+            "export function add(a: number, b: number): number {\n    let sum = a + b;\n    return sum;\n}\n",
+            "a.ts",
+        );
+        assert_ne!(before[0].source_hash, after[0].source_hash);
+        assert_eq!(before[0].interface_hash, after[0].interface_hash);
+    }
+
+    #[test]
+    fn signature_edit_changes_interface_hash() {
+        let before = extract_file(
+            "export function add(a: number, b: number): number {\n    return a + b;\n}\n",
+            "a.ts",
+        );
+        let after = extract_file(
+            "export function add(a: number, b: number, c: number): number {\n    return a + b;\n}\n",
+            "a.ts",
+        );
+        assert_ne!(before[0].interface_hash, after[0].interface_hash);
+        assert_ne!(before[0].source_hash, after[0].source_hash);
     }
 
     #[test]
@@ -371,12 +469,18 @@ mod tests {
             class.children,
             vec!["a.ts::Foo.constructor", "a.ts::Foo.doThing"]
         );
+        assert!(class.is_exported);
+        assert!(class.interface_hash.is_some());
 
         let ctor = &symbols[1];
         assert_eq!(ctor.id, "a.ts::Foo.constructor");
         assert_eq!(ctor.kind, SymbolKind::Method);
         assert_eq!(ctor.parent.as_deref(), Some("a.ts::Foo"));
         assert_eq!(ctor.docstring.as_deref(), Some("ctor doc"));
+        // Methods are never independently exported — see the doc comment
+        // on Symbol::is_exported.
+        assert!(!ctor.is_exported);
+        assert_eq!(ctor.interface_hash, None);
 
         let method = &symbols[2];
         assert_eq!(method.id, "a.ts::Foo.doThing");
@@ -388,6 +492,29 @@ mod tests {
                 .signature
                 .starts_with("async doThing(y: T): Promise<void>")
         );
+    }
+
+    #[test]
+    fn method_body_edit_propagates_source_hash_to_class_but_not_interface_hash() {
+        let before = extract_file(
+            "export class Foo {\n    bar(): void {\n        console.log('a');\n    }\n}\n",
+            "a.ts",
+        );
+        let after = extract_file(
+            "export class Foo {\n    bar(): void {\n        console.log('b');\n    }\n}\n",
+            "a.ts",
+        );
+        let (before_method, before_class) = (&before[1], &before[0]);
+        let (after_method, after_class) = (&after[1], &after[0]);
+
+        // The ancestor chain: a leaf method's source_hash changes...
+        assert_ne!(before_method.source_hash, after_method.source_hash);
+        // ...and that propagates up to the containing class's source_hash...
+        assert_ne!(before_class.source_hash, after_class.source_hash);
+        // ...but the class's *interface* didn't change (M2 doesn't yet
+        // fold method signatures into a class's interface_hash — see the
+        // doc comment on visit_class's interface_hash computation).
+        assert_eq!(before_class.interface_hash, after_class.interface_hash);
     }
 
     #[test]
