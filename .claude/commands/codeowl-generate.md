@@ -9,14 +9,17 @@ Generate the spec for `$ARGUMENTS`, using CodeOwl's MCP tools
 calls an LLM or writes prose — it only assembles context and persists
 whatever you write. You are the one writing the spec text.
 
-`$ARGUMENTS` is always a repo-relative file path — a plain file (e.g.
-`lib/utils.ts`) or a feature entry point (a page like
+`$ARGUMENTS` is a repo-relative file path — a plain file (e.g.
+`lib/utils.ts`), a feature entry point (a page like
 `app/submit/page.tsx`, or an API route with no page referencing it, like
-a webhook). You don't need to know in advance which one it is: the loop
-below walks bottom-up (a file's symbols, then the file, then — only if
-this file is also a recognized feature entry point — the feature) and
+a webhook) — or a directory path (e.g. `lib`) with at least two
+spec-bearing files in it. You don't need to know in advance which one it
+is: the loop below walks bottom-up (a file's symbols, then the file, then
+— only if this file is also a recognized feature entry point — the
+feature; or, for a directory, each of its files' own symbol-then-file
+ladder, then the directory's own rollup once every file is current) and
 just tells you what's next each time. If `$ARGUMENTS` is empty, ask the
-user which file to generate rather than guessing.
+user which file or directory to generate rather than guessing.
 
 **Read before writing, every time — this is not a formality.** Every
 piece of `source`/`core_sources` a task hands you exists to be read in
@@ -42,7 +45,7 @@ Repeat the following until `get_next_spec_task` returns `null`:
 1. Call `get_next_spec_task` with `target` set to `$ARGUMENTS`.
 2. If the result is `null`, stop — everything on this target already has
    a current spec. Report that and end the command.
-3. Otherwise you'll get a task shaped one of three ways:
+3. Otherwise you'll get a task shaped one of four ways:
    - **`kind: "symbol"`** — write markdown containing exactly these two
      headings, in this order, each with real prose under it:
      ```
@@ -84,6 +87,14 @@ Repeat the following until `get_next_spec_task` returns `null`:
      understand the capability without opening any source file — write
      for that reader, with file references as an aside for devs, not the
      other way around.
+   - **`kind: "rollup"`** — write one short paragraph of plain prose (no
+     headings needed) synthesizing what the directory as a whole is for,
+     based on `files` (each entry is that file's own already-generated
+     `## Summary` — read every one, don't re-derive from source, and don't
+     re-read the files themselves: the whole point of a rollup is that it
+     costs nothing beyond what's already been generated). This becomes the
+     directory's own `## Summary`; CodeOwl fills in the per-file listing
+     underneath it deterministically.
 4. Call `submit_spec` with `id` set to the task's `id` and `content` set
    to what you just wrote.
 5. Go back to step 1.
@@ -96,12 +107,13 @@ was last generated, it's skipped automatically (no LLM call happens for
 it), so re-running this command on an already-current target is a fast
 no-op that reports nothing left to do.
 
-When the loop ends, report concisely: which symbols/file/feature got a
-spec written or refreshed, and where it landed (`docs/specs/<path>.md`
-for a file, `docs/specs/_features/<slug>.md` for a feature — see
+When the loop ends, report concisely: which symbols/file/feature/rollup
+got a spec written or refreshed, and where it landed
+(`docs/specs/<path>.md` for a file, `docs/specs/_features/<slug>.md` for
+a feature, `docs/specs/<dir>/_index.md` for a directory rollup — see
 `ARCHITECTURE.md`'s "Spec document format"). If `get_next_spec_task`
 never returns anything at all on the first call, say why: either nothing
 changed since it was last generated, or the target doesn't qualify for a
-spec at all (a barrel file with no exported function/class, and not a
-feature entry point either — see the granularity rules in
-`ARCHITECTURE.md`).
+spec at all (a barrel file with no exported function/class and not a
+feature entry point either, or a directory with fewer than two
+spec-bearing files — see the granularity rules in `ARCHITECTURE.md`).

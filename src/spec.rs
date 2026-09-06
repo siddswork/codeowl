@@ -1,8 +1,8 @@
-//! The spec document format and file writer — M4 (file specs) and M5
-//! (feature specs). Implements `ARCHITECTURE.md`'s "Spec document format":
-//! the mirrored `docs/specs/` tree, per-symbol/per-file hash frontmatter,
-//! and the granularity rule deciding whether a file gets a document at
-//! all.
+//! The spec document format and file writer — M4 (file specs), M5 (feature
+//! specs), and M6 (directory rollups). Implements `ARCHITECTURE.md`'s "Spec
+//! document format": the mirrored `docs/specs/` tree, per-symbol/per-file/
+//! per-directory hash frontmatter, and the granularity rules deciding which
+//! documents exist at all.
 //!
 //! Frontmatter here is hand-parsed rather than run through a general YAML
 //! library: it's one fixed, CodeOwl-owned shape (see the `render`/`parse`
@@ -10,8 +10,8 @@
 //! exactly to that shape is simpler — and easier to reason about — than a
 //! full grammar for something we control both ends of.
 //!
-//! Directory rollups and the token-budget recursion threshold (open
-//! question 2) are still out of scope here.
+//! The token-budget recursion threshold (open question 2) is still out of
+//! scope here.
 
 use std::path::{Path, PathBuf};
 
@@ -68,17 +68,18 @@ fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
 /// full of single-file directories (`app/api/<route>/route.ts`), and an
 /// `_index.md` for each of those would be pure noise. `dir_path` is a
 /// repo-relative directory path with no trailing slash (`""` for the repo
-/// root).
-///
-/// This only implements the *rule*, not the rollup document itself —
-/// unlike the file and feature spec shapes, `ARCHITECTURE.md`'s "Spec
-/// document format" never templated a directory rollup's frontmatter/body,
-/// so writing one now would mean inventing an unreviewed format rather
-/// than implementing a decided one. Callers can use this to decide
-/// *whether* a directory would get a document without CodeOwl yet being
-/// able to produce it.
+/// root, though see `next_rollup_task`'s guard on that case).
 pub fn directory_is_spec_bearing(graph: &Graph, dir_path: &str) -> bool {
-    graph
+    spec_bearing_files_in(graph, dir_path).len() >= 2
+}
+
+/// Every file directly in `dir_path` (repo-relative, no trailing slash) —
+/// spec-bearing or not. `dir_path` compares against each file's own parent
+/// path, so this is one directory level, not a recursive subtree walk;
+/// nested subdirectories get their own rollup instead of being folded into
+/// this one.
+fn files_in(graph: &Graph, dir_path: &str) -> Vec<SymbolId> {
+    let mut files: Vec<SymbolId> = graph
         .files()
         .filter(|f| {
             Path::new(&f.id)
@@ -86,13 +87,20 @@ pub fn directory_is_spec_bearing(graph: &Graph, dir_path: &str) -> bool {
                 .map(|p| p.to_string_lossy().replace('\\', "/"))
                 == Some(dir_path.to_string())
         })
-        .filter(|f| {
-            graph
-                .find(&f.id)
-                .is_some_and(|id| file_is_spec_bearing(graph, id))
-        })
-        .count()
-        >= 2
+        .filter_map(|f| graph.find(&f.id))
+        .collect();
+    files.sort_by_key(|&id| graph.string_id(id).to_string());
+    files
+}
+
+/// `dir_path`'s own spec-bearing files, in a stable (path-sorted) order —
+/// unlike a file's symbols, a directory's files have no declaration order
+/// to preserve.
+fn spec_bearing_files_in(graph: &Graph, dir_path: &str) -> Vec<SymbolId> {
+    files_in(graph, dir_path)
+        .into_iter()
+        .filter(|&id| file_is_spec_bearing(graph, id))
+        .collect()
 }
 
 /// The short name a section heading uses — the part of a top-level
@@ -868,6 +876,286 @@ pub fn submit_feature(
     Ok(spec)
 }
 
+/// A directory rollup's persisted shape (M6). Deliberately closer to
+/// `FeatureSpec` than `FileSpec`: one document, one `spec_hash`, no
+/// per-entry subsections — a directory has no source of its own to
+/// section, only containment children (its files) to compose from. See
+/// `ARCHITECTURE.md`'s "Spec document format" for the decided template.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RollupSpec {
+    pub dir_path: String,
+    /// Each of the directory's spec-bearing files, keyed on that file's own
+    /// current `spec_hash` — not `source_hash`. Containment children
+    /// contribute the hash of their own *spec* (see "Caching and
+    /// invalidation"), so this only moves once a file's spec is actually
+    /// rewritten, never merely because its source changed but hasn't been
+    /// regenerated yet.
+    pub files: Vec<(String, String)>,
+    pub spec_hash: String,
+    /// The LLM-written `## Summary` prose only — the `## Contents` listing
+    /// is CodeOwl-written and recomputed fresh on every render, the same
+    /// way a file spec's signature/dependency lines are (see
+    /// `render_rollup`).
+    pub body: String,
+}
+
+pub fn rollup_spec_path(root: &Path, dir_path: &str) -> PathBuf {
+    root.join("docs")
+        .join("specs")
+        .join(dir_path)
+        .join("_index.md")
+}
+
+/// Render a `RollupSpec` to markdown+frontmatter. `root` is needed to pull
+/// each file's own current summary fresh for the `## Contents` list, the
+/// same "recompute, don't store" pattern `render`'s dependency lines use.
+pub fn render_rollup(graph: &Graph, root: &Path, spec: &RollupSpec) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("kind: rollup\n");
+    out.push_str(&format!("dir: {}\n", spec.dir_path));
+    out.push_str("files:\n");
+    for (path, hash) in &spec.files {
+        out.push_str(&format!("  {path}: {hash}\n"));
+    }
+    out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
+    out.push_str("---\n");
+    out.push_str(&format!("# {}\n", spec.dir_path));
+    out.push_str("## Summary\n");
+    out.push_str(spec.body.trim());
+    out.push('\n');
+    out.push_str("\n## Contents\n");
+    for id in files_in(graph, &spec.dir_path) {
+        let file = graph.get_file(id).expect("filtered to file ids");
+        if file_is_spec_bearing(graph, id) {
+            let summary = read_file_spec(root, &file.id)
+                .ok()
+                .flatten()
+                .map(|s| s.file_summary)
+                .unwrap_or_default();
+            let blurb = summary.lines().next().unwrap_or("").trim();
+            out.push_str(&format!("- `{}` — {blurb}\n", file.id));
+        } else {
+            out.push_str(&format!(
+                "- `{}` — (no document; not spec-bearing)\n",
+                file.id
+            ));
+        }
+    }
+    out
+}
+
+pub fn parse_rollup(content: &str) -> Result<RollupSpec> {
+    let mut lines = content.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        bail!("rollup spec missing frontmatter opening `---`");
+    }
+
+    let mut dir_path = String::new();
+    let mut files = Vec::new();
+    let mut spec_hash = String::new();
+    let mut in_files = false;
+    let mut consumed = 1;
+
+    for line in lines.by_ref() {
+        consumed += 1;
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("  ")
+            && in_files
+        {
+            let (path, hash) = rest
+                .rsplit_once(':')
+                .context("malformed files entry in rollup frontmatter")?;
+            files.push((path.trim().to_string(), hash.trim().to_string()));
+            continue;
+        }
+        in_files = line.trim() == "files:";
+        if in_files {
+            continue;
+        }
+        let (key, value) = line
+            .split_once(':')
+            .context("malformed rollup frontmatter line")?;
+        match key.trim() {
+            "dir" => dir_path = value.trim().to_string(),
+            "spec_hash" => spec_hash = value.trim().to_string(),
+            _ => {}
+        }
+    }
+
+    let body_all: String = content
+        .lines()
+        .skip(consumed)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = extract_section(&body_all, "## Summary", "\n## ").unwrap_or_default();
+
+    Ok(RollupSpec {
+        dir_path,
+        files,
+        spec_hash,
+        body,
+    })
+}
+
+pub fn read_rollup_spec(root: &Path, dir_path: &str) -> Result<Option<RollupSpec>> {
+    let path = rollup_spec_path(root, dir_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    parse_rollup(&content).map(Some)
+}
+
+/// Each of `dir_path`'s spec-bearing files paired with its own current
+/// `spec_hash` (empty if that file has no current spec yet) — what a
+/// persisted `RollupSpec.files` is compared against to decide staleness,
+/// and what a fresh generation records.
+pub fn current_file_hashes(
+    graph: &Graph,
+    root: &Path,
+    dir_path: &str,
+) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for id in spec_bearing_files_in(graph, dir_path) {
+        let file = graph.get_file(id).expect("filtered to file ids");
+        let hash = read_file_spec(root, &file.id)?
+            .filter(|s| s.file.source_hash == file.source_hash)
+            .map(|s| s.file.spec_hash)
+            .unwrap_or_default();
+        out.push((file.id.clone(), hash));
+    }
+    Ok(out)
+}
+
+/// One unit of work for a directory rollup — like a feature spec, a single
+/// document generated in one task, not a bottom-up ladder: composed
+/// entirely from its files' own already-generated summaries (containment
+/// children contribute their own spec, never their raw source — see
+/// "Bottom-up composition"). Only ever produced once every file under the
+/// directory is itself current (see `next_task_for_directory`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RollupTask {
+    pub dir_path: String,
+    /// (file path, that file's own current `## Summary` prose).
+    pub files: Vec<(String, String)>,
+}
+
+/// Walks `dir_path`'s own spec-bearing files' bottom-up ladders (`next_task`,
+/// in path-sorted order), returning the first uncovered symbol or file
+/// task — the same "symbols before their file" recursion, one level up:
+/// files before their directory's rollup. `None` once every file under
+/// `dir_path` is fully current, at which point `next_rollup_task` decides
+/// whether the rollup document itself still needs writing.
+pub fn next_task_for_directory(
+    graph: &Graph,
+    root: &Path,
+    dir_path: &str,
+) -> Result<Option<SpecTask>> {
+    for file_id in spec_bearing_files_in(graph, dir_path) {
+        if let Some(task) = next_task(graph, root, file_id)? {
+            return Ok(Some(task));
+        }
+    }
+    Ok(None)
+}
+
+/// The rollup task for `dir_path`, or `None` if it isn't spec-bearing (per
+/// `directory_is_spec_bearing`), one or more of its files aren't
+/// themselves current yet (call `next_task_for_directory` first — this
+/// mirrors `next_task` never returning a `File` task while a symbol is
+/// still uncovered), or the rollup is already current (every spec-bearing
+/// file's `spec_hash` matches what's on record, and the file set itself
+/// hasn't changed). Stateless and safe to call standalone at any point.
+pub fn next_rollup_task(graph: &Graph, root: &Path, dir_path: &str) -> Result<Option<RollupTask>> {
+    if dir_path.is_empty() {
+        bail!(
+            "the repo root's rollup would collide with the reserved system-spec path \
+             (docs/specs/_index.md) -- not supported until a system spec milestone exists"
+        );
+    }
+    if !directory_is_spec_bearing(graph, dir_path) {
+        return Ok(None);
+    }
+
+    let current = current_file_hashes(graph, root, dir_path)?;
+    if current.iter().any(|(_, h)| h.is_empty()) {
+        return Ok(None);
+    }
+    let existing = read_rollup_spec(root, dir_path)?;
+    let is_current = existing.is_some_and(|spec| {
+        spec.files.len() == current.len()
+            && spec
+                .files
+                .iter()
+                .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
+    });
+    if is_current {
+        return Ok(None);
+    }
+
+    let mut files = Vec::new();
+    for id in spec_bearing_files_in(graph, dir_path) {
+        let file = graph.get_file(id).expect("filtered to file ids");
+        let summary = read_file_spec(root, &file.id)?
+            .filter(|s| s.file.source_hash == file.source_hash)
+            .map(|s| s.file_summary)
+            .with_context(|| {
+                format!(
+                    "{} has no current spec yet -- exhaust next_task_for_directory first",
+                    file.id
+                )
+            })?;
+        files.push((file.id.clone(), summary));
+    }
+
+    Ok(Some(RollupTask {
+        dir_path: dir_path.to_string(),
+        files,
+    }))
+}
+
+/// Persist `content` (the agent's LLM-written directory summary — plain
+/// prose, becomes the rollup's `## Summary`) for `dir_path`.
+pub fn submit_rollup(
+    graph: &Graph,
+    root: &Path,
+    dir_path: &str,
+    content: &str,
+) -> Result<RollupSpec> {
+    if !directory_is_spec_bearing(graph, dir_path) {
+        bail!("{dir_path:?} is not a spec-bearing directory (needs >= 2 spec-bearing files)");
+    }
+    let body = content.trim().to_string();
+    if body.is_empty() {
+        bail!("submitted rollup content is empty");
+    }
+
+    let files = current_file_hashes(graph, root, dir_path)?;
+    if let Some((missing, _)) = files.iter().find(|(_, h)| h.is_empty()) {
+        bail!("{missing} has no current spec yet -- generate its file spec first");
+    }
+
+    let spec = RollupSpec {
+        dir_path: dir_path.to_string(),
+        files,
+        spec_hash: hash_text(&body),
+        body,
+    };
+
+    let path = rollup_spec_path(root, dir_path);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    std::fs::write(&path, render_rollup(graph, root, &spec))
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    Ok(spec)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1270,6 +1558,134 @@ mod tests {
             "app/submit/page.tsx",
             "no title here, just prose",
         );
+        assert!(result.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn rollup_fixture_dir(suffix: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "codeowl-rollup-spec-test-{}-{suffix}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn render_rollup_then_parse_rollup_round_trips() {
+        let graph = build_graph_from_sources(&[("lib/one.ts", "export function one(): void {}\n")]);
+        let spec = RollupSpec {
+            dir_path: "lib".to_string(),
+            files: vec![("lib/one.ts".to_string(), "onehash".to_string())],
+            spec_hash: "rolluphash".to_string(),
+            body: "Small shared helpers.".to_string(),
+        };
+        let rendered = render_rollup(&graph, Path::new("/nonexistent"), &spec);
+        assert!(rendered.contains("dir: lib"));
+        assert!(rendered.contains("lib/one.ts: onehash"));
+        let parsed = parse_rollup(&rendered).expect("should parse what we just rendered");
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn next_task_for_directory_walks_files_before_the_rollup() {
+        let dir = rollup_fixture_dir("1");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[
+            ("lib/one.ts", "export function one(): void {}\n"),
+            ("lib/two.ts", "export function two(): void {}\n"),
+        ]);
+
+        // Neither file has a spec yet -- the first task is one of their
+        // own symbols, not the rollup.
+        let task = next_task_for_directory(&graph, &dir, "lib")
+            .unwrap()
+            .expect("files aren't current yet");
+        assert_eq!(
+            task,
+            SpecTask::Symbol {
+                id: "lib/one.ts::one".to_string(),
+                signature: "function one(): void".to_string(),
+                docstring: None,
+                lines: [1, 1],
+            }
+        );
+        assert_eq!(next_rollup_task(&graph, &dir, "lib").unwrap(), None);
+
+        submit(
+            &graph,
+            &dir,
+            "lib/one.ts::one",
+            "### Summary\nS1.\n### Behavior\nB1.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "lib/one.ts", "Does one thing.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/two.ts::two",
+            "### Summary\nS2.\n### Behavior\nB2.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "lib/two.ts", "Does two things.").unwrap();
+
+        // Both files are now current -- the directory chase is exhausted,
+        // and the rollup task itself becomes available.
+        assert_eq!(next_task_for_directory(&graph, &dir, "lib").unwrap(), None);
+        let rollup_task = next_rollup_task(&graph, &dir, "lib")
+            .unwrap()
+            .expect("both files current, rollup itself still missing");
+        assert_eq!(
+            rollup_task.files,
+            vec![
+                ("lib/one.ts".to_string(), "Does one thing.".to_string()),
+                ("lib/two.ts".to_string(), "Does two things.".to_string()),
+            ]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_rollup_writes_the_document_and_records_file_hashes() {
+        let dir = rollup_fixture_dir("2");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[
+            ("lib/one.ts", "export function one(): void {}\n"),
+            ("lib/two.ts", "export function two(): void {}\n"),
+        ]);
+        for (id, content) in [
+            ("lib/one.ts::one", "### Summary\nS1.\n### Behavior\nB1.\n"),
+            ("lib/two.ts::two", "### Summary\nS2.\n### Behavior\nB2.\n"),
+        ] {
+            submit(&graph, &dir, id, content).unwrap();
+        }
+        submit(&graph, &dir, "lib/one.ts", "Does one thing.").unwrap();
+        submit(&graph, &dir, "lib/two.ts", "Does two things.").unwrap();
+
+        let spec = submit_rollup(&graph, &dir, "lib", "Small shared helpers.").unwrap();
+        assert_eq!(spec.files.len(), 2);
+        assert!(spec.files.iter().all(|(_, h)| !h.is_empty()));
+
+        assert!(rollup_spec_path(&dir, "lib").exists());
+        assert_eq!(
+            read_rollup_spec(&dir, "lib").unwrap().unwrap().body,
+            "Small shared helpers."
+        );
+        assert_eq!(next_rollup_task(&graph, &dir, "lib").unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_rollup_rejects_a_directory_that_is_not_spec_bearing() {
+        let dir = rollup_fixture_dir("3");
+        std::fs::create_dir_all(&dir).unwrap();
+        let graph = build_graph_from_sources(&[(
+            "app/api/submit/route.ts",
+            "export function GET(): void {}\n",
+        )]);
+        let result = submit_rollup(&graph, &dir, "app/api/submit", "A route.");
         assert!(result.is_err());
         std::fs::remove_dir_all(&dir).ok();
     }

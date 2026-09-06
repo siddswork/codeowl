@@ -263,6 +263,35 @@ spec_hash: <blake3>
 
 The `participants` map is what makes staleness work (section 5's "Caching and invalidation" extended): a feature spec is stale when any participant's hash moved, or when the participant set itself changes — a new `fetch()` literal appearing is a real change to the feature even though no existing participant moved. Crucially, feature generation **consumes** participants' summaries or deterministic stubs and never triggers their generation, so the containment-only recursion invariant is untouched: this is the same reference-edge read path section 5 already defines, just assembled from a different starting set.
 
+**Directory rollup shape** (M6). One document, one `spec_hash` — like a feature spec, not sectioned per-entry the way a file spec is, because a directory has no source of its own to section, only containment children (its spec-bearing files) to compose from. Frontmatter keys each file on its own current **`spec_hash`**, not `source_hash`: containment children contribute the hash of their own *spec* (see "Caching and invalidation" above), so the rollup only goes stale once a file's spec is actually rewritten, not merely because its source changed but hasn't been regenerated yet.
+
+```markdown
+---
+kind: rollup
+dir: lib/email
+files:
+  lib/email/config.ts: <blake3>
+  lib/email/send-artwork-submission-reminder.ts: <blake3>
+  lib/email/send-registration-email.ts: <blake3>
+spec_hash: <blake3>
+---
+# lib/email
+## Summary     ← LLM-synthesized from the files' own `## Summary` sections
+               only, never their raw source -- the same "containment
+               children, no source of its own" composition section 5
+               already describes for a node with several containment
+               children
+## Contents    ← CodeOwl-written, recomputed fresh on every render, the
+               same "recompute, don't store" pattern a file spec's
+               signature/dependency lines use
+- `lib/email/config.ts` — <that file's own summary, first line>
+- `lib/email/send-artwork-submission-reminder.ts` — <...>
+```
+
+A non-spec-bearing file in the same directory (barrel/const-only/boilerplate) still gets a `## Contents` line — `(no document; not spec-bearing)` in place of a summary — which is what actually closes the granularity rules' promise that such files "appear as one-liners in their directory's rollup instead."
+
+**Generation** walks the identical bottom-up shape one level up from a file spec: `/codeowl generate <dir>` drains each of the directory's own spec-bearing files' symbol-then-file ladders first (directories aren't graph nodes — see M4's deliberate scope cut — so this needs its own lightweight file-grouping lookup rather than `graph.find`), and only once every file under the directory is itself current does the rollup task appear — "symbols before their file," one level up, is now "files before their directory's rollup." Validated against the pilot repo: `lib/email` (3 files, 4 exported symbols) walked its full ladder to a rollup exactly this way, and a genuinely single-file directory (`app/about`) correctly produced no task and no `_index.md` at all — the case M4's own validation could only pass vacuously.
+
 **Generation priority.** Budgeted runs (`--all --budget=N`) spend in this order: **system spec → feature specs → high-fan-in files → long tail**. This supersedes plain fan-in ordering for the top two tiers, and has a useful brownfield property — the first budgeted runs against a legacy repo build exactly the documents a human would ask for first, so the tool is demonstrably useful long before coverage approaches complete.
 
 ### 7. MCP server
@@ -321,7 +350,7 @@ Requirements-level open questions (whether something is in scope at all) live in
    - **Schema/data boundaries** — SQL DDL (`CREATE TABLE`, etc.) defining tables that application code references via string literals or ORM calls, not via any call/import tree-sitter can see. Needs a dedicated SQL extractor producing schema nodes (tables/columns/constraints) plus a fuzzy, string/ORM-aware matcher on the application-code side — meaningfully less precise than resolved imports. Directly relevant to the Phase 1 pilot (Supabase SQL migrations), not a future/enterprise-only concern.
    - **Standalone tooling ("island" nodes)** — scripts with no inbound call edge at all (e.g. a perf-test-environment rebuild script, invoked manually or from CI, not from the main codebase). Still worth a leaf-level spec even with no edges into the rest of the graph; if a CI config or Makefile does reference it, that's a further artifact type worth resolving into an edge when possible, but the node's spec shouldn't depend on that being resolved.
 4. **Feature boundaries and naming** — M5 derives one feature spec per framework-enumerated entry point, slugged from its route path. Real features don't always map 1:1 to routes: some span several (a wizard across three pages), some routes are too trivial to warrant a feature narrative, and route slugs make poor human-facing titles. A manifest for merging/renaming/excluding is the obvious answer, but its format is deliberately not designed yet — guessing it before real generated feature specs exist to judge against would be premature. Revisit once M5 has produced a repo's worth of them.
-5. **Directory rollup document shape** — the granularity rule (≥2 spec-bearing files → an `_index.md`) is implemented and tested as of M4, but unlike the file and feature spec shapes, its frontmatter/body template was never worked out — the file spec's own worked example (`lib/utils.ts`) never needed one, since Phase 1's pilot repo puts multiple spec-bearing files in the same directory rarely enough that M4's single-file validation target didn't exercise it. Concretely open: does a rollup's own `## Summary` synthesize its files' summaries, or just list them; does it need per-file hashes in frontmatter the same way a file spec has per-symbol ones, keyed on what (each file's own `source_hash`, presumably, mirroring the file-spec pattern one level up); what triggers regenerating it when a *new* file becomes spec-bearing in an already-rolled-up directory, not just when an existing one's hash moves. Small relative to the feature-spec decision, but real — pick this up before wiring the write path, the same way file/feature specs got decided before M4/M5 built them.
+5. ~~**Directory rollup document shape**~~ — Resolved in M6: see "Directory rollup shape" above. `## Summary` is LLM-synthesized from the directory's files' own already-generated summaries (never raw source — the same containment composition section 5 already defines), frontmatter keys each file on its own current `spec_hash` (not `source_hash` — a rollup only goes stale once a file's *spec* is rewritten), and a new file becoming spec-bearing is exactly the set-membership change `next_rollup_task`'s currency check already catches (the same shape a feature spec's participant-set check uses) — no separate mechanism needed. What still isn't built is *reacting* to that staleness signal end-to-end across the whole design (M7's job, not this one's).
 6. ~~**CodeOwl's own implementation language/stack**~~ — Resolved: **Rust**. See "Implementation stack" above for the reasoning (cross-platform single-binary distribution, WASM-loadable tree-sitter grammars for language genericity, Phase 2 footprint), the selected crates, and the two structural rules that follow from it (arena-indexed graph, synchronous core with async only at the transport edges). The cross-platform constraint that framed this question — native Windows, Linux via WSL/devcontainer, and macOS, since a Java dev on native Windows is mainstream rather than an edge case — is what the decision is primarily optimizing for.
 7. ~~**Reference-edge invalidation**~~ — Resolved: see the `interfaceHash` field on the `Symbol` record and "Caching and invalidation," both above. A reference target's contribution to a consumer's cache key is its deterministic `interfaceHash` (signature/exported-shape only), never its spec/summary text — so a dependency's prose can be reworded freely without invalidating anything downstream, and only an actual public-surface change (new param, changed return type, removed export) does.
 

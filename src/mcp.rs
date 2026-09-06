@@ -66,9 +66,9 @@ pub struct SpecResponse {
 pub struct GenerateTaskRequest {
     /// The `/codeowl generate <id>` target — a file id (a repo-relative
     /// path, e.g. "lib/utils.ts"), which may also be a feature entry point
-    /// (a page or an orphan API route — see `features.rs`). Stateless:
-    /// safe to call repeatedly with the same target until it reports
-    /// nothing left.
+    /// (a page or an orphan API route — see `features.rs`), or a directory
+    /// path (e.g. "lib") with >=2 spec-bearing files. Stateless: safe to
+    /// call repeatedly with the same target until it reports nothing left.
     pub target: String,
 }
 
@@ -84,6 +84,15 @@ pub struct DependencyContext {
     /// The dependency's already-generated summary if it has a current
     /// spec, otherwise a deterministic stub (signature + docstring) — this
     /// task never triggers the dependency's own generation.
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct RollupFile {
+    pub file: String,
+    /// That file's own current `## Summary` prose — never its raw source
+    /// (see "Bottom-up composition"). Only ever populated once the file
+    /// itself is current; see `next_task_for_directory`.
     pub summary: String,
 }
 
@@ -113,27 +122,42 @@ pub enum SpecTaskResponse {
         core_sources: Vec<CoreSource>,
         dependencies: Vec<DependencyContext>,
     },
+    /// Generated in one shot, like a feature spec: composed purely from
+    /// its files' own already-generated summaries, never their raw source.
+    /// Only ever produced once every file in `files` is itself current —
+    /// `get_next_spec_task` walks a directory target's own files' bottom-up
+    /// ladders first, the same "symbols before their file" order one level
+    /// up: files before their directory's rollup.
+    Rollup {
+        /// `"rollup:<dir_path>"` — pass this straight back as
+        /// `submit_spec`'s `id`; it's never a real file/symbol id.
+        id: String,
+        dir_path: String,
+        files: Vec<RollupFile>,
+    },
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SubmitSpecRequest {
     /// The id `get_next_spec_task` returned — a symbol id, a file id, or
-    /// (for a feature task) the `"feature:<slug>"` id it reported.
+    /// (for a feature or rollup task) the `"feature:<slug>"`/
+    /// `"rollup:<dir_path>"` id it reported.
     pub id: String,
     /// For a symbol task: markdown containing `### Summary` and
-    /// `### Behavior` headings. For a file task: plain prose, becomes the
-    /// file's `## Summary`. For a feature task: the whole document body,
-    /// starting with a `# Title` line — see `ARCHITECTURE.md`'s "Feature
-    /// specs" template.
+    /// `### Behavior` headings. For a file or rollup task: plain prose,
+    /// becomes the `## Summary`. For a feature task: the whole document
+    /// body, starting with a `# Title` line — see `ARCHITECTURE.md`'s
+    /// "Feature specs" template.
     pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SubmitSpecResponse {
     pub id: String,
-    /// `None` for a feature submission — a feature has no single source
-    /// hash, only a participant map (see `get_spec`/the persisted
-    /// frontmatter for that).
+    /// `None` for a feature or rollup submission — neither has a single
+    /// source hash: a feature has a participant map, a rollup has a
+    /// per-file hash map (see `get_spec`/the persisted frontmatter for
+    /// either).
     pub source_hash: Option<String>,
     pub spec_hash: String,
 }
@@ -192,6 +216,93 @@ impl CodeOwlServer {
                 .map(|(id, summary)| DependencyContext { id, summary })
                 .collect(),
         })))
+    }
+
+    /// `get_next_spec_task`'s path when `target` doesn't resolve as a
+    /// graph id at all (directories aren't graph nodes — see `ROADMAP.md`'s
+    /// M6 scope): if it's a spec-bearing directory, walk its own files'
+    /// bottom-up ladders first, then the rollup task itself once every file
+    /// is current; otherwise there's genuinely nothing here.
+    fn next_directory_task_response(
+        &self,
+        target: &str,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        if !crate::spec::directory_is_spec_bearing(&self.graph, target) {
+            return Ok(Json(None));
+        }
+
+        if let Some(task) = crate::spec::next_task_for_directory(&self.graph, &self.root, target)
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(Json(Some(self.spec_task_to_response(task)?)));
+        }
+
+        let Some(task) = crate::spec::next_rollup_task(&self.graph, &self.root, target)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(Json(None));
+        };
+        Ok(Json(Some(SpecTaskResponse::Rollup {
+            id: format!("rollup:{}", task.dir_path),
+            dir_path: task.dir_path,
+            files: task
+                .files
+                .into_iter()
+                .map(|(file, summary)| RollupFile { file, summary })
+                .collect(),
+        })))
+    }
+
+    /// Shared by `get_next_spec_task`'s direct-target path and its
+    /// directory-target fallback: turns a bottom-up `SpecTask` (a symbol or
+    /// a file, never a feature/rollup — those are assembled by their own
+    /// callers) into the wire response, reading whatever source it needs
+    /// off disk.
+    fn spec_task_to_response(
+        &self,
+        task: crate::spec::SpecTask,
+    ) -> Result<SpecTaskResponse, String> {
+        Ok(match task {
+            crate::spec::SpecTask::Symbol {
+                id,
+                signature,
+                docstring,
+                lines,
+            } => {
+                let sym_id = self.graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
+                let file_id = self
+                    .graph
+                    .parent_id(sym_id)
+                    .ok_or_else(|| Self::not_found(&id))?;
+                let file = self
+                    .graph
+                    .get_file(file_id)
+                    .ok_or_else(|| Self::not_found(&id))?;
+                let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
+                let dependencies = self
+                    .graph
+                    .imports()
+                    .iter()
+                    .filter(|imp| imp.from_file == file.id)
+                    .map(|imp| match imp.target {
+                        Some(t) => format!("{} ({})", self.graph.string_id(t), imp.specifier),
+                        None => format!("{} ({}, unresolved)", imp.imported_name, imp.specifier),
+                    })
+                    .collect();
+                SpecTaskResponse::Symbol {
+                    id,
+                    signature,
+                    docstring,
+                    source,
+                    dependencies,
+                }
+            }
+            crate::spec::SpecTask::File { id } => {
+                let source =
+                    std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
+                SpecTaskResponse::File { id, source }
+            }
+        })
     }
 }
 
@@ -287,12 +398,31 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Get the spec for a symbol id, file id, or 'feature:<slug>' id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" with the structurally-extracted signature/docstring stub if nothing's been generated yet, or \"current\" with the LLM-written prose if it has."
+        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, or 'rollup:<dir_path>' id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" with the structurally-extracted signature/docstring stub if nothing's been generated yet, or \"current\" with the LLM-written prose if it has."
     )]
     async fn get_spec(
         &self,
         Parameters(req): Parameters<IdRequest>,
     ) -> Result<Json<SpecResponse>, String> {
+        if let Some(dir_path) = req.id.strip_prefix("rollup:") {
+            let spec =
+                crate::spec::read_rollup_spec(&self.root, dir_path).map_err(|e| e.to_string())?;
+            let current = crate::spec::current_file_hashes(&self.graph, &self.root, dir_path)
+                .map_err(|e| e.to_string())?;
+            let is_current = spec.as_ref().is_some_and(|s| {
+                s.files.len() == current.len()
+                    && s.files
+                        .iter()
+                        .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
+            });
+            return Ok(Json(SpecResponse {
+                id: req.id,
+                status: if is_current { "current" } else { "missing" }.to_string(),
+                signature: String::new(),
+                docstring: None,
+                content: is_current.then(|| spec.unwrap().body),
+            }));
+        }
         if let Some(slug) = req.id.strip_prefix("feature:") {
             let spec =
                 crate::spec::read_feature_spec(&self.root, slug).map_err(|e| e.to_string())?;
@@ -393,73 +523,40 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. Returns null when the target isn't spec-bearing at all (e.g. a barrel file with no feature either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current. Returns null when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
         Parameters(req): Parameters<GenerateTaskRequest>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let target_id = self
-            .graph
-            .find(&req.target)
-            .ok_or_else(|| Self::not_found(&req.target))?;
+        let Some(target_id) = self.graph.find(&req.target) else {
+            return self.next_directory_task_response(&req.target);
+        };
         let task = crate::spec::next_task(&self.graph, &self.root, target_id)
             .map_err(|e| e.to_string())?;
 
         let Some(task) = task else {
             return self.next_feature_task_response(&req.target);
         };
-        let response = match task {
-            crate::spec::SpecTask::Symbol {
-                id,
-                signature,
-                docstring,
-                lines,
-            } => {
-                let sym_id = self.graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
-                let file_id = self
-                    .graph
-                    .parent_id(sym_id)
-                    .ok_or_else(|| Self::not_found(&id))?;
-                let file = self
-                    .graph
-                    .get_file(file_id)
-                    .ok_or_else(|| Self::not_found(&id))?;
-                let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
-                let dependencies = self
-                    .graph
-                    .imports()
-                    .iter()
-                    .filter(|imp| imp.from_file == file.id)
-                    .map(|imp| match imp.target {
-                        Some(t) => format!("{} ({})", self.graph.string_id(t), imp.specifier),
-                        None => format!("{} ({}, unresolved)", imp.imported_name, imp.specifier),
-                    })
-                    .collect();
-                SpecTaskResponse::Symbol {
-                    id,
-                    signature,
-                    docstring,
-                    source,
-                    dependencies,
-                }
-            }
-            crate::spec::SpecTask::File { id } => {
-                let source =
-                    std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
-                SpecTaskResponse::File { id, source }
-            }
-        };
-        Ok(Json(Some(response)))
+        Ok(Json(Some(self.spec_task_to_response(task)?)))
     }
 
     #[tool(
-        description = "Persist LLM-written spec prose for a symbol id, file id, or 'feature:<slug>' id (all from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's content is plain prose for its '## Summary'; a feature's content is the whole document starting with a '# Title' line. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
+        description = "Persist LLM-written spec prose for a symbol id, file id, 'feature:<slug>' id, or 'rollup:<dir_path>' id (all from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's or rollup's content is plain prose for its '## Summary'; a feature's content is the whole document starting with a '# Title' line. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
     )]
     async fn submit_spec(
         &self,
         Parameters(req): Parameters<SubmitSpecRequest>,
     ) -> Result<Json<SubmitSpecResponse>, String> {
+        if let Some(dir_path) = req.id.strip_prefix("rollup:") {
+            let spec = crate::spec::submit_rollup(&self.graph, &self.root, dir_path, &req.content)
+                .map_err(|e| e.to_string())?;
+            return Ok(Json(SubmitSpecResponse {
+                id: req.id,
+                source_hash: None,
+                spec_hash: spec.spec_hash,
+            }));
+        }
         if let Some(slug) = req.id.strip_prefix("feature:") {
             let route_literals = self.graph.route_literals();
             let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
@@ -854,6 +951,111 @@ mod tests {
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/submit/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(done.0, None);
+    }
+
+    #[tokio::test]
+    async fn generate_loop_produces_a_rollup_once_its_files_are_covered() {
+        let server = test_server(&[
+            ("lib/one.ts", "export function one(): void {}\n"),
+            ("lib/two.ts", "export function two(): void {}\n"),
+        ]);
+
+        // Neither file has a spec yet -- targeting the directory should
+        // return one of their own symbol tasks first, not the rollup.
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "lib".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected lib/one.ts's own symbol task");
+        assert!(matches!(task, SpecTaskResponse::Symbol { .. }));
+
+        for (sym_id, sym_content, file_id, file_content) in [
+            (
+                "lib/one.ts::one",
+                "### Summary\nS1.\n### Behavior\nB1.\n",
+                "lib/one.ts",
+                "Does one thing.",
+            ),
+            (
+                "lib/two.ts::two",
+                "### Summary\nS2.\n### Behavior\nB2.\n",
+                "lib/two.ts",
+                "Does two things.",
+            ),
+        ] {
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: sym_id.to_string(),
+                    content: sym_content.to_string(),
+                }))
+                .await
+                .unwrap();
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: file_id.to_string(),
+                    content: file_content.to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "lib".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("both files current, expected the rollup task");
+        let SpecTaskResponse::Rollup {
+            id,
+            dir_path,
+            files,
+        } = task
+        else {
+            panic!("expected a Rollup task, got {task:?}");
+        };
+        assert_eq!(id, "rollup:lib");
+        assert_eq!(dir_path, "lib");
+        assert_eq!(
+            files,
+            vec![
+                RollupFile {
+                    file: "lib/one.ts".to_string(),
+                    summary: "Does one thing.".to_string(),
+                },
+                RollupFile {
+                    file: "lib/two.ts".to_string(),
+                    summary: "Does two things.".to_string(),
+                },
+            ]
+        );
+
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: id.clone(),
+                content: "Small shared helpers.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let spec = server
+            .get_spec(Parameters(IdRequest { id: id.clone() }))
+            .await
+            .unwrap();
+        assert_eq!(spec.0.status, "current");
+        assert_eq!(spec.0.content.unwrap(), "Small shared helpers.");
+
+        let done = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "lib".to_string(),
             }))
             .await
             .unwrap();
