@@ -897,13 +897,19 @@ impl ServerHandler for CodeOwlServer {
              grep/file-reading on \"how is this wired\" questions. get_symbol gives a definition \
              and signature; get_callers / get_callees give the reference graph (\"what breaks if \
              I change this\"); search_code is a plain regex sweep (no semantic search in Phase \
-             1). get_spec returns an LLM-authored prose spec for a symbol id, a file path, \
-             \"feature:<slug>\", \"rollup:<dir>\", or \"system\": status \"missing\" means none \
-             exists yet, \"stale\" means the code moved since it was written (the last-good text \
-             is still returned), and non-empty `smells` flags a spec a quality check distrusts. \
-             Those specs are populated by a separate, deliberate generation loop \
-             (get_spec_coverage -> get_next_spec_task -> submit_spec) that a normal consuming \
-             session never needs to touch."
+             1). The index tracks the working tree live -- files you edit during this session \
+             are re-parsed within about a second, no restart needed. \
+             get_spec returns an LLM-authored prose spec for a symbol id, a file path, \
+             \"feature:<slug>\" (a cross-cutting flow the import graph alone can't see, e.g. \
+             UI -> API route -> DB), \"rollup:<dir>\", or \"system\": status \"missing\" means \
+             none exists yet, \"stale\" means the code moved since it was written (the last-good \
+             text is still returned, with `changed` naming what moved), and a non-empty `smells` \
+             list means a deterministic quality check distrusts the prose even though its hashes \
+             still match. get_spec_coverage lists everything missing/stale/smelly in priority \
+             order. To write or refresh specs, use the /codeowl-generate slash command (target a \
+             file, a directory, \"system\", or \"--all [--budget=N]\") -- it drives the \
+             get_next_spec_task -> submit_spec loop, which a normal consuming session otherwise \
+             never touches."
                 .to_string(),
         );
         info

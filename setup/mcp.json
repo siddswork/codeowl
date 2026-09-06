@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codeowl": {
+      "command": "/absolute/path/to/codeowl/target/release/codeowl",
+      "args": ["serve", "/absolute/path/to/your/repo"]
+    }
+  }
+}
