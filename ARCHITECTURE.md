@@ -109,7 +109,7 @@ This is also why the Phase 2 "local uncommitted-change overlay" open question (s
 ### 4. Storage
 
 **Phase 1 (per `REQUIREMENTS.md`)**: a two-way split, not one storage layer.
-- **Specs** are committed to git, in a **mirrored tree under `docs/specs/`** — deliberately *not* sidecar files next to the source, since specs exist at multiple hierarchy levels with no single natural sidecar for each, and a separate tree keeps `git status`, source listings, and IDE fuzzy-search clean of generated artifacts. Physical files exist at file level and above only (`docs/specs/<mirrored-path>/<filename>.md` for a file-level spec, `_index.md` for a directory/submodule rollup, `docs/specs/_index.md` for the system level); leaf function/class specs are *sections within* their containing file's spec document rather than files of their own. See `REQUIREMENTS.md`'s "Spec file location and granularity" for the full rationale. Each spec file carries **two** hashes as frontmatter — `source_hash` (the inputs it was generated from, which doubles as the cache-invalidation key) and `spec_hash` (the body as CodeOwl last wrote it, which is what makes a human edit detectable) — so no separate cache database is needed. See "Human corrections" below.
+- **Specs** are committed to git, in a **mirrored tree under `docs/specs/`** — deliberately *not* sidecar files next to the source, since specs exist at multiple hierarchy levels with no single natural sidecar for each, and a separate tree keeps `git status`, source listings, and IDE fuzzy-search clean of generated artifacts. The tree is *mostly* mirrored but not strictly 1:1 — some source files get no document, and feature specs correspond to no single file or directory at all. Each spec file carries hashes as frontmatter — `source_hash` (the inputs it was generated from, which doubles as the cache-invalidation key) and `spec_hash` (the body as CodeOwl last wrote it, which is what makes a human edit detectable) — so no separate cache database is needed. The full document taxonomy, frontmatter schemas, and the rules deciding which documents exist at all are in "6. Spec document format" below; see also "Human corrections" further down.
 - **The dependency graph** is a derived, gitignored local cache, rebuilt from source + specs by the local file watcher/manual run. Nothing here needs to be durable or shared — it's cheap to regenerate on a laptop-scale monorepo.
 - **No `tantivy` index and no ONNX embedding model in Phase 1** — deferred, not merely deprioritized. Neither keyword nor semantic search is on the path to Phase 1's exit criterion (do generated specs reduce token usage/re-exploration), and both are real build/maintenance cost for a capability nothing else in the design depends on. `search_code` in Phase 1 is embedded ripgrep (the `grep` crate) instead: stateless, no index to build or keep in sync, needs nothing from this storage layer at all. `tantivy` and ONNX embeddings move to Phase 2 (see below), and only get pulled forward into Phase 1 if the hypothesis validates *and* ripgrep turns out to be the actual bottleneck — not by default.
 
@@ -183,9 +183,87 @@ Re-indexing after a commit only regenerates the specs on the path from the chang
 
 Only case 4 is new mechanism — the other three fall out of what's already designed. A reconciliation regeneration (case 4) still counts as one call against the cascade cap from "Ordering" above, same as any other regeneration.
 
-**Result.** The stored graph ends up with a spec at every level: symbol/file specs at the leaves, submodule and module specs above them, and (optionally) a system-level spec at the root, all queryable independently — an agent asking about one function gets a precise leaf spec without pulling in the whole module's context, while a BA asking "what does this service do" gets the module- or system-level spec instead.
+**Result.** The stored graph ends up with a spec at every level: symbol/file specs at the leaves, submodule and module specs above them, feature specs cutting across all of them, and a system-level spec at the root, all queryable independently — an agent asking about one function gets a precise leaf spec without pulling in the whole module's context, while a BA asking "how does artwork submission work" gets the feature spec instead.
 
-### 6. MCP server
+### 6. Spec document format
+
+Section 5 covers *how* generation is driven; this covers *what it produces*. Four document kinds, deliberately split by audience rather than only by hierarchy level:
+
+| Document | Path | Primary audience |
+|---|---|---|
+| **System spec** | `docs/specs/_index.md` | BA + everyone — what the product does, its major modules, its feature inventory |
+| **Feature spec** | `docs/specs/_features/<slug>.md` | **BA-primary** — the "how does X work" narrative |
+| **Directory rollup** | `docs/specs/<path>/_index.md` | Dev/agent — module orientation |
+| **File spec** | `docs/specs/<path>/<filename>.md` | Dev/agent — per-symbol technical detail |
+
+**Why audience-split rather than one dual-purpose format.** `REQUIREMENTS.md` now treats BA readability as a Phase 1 must-have, not a Phase 2 concern — but forcing business-language framing into *every* document would spend tokens on documents no BA will ever open (`lib/use-debounce.ts.md` has no realistic business reader) and dilute exactly the technical precision devs and agents need. The split resolves this: feature and system specs are *written for* BAs, file and directory specs stay technical, and **every document of every kind carries a plain-language `## Summary`** — which is already structurally required anyway, since reference-edge context assembly (section 5) pulls a node's summary section into other generations. BAs read the top two kinds; devs and agents descend into the rest.
+
+**Which documents exist at all — the granularity rules.** Not strictly one document per source file, in either direction:
+- A **file spec** exists iff the file has **≥1 exported function or class**. Barrel files (which extract to zero symbols), const-only route config, and metadata-only boilerplate get no document — they appear as one-liners in their directory's rollup instead. This is deterministic, needs no curation, and is tunable if it misfires.
+- A **directory rollup** exists iff the directory has **≥2 spec-bearing entries**. Next.js route trees are full of single-file directories; an `_index.md` per `app/api/*/route.ts` folder is pure noise.
+- A **feature spec** exists per enumerated entry point (below).
+
+`get_spec_coverage` reports against *this* inventory, not raw file count — otherwise coverage would be permanently capped below 100% by files that were never meant to have documents.
+
+**What CodeOwl writes vs. what the LLM writes.** Some of a spec is already known deterministically and should never be paid for in tokens or exposed to hallucination: the **signature** comes from extraction (section 1), the **dependency list** comes from resolved edges (section 2). CodeOwl fills those in itself; the agent writes only what it uniquely can — purpose, behavior, side effects, failure modes. This is "orchestrate, don't generate" applied *inside* the document, not just around it, and it means those lines can be refreshed without an LLM call at all. **Consequence for `spec_hash`:** it covers only the LLM-written prose, not the CodeOwl-written lines — otherwise refreshing a dependency list would register as a human edit and spuriously trip case 4 of "Human corrections."
+
+**File spec shape.** Per-symbol hashes in frontmatter, not just one per file — editing one function must not force regeneration of every section in its file (wasteful, and it would trample human corrections in untouched sections). Whole-file invalidation would also directly contradict gaps 1 and 2, which were entirely about invalidating only what actually changed.
+
+```markdown
+---
+kind: file
+source_paths: [lib/utils.ts]
+file: { source_hash: <blake3>, spec_hash: <blake3> }
+symbols:
+  lib/utils.ts::cn: { source_hash: <blake3>, spec_hash: <blake3> }
+---
+# lib/utils.ts
+## Summary            ← plain language, machine-extractable for context assembly
+## `cn`
+`function cn(...inputs: ClassValue[]): string`      ← CodeOwl-written (section 1)
+### Summary
+### Behavior          ← what it actually does: side effects, error cases, gotchas
+### Depends on        ← CodeOwl-written (section 2)
+```
+
+Summaries are delimited by explicit `### Summary` headings rather than hidden markers (`<!-- codeowl:summary -->`) or positional convention ("the first paragraph"). Specs are git-committed, PR-reviewed, and expected to be human-edited — keeping the file plain, ordinary markdown matters more than parser robustness, and a heading-based contract breaks *loudly* under `submit_spec` validation rather than silently mis-extracting when someone adds a leading sentence.
+
+**Feature specs** are the document kind that isn't derived from the containment tree at all — and the reason they're necessary is concrete. Tracing artwork submission in the pilot repo:
+
+| Hop | How it's expressed | Visible to the import graph? |
+|---|---|---|
+| `app/submit/page.tsx` → `app/api/submit-artwork/route.ts` | `fetch("/api/submit-artwork")` | **No** — string literal |
+| `route.ts` → `registrations`, `artwork_submissions` | `.from("registrations")` | **No** — string literal |
+| both files → `lib/supabase*.ts` | `import` | Yes |
+
+The feature spans four directories, and **its two load-bearing hops are string literals the import graph structurally cannot see.** No directory rollup at any level tells this story, because the story crosses the tree sideways — and no amount of richer prose in the existing document kinds fixes that, since the narrative has no home and would be duplicated partially across four directories. This is why feature specs are a Phase 1 must-have rather than a Phase 2 nicety: without them, an exit-criterion task shaped like "how does X work" (which is what these tasks realistically look like) would still force full re-exploration, and Phase 1 would report a false negative on the whole premise.
+
+Making them derivable needs two narrow additions:
+- **Entry-point enumeration** from framework conventions — `app/**/page.tsx`, plus orphan API routes no page references (webhooks, crons). Slugs come from route paths; human-friendly titles live inside the document.
+- **A route-literal resolver** — `fetch("/api/submit-artwork")` → `app/api/submit-artwork/route.ts`. In Next.js this is a *path-convention mapping*, effectively deterministic: a path join, not fuzzy matching and not call-graph analysis. General call/invocation resolution stays deferred past Phase 1 (open question 3); this is a deliberately narrow, framework-aware exception justified by being the single highest-value missing edge in the pilot repo.
+
+```markdown
+---
+kind: feature
+entry_point: app/submit/page.tsx
+participants:                      # hash observed at generation time
+  app/submit/page.tsx: <source_hash>
+  app/api/submit-artwork/route.ts: <source_hash>
+  lib/supabase.ts::getSupabase: <interface_hash>
+spec_hash: <blake3>
+---
+# Artwork submission
+## Summary                ← what the capability is, who uses it
+## How it works           ← numbered flow; BA-followable, file refs inline for devs
+## Data touched           ← tables, storage, external services
+## Rules & failure modes  ← business rules, edge cases, what breaks and how
+```
+
+The `participants` map is what makes staleness work (section 5's "Caching and invalidation" extended): a feature spec is stale when any participant's hash moved, or when the participant set itself changes — a new `fetch()` literal appearing is a real change to the feature even though no existing participant moved. Crucially, feature generation **consumes** participants' summaries or deterministic stubs and never triggers their generation, so the containment-only recursion invariant is untouched: this is the same reference-edge read path section 5 already defines, just assembled from a different starting set.
+
+**Generation priority.** Budgeted runs (`--all --budget=N`) spend in this order: **system spec → feature specs → high-fan-in files → long tail**. This supersedes plain fan-in ordering for the top two tiers, and has a useful brownfield property — the first budgeted runs against a legacy repo build exactly the documents a human would ask for first, so the tool is demonstrably useful long before coverage approaches complete.
+
+### 7. MCP server
 
 **Phase 1**: stdio, per-process, exactly like MemoLink's default — one local instance, launched by Claude Code, talking to one repo on disk. No network-facing component at all. Lifecycle is entirely client-managed: the user never starts or stops it themselves — the client spawns it when a session begins and kills it when the session ends, the same model as a language server. It runs wherever the developer's actual toolchain lives — WSL, a devcontainer/DevBox, or directly on native Windows — not tied to any one OS (see `REQUIREMENTS.md`'s "Runtime environment", and "Implementation stack" below for how the Rust choice serves this).
 
@@ -207,11 +285,11 @@ Draft tool surface (query tools apply to both phases; the generation tools are t
 
 **`/codeowl generate [id] [--all] [--budget=N]` is not an MCP tool** — it's a client-side command (a Claude Code slash command in Phase 1) that runs the `get_next_spec_task` → write → `submit_spec` loop above to completion or until `--budget` is spent. It has to live on the client side because the loop's write step needs an LLM, which CodeOwl itself never holds (see "CodeOwl orchestrates, it doesn't generate"). A B2-style trigger — a hook that shells out to a *separate*, headless Claude Code process (`claude -p "codeowl generate --budget=N"`) so completeness pushes happen automatically without touching an interactive session's context — is a plausible future addition, deliberately deferred out of Phase 1: it adds an automatic-token-spend surface before the core hypothesis (do specs even help) is validated, and the manual command is required regardless, so it's the smaller thing to build first.
 
-### 7. Human-facing viewer
+### 8. Human-facing viewer
 
 Graph browser (Cytoscape.js-style, as in MemoLink) for BAs/QA/SREs who aren't working inside an IDE. REST API backing it, same shape as MemoLink's (`/api/graph`, `/api/search`, `/api/traverse/{id}`).
 
-### 8. Implementation stack
+### 9. Implementation stack
 
 **CodeOwl is written in Rust.** (This is CodeOwl's own language — entirely separate from what it *parses*, which is TypeScript first per `REQUIREMENTS.md`'s pilot target.) The three requirements that drove it:
 
@@ -235,11 +313,12 @@ Requirements-level open questions (whether something is in scope at all) live in
 1. **tree-sitter vs. LSP** — precision vs. speed/breadth tradeoff, especially for C++.
 2. **Token-budget threshold for spec unit boundaries** — the concrete rule (or heuristic) that decides, at each level of the hierarchy, whether a unit is small enough to spec directly or must be recursed into further. Needs a concrete number/algorithm, not just the principle.
 3. **Polyglot & non-code artifact resolution within one repo** — not one problem, at least three:
-   - **Call/invocation boundaries** — a script invoking a compiled binary via `subprocess`/`exec`/shell (e.g. a Python tool calling a C++ binary the repo also builds). Same stub-node treatment as the cross-repo case, but resolved with a lightweight, pattern-based detector rather than full semantic resolution, since it's within one repo.
+   - **Call/invocation boundaries** — a script invoking a compiled binary via `subprocess`/`exec`/shell (e.g. a Python tool calling a C++ binary the repo also builds). Same stub-node treatment as the cross-repo case, but resolved with a lightweight, pattern-based detector rather than full semantic resolution, since it's within one repo. **Partially carved out:** one specific instance of this — an HTTP call from client code to an API route in the same repo (`fetch("/api/x")` → `app/api/x/route.ts`) — is resolved in Phase 1 by the route-literal resolver (see "Spec document format" → feature specs), because in a convention-based framework that mapping is a deterministic path join rather than semantic analysis, and because it's the single highest-value missing edge in the pilot repo. The general problem stays open; only the framework-convention case is settled.
    - **Schema/data boundaries** — SQL DDL (`CREATE TABLE`, etc.) defining tables that application code references via string literals or ORM calls, not via any call/import tree-sitter can see. Needs a dedicated SQL extractor producing schema nodes (tables/columns/constraints) plus a fuzzy, string/ORM-aware matcher on the application-code side — meaningfully less precise than resolved imports. Directly relevant to the Phase 1 pilot (Supabase SQL migrations), not a future/enterprise-only concern.
    - **Standalone tooling ("island" nodes)** — scripts with no inbound call edge at all (e.g. a perf-test-environment rebuild script, invoked manually or from CI, not from the main codebase). Still worth a leaf-level spec even with no edges into the rest of the graph; if a CI config or Makefile does reference it, that's a further artifact type worth resolving into an edge when possible, but the node's spec shouldn't depend on that being resolved.
-4. ~~**CodeOwl's own implementation language/stack**~~ — Resolved: **Rust**. See "Implementation stack" above for the reasoning (cross-platform single-binary distribution, WASM-loadable tree-sitter grammars for language genericity, Phase 2 footprint), the selected crates, and the two structural rules that follow from it (arena-indexed graph, synchronous core with async only at the transport edges). The cross-platform constraint that framed this question — native Windows, Linux via WSL/devcontainer, and macOS, since a Java dev on native Windows is mainstream rather than an edge case — is what the decision is primarily optimizing for.
-5. ~~**Reference-edge invalidation**~~ — Resolved: see the `interfaceHash` field on the `Symbol` record and "Caching and invalidation," both above. A reference target's contribution to a consumer's cache key is its deterministic `interfaceHash` (signature/exported-shape only), never its spec/summary text — so a dependency's prose can be reworded freely without invalidating anything downstream, and only an actual public-surface change (new param, changed return type, removed export) does.
+4. **Feature boundaries and naming** — M5 derives one feature spec per framework-enumerated entry point, slugged from its route path. Real features don't always map 1:1 to routes: some span several (a wizard across three pages), some routes are too trivial to warrant a feature narrative, and route slugs make poor human-facing titles. A manifest for merging/renaming/excluding is the obvious answer, but its format is deliberately not designed yet — guessing it before real generated feature specs exist to judge against would be premature. Revisit once M5 has produced a repo's worth of them.
+5. ~~**CodeOwl's own implementation language/stack**~~ — Resolved: **Rust**. See "Implementation stack" above for the reasoning (cross-platform single-binary distribution, WASM-loadable tree-sitter grammars for language genericity, Phase 2 footprint), the selected crates, and the two structural rules that follow from it (arena-indexed graph, synchronous core with async only at the transport edges). The cross-platform constraint that framed this question — native Windows, Linux via WSL/devcontainer, and macOS, since a Java dev on native Windows is mainstream rather than an edge case — is what the decision is primarily optimizing for.
+6. ~~**Reference-edge invalidation**~~ — Resolved: see the `interfaceHash` field on the `Symbol` record and "Caching and invalidation," both above. A reference target's contribution to a consumer's cache key is its deterministic `interfaceHash` (signature/exported-shape only), never its spec/summary text — so a dependency's prose can be reworded freely without invalidating anything downstream, and only an actual public-surface change (new param, changed return type, removed export) does.
 
 ## Non-goals (for now)
 

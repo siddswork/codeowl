@@ -8,6 +8,7 @@ CodeOwl extracts a structural + semantic graph from a codebase and serves LLM-ge
 - **`get_spec` is a pure read.** It never triggers generation. Writes happen only via the `/codeowl generate` command. See ARCHITECTURE.md "Ordering".
 - **Generation recurses across containment edges only, never reference edges.** See ARCHITECTURE.md "Recursive spec generation".
 - **Invalidation never hashes LLM prose.** Reference edges key on `interfaceHash` (deterministic, off the graph). See ARCHITECTURE.md "Caching and invalidation".
+- **The LLM never writes what the graph already knows.** Signatures come from extraction, dependency lists from resolved edges — CodeOwl fills those into a spec itself, and `spec_hash` covers only the LLM-written prose. If a generation prompt asks the agent to restate a signature, that's tokens spent on something we can't afford to have hallucinated. See ARCHITECTURE.md "Spec document format".
 
 ## Rust conventions
 
