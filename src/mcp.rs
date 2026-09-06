@@ -2123,7 +2123,7 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: system_id.clone(),
-                content: "# TalentTrail\n## Summary\nA platform for running art competitions.\n"
+                content: "# Acme\n## Summary\nA platform for running art competitions.\n"
                     .to_string(),
             }))
             .await

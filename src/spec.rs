@@ -2920,7 +2920,7 @@ mod tests {
             modules: vec![("lib/email".to_string(), "rolluphash".to_string())],
             features: vec![("submit".to_string(), "featurehash".to_string())],
             spec_hash: "systemhash".to_string(),
-            body: "# TalentTrail\n## Summary\nA competition platform.".to_string(),
+            body: "# Acme\n## Summary\nA competition platform.".to_string(),
         };
         let rendered = render_system(Path::new("/nonexistent"), &spec);
         assert!(rendered.contains("lib/email: rolluphash"));
@@ -3036,7 +3036,7 @@ mod tests {
             &graph,
             &dir,
             &route_literals,
-            "# TalentTrail\n## Summary\nA platform for running art competitions.\n",
+            "# Acme\n## Summary\nA platform for running art competitions.\n",
         )
         .unwrap();
         assert_eq!(
@@ -3159,7 +3159,7 @@ mod tests {
             &graph,
             &dir,
             &route_literals,
-            "# TalentTrail\n## Summary\nA platform for running art competitions.\n",
+            "# Acme\n## Summary\nA platform for running art competitions.\n",
         )
         .unwrap();
 
