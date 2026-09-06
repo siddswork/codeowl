@@ -1,8 +1,8 @@
 //! The spec document format and file writer — M4 (file specs), M5 (feature
-//! specs), and M6 (directory rollups). Implements `ARCHITECTURE.md`'s "Spec
-//! document format": the mirrored `docs/specs/` tree, per-symbol/per-file/
-//! per-directory hash frontmatter, and the granularity rules deciding which
-//! documents exist at all.
+//! specs), M6 (directory rollups), and M8's system spec. Implements
+//! `ARCHITECTURE.md`'s "Spec document format": the mirrored `docs/specs/`
+//! tree, per-symbol/per-file/per-directory/per-repo hash frontmatter, and
+//! the granularity rules deciding which documents exist at all.
 //!
 //! Frontmatter here is hand-parsed rather than run through a general YAML
 //! library: it's one fixed, CodeOwl-owned shape (see the `render`/`parse`
@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::features::{
-    EntryPoint, Participants, RouteLiteral, assemble_participants, feature_slug,
+    EntryPoint, Participants, RouteLiteral, assemble_participants, enumerate_entry_points,
+    feature_slug,
 };
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
@@ -619,17 +620,79 @@ pub enum SpecTask {
         signature: String,
         docstring: Option<String>,
         lines: [usize; 2],
+        /// `Some` only for a reconciliation regeneration (M8's "Human
+        /// corrections" case 4: source moved *and* a human had edited this
+        /// symbol's prose) — the human's prior text, to preserve whatever
+        /// correction is still accurate rather than silently discard it.
+        /// `None` for a first-ever generation or a plain case-2
+        /// regeneration (no human edit on record).
+        prior: Option<SymbolProse>,
     },
     File {
         id: String,
+        /// Same case-4 meaning as `Symbol::prior`, for the file's own
+        /// `## Summary`.
+        prior: Option<String>,
     },
+}
+
+/// Whether `spec`'s currently-parsed prose for `id` no longer matches the
+/// `spec_hash` last recorded for it — i.e. a human edited the `.md` file
+/// directly (never through `submit_spec`) since it was last machine-
+/// written. `spec_hash` is defined as `hash_text` of exactly this prose at
+/// generation time (see `submit`), so any drift between the two can only
+/// come from an edit that didn't also fix up the hash — not something a
+/// human would do by hand. See `ARCHITECTURE.md`'s "Human corrections".
+fn symbol_prose_is_human_edited(hash: &HashPair, prose: &SymbolProse) -> bool {
+    hash_text(&format!("{}\n{}", prose.summary, prose.behavior)) != hash.spec_hash
+}
+
+fn file_prose_is_human_edited(hash: &HashPair, file_summary: &str) -> bool {
+    hash_text(file_summary) != hash.spec_hash
+}
+
+/// Case 3 of "Human corrections": source unchanged, but a human edited the
+/// prose — refresh just this symbol's `spec_hash` to match their edit (no
+/// LLM call, prose left exactly as the human wrote it) and persist it.
+fn reconcile_symbol_hash(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym_id: &str,
+    hash: &HashPair,
+    prose: &SymbolProse,
+) -> Result<()> {
+    let mut new_hash = hash.clone();
+    new_hash.spec_hash = hash_text(&format!("{}\n{}", prose.summary, prose.behavior));
+    let Node::File(file) = graph.get(file_id) else {
+        return Ok(());
+    };
+    let mut spec = read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
+    upsert(&mut spec.symbols, sym_id.to_string(), new_hash);
+    reorder_symbols(graph, file_id, &mut spec);
+    write(root, graph, file_id, &spec)
+}
+
+/// The file-level equivalent of `reconcile_symbol_hash`.
+fn reconcile_file_hash(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    spec: &FileSpec,
+) -> Result<()> {
+    let mut fixed = spec.clone();
+    fixed.file.spec_hash = hash_text(&spec.file_summary);
+    write(root, graph, file_id, &fixed)
 }
 
 /// The next thing `/codeowl generate <target_file_id>` needs written, or
 /// `None` if the file isn't spec-bearing at all, or everything on it is
-/// already current. Stateless and idempotent: safe to call repeatedly
-/// (the client-side generate loop's own termination condition), and
-/// doesn't touch disk beyond a read.
+/// already current. Stateless and idempotent from a caller's perspective
+/// (safe to call repeatedly — the client-side generate loop's own
+/// termination condition), though it may itself write a small housekeeping
+/// fix to disk: case 3 of "Human corrections" (source unchanged, prose
+/// hand-edited) is reconciled silently here, with no LLM call and no task
+/// returned for it, rather than surfaced as something needing generation.
 pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result<Option<SpecTask>> {
     if !file_is_spec_bearing(graph, target_file_id) {
         return Ok(None);
@@ -641,30 +704,90 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
 
     for sym_id in spec_bearing_children(graph, target_file_id) {
         let sym = graph.get_symbol(sym_id).expect("filtered to symbol ids");
-        let current = existing
-            .as_ref()
-            .and_then(|spec| spec.symbol_hash(&sym.id))
-            .is_some_and(|h| symbol_changes(graph, root, target_file_id, sym, h).is_empty());
-        if !current {
+        let Some(hash) = existing.as_ref().and_then(|spec| spec.symbol_hash(&sym.id)) else {
+            // Never generated at all -- not a reconciliation case, just a
+            // first-ever generation.
             return Ok(Some(SpecTask::Symbol {
                 id: sym.id.clone(),
                 signature: sym.signature.clone(),
                 docstring: sym.docstring.clone(),
                 lines: sym.lines,
+                prior: None,
             }));
+        };
+        let source_changed = !symbol_changes(graph, root, target_file_id, sym, hash).is_empty();
+        let prose = existing
+            .as_ref()
+            .and_then(|spec| spec.section(&sym.id).cloned())
+            .unwrap_or_default();
+        let human_edited = symbol_prose_is_human_edited(hash, &prose);
+
+        match (source_changed, human_edited) {
+            (false, false) => continue, // case 1: current, check the next symbol
+            (true, false) => {
+                // case 2: plain regeneration, nothing to preserve
+                return Ok(Some(SpecTask::Symbol {
+                    id: sym.id.clone(),
+                    signature: sym.signature.clone(),
+                    docstring: sym.docstring.clone(),
+                    lines: sym.lines,
+                    prior: None,
+                }));
+            }
+            (false, true) => {
+                // case 3: reconcile silently, no task
+                reconcile_symbol_hash(graph, root, target_file_id, &sym.id, hash, &prose)?;
+            }
+            (true, true) => {
+                // case 4: reconciliation regeneration, preserve the prior
+                return Ok(Some(SpecTask::Symbol {
+                    id: sym.id.clone(),
+                    signature: sym.signature.clone(),
+                    docstring: sym.docstring.clone(),
+                    lines: sym.lines,
+                    prior: Some(prose),
+                }));
+            }
         }
     }
 
-    let file_current = existing
+    // `existing` may already exist purely because a symbol was submitted
+    // (which lazily creates the `FileSpec` via `FileSpec::blank`) even
+    // though the file's own entry -- a single `HashPair`, not a map keyed
+    // lookup -- has never itself been written. An empty `spec_hash` is
+    // that "never generated" signal, the file-level analogue of a
+    // symbol's `symbol_hash` returning `None`.
+    let file_generated = existing
         .as_ref()
-        .is_some_and(|spec| file_changes(graph, target_file_id, &spec.file).is_empty());
-    if !file_current {
-        return Ok(Some(SpecTask::File {
-            id: file.id.clone(),
-        }));
+        .is_some_and(|spec| !spec.file.spec_hash.is_empty());
+    if let Some(spec) = existing.as_ref().filter(|_| file_generated) {
+        let source_changed = !file_changes(graph, target_file_id, &spec.file).is_empty();
+        let human_edited = file_prose_is_human_edited(&spec.file, &spec.file_summary);
+        match (source_changed, human_edited) {
+            (false, false) => return Ok(None),
+            (true, false) => {
+                return Ok(Some(SpecTask::File {
+                    id: file.id.clone(),
+                    prior: None,
+                }));
+            }
+            (false, true) => {
+                reconcile_file_hash(graph, root, target_file_id, spec)?;
+                return Ok(None);
+            }
+            (true, true) => {
+                return Ok(Some(SpecTask::File {
+                    id: file.id.clone(),
+                    prior: Some(spec.file_summary.clone()),
+                }));
+            }
+        }
     }
 
-    Ok(None)
+    Ok(Some(SpecTask::File {
+        id: file.id.clone(),
+        prior: None,
+    }))
 }
 
 /// Persist `content` (the agent's LLM-written prose) for `id` — a symbol
@@ -1313,6 +1436,545 @@ pub fn submit_rollup(
     Ok(spec)
 }
 
+/// Every directory anywhere in the repo that currently qualifies for a
+/// rollup (`directory_is_spec_bearing`, at any nesting depth) — the
+/// system spec's flat "modules" list (M8). Deliberately flat, not a
+/// nested module tree: rollups don't recursively aggregate a
+/// subdirectory's rollup into its parent's (a real, explicit scope cut —
+/// see `ROADMAP.md`'s M6 note), so the system spec doesn't pretend
+/// otherwise by inventing a hierarchy on top of documents that aren't
+/// actually structured that way. Excludes the repo root (`""`) even if it
+/// has >=2 spec-bearing files directly in it — that path is reserved for
+/// a future system-spec document (see `next_rollup_task`'s own guard), so
+/// it can never actually be generated as a rollup.
+pub fn enumerate_modules(graph: &Graph) -> Vec<String> {
+    let mut dirs: Vec<String> = graph
+        .files()
+        .filter_map(|f| {
+            Path::new(&f.id)
+                .parent()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+        })
+        .collect();
+    dirs.sort();
+    dirs.dedup();
+    dirs.retain(|d| !d.is_empty() && directory_is_spec_bearing(graph, d));
+    dirs
+}
+
+/// Each module's own current rollup `spec_hash` (empty if that rollup
+/// isn't itself current yet) — the system spec's per-module half of its
+/// staleness key, in the same "current vs. stored, empty means not ready"
+/// shape `current_file_hashes` already uses one level down.
+pub fn current_module_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for dir in enumerate_modules(graph) {
+        let files = current_file_hashes(graph, root, &dir)?;
+        let hash = read_rollup_spec(root, &dir)?
+            .filter(|s| diff_hash_lists(&files, &s.files).is_empty())
+            .map(|s| s.spec_hash)
+            .unwrap_or_default();
+        out.push((dir, hash));
+    }
+    Ok(out)
+}
+
+/// Each currently-enumerated feature entry point's own current
+/// `spec_hash` (empty if that feature isn't itself current yet) — the
+/// system spec's per-feature half of its staleness key.
+pub fn current_feature_hashes(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for entry in enumerate_entry_points(graph, route_literals) {
+        let participants = assemble_participants(graph, route_literals, &entry.file);
+        let current = current_participant_hashes(graph, &participants)?;
+        let hash = read_feature_spec(root, &entry.slug)?
+            .filter(|s| diff_hash_lists(&current, &s.participants).is_empty())
+            .map(|s| s.spec_hash)
+            .unwrap_or_default();
+        out.push((entry.slug, hash));
+    }
+    Ok(out)
+}
+
+/// The whole-repo document (M8) — see `ARCHITECTURE.md`'s "System spec
+/// shape". Exactly one per repo; addressed by the fixed pseudo-id
+/// `"system"`, the same way a feature is addressed by `"feature:<slug>"`.
+/// `body` is the LLM-written title-plus-summary, title included (like
+/// `FeatureSpec.body`) — the `## Modules`/`## Features` listings
+/// underneath are CodeOwl-written and never stored, recomputed fresh on
+/// every render the same way a rollup's `## Contents` is.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SystemSpec {
+    pub modules: Vec<(String, String)>,
+    pub features: Vec<(String, String)>,
+    pub spec_hash: String,
+    pub body: String,
+}
+
+pub fn system_spec_path(root: &Path) -> PathBuf {
+    root.join("docs").join("specs").join("_index.md")
+}
+
+pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("kind: system\n");
+    out.push_str("modules:\n");
+    for (dir, hash) in &spec.modules {
+        out.push_str(&format!("  {dir}: {hash}\n"));
+    }
+    out.push_str("features:\n");
+    for (slug, hash) in &spec.features {
+        out.push_str(&format!("  {slug}: {hash}\n"));
+    }
+    out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
+    out.push_str("---\n");
+    out.push_str(spec.body.trim());
+    out.push('\n');
+
+    out.push_str("\n## Modules\n");
+    for (dir, _) in &spec.modules {
+        let summary = read_rollup_spec(root, dir)
+            .ok()
+            .flatten()
+            .map(|s| s.body)
+            .unwrap_or_default();
+        let blurb = summary.lines().next().unwrap_or("").trim();
+        out.push_str(&format!("- `{dir}` — {blurb}\n"));
+    }
+
+    out.push_str("\n## Features\n");
+    for (slug, _) in &spec.features {
+        let feature = read_feature_spec(root, slug).ok().flatten();
+        let title = feature
+            .as_ref()
+            .and_then(|f| f.body.lines().next())
+            .map(|l| l.trim_start_matches('#').trim().to_string())
+            .unwrap_or_else(|| slug.clone());
+        let summary = feature
+            .as_ref()
+            .and_then(|f| extract_section(&f.body, "## Summary", "\n## "))
+            .and_then(|s| s.lines().next().map(str::to_string))
+            .unwrap_or_default();
+        out.push_str(&format!("- [{title}](_features/{slug}.md) — {summary}\n"));
+    }
+    out
+}
+
+pub fn parse_system(content: &str) -> Result<SystemSpec> {
+    let mut lines = content.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        bail!("system spec missing frontmatter opening `---`");
+    }
+
+    let mut modules = Vec::new();
+    let mut features = Vec::new();
+    let mut spec_hash = String::new();
+    let mut section = "";
+    let mut consumed = 1;
+
+    for line in lines.by_ref() {
+        consumed += 1;
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("  ") {
+            match section {
+                "modules" => {
+                    let (id, hash) = rest
+                        .rsplit_once(':')
+                        .context("malformed modules entry in system frontmatter")?;
+                    modules.push((id.trim().to_string(), hash.trim().to_string()));
+                    continue;
+                }
+                "features" => {
+                    let (id, hash) = rest
+                        .rsplit_once(':')
+                        .context("malformed features entry in system frontmatter")?;
+                    features.push((id.trim().to_string(), hash.trim().to_string()));
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        match line.trim() {
+            "modules:" => {
+                section = "modules";
+                continue;
+            }
+            "features:" => {
+                section = "features";
+                continue;
+            }
+            _ => {}
+        }
+        let (key, value) = line
+            .split_once(':')
+            .context("malformed system frontmatter line")?;
+        if key.trim() == "spec_hash" {
+            spec_hash = value.trim().to_string();
+        }
+    }
+
+    // `body` is everything up through the LLM-written `## Summary` --
+    // title included, the CodeOwl-written `## Modules`/`## Features`
+    // listings after it excluded, the same way `render_system` never
+    // stores them either.
+    let full_body: String = content
+        .lines()
+        .skip(consumed)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let body = full_body
+        .split("\n## Modules")
+        .next()
+        .unwrap_or(&full_body)
+        .trim()
+        .to_string();
+
+    Ok(SystemSpec {
+        modules,
+        features,
+        spec_hash,
+        body,
+    })
+}
+
+pub fn read_system_spec(root: &Path) -> Result<Option<SystemSpec>> {
+    let path = system_spec_path(root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    parse_system(&content).map(Some)
+}
+
+/// One unit of work for the system spec — a single document, single
+/// `spec_hash`, generated in one task like a feature or rollup: composed
+/// purely from every module's and every feature's own already-generated
+/// summary, never raw source.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SystemTask {
+    /// (module dir, that module's own rollup summary)
+    pub modules: Vec<(String, String)>,
+    /// (feature slug, "<title> -- <summary>")
+    pub features: Vec<(String, String)>,
+}
+
+/// The system task, or `None` if it's already current, or if any module's
+/// rollup or any feature's spec isn't itself current yet — callers should
+/// exhaust each module's and each feature's own chase first, the same
+/// "children before parent" order every other document kind uses.
+pub fn next_system_task(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+) -> Result<Option<SystemTask>> {
+    let current_modules = current_module_hashes(graph, root)?;
+    let current_features = current_feature_hashes(graph, root, route_literals)?;
+    if current_modules.iter().any(|(_, h)| h.is_empty())
+        || current_features.iter().any(|(_, h)| h.is_empty())
+    {
+        return Ok(None);
+    }
+
+    let existing = read_system_spec(root)?;
+    let is_current = existing.is_some_and(|spec| {
+        let mut current_all = current_modules.clone();
+        current_all.extend(current_features.clone());
+        let mut stored_all = spec.modules;
+        stored_all.extend(spec.features);
+        diff_hash_lists(&current_all, &stored_all).is_empty()
+    });
+    if is_current {
+        return Ok(None);
+    }
+
+    let mut modules = Vec::new();
+    for (dir, _) in &current_modules {
+        let summary = read_rollup_spec(root, dir)?
+            .map(|s| s.body)
+            .with_context(|| format!("{dir} has no current rollup yet"))?;
+        modules.push((dir.clone(), summary));
+    }
+    let mut features = Vec::new();
+    for (slug, _) in &current_features {
+        let feature = read_feature_spec(root, slug)?
+            .with_context(|| format!("{slug} has no current feature spec yet"))?;
+        let title = feature
+            .body
+            .lines()
+            .next()
+            .map(|l| l.trim_start_matches('#').trim().to_string())
+            .unwrap_or_else(|| slug.clone());
+        let summary = extract_section(&feature.body, "## Summary", "\n## ").unwrap_or_default();
+        features.push((slug.clone(), format!("{title} -- {summary}")));
+    }
+
+    Ok(Some(SystemTask { modules, features }))
+}
+
+/// Persist `content` (the agent's LLM-written product narrative, title
+/// included) as the system spec.
+pub fn submit_system(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+    content: &str,
+) -> Result<SystemSpec> {
+    let body = content.trim().to_string();
+    if body.is_empty() {
+        bail!("submitted system content is empty");
+    }
+    if !body.starts_with("# ") {
+        bail!("submitted system content must start with a `# Title` heading");
+    }
+
+    let spec = SystemSpec {
+        modules: current_module_hashes(graph, root)?,
+        features: current_feature_hashes(graph, root, route_literals)?,
+        spec_hash: hash_text(&body),
+        body,
+    };
+
+    let path = system_spec_path(root);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    std::fs::write(&path, render_system(root, &spec))
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    Ok(spec)
+}
+
+/// One document the granularity rules say should exist, and where it
+/// currently stands (M8) — the unit `get_spec_coverage` reports against.
+/// `id` is exactly the id `get_next_spec_task`/`get_spec` expect for that
+/// document: a repo-relative path for a file, `"rollup:<dir>"`,
+/// `"feature:<slug>"`, or the fixed `"system"`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoverageItem {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    /// Import fan-in — how many other files import something from this
+    /// one. Always 0 for non-file kinds; this is what "high-fan-in files"
+    /// in `ARCHITECTURE.md`'s "Generation priority" is computed from.
+    pub fan_in: usize,
+}
+
+fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
+    graph
+        .imports()
+        .iter()
+        .filter(|imp| {
+            imp.target
+                .is_some_and(|t| graph.parent_id(t) == Some(file_id))
+        })
+        .count()
+}
+
+/// A file document's status: "missing" if nothing at all has ever been
+/// generated for it (neither any symbol nor its own summary — the same
+/// `HashPair`-is-empty/`symbols`-is-empty signal `next_task` itself uses
+/// to distinguish a first-ever generation from a reconciliation), else
+/// "current" iff `next_task` finds nothing left to do, else "stale" (some
+/// symbol or the file itself needs attention, but something here was
+/// already generated at some point).
+fn file_status(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<String> {
+    let file = graph.get_file(file_id).context("not a file id")?;
+    let existing = read_file_spec(root, &file.id)?;
+    let has_any_content =
+        existing.is_some_and(|s| !s.file.spec_hash.is_empty() || !s.symbols.is_empty());
+    if !has_any_content {
+        return Ok("missing".to_string());
+    }
+    Ok(if next_task(graph, root, file_id)?.is_some() {
+        "stale"
+    } else {
+        "current"
+    }
+    .to_string())
+}
+
+fn rollup_status(graph: &Graph, root: &Path, dir: &str) -> Result<String> {
+    let Some(spec) = read_rollup_spec(root, dir)? else {
+        return Ok("missing".to_string());
+    };
+    let current = current_file_hashes(graph, root, dir)?;
+    Ok(if diff_hash_lists(&current, &spec.files).is_empty() {
+        "current"
+    } else {
+        "stale"
+    }
+    .to_string())
+}
+
+fn feature_status(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+    entry: &EntryPoint,
+) -> Result<String> {
+    let Some(spec) = read_feature_spec(root, &entry.slug)? else {
+        return Ok("missing".to_string());
+    };
+    let participants = assemble_participants(graph, route_literals, &entry.file);
+    let current = current_participant_hashes(graph, &participants)?;
+    Ok(
+        if diff_hash_lists(&current, &spec.participants).is_empty() {
+            "current"
+        } else {
+            "stale"
+        }
+        .to_string(),
+    )
+}
+
+fn system_status(graph: &Graph, root: &Path, route_literals: &[RouteLiteral]) -> Result<String> {
+    let Some(spec) = read_system_spec(root)? else {
+        return Ok("missing".to_string());
+    };
+    let mut current_all = current_module_hashes(graph, root)?;
+    current_all.extend(current_feature_hashes(graph, root, route_literals)?);
+    let mut stored_all = spec.modules;
+    stored_all.extend(spec.features);
+    Ok(if diff_hash_lists(&current_all, &stored_all).is_empty() {
+        "current"
+    } else {
+        "stale"
+    }
+    .to_string())
+}
+
+/// Whether `path` (a file or directory) falls under `scope` — an exact
+/// match, or a true subdirectory (`scope` plus a `/` boundary), never a
+/// bare string-prefix match: `"lib/email"` must not also catch
+/// `"lib/email.ts"` or `"lib/email-utils/"`. An empty `scope` matches
+/// everything (files/rollups only — see `coverage`'s own doc comment on
+/// why an empty-but-`Some` scope still excludes features/system).
+fn within_scope(path: &str, scope: &str) -> bool {
+    scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/"))
+}
+
+/// Every document the granularity rules say should exist, each with its
+/// current status — the whole-repo inventory `get_spec_coverage` reports
+/// (M8), optionally narrowed to files/rollups under `scope` (a directory
+/// prefix — see `within_scope`). Features and the system spec are
+/// unaffected by `scope` — both are repo-wide concepts, and `scope`
+/// itself excludes the system spec entirely (a system spec scoped to one
+/// directory isn't a coherent thing to ask for).
+pub fn coverage(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+    scope: Option<&str>,
+) -> Result<Vec<CoverageItem>> {
+    let mut items = Vec::new();
+
+    let mut file_ids: Vec<SymbolId> = graph.files().filter_map(|f| graph.find(&f.id)).collect();
+    file_ids.sort_by_key(|&id| graph.string_id(id).to_string());
+    for id in file_ids {
+        if !file_is_spec_bearing(graph, id) {
+            continue;
+        }
+        let path = graph.string_id(id).to_string();
+        if scope.is_some_and(|s| !within_scope(&path, s)) {
+            continue;
+        }
+        items.push(CoverageItem {
+            status: file_status(graph, root, id)?,
+            fan_in: file_fan_in(graph, id),
+            id: path,
+            kind: "file".to_string(),
+        });
+    }
+
+    for dir in enumerate_modules(graph) {
+        if scope.is_some_and(|s| !within_scope(&dir, s)) {
+            continue;
+        }
+        items.push(CoverageItem {
+            status: rollup_status(graph, root, &dir)?,
+            fan_in: 0,
+            id: format!("rollup:{dir}"),
+            kind: "rollup".to_string(),
+        });
+    }
+
+    if scope.is_none() {
+        for entry in enumerate_entry_points(graph, route_literals) {
+            items.push(CoverageItem {
+                status: feature_status(graph, root, route_literals, &entry)?,
+                fan_in: 0,
+                id: format!("feature:{}", entry.slug),
+                kind: "feature".to_string(),
+            });
+        }
+        items.push(CoverageItem {
+            status: system_status(graph, root, route_literals)?,
+            fan_in: 0,
+            id: "system".to_string(),
+            kind: "system".to_string(),
+        });
+    }
+
+    Ok(items)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CoverageSummary {
+    pub current: usize,
+    pub stale: usize,
+    pub missing: usize,
+}
+
+pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
+    let mut summary = CoverageSummary::default();
+    for item in items {
+        match item.status.as_str() {
+            "current" => summary.current += 1,
+            "stale" => summary.stale += 1,
+            "missing" => summary.missing += 1,
+            _ => {}
+        }
+    }
+    summary
+}
+
+/// `coverage`'s items that still need attention, ordered the way
+/// `/codeowl generate --all`/`--budget=N` should spend a limited budget:
+/// the system spec first, then feature specs, then files by descending
+/// import fan-in, then everything else (rollups) — see
+/// `ARCHITECTURE.md`'s "Generation priority". Ties within a tier break on
+/// `id` for a stable, reproducible order.
+pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
+    let mut pending: Vec<CoverageItem> = items
+        .into_iter()
+        .filter(|i| i.status != "current")
+        .collect();
+    pending.sort_by(|a, b| {
+        fn tier(kind: &str) -> u8 {
+            match kind {
+                "system" => 0,
+                "feature" => 1,
+                "file" => 2,
+                _ => 3,
+            }
+        }
+        tier(&a.kind)
+            .cmp(&tier(&b.kind))
+            .then(b.fan_in.cmp(&a.fan_in))
+            .then(a.id.cmp(&b.id))
+    });
+    pending
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1358,6 +2020,20 @@ mod tests {
             ("lib/two.ts", "export function two(): void {}\n"),
         ]);
         assert!(directory_is_spec_bearing(&graph, "lib"));
+    }
+
+    #[test]
+    fn enumerate_modules_excludes_the_repo_root_even_when_spec_bearing() {
+        let graph = build_graph_from_sources(&[
+            ("one.ts", "export function one(): void {}\n"),
+            ("two.ts", "export function two(): void {}\n"),
+        ]);
+        // The repo root itself has 2 spec-bearing files, so
+        // directory_is_spec_bearing("") is true -- but "" is reserved for
+        // a future system-spec path (see next_rollup_task's guard), so it
+        // must never show up as a generatable module.
+        assert!(directory_is_spec_bearing(&graph, ""));
+        assert_eq!(enumerate_modules(&graph), Vec::<String>::new());
     }
 
     #[test]
@@ -1492,6 +2168,7 @@ mod tests {
                 signature: "function one(): void".to_string(),
                 docstring: None,
                 lines: [1, 1],
+                prior: None,
             }
         );
 
@@ -1510,6 +2187,7 @@ mod tests {
                 signature: "function two(): void".to_string(),
                 docstring: None,
                 lines: [2, 2],
+                prior: None,
             }
         );
 
@@ -1524,7 +2202,8 @@ mod tests {
         assert_eq!(
             task,
             SpecTask::File {
-                id: "a.ts".to_string()
+                id: "a.ts".to_string(),
+                prior: None,
             }
         );
 
@@ -1580,8 +2259,100 @@ mod tests {
         assert_eq!(
             task,
             SpecTask::File {
-                id: "a.ts".to_string()
+                id: "a.ts".to_string(),
+                prior: None,
             }
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_edited_prose_with_source_unchanged_reconciles_silently() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-human1", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nOriginal summary.\n### Behavior\nOriginal behavior.\n",
+        )
+        .unwrap();
+
+        // A human hand-edits the spec file's prose directly -- never
+        // through submit_spec -- leaving the frontmatter hashes as they
+        // were (a human wouldn't hand-update an opaque blake3 hash).
+        let path = spec_path(&dir, "a.ts");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let edited = content.replace("Original summary.", "A human-corrected summary.");
+        assert_ne!(edited, content);
+        std::fs::write(&path, &edited).unwrap();
+
+        // Source hasn't changed -- case 3: reconcile silently (no task for
+        // the symbol; spec_hash refreshed to match the human's edit) and
+        // move on to the file, which was never generated at all.
+        let task = next_task(&graph, &dir, file_id).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::File {
+                id: "a.ts".to_string(),
+                prior: None,
+            })
+        );
+
+        let reread = read_file_spec(&dir, "a.ts").unwrap().unwrap();
+        assert_eq!(reread.sections[0].1.summary, "A human-corrected summary.");
+        let expected_hash = hash_text("A human-corrected summary.\nOriginal behavior.");
+        assert_eq!(reread.symbols[0].1.spec_hash, expected_hash);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn human_edited_prose_with_source_changed_returns_a_reconciliation_task() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-human2", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let source_v1 = "export function one(): void {}\n";
+        let graph_v1 = build_graph_from_sources(&[("a.ts", source_v1)]);
+        submit(
+            &graph_v1,
+            &dir,
+            "a.ts::one",
+            "### Summary\nOriginal summary.\n### Behavior\nOriginal behavior.\n",
+        )
+        .unwrap();
+
+        let path = spec_path(&dir, "a.ts");
+        let content = std::fs::read_to_string(&path).unwrap();
+        let edited = content.replace("Original summary.", "A human-corrected summary.");
+        std::fs::write(&path, &edited).unwrap();
+
+        // The underlying source ALSO changes -- case 4: a reconciliation
+        // regeneration, carrying the human's prior text forward rather
+        // than silently discarding it.
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let graph_v2 = build_graph_from_sources(&[("a.ts", source_v2)]);
+        let file_id_v2 = graph_v2.find("a.ts").unwrap();
+
+        let task = next_task(&graph_v2, &dir, file_id_v2).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::Symbol {
+                id: "a.ts::one".to_string(),
+                signature: "function one(): void".to_string(),
+                docstring: None,
+                lines: [1, 3],
+                prior: Some(SymbolProse {
+                    summary: "A human-corrected summary.".to_string(),
+                    behavior: "Original behavior.".to_string(),
+                }),
+            })
         );
 
         std::fs::remove_dir_all(&dir).ok();
@@ -1766,6 +2537,7 @@ mod tests {
                 signature: "function one(): void".to_string(),
                 docstring: None,
                 lines: [1, 1],
+                prior: None,
             }
         );
         assert_eq!(next_rollup_task(&graph, &dir, "lib").unwrap(), None);
@@ -1871,5 +2643,255 @@ mod tests {
     fn diff_hash_lists_is_empty_when_nothing_moved() {
         let list = vec![("a".to_string(), "h1".to_string())];
         assert!(diff_hash_lists(&list, &list).is_empty());
+    }
+
+    #[test]
+    fn render_system_then_parse_system_round_trips() {
+        let spec = SystemSpec {
+            modules: vec![("lib/email".to_string(), "rolluphash".to_string())],
+            features: vec![("submit".to_string(), "featurehash".to_string())],
+            spec_hash: "systemhash".to_string(),
+            body: "# TalentTrail\n## Summary\nA competition platform.".to_string(),
+        };
+        let rendered = render_system(Path::new("/nonexistent"), &spec);
+        assert!(rendered.contains("lib/email: rolluphash"));
+        assert!(rendered.contains("submit: featurehash"));
+        let parsed = parse_system(&rendered).expect("should parse what we just rendered");
+        assert_eq!(parsed, spec);
+    }
+
+    const SYSTEM_FIXTURE: &[(&str, &str)] = &[
+        (
+            "app/submit/page.tsx",
+            "import { getSupabase } from '../../lib/supabase';\nexport default function Page() {\n  fetch(\"/api/submit-artwork\");\n  getSupabase();\n  return null;\n}\n",
+        ),
+        (
+            "app/api/submit-artwork/route.ts",
+            "import { getSupabase } from '../../../lib/supabase';\nexport async function POST(): Promise<void> {\n  getSupabase();\n}\n",
+        ),
+        (
+            "lib/supabase.ts",
+            "export function getSupabase(): void {}\n",
+        ),
+        ("lib/one.ts", "export function one(): void {}\n"),
+        ("lib/two.ts", "export function two(): void {}\n"),
+    ];
+
+    #[test]
+    fn next_system_task_is_none_until_every_module_and_feature_is_current() {
+        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "system1");
+
+        assert_eq!(
+            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            None,
+            "nothing generated yet"
+        );
+
+        for (sym_id, file_id) in [
+            ("lib/supabase.ts::getSupabase", "lib/supabase.ts"),
+            ("lib/one.ts::one", "lib/one.ts"),
+            ("lib/two.ts::two", "lib/two.ts"),
+        ] {
+            submit(&graph, &dir, sym_id, "### Summary\nS.\n### Behavior\nB.\n").unwrap();
+            submit(&graph, &dir, file_id, "A helper file.").unwrap();
+        }
+        assert!(directory_is_spec_bearing(&graph, "lib"));
+        assert_eq!(
+            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            None,
+            "lib's own rollup isn't generated yet"
+        );
+        submit_rollup(&graph, &dir, "lib", "Shared helpers.").unwrap();
+
+        assert_eq!(
+            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            None,
+            "the feature isn't generated yet"
+        );
+
+        submit(
+            &graph,
+            &dir,
+            "app/submit/page.tsx::Page",
+            "### Summary\nS.\n### Behavior\nB.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "app/submit/page.tsx", "The submit page.").unwrap();
+        submit_feature(
+            &graph,
+            &dir,
+            &route_literals,
+            "app/submit/page.tsx",
+            "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
+        )
+        .unwrap();
+
+        let task = next_system_task(&graph, &dir, &route_literals)
+            .unwrap()
+            .expect("everything current, system task should now appear");
+        assert_eq!(
+            task.modules,
+            vec![("lib".to_string(), "Shared helpers.".to_string())]
+        );
+        assert_eq!(task.features.len(), 1);
+        assert_eq!(task.features[0].0, "submit");
+        assert!(task.features[0].1.contains("Artwork submission"));
+        assert!(
+            task.features[0]
+                .1
+                .contains("Lets an artist submit artwork.")
+        );
+
+        submit_system(
+            &graph,
+            &dir,
+            &route_literals,
+            "# TalentTrail\n## Summary\nA competition platform.\n",
+        )
+        .unwrap();
+        assert_eq!(
+            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            None
+        );
+        assert!(read_system_spec(&dir).unwrap().is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_system_rejects_content_without_a_title() {
+        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "system2");
+        let result = submit_system(&graph, &dir, &route_literals, "no title here, just prose");
+        assert!(result.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coverage_reports_everything_missing_then_everything_current() {
+        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "coverage1");
+
+        let items = coverage(&graph, &dir, &route_literals, None).unwrap();
+        let summary = summarize(&items);
+        assert_eq!(
+            summary.missing, 8,
+            "5 files + 1 rollup + 1 feature + 1 system"
+        );
+        assert_eq!(summary.current, 0);
+        assert_eq!(summary.stale, 0);
+
+        let pending = prioritize(items);
+        let ids: Vec<&str> = pending.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "system",
+                "feature:submit",
+                "lib/supabase.ts",
+                "app/api/submit-artwork/route.ts",
+                "app/submit/page.tsx",
+                "lib/one.ts",
+                "lib/two.ts",
+                "rollup:lib",
+            ],
+            "system first, then features, then files by descending fan-in \
+             (lib/supabase.ts is imported by both page.tsx and route.ts), \
+             then rollups"
+        );
+        assert_eq!(
+            pending
+                .iter()
+                .find(|i| i.id == "lib/supabase.ts")
+                .unwrap()
+                .fan_in,
+            2
+        );
+
+        // Generate everything, then confirm coverage agrees nothing is
+        // pending.
+        for (sym_id, file_id) in [
+            ("lib/supabase.ts::getSupabase", "lib/supabase.ts"),
+            ("lib/one.ts::one", "lib/one.ts"),
+            ("lib/two.ts::two", "lib/two.ts"),
+        ] {
+            submit(&graph, &dir, sym_id, "### Summary\nS.\n### Behavior\nB.\n").unwrap();
+            submit(&graph, &dir, file_id, "A helper file.").unwrap();
+        }
+        submit_rollup(&graph, &dir, "lib", "Shared helpers.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "app/submit/page.tsx::Page",
+            "### Summary\nS.\n### Behavior\nB.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "app/submit/page.tsx", "The submit page.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "app/api/submit-artwork/route.ts::POST",
+            "### Summary\nS.\n### Behavior\nB.\n",
+        )
+        .unwrap();
+        submit(
+            &graph,
+            &dir,
+            "app/api/submit-artwork/route.ts",
+            "The submit-artwork route.",
+        )
+        .unwrap();
+        submit_feature(
+            &graph,
+            &dir,
+            &route_literals,
+            "app/submit/page.tsx",
+            "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
+        )
+        .unwrap();
+        submit_system(
+            &graph,
+            &dir,
+            &route_literals,
+            "# TalentTrail\n## Summary\nA competition platform.\n",
+        )
+        .unwrap();
+
+        let items = coverage(&graph, &dir, &route_literals, None).unwrap();
+        let summary = summarize(&items);
+        assert_eq!(summary.current, 8);
+        assert_eq!(summary.stale, 0);
+        assert_eq!(summary.missing, 0);
+        assert!(prioritize(items).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coverage_scope_narrows_to_files_and_rollups_under_that_prefix() {
+        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "coverage2");
+        let items = coverage(&graph, &dir, &route_literals, Some("lib")).unwrap();
+        let ids: std::collections::HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            std::collections::HashSet::from([
+                "lib/supabase.ts",
+                "lib/one.ts",
+                "lib/two.ts",
+                "rollup:lib",
+            ]),
+            "scope excludes app/* files, the feature, and the system spec"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn within_scope_respects_path_boundaries_not_bare_string_prefixes() {
+        // A real bug caught dogfooding against the pilot repo: "lib/email"
+        // as a bare string prefix also matches "lib/email.ts", an
+        // unrelated sibling file that merely shares the prefix.
+        assert!(within_scope("lib/email", "lib/email"));
+        assert!(within_scope("lib/email/config.ts", "lib/email"));
+        assert!(!within_scope("lib/email.ts", "lib/email"));
+        assert!(!within_scope("lib/email-utils/x.ts", "lib/email"));
+        assert!(within_scope("anything", ""));
     }
 }

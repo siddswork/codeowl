@@ -32,6 +32,39 @@ pub struct SearchRequest {
     pub query: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CoverageRequest {
+    /// Narrow the file/rollup portion of the report to this directory
+    /// prefix (e.g. "lib"). Features and the system spec are always
+    /// repo-wide, unaffected by scope. Omit for the whole repo.
+    pub scope: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CoverageItemResponse {
+    /// Pass straight to `get_next_spec_task`/`get_spec` — a repo-relative
+    /// file path, or `"rollup:<dir>"`/`"feature:<slug>"`/`"system"`.
+    pub id: String,
+    /// One of `"file"` | `"rollup"` | `"feature"` | `"system"`.
+    pub kind: String,
+    /// One of `"missing"` | `"stale"` (never `"current"` — `pending` only
+    /// ever lists what still needs attention).
+    pub status: String,
+    /// Import fan-in — how many other files import something from this
+    /// one. Always 0 for non-file kinds.
+    pub fan_in: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CoverageResponse {
+    pub current: usize,
+    pub stale: usize,
+    pub missing: usize,
+    /// Every non-current document, in priority order — see
+    /// `ARCHITECTURE.md`'s "Generation priority".
+    pub pending: Vec<CoverageItemResponse>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct CallerInfo {
     pub from_file: String,
@@ -76,9 +109,11 @@ pub struct SpecResponse {
 pub struct GenerateTaskRequest {
     /// The `/codeowl generate <id>` target — a file id (a repo-relative
     /// path, e.g. "lib/utils.ts"), which may also be a feature entry point
-    /// (a page or an orphan API route — see `features.rs`), or a directory
-    /// path (e.g. "lib") with >=2 spec-bearing files. Stateless: safe to
-    /// call repeatedly with the same target until it reports nothing left.
+    /// (a page or an orphan API route — see `features.rs`), a directory
+    /// path (e.g. "lib") with >=2 spec-bearing files, or "system"/"." for
+    /// the whole repo (every module, every feature, then the system spec).
+    /// Stateless: safe to call repeatedly with the same target until it
+    /// reports nothing left.
     pub target: String,
 }
 
@@ -115,10 +150,19 @@ pub enum SpecTaskResponse {
         docstring: Option<String>,
         source: String,
         dependencies: Vec<String>,
+        /// `Some` only for a reconciliation regeneration (M8's "Human
+        /// corrections" case 4) — the human-edited `### Summary`/
+        /// `### Behavior` prose still on record, to preserve whatever
+        /// correction is still accurate rather than silently overwrite it.
+        prior_summary: Option<String>,
+        prior_behavior: Option<String>,
     },
     File {
         id: String,
         source: String,
+        /// Same case-4 meaning as `Symbol::prior_summary`, for the file's
+        /// own `## Summary`.
+        prior: Option<String>,
     },
     /// Generated in one shot, unlike the bottom-up symbol-then-file chase
     /// above: a feature spec is a single document with a single
@@ -145,29 +189,56 @@ pub enum SpecTaskResponse {
         dir_path: String,
         files: Vec<RollupFile>,
     },
+    /// Generated in one shot, like a feature or rollup spec: composed
+    /// purely from every module's and every feature's own already-
+    /// generated summary. Only ever produced once every module and every
+    /// feature in the whole repo is itself current -- there is exactly
+    /// one of these per repo.
+    System {
+        /// Always the literal `"system"` -- pass straight back as
+        /// `submit_spec`'s `id`.
+        id: String,
+        modules: Vec<ModuleSummary>,
+        features: Vec<FeatureSummary>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct ModuleSummary {
+    pub dir: String,
+    /// That module's own current rollup `## Summary` prose.
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct FeatureSummary {
+    pub slug: String,
+    /// That feature's own title plus its current `## Summary` prose.
+    pub summary: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SubmitSpecRequest {
-    /// The id `get_next_spec_task` returned — a symbol id, a file id, or
-    /// (for a feature or rollup task) the `"feature:<slug>"`/
-    /// `"rollup:<dir_path>"` id it reported.
+    /// The id `get_next_spec_task` returned — a symbol id, a file id, the
+    /// fixed id `"system"`, or (for a feature or rollup task) the
+    /// `"feature:<slug>"`/`"rollup:<dir_path>"` id it reported.
     pub id: String,
     /// For a symbol task: markdown containing `### Summary` and
     /// `### Behavior` headings. For a file or rollup task: plain prose,
-    /// becomes the `## Summary`. For a feature task: the whole document
-    /// body, starting with a `# Title` line — see `ARCHITECTURE.md`'s
-    /// "Feature specs" template.
+    /// becomes the `## Summary`. For a feature or system task: the whole
+    /// document body, starting with a `# Title` line — see
+    /// `ARCHITECTURE.md`'s "Feature specs"/"System spec shape" templates.
     pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SubmitSpecResponse {
     pub id: String,
-    /// `None` for a feature or rollup submission — neither has a single
-    /// source hash: a feature has a participant map, a rollup has a
-    /// per-file hash map (see `get_spec`/the persisted frontmatter for
-    /// either).
+    /// `None` for a feature, rollup, or system submission — none of the
+    /// three has a single source hash: a feature has a participant map, a
+    /// rollup has a per-file hash map, the system spec has both a module
+    /// map and a feature map (see `get_spec`/the persisted frontmatter for
+    /// any of them).
     pub source_hash: Option<String>,
     pub spec_hash: String,
 }
@@ -278,6 +349,7 @@ impl CodeOwlServer {
                 signature,
                 docstring,
                 lines,
+                prior,
             } => {
                 let sym_id = self.graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
                 let file_id = self
@@ -305,12 +377,14 @@ impl CodeOwlServer {
                     docstring,
                     source,
                     dependencies,
+                    prior_summary: prior.as_ref().map(|p| p.summary.clone()),
+                    prior_behavior: prior.map(|p| p.behavior),
                 }
             }
-            crate::spec::SpecTask::File { id } => {
+            crate::spec::SpecTask::File { id, prior } => {
                 let source =
                     std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
-                SpecTaskResponse::File { id, source }
+                SpecTaskResponse::File { id, source, prior }
             }
         })
     }
@@ -408,7 +482,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, or 'rollup:<dir_path>' id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed."
+        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, 'rollup:<dir_path>' id, or the fixed id 'system'. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed."
     )]
     async fn get_spec(
         &self,
@@ -425,6 +499,37 @@ impl CodeOwlServer {
             }
         }
 
+        if req.id == "system" {
+            let Some(spec) =
+                crate::spec::read_system_spec(&self.root).map_err(|e| e.to_string())?
+            else {
+                return Ok(Json(missing(req.id, String::new(), None)));
+            };
+            let route_literals = self.graph.route_literals();
+            let current_modules = crate::spec::current_module_hashes(&self.graph, &self.root)
+                .map_err(|e| e.to_string())?;
+            let current_features =
+                crate::spec::current_feature_hashes(&self.graph, &self.root, route_literals)
+                    .map_err(|e| e.to_string())?;
+            let mut current_all = current_modules;
+            current_all.extend(current_features);
+            let mut stored_all = spec.modules;
+            stored_all.extend(spec.features);
+            let changed = crate::spec::diff_hash_lists(&current_all, &stored_all);
+            return Ok(Json(SpecResponse {
+                id: req.id,
+                status: if changed.is_empty() {
+                    "current"
+                } else {
+                    "stale"
+                }
+                .to_string(),
+                signature: String::new(),
+                docstring: None,
+                content: Some(spec.body),
+                changed,
+            }));
+        }
         if let Some(dir_path) = req.id.strip_prefix("rollup:") {
             let Some(spec) =
                 crate::spec::read_rollup_spec(&self.root, dir_path).map_err(|e| e.to_string())?
@@ -557,31 +662,92 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current. Returns null when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns null when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
         Parameters(req): Parameters<GenerateTaskRequest>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let Some(target_id) = self.graph.find(&req.target) else {
-            return self.next_directory_task_response(&req.target);
+        if req.target == "system" || req.target == "." {
+            return self.next_system_task_response();
+        }
+        self.next_task_for_target(&req.target)
+    }
+
+    /// The bottom-up chase for a single file/symbol/directory target --
+    /// shared by `get_next_spec_task`'s direct call and
+    /// `next_system_task_response`'s per-module, per-feature walk.
+    fn next_task_for_target(&self, target: &str) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let Some(target_id) = self.graph.find(target) else {
+            return self.next_directory_task_response(target);
         };
         let task = crate::spec::next_task(&self.graph, &self.root, target_id)
             .map_err(|e| e.to_string())?;
 
         let Some(task) = task else {
-            return self.next_feature_task_response(&req.target);
+            return self.next_feature_task_response(target);
         };
         Ok(Json(Some(self.spec_task_to_response(task)?)))
     }
 
+    /// `get_next_spec_task`'s path for the whole-repo target (`"system"` or
+    /// `"."`): walk every module directory's own chase (reusing
+    /// `next_directory_task_response`, files then that directory's
+    /// rollup), then every feature entry point's own chase (reusing
+    /// `next_task_for_target`, its file then its feature) -- only once
+    /// every one of those is current does the system task itself appear.
+    fn next_system_task_response(&self) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let route_literals = self.graph.route_literals();
+
+        for dir in crate::spec::enumerate_modules(&self.graph) {
+            if let Json(Some(response)) = self.next_directory_task_response(&dir)? {
+                return Ok(Json(Some(response)));
+            }
+        }
+        for entry in crate::features::enumerate_entry_points(&self.graph, route_literals) {
+            if let Json(Some(response)) = self.next_task_for_target(&entry.file)? {
+                return Ok(Json(Some(response)));
+            }
+        }
+
+        let Some(task) = crate::spec::next_system_task(&self.graph, &self.root, route_literals)
+            .map_err(|e| e.to_string())?
+        else {
+            return Ok(Json(None));
+        };
+        Ok(Json(Some(SpecTaskResponse::System {
+            id: "system".to_string(),
+            modules: task
+                .modules
+                .into_iter()
+                .map(|(dir, summary)| ModuleSummary { dir, summary })
+                .collect(),
+            features: task
+                .features
+                .into_iter()
+                .map(|(slug, summary)| FeatureSummary { slug, summary })
+                .collect(),
+        })))
+    }
+
     #[tool(
-        description = "Persist LLM-written spec prose for a symbol id, file id, 'feature:<slug>' id, or 'rollup:<dir_path>' id (all from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's or rollup's content is plain prose for its '## Summary'; a feature's content is the whole document starting with a '# Title' line. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
+        description = "Persist LLM-written spec prose for a symbol id, file id, 'feature:<slug>' id, 'rollup:<dir_path>' id, or the fixed id 'system' (all from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's or rollup's content is plain prose for its '## Summary'; a feature's or the system spec's content is the whole document starting with a '# Title' line. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
     )]
     async fn submit_spec(
         &self,
         Parameters(req): Parameters<SubmitSpecRequest>,
     ) -> Result<Json<SubmitSpecResponse>, String> {
+        if req.id == "system" {
+            let route_literals = self.graph.route_literals();
+            let spec =
+                crate::spec::submit_system(&self.graph, &self.root, route_literals, &req.content)
+                    .map_err(|e| e.to_string())?;
+            return Ok(Json(SubmitSpecResponse {
+                id: req.id,
+                source_hash: None,
+                spec_hash: spec.spec_hash,
+            }));
+        }
         if let Some(dir_path) = req.id.strip_prefix("rollup:") {
             let spec = crate::spec::submit_rollup(&self.graph, &self.root, dir_path, &req.content)
                 .map_err(|e| e.to_string())?;
@@ -633,6 +799,39 @@ impl CodeOwlServer {
         crate::search::search_code(&self.root, &req.query)
             .map(Json)
             .map_err(|e| e.to_string())
+    }
+
+    #[tool(
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing. `pending` lists every non-current one, its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: the system spec, then feature specs, then files by descending import fan-in, then everything else (rollups). Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+    )]
+    async fn get_spec_coverage(
+        &self,
+        Parameters(req): Parameters<CoverageRequest>,
+    ) -> Result<Json<CoverageResponse>, String> {
+        let route_literals = self.graph.route_literals();
+        let items = crate::spec::coverage(
+            &self.graph,
+            &self.root,
+            route_literals,
+            req.scope.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        let summary = crate::spec::summarize(&items);
+        let pending = crate::spec::prioritize(items)
+            .into_iter()
+            .map(|i| CoverageItemResponse {
+                id: i.id,
+                kind: i.kind,
+                status: i.status,
+                fan_in: i.fan_in,
+            })
+            .collect();
+        Ok(Json(CoverageResponse {
+            current: summary.current,
+            stale: summary.stale,
+            missing: summary.missing,
+            pending,
+        }))
     }
 }
 
@@ -802,6 +1001,158 @@ mod tests {
         assert_eq!(result.0.status, "missing");
         assert_eq!(result.0.docstring.as_deref(), Some("Doubles a number."));
         assert_eq!(result.0.content, None);
+    }
+
+    // --- M8: completeness & correction mechanics ------------------------
+
+    #[tokio::test]
+    async fn get_spec_coverage_orders_pending_items_and_a_budgeted_walk_stops_early() {
+        let server = test_server(&[
+            ("util.ts", "export function helper(): void {}\n"),
+            (
+                "a.ts",
+                "import { helper } from './util';\nexport function useA() {\n  helper();\n}\n",
+            ),
+            (
+                "b.ts",
+                "import { helper } from './util';\nexport function useB() {\n  helper();\n}\n",
+            ),
+        ]);
+
+        // scope: Some("") matches every file/rollup path (every string
+        // starts with "") but -- per `coverage`'s own doc comment --
+        // excludes the always-present, repo-wide feature/system entries
+        // whenever a scope is given at all. That's used deliberately here
+        // to keep this test focused on file fan-in prioritization, not
+        // system-spec content (covered by its own tests).
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: Some(String::new()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(coverage.0.missing, 3);
+        assert_eq!(coverage.0.current, 0);
+        assert_eq!(coverage.0.stale, 0);
+        let ids: Vec<&str> = coverage.0.pending.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["util.ts", "a.ts", "b.ts"],
+            "util.ts has fan-in 2 (imported by both a.ts and b.ts), so it's spent first"
+        );
+        assert_eq!(coverage.0.pending[0].fan_in, 2);
+
+        // Simulate a budget=2 run: walk get_next_spec_task/submit_spec for
+        // the first 2 pending targets only (draining each target's own
+        // symbol-then-file ladder), then stop.
+        let mut generations = 0;
+        for item in coverage.0.pending.iter().take(2) {
+            loop {
+                let Some(task) = server
+                    .get_next_spec_task(Parameters(GenerateTaskRequest {
+                        target: item.id.clone(),
+                    }))
+                    .await
+                    .unwrap()
+                    .0
+                else {
+                    break;
+                };
+                generations += 1;
+                let id = match &task {
+                    SpecTaskResponse::Symbol { id, .. } => id.clone(),
+                    SpecTaskResponse::File { id, .. } => id.clone(),
+                    other => panic!("expected a Symbol or File task, got {other:?}"),
+                };
+                let content = if matches!(task, SpecTaskResponse::Symbol { .. }) {
+                    "### Summary\nS.\n### Behavior\nB.\n".to_string()
+                } else {
+                    "A helper file.".to_string()
+                };
+                server
+                    .submit_spec(Parameters(SubmitSpecRequest { id, content }))
+                    .await
+                    .unwrap();
+            }
+        }
+        assert_eq!(
+            generations, 4,
+            "util.ts and a.ts each need a symbol + file generation"
+        );
+
+        let after = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: Some(String::new()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(after.0.current, 2);
+        assert_eq!(after.0.missing, 1);
+        assert_eq!(
+            after
+                .0
+                .pending
+                .iter()
+                .map(|i| i.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b.ts"],
+            "budget was spent on the first 2 priority items only -- b.ts is untouched"
+        );
+    }
+
+    #[tokio::test]
+    async fn human_edited_spec_surfaces_as_a_reconciliation_task_via_the_mcp_surface() {
+        let dir = std::env::temp_dir().join(format!("codeowl-mcp-human-{}-1", std::process::id()));
+        let source_v1 = "export function one(): void {}\n";
+        let server_v1 = rebuild_server(dir.clone(), &[("a.ts", source_v1)]);
+        server_v1
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts::one".to_string(),
+                content: "### Summary\nOriginal summary.\n### Behavior\nOriginal behavior.\n"
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // A human hand-edits the spec file directly. Deliberately no
+        // get_next_spec_task call in between here and the source edit
+        // below -- that's the one thing that would silently reconcile
+        // case 3 and "absorb" this edit as the new baseline before the
+        // source change ever happens, which would turn this into a plain
+        // case-2 regeneration instead of the case-4 this test is for.
+        let spec_path = dir.join("docs/specs/a.ts.md");
+        let content = std::fs::read_to_string(&spec_path).unwrap();
+        std::fs::write(
+            &spec_path,
+            content.replace("Original summary.", "A human-corrected summary."),
+        )
+        .unwrap();
+
+        // The source ALSO changes -- a fresh server against the same dir
+        // should surface a reconciliation task carrying the human's edit
+        // forward.
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let server_v2 = rebuild_server(dir.clone(), &[("a.ts", source_v2)]);
+        let task = server_v2
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("source changed, expected a reconciliation task");
+        let SpecTaskResponse::Symbol {
+            prior_summary,
+            prior_behavior,
+            ..
+        } = task
+        else {
+            panic!("expected a Symbol task");
+        };
+        assert_eq!(prior_summary.as_deref(), Some("A human-corrected summary."));
+        assert_eq!(prior_behavior.as_deref(), Some("Original behavior."));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     // --- M7: staleness & invalidation end-to-end -----------------------
@@ -1491,6 +1842,139 @@ mod tests {
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "lib".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(done.0, None);
+    }
+
+    #[tokio::test]
+    async fn generate_dot_walks_every_module_and_feature_then_produces_the_system_spec() {
+        let server = test_server(&[
+            (
+                "app/submit/page.tsx",
+                "import { getSupabase } from '../../lib/supabase';\nexport default function Page() {\n  fetch(\"/api/submit-artwork\");\n  getSupabase();\n  return null;\n}\n",
+            ),
+            (
+                "app/api/submit-artwork/route.ts",
+                "import { getSupabase } from '../../../lib/supabase';\nexport async function POST(): Promise<void> {\n  getSupabase();\n}\n",
+            ),
+            (
+                "lib/supabase.ts",
+                "export function getSupabase(): void {}\n",
+            ),
+            ("lib/one.ts", "export function one(): void {}\n"),
+            ("lib/two.ts", "export function two(): void {}\n"),
+        ]);
+
+        let mut seen_kinds = Vec::new();
+        let system_task = loop {
+            let task = server
+                .get_next_spec_task(Parameters(GenerateTaskRequest {
+                    target: ".".to_string(),
+                }))
+                .await
+                .unwrap()
+                .0
+                .expect("should eventually reach the system task, not run out early");
+            match &task {
+                SpecTaskResponse::Symbol { id, .. } => {
+                    seen_kinds.push("symbol");
+                    server
+                        .submit_spec(Parameters(SubmitSpecRequest {
+                            id: id.clone(),
+                            content: "### Summary\nS.\n### Behavior\nB.\n".to_string(),
+                        }))
+                        .await
+                        .unwrap();
+                }
+                SpecTaskResponse::File { id, .. } => {
+                    seen_kinds.push("file");
+                    server
+                        .submit_spec(Parameters(SubmitSpecRequest {
+                            id: id.clone(),
+                            content: "A helper file.".to_string(),
+                        }))
+                        .await
+                        .unwrap();
+                }
+                SpecTaskResponse::Rollup { id, .. } => {
+                    seen_kinds.push("rollup");
+                    server
+                        .submit_spec(Parameters(SubmitSpecRequest {
+                            id: id.clone(),
+                            content: "Shared helpers.".to_string(),
+                        }))
+                        .await
+                        .unwrap();
+                }
+                SpecTaskResponse::Feature { id, .. } => {
+                    seen_kinds.push("feature");
+                    server
+                        .submit_spec(Parameters(SubmitSpecRequest {
+                            id: id.clone(),
+                            content:
+                                "# Artwork submission\n## Summary\nLets an artist submit artwork.\n"
+                                    .to_string(),
+                        }))
+                        .await
+                        .unwrap();
+                }
+                SpecTaskResponse::System { .. } => {
+                    seen_kinds.push("system");
+                    break task;
+                }
+            }
+        };
+
+        let SpecTaskResponse::System {
+            id: system_id,
+            modules,
+            features,
+        } = system_task
+        else {
+            panic!("expected a System task");
+        };
+        assert_eq!(system_id, "system");
+        assert_eq!(
+            modules,
+            vec![ModuleSummary {
+                dir: "lib".to_string(),
+                summary: "Shared helpers.".to_string(),
+            }]
+        );
+        assert_eq!(features.len(), 1);
+        assert_eq!(features[0].slug, "submit");
+        assert!(features[0].summary.contains("Artwork submission"));
+
+        // Every module and feature was drained bottom-up before the
+        // system task appeared -- symbols/files for lib's 3 files, its
+        // rollup, then the feature, then finally system.
+        assert_eq!(seen_kinds.last(), Some(&"system"));
+        assert!(seen_kinds.contains(&"rollup"));
+        assert!(seen_kinds.contains(&"feature"));
+        assert_eq!(seen_kinds.iter().filter(|k| **k == "system").count(), 1);
+
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: system_id.clone(),
+                content: "# TalentTrail\n## Summary\nA competition platform.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let spec = server
+            .get_spec(Parameters(IdRequest {
+                id: system_id.clone(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(spec.0.status, "current");
+        assert!(spec.0.content.unwrap().contains("A competition platform."));
+
+        let done = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: ".".to_string(),
             }))
             .await
             .unwrap();

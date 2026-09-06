@@ -1,25 +1,34 @@
 ---
-description: Generate (or refresh) the spec for one file or feature entry point via CodeOwl's MCP tools
-argument-hint: <repo-relative-file-path>
+description: Generate (or refresh) specs via CodeOwl's MCP tools -- one target, the whole repo, or a budgeted batch
+argument-hint: <repo-relative-file-path> | system | . | --all [--budget=N]
 ---
 
-Generate the spec for `$ARGUMENTS`, using CodeOwl's MCP tools
-(`get_next_spec_task`, `submit_spec`, `get_spec`). This command is the
-*client-side* half of CodeOwl's generation loop: CodeOwl itself never
-calls an LLM or writes prose — it only assembles context and persists
-whatever you write. You are the one writing the spec text.
+Generate spec(s) for `$ARGUMENTS`, using CodeOwl's MCP tools
+(`get_next_spec_task`, `submit_spec`, `get_spec`, `get_spec_coverage`).
+This command is the *client-side* half of CodeOwl's generation loop:
+CodeOwl itself never calls an LLM or writes prose — it only assembles
+context and persists whatever you write. You are the one writing the
+spec text.
 
-`$ARGUMENTS` is a repo-relative file path — a plain file (e.g.
-`lib/utils.ts`), a feature entry point (a page like
-`app/submit/page.tsx`, or an API route with no page referencing it, like
-a webhook) — or a directory path (e.g. `lib`) with at least two
-spec-bearing files in it. You don't need to know in advance which one it
-is: the loop below walks bottom-up (a file's symbols, then the file, then
-— only if this file is also a recognized feature entry point — the
-feature; or, for a directory, each of its files' own symbol-then-file
-ladder, then the directory's own rollup once every file is current) and
-just tells you what's next each time. If `$ARGUMENTS` is empty, ask the
-user which file or directory to generate rather than guessing.
+`$ARGUMENTS` is one of:
+- A repo-relative file path (e.g. `lib/utils.ts`), a feature entry point
+  (a page like `app/submit/page.tsx`, or an API route with no page
+  referencing it, like a webhook), or a directory path (e.g. `lib`) with
+  at least two spec-bearing files in it.
+- `system` or `.` — the whole repo: every module directory, every
+  feature, then the one system spec, all in one bottom-up sweep.
+- `--all`, optionally with `--budget=N` — a *prioritized* batch instead of
+  a plain sweep: system spec, then feature specs, then files by
+  descending import fan-in, then everything else. See "Batch mode" below.
+
+You don't need to know in advance which single-target shape applies: the
+loop below walks bottom-up (a file's symbols, then the file, then — only
+if this file is also a recognized feature entry point — the feature; for
+a directory, each of its files' own ladder, then the directory's own
+rollup; for `system`/`.`, every module's and every feature's own ladder,
+then the system spec) and just tells you what's next each time. If
+`$ARGUMENTS` is empty, ask the user what to generate rather than
+guessing.
 
 **Read before writing, every time — this is not a formality.** Every
 piece of `source`/`core_sources` a task hands you exists to be read in
@@ -42,10 +51,11 @@ real generated output:
 
 Repeat the following until `get_next_spec_task` returns `null`:
 
-1. Call `get_next_spec_task` with `target` set to `$ARGUMENTS`.
+1. Call `get_next_spec_task` with `target` set to `$ARGUMENTS` (or, in
+   batch mode, the current item's `id` — see "Batch mode" below).
 2. If the result is `null`, stop — everything on this target already has
    a current spec. Report that and end the command.
-3. Otherwise you'll get a task shaped one of four ways:
+3. Otherwise you'll get a task shaped one of five ways:
    - **`kind: "symbol"`** — write markdown containing exactly these two
      headings, in this order, each with real prose under it:
      ```
@@ -95,9 +105,50 @@ Repeat the following until `get_next_spec_task` returns `null`:
      costs nothing beyond what's already been generated). This becomes the
      directory's own `## Summary`; CodeOwl fills in the per-file listing
      underneath it deterministically.
+   - **`kind: "system"`** — write one short paragraph of plain prose (no
+     headings needed) starting with a `# Title` line (a product name —
+     CodeOwl never synthesizes one), synthesizing what the product as a
+     whole does from `modules` (each entry is that module's own rollup
+     summary) and `features` (each entry is that feature's own title +
+     summary) — read every one, don't re-derive from source, don't
+     re-read any of the underlying files. This is the top-level document
+     a BA (or anyone new to the repo) should read first.
+
+   **Reconciliation (`prior`/`prior_summary`/`prior_behavior`, when
+   present and non-null):** the source changed *and* a human had hand-
+   edited this exact spec since it was last machine-written — the value
+   is their edit. Preserve whatever in it is still accurate; change only
+   what the actual source diff affects. Don't silently discard a human's
+   correction just because you're rewriting the section — read it first,
+   the same way you'd read `source`.
 4. Call `submit_spec` with `id` set to the task's `id` and `content` set
    to what you just wrote.
 5. Go back to step 1.
+
+## Batch mode (`--all` / `--all --budget=N`)
+
+Use this when `$ARGUMENTS` starts with `--all`, instead of the single-
+target loop above:
+
+1. Call `get_spec_coverage` (no `scope`, unless the user named one) to
+   get `pending`: every non-current document, already in priority order
+   (system spec, then feature specs, then files by descending fan-in,
+   then everything else).
+2. If `--budget=N` was given, you have `N` **generations** to spend —
+   count every `get_next_spec_task` call that returns a real task (not
+   `null`) toward that budget, not every item in `pending` (a single file
+   with three uncovered symbols costs four generations: three symbols
+   plus the file itself). Without `--budget`, spend as many as it takes
+   to exhaust `pending` entirely.
+3. Walk `pending` in order. For each item's `id`, run the single-target
+   loop above (steps 1–5) against it — but stop the *whole* batch the
+   moment your generation count would exceed the budget, even mid-item;
+   don't finish an in-progress item "for free."
+4. When you stop (budget exhausted or `pending` fully drained), report
+   concisely: how many generations you spent, on which documents, and —
+   if budget-capped — call `get_spec_coverage` once more and tell the
+   user how much is still pending so they know whether another budgeted
+   run is worth it.
 
 ## Termination and reporting
 
@@ -107,13 +158,14 @@ was last generated, it's skipped automatically (no LLM call happens for
 it), so re-running this command on an already-current target is a fast
 no-op that reports nothing left to do.
 
-When the loop ends, report concisely: which symbols/file/feature/rollup
-got a spec written or refreshed, and where it landed
+When the loop ends, report concisely: which symbols/file/feature/rollup/
+system spec got a spec written or refreshed, and where it landed
 (`docs/specs/<path>.md` for a file, `docs/specs/_features/<slug>.md` for
-a feature, `docs/specs/<dir>/_index.md` for a directory rollup — see
-`ARCHITECTURE.md`'s "Spec document format"). If `get_next_spec_task`
-never returns anything at all on the first call, say why: either nothing
-changed since it was last generated, or the target doesn't qualify for a
-spec at all (a barrel file with no exported function/class and not a
-feature entry point either, or a directory with fewer than two
-spec-bearing files — see the granularity rules in `ARCHITECTURE.md`).
+a feature, `docs/specs/<dir>/_index.md` for a directory rollup,
+`docs/specs/_index.md` for the system spec — see `ARCHITECTURE.md`'s
+"Spec document format"). If `get_next_spec_task` never returns anything
+at all on the first call, say why: either nothing changed since it was
+last generated, or the target doesn't qualify for a spec at all (a barrel
+file with no exported function/class and not a feature entry point
+either, or a directory with fewer than two spec-bearing files — see the
+granularity rules in `ARCHITECTURE.md`).
