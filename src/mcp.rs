@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::{Json, Parameters};
 use rmcp::model::{ProtocolVersion, ServerCapabilities, ServerInfo};
@@ -264,7 +265,12 @@ pub struct SubmitSpecResponse {
 
 #[derive(Clone)]
 pub struct CodeOwlServer {
-    graph: Arc<Graph>,
+    /// Swapped wholesale by the file watcher as source files change
+    /// mid-session (M9). Every request handler loads one consistent
+    /// snapshot (`self.graph.load_full()`) up front rather than reading
+    /// this field repeatedly — a `SymbolId` is only valid for the graph
+    /// that produced it, so a handler must not straddle a swap.
+    graph: Arc<ArcSwap<Graph>>,
     root: Arc<PathBuf>,
     tool_router: ToolRouter<Self>,
 }
@@ -272,10 +278,17 @@ pub struct CodeOwlServer {
 impl CodeOwlServer {
     pub fn new(root: PathBuf, graph: Graph) -> Self {
         Self {
-            graph: Arc::new(graph),
+            graph: Arc::new(ArcSwap::from_pointee(graph)),
             root: Arc::new(root),
             tool_router: Self::tool_router(),
         }
+    }
+
+    /// The shared graph cell for `watch::spawn` to publish reindexed
+    /// graphs into. Cloning the `Arc` shares the same cell, so a swap on
+    /// the watcher thread is immediately visible to every request handler.
+    pub fn graph_store(&self) -> Arc<ArcSwap<Graph>> {
+        Arc::clone(&self.graph)
     }
 
     fn not_found(id: &str) -> String {
@@ -288,15 +301,16 @@ impl CodeOwlServer {
     /// task; otherwise there's genuinely nothing left.
     fn next_feature_task_response(
         &self,
+        graph: &Graph,
         target: &str,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let route_literals = self.graph.route_literals();
-        let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
+        let route_literals = graph.route_literals();
+        let entry_points = crate::features::enumerate_entry_points(graph, route_literals);
         let Some(entry) = entry_points.iter().find(|e| e.file == target) else {
             return Ok(Json(None));
         };
 
-        let task = crate::spec::next_feature_task(&self.graph, &self.root, entry, route_literals)
+        let task = crate::spec::next_feature_task(graph, &self.root, entry, route_literals)
             .map_err(|e| e.to_string())?;
         let Some(task) = task else {
             return Ok(Json(None));
@@ -325,20 +339,21 @@ impl CodeOwlServer {
     /// is current; otherwise there's genuinely nothing here.
     fn next_directory_task_response(
         &self,
+        graph: &Graph,
         target: &str,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        if !crate::spec::directory_is_spec_bearing(&self.graph, target) {
+        if !crate::spec::directory_is_spec_bearing(graph, target) {
             return Ok(Json(None));
         }
 
-        if let Some(task) = crate::spec::next_task_for_directory(&self.graph, &self.root, target)
+        if let Some(task) = crate::spec::next_task_for_directory(graph, &self.root, target)
             .map_err(|e| e.to_string())?
         {
-            return Ok(Json(Some(self.spec_task_to_response(task)?)));
+            return Ok(Json(Some(self.spec_task_to_response(graph, task)?)));
         }
 
-        let Some(task) = crate::spec::next_rollup_task(&self.graph, &self.root, target)
-            .map_err(|e| e.to_string())?
+        let Some(task) =
+            crate::spec::next_rollup_task(graph, &self.root, target).map_err(|e| e.to_string())?
         else {
             return Ok(Json(None));
         };
@@ -360,6 +375,7 @@ impl CodeOwlServer {
     /// off disk.
     fn spec_task_to_response(
         &self,
+        graph: &Graph,
         task: crate::spec::SpecTask,
     ) -> Result<SpecTaskResponse, String> {
         Ok(match task {
@@ -370,23 +386,20 @@ impl CodeOwlServer {
                 lines,
                 prior,
             } => {
-                let sym_id = self.graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
-                let file_id = self
-                    .graph
+                let sym_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
+                let file_id = graph
                     .parent_id(sym_id)
                     .ok_or_else(|| Self::not_found(&id))?;
-                let file = self
-                    .graph
+                let file = graph
                     .get_file(file_id)
                     .ok_or_else(|| Self::not_found(&id))?;
                 let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
-                let dependencies = self
-                    .graph
+                let dependencies = graph
                     .imports()
                     .iter()
                     .filter(|imp| imp.from_file == file.id)
                     .map(|imp| match imp.target {
-                        Some(t) => format!("{} ({})", self.graph.string_id(t), imp.specifier),
+                        Some(t) => format!("{} ({})", graph.string_id(t), imp.specifier),
                         None => format!("{} ({}, unresolved)", imp.imported_name, imp.specifier),
                     })
                     .collect();
@@ -436,11 +449,11 @@ impl CodeOwlServer {
         &self,
         Parameters(req): Parameters<IdRequest>,
     ) -> Result<Json<SymbolView>, String> {
-        let id = self
-            .graph
+        let graph = self.graph.load_full();
+        let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        SymbolView::from_graph(&self.graph, id)
+        SymbolView::from_graph(&graph, id)
             .map(Json)
             .ok_or_else(|| Self::not_found(&req.id))
     }
@@ -452,12 +465,11 @@ impl CodeOwlServer {
         &self,
         Parameters(req): Parameters<IdRequest>,
     ) -> Result<Json<Vec<CallerInfo>>, String> {
-        let id = self
-            .graph
+        let graph = self.graph.load_full();
+        let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let callers = self
-            .graph
+        let callers = graph
             .imports()
             .iter()
             .filter(|imp| imp.target == Some(id))
@@ -476,25 +488,23 @@ impl CodeOwlServer {
         &self,
         Parameters(req): Parameters<IdRequest>,
     ) -> Result<Json<Vec<CalleeInfo>>, String> {
-        let id = self
-            .graph
+        let graph = self.graph.load_full();
+        let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let file = self
-            .graph
+        let file = graph
             .get_symbol(id)
             .ok_or_else(|| Self::not_found(&req.id))?
             .file
             .clone();
-        let callees = self
-            .graph
+        let callees = graph
             .imports()
             .iter()
             .filter(|imp| imp.from_file == file)
             .map(|imp| CalleeInfo {
                 specifier: imp.specifier.clone(),
                 imported_name: imp.imported_name.clone(),
-                resolved_id: imp.target.map(|t| self.graph.string_id(t).to_string()),
+                resolved_id: imp.target.map(|t| graph.string_id(t).to_string()),
             })
             .collect();
         Ok(Json(callees))
@@ -519,6 +529,8 @@ impl CodeOwlServer {
             }
         }
 
+        let graph = self.graph.load_full();
+
         if req.id == "system" {
             let Some(spec) =
                 crate::spec::read_system_spec(&self.root).map_err(|e| e.to_string())?
@@ -526,11 +538,11 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let route_literals = self.graph.route_literals();
-            let current_modules = crate::spec::current_module_hashes(&self.graph, &self.root)
+            let route_literals = graph.route_literals();
+            let current_modules = crate::spec::current_module_hashes(&graph, &self.root)
                 .map_err(|e| e.to_string())?;
             let current_features =
-                crate::spec::current_feature_hashes(&self.graph, &self.root, route_literals)
+                crate::spec::current_feature_hashes(&graph, &self.root, route_literals)
                     .map_err(|e| e.to_string())?;
             let mut current_all = current_modules;
             current_all.extend(current_features);
@@ -559,7 +571,7 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let current = crate::spec::current_file_hashes(&self.graph, &self.root, dir_path)
+            let current = crate::spec::current_file_hashes(&graph, &self.root, dir_path)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.files);
             return Ok(Json(SpecResponse {
@@ -584,15 +596,15 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let route_literals = self.graph.route_literals();
-            let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
+            let route_literals = graph.route_literals();
+            let entry_points = crate::features::enumerate_entry_points(&graph, route_literals);
             let entry = entry_points
                 .iter()
                 .find(|e| e.slug == slug)
                 .ok_or_else(|| Self::not_found(&req.id))?;
             let participants =
-                crate::features::assemble_participants(&self.graph, route_literals, &entry.file);
-            let current = crate::spec::current_participant_hashes(&self.graph, &participants)
+                crate::features::assemble_participants(&graph, route_literals, &entry.file);
+            let current = crate::spec::current_participant_hashes(&graph, &participants)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.participants);
             return Ok(Json(SpecResponse {
@@ -611,16 +623,14 @@ impl CodeOwlServer {
             }));
         }
 
-        let id = self
-            .graph
+        let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
 
-        match self.graph.get(id) {
+        match graph.get(id) {
             crate::graph::Node::Symbol(symbol) => {
                 let file_id = symbol.parent.ok_or_else(|| Self::not_found(&req.id))?;
-                let file = self
-                    .graph
+                let file = graph
                     .get_file(file_id)
                     .ok_or_else(|| Self::not_found(&req.id))?;
                 let existing =
@@ -645,7 +655,7 @@ impl CodeOwlServer {
                     )));
                 };
                 let changed =
-                    crate::spec::symbol_changes(&self.graph, &self.root, file_id, symbol, &stored);
+                    crate::spec::symbol_changes(&graph, &self.root, file_id, symbol, &stored);
                 let mut smells = crate::spec::prose_smells(&prose.summary);
                 smells.extend(crate::spec::prose_smells(&prose.behavior));
                 smells.sort();
@@ -674,8 +684,8 @@ impl CodeOwlServer {
                 else {
                     return Ok(Json(missing(file.id.clone(), String::new(), None)));
                 };
-                let changed = crate::spec::file_changes(&self.graph, id, &spec.file);
-                let smells = crate::spec::file_spec_smells(&self.graph, &self.root, id, &spec);
+                let changed = crate::spec::file_changes(&graph, id, &spec.file);
+                let smells = crate::spec::file_spec_smells(&graph, &self.root, id, &spec);
                 Ok(Json(SpecResponse {
                     id: file.id.clone(),
                     status: if changed.is_empty() {
@@ -701,26 +711,31 @@ impl CodeOwlServer {
         &self,
         Parameters(req): Parameters<GenerateTaskRequest>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let graph = self.graph.load_full();
         if req.target == "system" || req.target == "." {
-            return self.next_system_task_response();
+            return self.next_system_task_response(&graph);
         }
-        self.next_task_for_target(&req.target)
+        self.next_task_for_target(&graph, &req.target)
     }
 
     /// The bottom-up chase for a single file/symbol/directory target --
     /// shared by `get_next_spec_task`'s direct call and
     /// `next_system_task_response`'s per-module, per-feature walk.
-    fn next_task_for_target(&self, target: &str) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let Some(target_id) = self.graph.find(target) else {
-            return self.next_directory_task_response(target);
+    fn next_task_for_target(
+        &self,
+        graph: &Graph,
+        target: &str,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let Some(target_id) = graph.find(target) else {
+            return self.next_directory_task_response(graph, target);
         };
-        let task = crate::spec::next_task(&self.graph, &self.root, target_id)
-            .map_err(|e| e.to_string())?;
+        let task =
+            crate::spec::next_task(graph, &self.root, target_id).map_err(|e| e.to_string())?;
 
         let Some(task) = task else {
-            return self.next_feature_task_response(target);
+            return self.next_feature_task_response(graph, target);
         };
-        Ok(Json(Some(self.spec_task_to_response(task)?)))
+        Ok(Json(Some(self.spec_task_to_response(graph, task)?)))
     }
 
     /// `get_next_spec_task`'s path for the whole-repo target (`"system"` or
@@ -729,21 +744,24 @@ impl CodeOwlServer {
     /// rollup), then every feature entry point's own chase (reusing
     /// `next_task_for_target`, its file then its feature) -- only once
     /// every one of those is current does the system task itself appear.
-    fn next_system_task_response(&self) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let route_literals = self.graph.route_literals();
+    fn next_system_task_response(
+        &self,
+        graph: &Graph,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let route_literals = graph.route_literals();
 
-        for dir in crate::spec::enumerate_modules(&self.graph) {
-            if let Json(Some(response)) = self.next_directory_task_response(&dir)? {
+        for dir in crate::spec::enumerate_modules(graph) {
+            if let Json(Some(response)) = self.next_directory_task_response(graph, &dir)? {
                 return Ok(Json(Some(response)));
             }
         }
-        for entry in crate::features::enumerate_entry_points(&self.graph, route_literals) {
-            if let Json(Some(response)) = self.next_task_for_target(&entry.file)? {
+        for entry in crate::features::enumerate_entry_points(graph, route_literals) {
+            if let Json(Some(response)) = self.next_task_for_target(graph, &entry.file)? {
                 return Ok(Json(Some(response)));
             }
         }
 
-        let Some(task) = crate::spec::next_system_task(&self.graph, &self.root, route_literals)
+        let Some(task) = crate::spec::next_system_task(graph, &self.root, route_literals)
             .map_err(|e| e.to_string())?
         else {
             return Ok(Json(None));
@@ -770,11 +788,11 @@ impl CodeOwlServer {
         &self,
         Parameters(req): Parameters<SubmitSpecRequest>,
     ) -> Result<Json<SubmitSpecResponse>, String> {
+        let graph = self.graph.load_full();
         if req.id == "system" {
-            let route_literals = self.graph.route_literals();
-            let spec =
-                crate::spec::submit_system(&self.graph, &self.root, route_literals, &req.content)
-                    .map_err(|e| e.to_string())?;
+            let route_literals = graph.route_literals();
+            let spec = crate::spec::submit_system(&graph, &self.root, route_literals, &req.content)
+                .map_err(|e| e.to_string())?;
             return Ok(Json(SubmitSpecResponse {
                 id: req.id,
                 source_hash: None,
@@ -782,7 +800,7 @@ impl CodeOwlServer {
             }));
         }
         if let Some(dir_path) = req.id.strip_prefix("rollup:") {
-            let spec = crate::spec::submit_rollup(&self.graph, &self.root, dir_path, &req.content)
+            let spec = crate::spec::submit_rollup(&graph, &self.root, dir_path, &req.content)
                 .map_err(|e| e.to_string())?;
             return Ok(Json(SubmitSpecResponse {
                 id: req.id,
@@ -791,14 +809,14 @@ impl CodeOwlServer {
             }));
         }
         if let Some(slug) = req.id.strip_prefix("feature:") {
-            let route_literals = self.graph.route_literals();
-            let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
+            let route_literals = graph.route_literals();
+            let entry_points = crate::features::enumerate_entry_points(&graph, route_literals);
             let entry = entry_points
                 .iter()
                 .find(|e| e.slug == slug)
                 .ok_or_else(|| format!("no feature entry point with slug {slug:?}"))?;
             let spec = crate::spec::submit_feature(
-                &self.graph,
+                &graph,
                 &self.root,
                 route_literals,
                 &entry.file,
@@ -812,7 +830,7 @@ impl CodeOwlServer {
             }));
         }
 
-        let hash = crate::spec::submit(&self.graph, &self.root, &req.id, &req.content)
+        let hash = crate::spec::submit(&graph, &self.root, &req.id, &req.content)
             .map_err(|e| e.to_string())?;
         Ok(Json(SubmitSpecResponse {
             id: req.id,
@@ -841,14 +859,10 @@ impl CodeOwlServer {
         &self,
         Parameters(req): Parameters<CoverageRequest>,
     ) -> Result<Json<CoverageResponse>, String> {
-        let route_literals = self.graph.route_literals();
-        let items = crate::spec::coverage(
-            &self.graph,
-            &self.root,
-            route_literals,
-            req.scope.as_deref(),
-        )
-        .map_err(|e| e.to_string())?;
+        let graph = self.graph.load_full();
+        let route_literals = graph.route_literals();
+        let items = crate::spec::coverage(&graph, &self.root, route_literals, req.scope.as_deref())
+            .map_err(|e| e.to_string())?;
         let summary = crate::spec::summarize(&items);
         let pending = crate::spec::prioritize(items)
             .into_iter()
@@ -939,6 +953,48 @@ mod tests {
         graph.set_route_literals(route_literals);
 
         CodeOwlServer::new(dir, graph)
+    }
+
+    #[tokio::test]
+    async fn get_symbol_reflects_a_hot_swapped_graph() {
+        // The M9 in-session model: the file watcher reindexes an edited
+        // file and swaps a fresh graph into the server's cell, and the very
+        // next request sees it -- no restart.
+        let server = test_server(&[("a.ts", "export function f(): number { return 1; }\n")]);
+        let root = server.root.to_path_buf();
+        let before = server
+            .get_symbol(Parameters(IdRequest {
+                id: "a.ts::f".into(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .source_hash;
+
+        let mut index = crate::index::RepoIndex::build(&root).unwrap();
+        std::fs::write(
+            root.join("a.ts"),
+            "export function f(): number { return 2; }\n",
+        )
+        .unwrap();
+        let (rebuilt, _) = index
+            .apply_changes(&[root.join("a.ts")])
+            .unwrap()
+            .expect("a real edit rebuilds");
+        server.graph_store().store(std::sync::Arc::new(rebuilt));
+
+        let after = server
+            .get_symbol(Parameters(IdRequest {
+                id: "a.ts::f".into(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .source_hash;
+        assert_ne!(
+            before, after,
+            "get_symbol must reflect the swapped-in graph"
+        );
     }
 
     #[tokio::test]

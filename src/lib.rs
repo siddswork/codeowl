@@ -3,11 +3,13 @@ pub mod features;
 pub mod graph;
 pub mod hash;
 pub mod imports;
+pub mod index;
 pub mod mcp;
 pub mod resolve;
 pub mod search;
 pub mod spec;
 pub mod symbol;
+pub mod watch;
 
 pub use extract::extract_file;
 pub use graph::{FileNode, Graph, Node, SymbolId, SymbolView};

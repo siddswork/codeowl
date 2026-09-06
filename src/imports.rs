@@ -12,12 +12,13 @@
 //! three are left untracked here rather than guessed at. See `CLAUDE.md`'s
 //! pending decisions.
 
+use serde::{Deserialize, Serialize};
 use tree_sitter::{Node, Parser};
 
 /// One named import: `import { <imported_name> } from '<specifier>'`. A
 /// local alias (`import { Foo as Bar }`), if any, is purely a local rename
 /// — irrelevant to resolving what it points at, so it isn't tracked here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ImportRef {
     pub specifier: String,
     pub imported_name: String,
@@ -25,14 +26,14 @@ pub struct ImportRef {
 
 /// One named re-export: `export { <source_name> as <exported_as> } from
 /// '<specifier>'` — how a barrel forwards a name it doesn't declare itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReExport {
     pub exported_as: String,
     pub specifier: String,
     pub source_name: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileImports {
     pub imports: Vec<ImportRef>,
     pub re_exports: Vec<ReExport>,
