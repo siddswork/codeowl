@@ -10,6 +10,12 @@ CodeOwl itself never calls an LLM or writes prose — it only assembles
 context and persists whatever you write. You are the one writing the
 spec text.
 
+The context a task hands you always reflects the current working tree:
+CodeOwl's in-session file watcher re-parses edited files within about a
+second, so if you changed code earlier in this session you can run this
+command straight away — the `source`/`dependencies` you get back are
+already up to date, no server restart.
+
 `$ARGUMENTS` is one of:
 - A repo-relative file path (e.g. `lib/utils.ts`), a feature entry point
   (a page like `app/submit/page.tsx`, or an API route with no page
