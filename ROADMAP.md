@@ -192,38 +192,45 @@ Live against the pilot repo (talentTrail, 292 TS/TSX files): with `serve` runnin
 
 **Validation:** point it at the pilot repo's actual migration files, confirm schema nodes are created for known tables, and confirm at least one known ORM/string-literal reference in application code resolves to the right schema node (fuzzy match, so "resolves to a plausible candidate" is the bar, not exact precision).
 
-**MVP value:** without this, any exit-criterion task touching schema-coupled code (exactly the kind of task the deleted exp-01 scaffolding picked, for good reason) gets an unfairly degraded test — schema nodes would just be invisible. This milestone is what makes M11 a fair test rather than an easy one.
+**MVP value:** the pilot is a payments/registration app — its domain *is* the database. Without schema nodes a feature spec's "Data touched" section can't name the tables a flow reads and writes, and a file spec for `processWebhookEvent` can't say it marks `payments` and `registrations` — the specs stay vague exactly where the domain is richest. This directly determines whether the M11 corpus passes its BA cut on any payments/registration question, and it's the last framework-convention resolver Phase 1 needs (after M5's route literals).
 
 ---
 
-### M11 — Exit criterion validation
-**Size:** S (mechanically) · **Builds on:** M8 and M10
+### M11 — Spec corpus + dual-audience quality bar
+**Size:** M · **Builds on:** M8 and M10
 
-**Scope:** The thing Phase 1 actually exists to answer. Populate `docs/specs/` for a meaningful slice of the pilot repo (via M8's `--budget=N`, which now builds the system + feature layer first), add the `CLAUDE.md` line telling an agent to check specs first, then run several real tasks with and without CodeOwl available and compare — using `utility/mine.py`, already built, for the token/exploration-tool measurement.
+**Scope:** Produce the thing the project exists to produce. Generate specs across a substantial, representative slice of the pilot repo — every feature, all of `lib/`, `app/api/`, and the load-bearing `app/` pages — via `/codeowl-generate --all --budget=N` in repeated passes, and commit the corpus as its own PR (per the spec-regeneration commit-hygiene convention). Add the `CLAUDE.md` line pointing agents at `get_spec`/`get_spec_coverage` before they explore.
 
-**Validation:** this milestone *is* the validation — the deliverable is a verdict, not code. Concretely: for each task, does `mine.py`'s exploration-tool count and token estimate drop meaningfully with specs available, and does the agent actually use `get_spec` rather than defaulting to `Read`/`Grep` (the H1 gate from the deleted exp-01 scaffolding's framing — worth reusing that hypothesis table even though the manual pre-code version isn't being run). Plus the BA-side gate added when feature specs became a Phase 1 must-have: a feature-shaped question ("how does artwork submission work?") is answerable from the feature spec alone, judged by a human reading it without the code.
+**Validation:** the deliverable is the corpus plus a short quality writeup, assessed four ways:
+- **BA cut** — a human answers 3–4 feature-shaped questions ("how does artwork submission work?", "how does payment reconciliation work?", "what happens when a judge is reassigned?") from the feature and system specs alone, without opening any source file. Pass = each spec was sufficient *and* accurate.
+- **Dev cut** — spot-check ~10 file/symbol specs against their source: no invented behavior, no missing error/edge cases, dependency lists right.
+- **Smell cut** — `get_spec_coverage` reports `smelly: 0` across the generated corpus.
+- **Agent data point (optional, informational)** — one `utility/mine.py` run comparing 2–3 real tasks with and without specs available. Not a gate.
 
-**MVP value:** this is the actual Phase 1 exit gate. A "no" here is a valid, useful outcome — it means stopping before any Phase 2 investment, which is the entire reason Phase 1 was scoped this way.
+**MVP value:** this is Phase 1's actual output — a real, committed, dual-audience spec corpus over a real repo, plus evidence it holds up when a human reads it cold. Not a verdict on whether to continue: the brownfield-documentation value proposition is the premise, not the hypothesis under test.
 
 ---
 
 ## Phase 2 — sketch only, revisit after M11
 
-Deliberately coarse — detailed planning here is premature until M11 answers whether Phase 2 happens at all. Rough shape, in likely order:
+Deliberately coarse — detailed planning waits until the M11 corpus exists and its quality is known. Rough shape, in likely order (the first two moved up when Phase 1's framing shifted to "the specs are the product" — see the revision note at the end):
 
-1. **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio, repo-scoped tool calls.
-2. **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1 (see `ARCHITECTURE.md` "Storage"), now justified by multi-user load.
-3. **Multi-repo namespacing** — per-repo index/graph/spec-cache within one shared process (`REQUIREMENTS.md` "Hosting granularity").
-4. **Stub nodes + cross-team delegation** — the cross-repo dependency model (`REQUIREMENTS.md` "Multi-repo & team ownership").
-5. **Web viewer** — the Cytoscape.js-style graph browser for BAs/QA/SREs.
-6. **Auth/roles** — reopens once multiple users share one hosted instance (`REQUIREMENTS.md` open question 2).
+1. **Web viewer** — a graph + spec browser for BAs/QA/SREs. The human half of the dual audience needs a browser, not an MCP client, so this is no longer a late nice-to-have.
+2. **Headless / scheduled spec generation** — a non-interactive runner (Claude Code SDK or `--print` mode, triggered by CI or a git hook) that drives the `get_next_spec_task → submit_spec` loop so the corpus refreshes without a person running a slash command. CodeOwl still never calls an LLM itself — this is just the calling agent, unattended.
+3. **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio, repo-scoped tool calls.
+4. **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1 (see `ARCHITECTURE.md` "Storage"), now justified by multi-user load.
+5. **Multi-repo namespacing** — per-repo index/graph/spec-cache within one shared process (`REQUIREMENTS.md` "Hosting granularity").
+6. **Stub nodes + cross-team delegation** — the cross-repo dependency model (`REQUIREMENTS.md` "Multi-repo & team ownership").
+7. **Auth/roles** — reopens once multiple users share one hosted instance (`REQUIREMENTS.md` open question 2).
 
 ## Provisional decisions this ordering makes
 
 Worth flagging since I made these calls rather than asking:
-- **M10 (SQL) is sequenced before M11**, not folded into M4–M9's core TS pipeline. If you'd rather ship M11 sooner and pick a validation task that avoids schema-coupled code, M10 can move after M11 or drop out of Phase 1 entirely — it's the one milestone here that isn't strictly load-bearing for the others.
+- **M10 (SQL) is sequenced before M11** so the corpus M11 generates can describe the database layer. It was once the one optional Phase-1 milestone; the reframe below makes it load-bearing — the pilot's domain is largely its schema, and a corpus that can't name tables fails M11's BA cut on any payments/registration question.
 - **`CLAUDE.md`'s two pending items** (tool-surface trimming, spec-regen commit hygiene) aren't given their own milestones — the plan resolves the tool-surface one implicitly (M3–M8 only ever build the tools actually used: `get_spec`, `get_symbol`, `get_callers`/`get_callees`, `search_code`, the three generation tools, `get_spec_coverage` — `trace_path`/`get_tests_for`/`get_dependencies` simply never get built unless a later milestone needs them), and commit hygiene is a workflow habit to adopt once M8 exists, not something to build.
 
 Revised 2026-09-06: the spec-format decision (see `ARCHITECTURE.md` "Spec document format") inserted the feature layer as its own M5 and renumbered everything after it — old M5–M9 are now M6–M10. Feature specs were promoted from a Phase 2 idea to a Phase 1 must-have after tracing a real pilot-repo feature and finding its two load-bearing hops (UI→API via `fetch("/api/…")`, API→DB via `.from("table")`) are string literals the import graph structurally cannot see — meaning directory-mirrored specs alone would have rigged M10's exit test against exactly the feature-shaped questions it needs to answer.
 
 Revised again 2026-09-06, after M4's real-repo validation: M4 shipped the file-spec granularity rule but never wrote directory rollups (their document shape was never templated — see `ARCHITECTURE.md`'s open question 5), and that gap turned out to be silently load-bearing — the staleness milestone's own validation assumes a directory `_index.md` already exists to edit and re-check. Rather than leave that implicit, directory rollups became their own milestone, inserted as the new M6 right after the feature layer; everything from the old M6 (Staleness) onward shifted up by one, M6–M10 becoming M7–M11.
+
+Revised again 2026-09-06, after M9: Phase 1's framing shifted. The original exit criterion — does spec generation measurably cut an agent's token use, a go/no-go gate on whether to continue — is retired. The value proposition is taken as settled: accurate, current, dual-audience (human + LLM) documentation of a brownfield codebase. So **M11 changes from "run tasks and reach a verdict" to "generate a real spec corpus over the pilot and hold it to a dual-audience quality bar"**; **M10's rationale shifts** from "makes M11 a fair test" to "lets the corpus describe the database" (which also makes it load-bearing rather than optional); the agent-side token measurement survives only as an optional data point. `REQUIREMENTS.md`'s problem statement, goal, and success criterion were updated to match, and Phase 2 was reprioritized — web viewer and headless generation move to the front, since the human audience and corpus freshness are now first-class concerns.

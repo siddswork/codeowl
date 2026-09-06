@@ -16,9 +16,11 @@
 
 </pre>
 
-CodeOwl extracts a structural graph from a codebase and serves
-LLM-generated specs over MCP, so a coding agent can query accurate facts
-instead of re-exploring the repo every task.
+CodeOwl extracts a structural graph from a codebase and layers
+LLM-authored specs on top — at every level from symbol to whole system —
+describing how the code actually works, in prose a human and an agent can
+both read. Specs are committed to git and kept honest by content hashing,
+so they stay current instead of rotting. Served over MCP.
 
 - **What & why:** `REQUIREMENTS.md`
 - **How it's built:** `ARCHITECTURE.md`
