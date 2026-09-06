@@ -112,6 +112,14 @@ fn short_name(id: &str) -> &str {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HashPair {
     pub source_hash: String,
+    /// The reference-edge contribution to this entry's staleness key: a
+    /// hash of every resolved dependency's current `interfaceHash` (see
+    /// `dependency_hash`/`file_dependency_hash`) as observed *at generation
+    /// time*. Compared against a freshly recomputed value to detect the
+    /// case `source_hash` alone can't: nothing in this symbol/file's own
+    /// text changed, but something it imports changed shape (M7 — see
+    /// `ARCHITECTURE.md`'s "Caching and invalidation").
+    pub deps_hash: String,
     pub spec_hash: String,
 }
 
@@ -175,15 +183,15 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
     out.push_str("kind: file\n");
     out.push_str(&format!("source_paths: [{}]\n", spec.source_path));
     out.push_str(&format!(
-        "file: {{ source_hash: {}, spec_hash: {} }}\n",
-        spec.file.source_hash, spec.file.spec_hash
+        "file: {{ source_hash: {}, deps_hash: {}, spec_hash: {} }}\n",
+        spec.file.source_hash, spec.file.deps_hash, spec.file.spec_hash
     ));
     if !spec.symbols.is_empty() {
         out.push_str("symbols:\n");
         for (id, h) in &spec.symbols {
             out.push_str(&format!(
-                "  {id}: {{ source_hash: {}, spec_hash: {} }}\n",
-                h.source_hash, h.spec_hash
+                "  {id}: {{ source_hash: {}, deps_hash: {}, spec_hash: {} }}\n",
+                h.source_hash, h.deps_hash, h.spec_hash
             ));
         }
     }
@@ -296,9 +304,166 @@ fn contains_identifier(text: &str, name: &str) -> bool {
     false
 }
 
+/// A reference target's contribution to a consumer's staleness key: its
+/// `interfaceHash` if it has one (an exported symbol), falling back to a
+/// file's own `source_hash` if the target is a whole file rather than a
+/// symbol — never a spec/summary's text (see "Caching and invalidation":
+/// rewording a dependency's prose must never invalidate its consumers).
+fn interface_or_source_hash(graph: &Graph, id: SymbolId) -> String {
+    graph
+        .get_symbol(id)
+        .map(|s| {
+            s.interface_hash
+                .clone()
+                .unwrap_or_else(|| s.source_hash.clone())
+        })
+        .or_else(|| graph.get_file(id).map(|f| f.source_hash.clone()))
+        .unwrap_or_default()
+}
+
+/// Hash a set of reference-edge targets into one deps-hash value — order-
+/// independent (sorted first) since import declaration order isn't a real
+/// dependency, and deduplicated since two different local names can
+/// resolve to the same target.
+fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId>) -> String {
+    let mut pairs: Vec<(String, String)> = targets
+        .map(|id| {
+            (
+                graph.string_id(id).to_string(),
+                interface_or_source_hash(graph, id),
+            )
+        })
+        .collect();
+    pairs.sort();
+    pairs.dedup();
+    hash_text(
+        &pairs
+            .iter()
+            .map(|(id, h)| format!("{id}:{h}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
+/// `sym`'s reference-edge staleness contribution — the same per-symbol
+/// scoping `dependency_lines` uses for the human-readable "Depends on"
+/// list, but hashing only the *resolved* targets' current interface
+/// hashes (an external/unresolved import has no interface CodeOwl can
+/// observe, so it can't contribute to staleness). Persisted as
+/// `HashPair.deps_hash` at generation time, recomputed here again at
+/// every currency check to detect drift.
+fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> String {
+    let Node::File(file) = graph.get(file_id) else {
+        return String::new();
+    };
+    let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
+        return String::new();
+    };
+    let targets = graph
+        .imports()
+        .iter()
+        .filter(|imp| {
+            imp.from_file == file.id && contains_identifier(&symbol_text, &imp.imported_name)
+        })
+        .filter_map(|imp| imp.target);
+    hash_dependency_targets(graph, targets)
+}
+
+/// A file's own reference-edge staleness contribution — every one of its
+/// resolved imports, regardless of which specific symbol in the file uses
+/// each one (a file has no per-symbol text scoping the way a `### Depends
+/// on` section does; `dependency_hash` above is the narrower, per-symbol
+/// version of this same idea).
+fn file_dependency_hash(graph: &Graph, file_id: SymbolId) -> String {
+    let Node::File(file) = graph.get(file_id) else {
+        return String::new();
+    };
+    let targets = graph
+        .imports()
+        .iter()
+        .filter(|imp| imp.from_file == file.id)
+        .filter_map(|imp| imp.target);
+    hash_dependency_targets(graph, targets)
+}
+
+/// Diff two `(id, hash)` lists — shared between a feature's `participants`
+/// map and a rollup's `files` map, since the staleness semantics are
+/// identical for both: an existing entry whose hash moved, a new entry
+/// that appeared, or an old entry that's gone are all real changes (the
+/// "or the participant set itself changes" half of "Caching and
+/// invalidation", applied uniformly). Empty means current; each entry in
+/// the result names one thing that moved, deterministically, off the
+/// graph — no LLM needed to say *that* something changed (see
+/// `ARCHITECTURE.md`'s "Ordering").
+pub fn diff_hash_lists(current: &[(String, String)], stored: &[(String, String)]) -> Vec<String> {
+    let mut changed = Vec::new();
+    for (id, hash) in current {
+        match stored.iter().find(|(sid, _)| sid == id) {
+            Some((_, h)) if h == hash => {}
+            Some(_) => changed.push(format!("changed:{id}")),
+            None => changed.push(format!("added:{id}")),
+        }
+    }
+    for (id, _) in stored {
+        if !current.iter().any(|(cid, _)| cid == id) {
+            changed.push(format!("removed:{id}"));
+        }
+    }
+    changed.sort();
+    changed
+}
+
+/// What's changed for `sym` since `stored` was recorded — empty means
+/// current. Expressed as a `diff_hash_lists` comparison over exactly two
+/// fixed keys (`"source"`, `"dependencies"`) so a caller (`get_spec`) can
+/// report *which* of the two moved, not just that something did.
+pub fn symbol_changes(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym: &Symbol,
+    stored: &HashPair,
+) -> Vec<String> {
+    diff_hash_lists(
+        &[
+            ("source".to_string(), sym.source_hash.clone()),
+            (
+                "dependencies".to_string(),
+                dependency_hash(graph, root, file_id, sym),
+            ),
+        ],
+        &[
+            ("source".to_string(), stored.source_hash.clone()),
+            ("dependencies".to_string(), stored.deps_hash.clone()),
+        ],
+    )
+}
+
+/// The file-level equivalent of `symbol_changes` — what's changed about
+/// `file_id`'s own spec since `stored` was recorded.
+pub fn file_changes(graph: &Graph, file_id: SymbolId, stored: &HashPair) -> Vec<String> {
+    let source_hash = graph
+        .get_file(file_id)
+        .map(|f| f.source_hash.clone())
+        .unwrap_or_default();
+    diff_hash_lists(
+        &[
+            ("source".to_string(), source_hash),
+            (
+                "dependencies".to_string(),
+                file_dependency_hash(graph, file_id),
+            ),
+        ],
+        &[
+            ("source".to_string(), stored.source_hash.clone()),
+            ("dependencies".to_string(), stored.deps_hash.clone()),
+        ],
+    )
+}
+
 /// Parse a spec file's own rendered output back into a `FileSpec`. Only
 /// needs to tolerate what `render` produces — human-edit tolerance
-/// (arbitrary reordering, reformatting) is M6's "Human corrections"
+/// (arbitrary reordering, reformatting) is M8's "Human corrections"
 /// mechanics, not in scope yet.
 pub fn parse(content: &str) -> Result<FileSpec> {
     let mut lines = content.lines();
@@ -398,6 +563,7 @@ fn parse_hash_pair(flow_map: &str) -> HashPair {
         if let Some((k, v)) = kv.split_once(':') {
             match k.trim() {
                 "source_hash" => pair.source_hash = v.trim().to_string(),
+                "deps_hash" => pair.deps_hash = v.trim().to_string(),
                 "spec_hash" => pair.spec_hash = v.trim().to_string(),
                 _ => {}
             }
@@ -478,7 +644,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
         let current = existing
             .as_ref()
             .and_then(|spec| spec.symbol_hash(&sym.id))
-            .is_some_and(|h| h.source_hash == sym.source_hash);
+            .is_some_and(|h| symbol_changes(graph, root, target_file_id, sym, h).is_empty());
         if !current {
             return Ok(Some(SpecTask::Symbol {
                 id: sym.id.clone(),
@@ -491,7 +657,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
 
     let file_current = existing
         .as_ref()
-        .is_some_and(|spec| spec.file.source_hash == file.source_hash);
+        .is_some_and(|spec| file_changes(graph, target_file_id, &spec.file).is_empty());
     if !file_current {
         return Ok(Some(SpecTask::File {
             id: file.id.clone(),
@@ -517,6 +683,7 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             let summary = content.trim().to_string();
             let hash = HashPair {
                 source_hash: file.source_hash.clone(),
+                deps_hash: file_dependency_hash(graph, file_id),
                 spec_hash: hash_text(&summary),
             };
             spec.file_summary = summary;
@@ -543,6 +710,7 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
                 read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
             let hash = HashPair {
                 source_hash: sym.source_hash.clone(),
+                deps_hash: dependency_hash(graph, root, file_id, sym),
                 spec_hash: hash_text(&format!("{summary}\n{behavior}")),
             };
             upsert(&mut spec.symbols, sym.id.clone(), hash.clone());
@@ -805,13 +973,8 @@ pub fn next_feature_task(
     let current = current_participant_hashes(graph, &participants)?;
 
     let existing = read_feature_spec(root, &entry.slug)?;
-    let is_current = existing.is_some_and(|spec| {
-        spec.participants.len() == current.len()
-            && spec
-                .participants
-                .iter()
-                .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
-    });
+    let is_current =
+        existing.is_some_and(|spec| diff_hash_lists(&current, &spec.participants).is_empty());
     if is_current {
         return Ok(None);
     }
@@ -1023,7 +1186,7 @@ pub fn current_file_hashes(
     for id in spec_bearing_files_in(graph, dir_path) {
         let file = graph.get_file(id).expect("filtered to file ids");
         let hash = read_file_spec(root, &file.id)?
-            .filter(|s| s.file.source_hash == file.source_hash)
+            .filter(|s| file_changes(graph, id, &s.file).is_empty())
             .map(|s| s.file.spec_hash)
             .unwrap_or_default();
         out.push((file.id.clone(), hash));
@@ -1086,13 +1249,7 @@ pub fn next_rollup_task(graph: &Graph, root: &Path, dir_path: &str) -> Result<Op
         return Ok(None);
     }
     let existing = read_rollup_spec(root, dir_path)?;
-    let is_current = existing.is_some_and(|spec| {
-        spec.files.len() == current.len()
-            && spec
-                .files
-                .iter()
-                .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
-    });
+    let is_current = existing.is_some_and(|spec| diff_hash_lists(&current, &spec.files).is_empty());
     if is_current {
         return Ok(None);
     }
@@ -1227,12 +1384,14 @@ mod tests {
             source_path: "a.ts".to_string(),
             file: HashPair {
                 source_hash: "filehash".to_string(),
+                deps_hash: "filedepshash".to_string(),
                 spec_hash: "filespechash".to_string(),
             },
             symbols: vec![(
                 "a.ts::double".to_string(),
                 HashPair {
                     source_hash: sym.source_hash.clone(),
+                    deps_hash: "symdepshash".to_string(),
                     spec_hash: "symspechash".to_string(),
                 },
             )],
@@ -1688,5 +1847,29 @@ mod tests {
         let result = submit_rollup(&graph, &dir, "app/api/submit", "A route.");
         assert!(result.is_err());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn diff_hash_lists_reports_changed_added_and_removed() {
+        let current = vec![
+            ("a".to_string(), "h1".to_string()),
+            ("b".to_string(), "h2-new".to_string()),
+            ("c".to_string(), "h3".to_string()),
+        ];
+        let stored = vec![
+            ("a".to_string(), "h1".to_string()),
+            ("b".to_string(), "h2-old".to_string()),
+            ("d".to_string(), "h4".to_string()),
+        ];
+        assert_eq!(
+            diff_hash_lists(&current, &stored),
+            vec!["added:c", "changed:b", "removed:d"]
+        );
+    }
+
+    #[test]
+    fn diff_hash_lists_is_empty_when_nothing_moved() {
+        let list = vec![("a".to_string(), "h1".to_string())];
+        assert!(diff_hash_lists(&list, &list).is_empty());
     }
 }

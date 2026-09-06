@@ -52,14 +52,24 @@ pub struct CalleeInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SpecResponse {
     pub id: String,
-    /// One of `"missing"` | `"current"`. `"stale"` doesn't exist until M6
-    /// (staleness/invalidation) lands — see `ARCHITECTURE.md`'s "Ordering".
+    /// One of `"missing"` | `"current"` | `"stale"` — see `ARCHITECTURE.md`'s
+    /// "Ordering". `"stale"` means a spec exists but at least one of its
+    /// inputs has moved since it was generated; the last-known-good
+    /// `content` is still returned rather than withheld.
     pub status: String,
     pub signature: String,
     pub docstring: Option<String>,
-    /// The LLM-written prose `submit_spec` persisted, when `status` is
-    /// `"current"`. `None` while `status` is `"missing"`.
+    /// The LLM-written prose `submit_spec` persisted. `Some` for both
+    /// `"current"` and `"stale"` (the last-known-good spec is always
+    /// served — see "Ordering"'s read/write split); `None` only for
+    /// `"missing"`.
     pub content: Option<String>,
+    /// Which inputs moved since generation, deterministically named (e.g.
+    /// `"source"`, `"changed:<dependency id>"`, `"added:<participant id>"`)
+    /// — empty unless `status` is `"stale"`. Never requires an LLM to
+    /// compute; see `ARCHITECTURE.md`'s "Ordering" ("plus which inputs
+    /// moved (deterministic, off the graph)").
+    pub changed: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -398,34 +408,52 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, or 'rollup:<dir_path>' id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" with the structurally-extracted signature/docstring stub if nothing's been generated yet, or \"current\" with the LLM-written prose if it has."
+        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, or 'rollup:<dir_path>' id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed."
     )]
     async fn get_spec(
         &self,
         Parameters(req): Parameters<IdRequest>,
     ) -> Result<Json<SpecResponse>, String> {
+        fn missing(id: String, signature: String, docstring: Option<String>) -> SpecResponse {
+            SpecResponse {
+                id,
+                status: "missing".to_string(),
+                signature,
+                docstring,
+                content: None,
+                changed: Vec::new(),
+            }
+        }
+
         if let Some(dir_path) = req.id.strip_prefix("rollup:") {
-            let spec =
-                crate::spec::read_rollup_spec(&self.root, dir_path).map_err(|e| e.to_string())?;
+            let Some(spec) =
+                crate::spec::read_rollup_spec(&self.root, dir_path).map_err(|e| e.to_string())?
+            else {
+                return Ok(Json(missing(req.id, String::new(), None)));
+            };
             let current = crate::spec::current_file_hashes(&self.graph, &self.root, dir_path)
                 .map_err(|e| e.to_string())?;
-            let is_current = spec.as_ref().is_some_and(|s| {
-                s.files.len() == current.len()
-                    && s.files
-                        .iter()
-                        .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
-            });
+            let changed = crate::spec::diff_hash_lists(&current, &spec.files);
             return Ok(Json(SpecResponse {
                 id: req.id,
-                status: if is_current { "current" } else { "missing" }.to_string(),
+                status: if changed.is_empty() {
+                    "current"
+                } else {
+                    "stale"
+                }
+                .to_string(),
                 signature: String::new(),
                 docstring: None,
-                content: is_current.then(|| spec.unwrap().body),
+                content: Some(spec.body),
+                changed,
             }));
         }
         if let Some(slug) = req.id.strip_prefix("feature:") {
-            let spec =
-                crate::spec::read_feature_spec(&self.root, slug).map_err(|e| e.to_string())?;
+            let Some(spec) =
+                crate::spec::read_feature_spec(&self.root, slug).map_err(|e| e.to_string())?
+            else {
+                return Ok(Json(missing(req.id, String::new(), None)));
+            };
             let route_literals = self.graph.route_literals();
             let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
             let entry = entry_points
@@ -434,21 +462,21 @@ impl CodeOwlServer {
                 .ok_or_else(|| Self::not_found(&req.id))?;
             let participants =
                 crate::features::assemble_participants(&self.graph, route_literals, &entry.file);
-            let is_current = spec.as_ref().is_some_and(|s| {
-                let current = crate::spec::current_participant_hashes(&self.graph, &participants);
-                current.is_ok_and(|current| {
-                    s.participants.len() == current.len()
-                        && s.participants
-                            .iter()
-                            .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
-                })
-            });
+            let current = crate::spec::current_participant_hashes(&self.graph, &participants)
+                .map_err(|e| e.to_string())?;
+            let changed = crate::spec::diff_hash_lists(&current, &spec.participants);
             return Ok(Json(SpecResponse {
                 id: req.id,
-                status: if is_current { "current" } else { "missing" }.to_string(),
+                status: if changed.is_empty() {
+                    "current"
+                } else {
+                    "stale"
+                }
+                .to_string(),
                 signature: String::new(),
                 docstring: None,
-                content: is_current.then(|| spec.unwrap().body),
+                content: Some(spec.body),
+                changed,
             }));
         }
 
@@ -466,58 +494,64 @@ impl CodeOwlServer {
                     .ok_or_else(|| Self::not_found(&req.id))?;
                 let existing =
                     crate::spec::read_file_spec(&self.root, &file.id).map_err(|e| e.to_string())?;
-                let current = existing.and_then(|spec| {
-                    let (_, hash) = spec
-                        .symbols
+                let stored = existing.as_ref().and_then(|spec| {
+                    spec.symbols
                         .iter()
-                        .find(|(sid, _)| sid == &symbol.id)?
-                        .clone();
-                    (hash.source_hash == symbol.source_hash).then_some(spec)
+                        .find(|(sid, _)| sid == &symbol.id)
+                        .map(|(_, h)| h.clone())
                 });
-                match current.and_then(|spec| {
+                let prose = existing.as_ref().and_then(|spec| {
                     spec.sections
                         .iter()
                         .find(|(sid, _)| sid == &symbol.id)
                         .map(|(_, p)| p.clone())
-                }) {
-                    Some(prose) => Ok(Json(SpecResponse {
-                        id: symbol.id.clone(),
-                        status: "current".to_string(),
-                        signature: symbol.signature.clone(),
-                        docstring: symbol.docstring.clone(),
-                        content: Some(format!(
-                            "### Summary\n{}\n\n### Behavior\n{}",
-                            prose.summary, prose.behavior
-                        )),
-                    })),
-                    None => Ok(Json(SpecResponse {
-                        id: symbol.id.clone(),
-                        status: "missing".to_string(),
-                        signature: symbol.signature.clone(),
-                        docstring: symbol.docstring.clone(),
-                        content: None,
-                    })),
-                }
+                });
+                let (Some(stored), Some(prose)) = (stored, prose) else {
+                    return Ok(Json(missing(
+                        symbol.id.clone(),
+                        symbol.signature.clone(),
+                        symbol.docstring.clone(),
+                    )));
+                };
+                let changed =
+                    crate::spec::symbol_changes(&self.graph, &self.root, file_id, symbol, &stored);
+                Ok(Json(SpecResponse {
+                    id: symbol.id.clone(),
+                    status: if changed.is_empty() {
+                        "current"
+                    } else {
+                        "stale"
+                    }
+                    .to_string(),
+                    signature: symbol.signature.clone(),
+                    docstring: symbol.docstring.clone(),
+                    content: Some(format!(
+                        "### Summary\n{}\n\n### Behavior\n{}",
+                        prose.summary, prose.behavior
+                    )),
+                    changed,
+                }))
             }
             crate::graph::Node::File(file) => {
-                let existing =
-                    crate::spec::read_file_spec(&self.root, &file.id).map_err(|e| e.to_string())?;
-                match existing.filter(|spec| spec.file.source_hash == file.source_hash) {
-                    Some(spec) => Ok(Json(SpecResponse {
-                        id: file.id.clone(),
-                        status: "current".to_string(),
-                        signature: String::new(),
-                        docstring: None,
-                        content: Some(spec.file_summary),
-                    })),
-                    None => Ok(Json(SpecResponse {
-                        id: file.id.clone(),
-                        status: "missing".to_string(),
-                        signature: String::new(),
-                        docstring: None,
-                        content: None,
-                    })),
-                }
+                let Some(spec) =
+                    crate::spec::read_file_spec(&self.root, &file.id).map_err(|e| e.to_string())?
+                else {
+                    return Ok(Json(missing(file.id.clone(), String::new(), None)));
+                };
+                let changed = crate::spec::file_changes(&self.graph, id, &spec.file);
+                Ok(Json(SpecResponse {
+                    id: file.id.clone(),
+                    status: if changed.is_empty() {
+                        "current"
+                    } else {
+                        "stale"
+                    }
+                    .to_string(),
+                    signature: String::new(),
+                    docstring: None,
+                    content: Some(spec.file_summary),
+                    changed,
+                }))
             }
         }
     }
@@ -642,7 +676,16 @@ mod tests {
         let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!("codeowl-mcp-test-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        rebuild_server(dir, files)
+    }
 
+    /// Write `files` into `dir` (creating it if new, overwriting in place if
+    /// not) and build a fresh server/graph against it. Reusing the same
+    /// `dir` across two calls is what an M7 staleness test needs: the
+    /// second call's graph reflects the "edit," while `docs/specs/` from
+    /// the first call is still sitting on disk underneath it, exactly like
+    /// a real edit-then-re-run-generate session.
+    fn rebuild_server(dir: std::path::PathBuf, files: &[(&str, &str)]) -> CodeOwlServer {
         let mut extractions = Vec::new();
         let mut file_imports = HashMap::new();
         let mut route_literals = Vec::new();
@@ -759,6 +802,398 @@ mod tests {
         assert_eq!(result.0.status, "missing");
         assert_eq!(result.0.docstring.as_deref(), Some("Doubles a number."));
         assert_eq!(result.0.content, None);
+    }
+
+    // --- M7: staleness & invalidation end-to-end -----------------------
+
+    #[tokio::test]
+    async fn dependency_signature_change_stales_importer_but_implementation_change_does_not() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-staletest-{}-1", std::process::id()));
+        let math_v1 = "export function add(a: number, b: number): number {\n  return a + b;\n}\n";
+        let user = "import { add } from './math';\n\nexport function sumThree(a: number, b: number, c: number): number {\n  return add(a, b) + c;\n}\n";
+        let other = "export function noop(): void {}\n";
+
+        let server = rebuild_server(
+            dir.clone(),
+            &[("math.ts", math_v1), ("user.ts", user), ("other.ts", other)],
+        );
+        for (sym_id, sym_content, file_id, file_content) in [
+            (
+                "user.ts::sumThree",
+                "### Summary\nAdds three numbers.\n### Behavior\nCalls add then adds c.\n",
+                "user.ts",
+                "Sums three numbers via add.",
+            ),
+            (
+                "other.ts::noop",
+                "### Summary\nDoes nothing.\n### Behavior\nNo-op.\n",
+                "other.ts",
+                "An intentional no-op.",
+            ),
+        ] {
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: sym_id.to_string(),
+                    content: sym_content.to_string(),
+                }))
+                .await
+                .unwrap();
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: file_id.to_string(),
+                    content: file_content.to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+
+        // math.ts's implementation changes; its exported signature does not.
+        let math_v2_body = "export function add(a: number, b: number): number {\n  // logs\n  console.log('adding');\n  return a + b;\n}\n";
+        let server_body_edit = rebuild_server(
+            dir.clone(),
+            &[
+                ("math.ts", math_v2_body),
+                ("user.ts", user),
+                ("other.ts", other),
+            ],
+        );
+        let done = server_body_edit
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "user.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            done.0, None,
+            "an implementation-only dependency edit must not stale the importer"
+        );
+        let sumthree = server_body_edit
+            .get_spec(Parameters(IdRequest {
+                id: "user.ts::sumThree".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(sumthree.0.status, "current");
+        let other_spec = server_body_edit
+            .get_spec(Parameters(IdRequest {
+                id: "other.ts::noop".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(other_spec.0.status, "current");
+
+        // math.ts's exported signature changes.
+        let math_v2_sig = "export function add(a: number, b: number, c: number): number {\n  return a + b + c;\n}\n";
+        let server_sig_edit = rebuild_server(
+            dir.clone(),
+            &[
+                ("math.ts", math_v2_sig),
+                ("user.ts", user),
+                ("other.ts", other),
+            ],
+        );
+        let task = server_sig_edit
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "user.ts".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("a dependency's signature change should stale the importer");
+        assert!(
+            matches!(task, SpecTaskResponse::Symbol { ref id, .. } if id == "user.ts::sumThree")
+        );
+
+        let sumthree = server_sig_edit
+            .get_spec(Parameters(IdRequest {
+                id: "user.ts::sumThree".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(sumthree.0.status, "stale");
+        assert_eq!(sumthree.0.changed, vec!["changed:dependencies".to_string()]);
+        assert!(
+            sumthree.0.content.is_some(),
+            "a stale symbol must still return its last-known-good content"
+        );
+        let user_file = server_sig_edit
+            .get_spec(Parameters(IdRequest {
+                id: "user.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(user_file.0.status, "stale");
+        let other_spec = server_sig_edit
+            .get_spec(Parameters(IdRequest {
+                id: "other.ts::noop".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            other_spec.0.status, "current",
+            "an unrelated file must not be affected"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn leaf_body_edit_stales_exactly_its_file_and_containing_rollup() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-staletest-{}-2", std::process::id()));
+        let math_v1 = "export function add(a: number, b: number): number {\n  return a + b;\n}\n";
+        let sibling = "export function noop(): void {}\n";
+
+        let server = rebuild_server(
+            dir.clone(),
+            &[("lib/math.ts", math_v1), ("lib/sibling.ts", sibling)],
+        );
+        for (sym_id, sym_content, file_id, file_content) in [
+            (
+                "lib/math.ts::add",
+                "### Summary\nAdds two numbers.\n### Behavior\nReturns a + b.\n",
+                "lib/math.ts",
+                "Numeric addition helper.",
+            ),
+            (
+                "lib/sibling.ts::noop",
+                "### Summary\nDoes nothing.\n### Behavior\nNo-op.\n",
+                "lib/sibling.ts",
+                "An intentional no-op.",
+            ),
+        ] {
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: sym_id.to_string(),
+                    content: sym_content.to_string(),
+                }))
+                .await
+                .unwrap();
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: file_id.to_string(),
+                    content: file_content.to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+        let rollup_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "lib".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected the rollup task");
+        let SpecTaskResponse::Rollup { id: rollup_id, .. } = rollup_task else {
+            panic!("expected a Rollup task, got {rollup_task:?}");
+        };
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: rollup_id.clone(),
+                content: "Small numeric/no-op helpers.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        for id in [
+            "lib/math.ts::add",
+            "lib/math.ts",
+            "lib/sibling.ts::noop",
+            "lib/sibling.ts",
+            rollup_id.as_str(),
+        ] {
+            let spec = server
+                .get_spec(Parameters(IdRequest { id: id.to_string() }))
+                .await
+                .unwrap();
+            assert_eq!(
+                spec.0.status, "current",
+                "{id} should be current before any edit"
+            );
+        }
+
+        // Edit ONLY math.ts's body -- same exported signature, sibling.ts
+        // untouched.
+        let math_v2 = "export function add(a: number, b: number): number {\n  // logs\n  console.log('adding');\n  return a + b;\n}\n";
+        let server2 = rebuild_server(
+            dir.clone(),
+            &[("lib/math.ts", math_v2), ("lib/sibling.ts", sibling)],
+        );
+
+        let math_symbol = server2
+            .get_spec(Parameters(IdRequest {
+                id: "lib/math.ts::add".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(math_symbol.0.status, "stale");
+        let math_file = server2
+            .get_spec(Parameters(IdRequest {
+                id: "lib/math.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(math_file.0.status, "stale");
+        let rollup = server2
+            .get_spec(Parameters(IdRequest {
+                id: rollup_id.clone(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(rollup.0.status, "stale");
+        assert_eq!(rollup.0.changed, vec!["changed:lib/math.ts".to_string()]);
+
+        let sibling_symbol = server2
+            .get_spec(Parameters(IdRequest {
+                id: "lib/sibling.ts::noop".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(sibling_symbol.0.status, "current");
+        let sibling_file = server2
+            .get_spec(Parameters(IdRequest {
+                id: "lib/sibling.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(sibling_file.0.status, "current");
+
+        let next = server2
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "lib".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("math.ts should need regeneration");
+        assert!(
+            matches!(next, SpecTaskResponse::Symbol { ref id, .. } if id == "lib/math.ts::add")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn feature_spec_goes_stale_when_a_core_participant_changes_but_not_an_unrelated_file() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-staletest-{}-3", std::process::id()));
+        let page_v1 =
+            "export default function Page() {\n  fetch(\"/api/widget\");\n  return null;\n}\n";
+        let route = "export async function GET(): Promise<void> {}\n";
+        let unrelated = "export function helper(): void {}\n";
+
+        let server = rebuild_server(
+            dir.clone(),
+            &[
+                ("app/widget/page.tsx", page_v1),
+                ("app/api/widget/route.ts", route),
+                ("lib/unrelated.ts", unrelated),
+            ],
+        );
+
+        let symbol_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/widget/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected the page's own symbol task");
+        assert!(matches!(symbol_task, SpecTaskResponse::Symbol { .. }));
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "app/widget/page.tsx::Page".to_string(),
+                content: "### Summary\nRenders the widget page.\n### Behavior\nFetches from the widget API on mount.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "app/widget/page.tsx".to_string(),
+                content: "The widget page.".to_string(),
+            }))
+            .await
+            .unwrap();
+        let feature_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/widget/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected a feature task");
+        let SpecTaskResponse::Feature { id: feature_id, .. } = feature_task else {
+            panic!("expected a Feature task, got {feature_task:?}");
+        };
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: feature_id.clone(),
+                content: "# Widget\n## Summary\nShows the widget.\n## How it works\n1. Loads and fetches.\n## Data touched\nNone.\n## Rules & failure modes\nNone.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let spec = server
+            .get_spec(Parameters(IdRequest {
+                id: feature_id.clone(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(spec.0.status, "current");
+
+        // Edit the page itself -- a core participant.
+        let page_v2 = "export default function Page() {\n  fetch(\"/api/widget\");\n  console.log('loaded');\n  return null;\n}\n";
+        let server2 = rebuild_server(
+            dir.clone(),
+            &[
+                ("app/widget/page.tsx", page_v2),
+                ("app/api/widget/route.ts", route),
+                ("lib/unrelated.ts", unrelated),
+            ],
+        );
+        let spec2 = server2
+            .get_spec(Parameters(IdRequest {
+                id: feature_id.clone(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(spec2.0.status, "stale");
+        assert!(
+            spec2
+                .0
+                .changed
+                .iter()
+                .any(|c| c.contains("app/widget/page.tsx")),
+            "changed should name the page participant, got {:?}",
+            spec2.0.changed
+        );
+        assert!(
+            spec2.0.content.is_some(),
+            "a stale feature must still return its last-known-good narrative"
+        );
+
+        // Edit a file the feature never touches.
+        let unrelated_v2 = "export function helper(): void {\n  console.log('changed');\n}\n";
+        let server3 = rebuild_server(
+            dir.clone(),
+            &[
+                ("app/widget/page.tsx", page_v1),
+                ("app/api/widget/route.ts", route),
+                ("lib/unrelated.ts", unrelated_v2),
+            ],
+        );
+        let spec3 = server3
+            .get_spec(Parameters(IdRequest { id: feature_id }))
+            .await
+            .unwrap();
+        assert_eq!(
+            spec3.0.status, "current",
+            "editing a file the feature never touches must not stale it"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]

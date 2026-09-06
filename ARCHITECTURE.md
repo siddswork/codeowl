@@ -144,6 +144,8 @@ One consequence worth naming: specs get richer over time without anyone forcing 
 
 The cascade-cap guardrail (a hard limit on how many nodes one `generate` invocation will regenerate before stopping and reporting instead of continuing silently) still applies — it now bounds a `/codeowl generate` run rather than a `get_spec` query, but the reasoning is unchanged: since the cascade only ever walks the containment tree beneath the target, and a widely-shared utility's *implementation* changing no longer forces regeneration of everything that *references* it (only of what actually *contains* it), this should rarely bind in practice.
 
+**Implemented in M7, across every document kind** (file, symbol, feature, rollup): `get_spec`'s `status` is `"missing"` | `"current"` | `"stale"`, and a `"stale"` response carries `changed: Vec<String>` — deterministic entries like `"source"`, `"changed:<id>"`, `"added:<id>"`, `"removed:<id>"` naming exactly what moved, per the "which inputs moved" line above. File/symbol staleness compares two independent dimensions (`source_hash`, and the new `deps_hash` — see "File spec shape"); feature/rollup staleness diffs their whole participant-hash/file-hash map (`diff_hash_lists`, shared by both) against what's currently observed, catching a set-membership change (a new participant or file appearing, one disappearing) the same way a value change is caught. `/codeowl generate` on a stale node needs no new mechanism: the exact same `source_hash`/`deps_hash`/participant-hash mismatch that makes `get_spec` report `"stale"` is what already made `next_task`/`next_feature_task`/`next_rollup_task` return a fresh task instead of `None` — regeneration was never a separate code path from first-time generation. One emergent property worth naming: a directory rollup goes `"stale"` the moment a file it summarizes does, even before that file is actually regenerated — because a rollup's currency check only trusts a file's recorded `spec_hash` when that file is *itself* current, so a stale file's contribution reads as absent, not merely different, and immediately mismatches the rollup's own record.
+
 **Unit boundaries.** The dependency graph tells you *where the valid cut points are* (a function, a class, a file, a package) — but structure alone doesn't guarantee a unit is small enough for one LLM call. A token-budget threshold decides, at each level, whether to generate a spec for the whole unit as-is or recurse one level deeper first (e.g. spec each class in a file individually before rolling them up into a file-level spec). This is the answer to "one spec per module or per submodule": both — every level of the hierarchy gets a spec, and the threshold decides how many levels deep you have to go before a unit is small enough to summarize directly.
 
 **Bottom-up composition.** When generating the spec for a node with containment children (a module with several submodules, a file with several classes), the LLM is given:
@@ -213,9 +215,9 @@ Section 5 covers *how* generation is driven; this covers *what it produces*. Fou
 ---
 kind: file
 source_paths: [lib/utils.ts]
-file: { source_hash: <blake3>, spec_hash: <blake3> }
+file: { source_hash: <blake3>, deps_hash: <blake3>, spec_hash: <blake3> }
 symbols:
-  lib/utils.ts::cn: { source_hash: <blake3>, spec_hash: <blake3> }
+  lib/utils.ts::cn: { source_hash: <blake3>, deps_hash: <blake3>, spec_hash: <blake3> }
 ---
 # lib/utils.ts
 ## Summary            ← plain language, machine-extractable for context assembly
@@ -229,6 +231,8 @@ symbols:
 Summaries are delimited by explicit `### Summary` headings rather than hidden markers (`<!-- codeowl:summary -->`) or positional convention ("the first paragraph"). Specs are git-committed, PR-reviewed, and expected to be human-edited — keeping the file plain, ordinary markdown matters more than parser robustness, and a heading-based contract breaks *loudly* under `submit_spec` validation rather than silently mis-extracting when someone adds a leading sentence.
 
 **`### Depends on` is scoped per symbol, not per file** — a real correctness fix made during M5's validation, not part of the original M4 design. M2 only resolves imports at file granularity, so the naive version (list every import the *file* has, under every symbol in it) is actively wrong, not just imprecise: `formatDate` doesn't use `clsx`, but a file-wide list would claim it does. The fix is a whole-word text search over each symbol's own source span (its `lines` range) against the file's resolved imports — a heuristic, not semantic analysis (it can't see re-assignment, destructuring into a different local name, or a reference inside a string/comment that happens to match), but a large, measured improvement over file-wide attribution, and needs no new resolution machinery. Revisit if the heuristic's false positive/negative rate turns out to matter in practice.
+
+**`deps_hash` (M7)** is what makes that same per-symbol scoping do double duty for staleness, not just rendering: it hashes the sorted `(target id, target's current interfaceHash)` pairs the "Depends on" scoping already computes — for a file-level `deps_hash`, every one of the file's resolved imports, since a file has no per-symbol text boundary. Kept as a field separate from `source_hash` (rather than folded into one composite hash) so `get_spec`'s `changed` list can name *which* of the two moved — own source, or a dependency's interface — rather than just that something did. A pre-M7 spec has no `deps_hash` at all; read back, that's an empty string, which never matches a freshly computed one, so an old spec is correctly treated as needing a currency check once — not silently trusted, and not wrongly treated as broken.
 
 **Feature specs** are the document kind that isn't derived from the containment tree at all — and the reason they're necessary is concrete. Tracing artwork submission in the pilot repo:
 
