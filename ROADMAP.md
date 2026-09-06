@@ -13,7 +13,7 @@ Fixed set of real repos the milestone validations below run against — chosen f
 | leveldb | `~/dev/openSource/test-repos/leveldb` | C++ | 132 files, CMake | Stresses open question 1 directly — tree-sitter's weak spot on overloads/virtual dispatch. Real interface hierarchies (`Comparator`, `Iterator`, `WriteBatch::Handler`), well-documented enough to check generated specs against. |
 | commons-lang | `~/dev/openSource/test-repos/commons-lang` | Java | 627 files, Maven | Plain classic Java, no framework magic — a second Java data point distinct from memolink's Spring-adjacent style. |
 
-Only talentTrail is load-bearing for the Phase 1 milestones as written (M1–M10 all target it). The other three exist to catch language-specific extraction bugs early rather than discovering them only once Phase 2's polyglot ambitions are actually being built — worth a quick M1/M2 smoke pass against each once the TS pipeline works, even though the detailed milestone validations above are TS-specific.
+Only talentTrail is load-bearing for the Phase 1 milestones as written (M1–M11 all target it). The other three exist to catch language-specific extraction bugs early rather than discovering them only once Phase 2's polyglot ambitions are actually being built — worth a quick M1/M2 smoke pass against each once the TS pipeline works, even though the detailed milestone validations above are TS-specific.
 
 ## Sequencing principle
 
@@ -97,18 +97,31 @@ Done against the pilot repo (`lib/utils.ts`, real MCP stdio session, both symbol
 - **Participant-set assembly**: from an entry point, follow import edges + route-literal edges to collect the files/symbols a feature touches.
 - **Feature spec generation** via the same `get_next_spec_task`/`submit_spec` loop, writing `docs/specs/_features/<route-slug>.md` with the `participants` frontmatter map (each participant's hash as observed at generation time). Feature specs *consume* participants' summaries or deterministic stubs — never trigger their generation (the containment-only recursion invariant holds).
 
-**Explicitly not in scope:** staleness (M6), manifest-based feature renaming/merging (later refinement — v1 names come from route paths), general call/invocation resolution (still deferred past Phase 1 per open question 3).
+**Explicitly not in scope:** staleness (M7), manifest-based feature renaming/merging (later refinement — v1 names come from route paths), general call/invocation resolution (still deferred past Phase 1 per open question 3).
 
 **Validation:** enumerate entry points on the pilot repo — count matches its actual page/route inventory. The route-literal resolver maps `fetch("/api/submit-artwork")` in `app/submit/page.tsx` to the right route file. Generate the artwork-submission feature spec — confirm its participant list includes the page, both API routes it calls, and the lib helpers they import, and confirm (human judgment, the point of the whole exercise) that the document answers "how does artwork submission work" without opening a single source file.
 
-**MVP value:** the documents BAs (and agents doing feature-shaped work) actually read now exist — and M10's exit test stops being structurally rigged against feature-shaped questions.
+**MVP value:** the documents BAs (and agents doing feature-shaped work) actually read now exist — and M11's exit test stops being structurally rigged against feature-shaped questions.
 
 ---
 
-### M6 — Staleness & invalidation end-to-end
-**Size:** M · **Builds on:** M5
+### M6 — Directory rollups
+**Size:** S · **Builds on:** M4
 
-**Scope:** Wire up the parts of M2's hashing that M4/M5 didn't yet exercise, across **all document kinds**: `get_spec` on a stale node returns the last-known-good spec flagged `stale` with what changed (not just `missing`), `/codeowl generate` on a stale node does a real cascade-bounded regeneration, and a feature spec goes stale when any entry in its `participants` map moves (or the participant set itself changes — a new route literal appears).
+**Scope:** Closes the gap M4 left open: the directory-rollup granularity rule (`directory_is_spec_bearing`, ≥2 spec-bearing files) was implemented and tested in M4, but nothing writes an `_index.md` — its document shape was never templated in `ARCHITECTURE.md` (open question 5). This milestone decides that shape and wires the write path: whether a rollup's `## Summary` synthesizes its files' summaries or just lists them, per-file hashes in frontmatter keyed on each file's own `source_hash` (mirroring the file spec's per-symbol pattern one level up), and what makes a rollup a valid `/codeowl generate <id>` target (a directory path, resolved against the files under it — directories still aren't graph nodes, per M4's deliberate scope cut, so this needs its own lightweight lookup rather than `graph.find`). Once decided, record the shape in `ARCHITECTURE.md`'s "Spec document format" alongside the file/feature templates, and remove open question 5.
+
+**Explicitly not in scope:** staleness (M7 needs a rollup to go stale, but propagating that correctly is its own milestone, not this one's) — this milestone only covers first-ever generation, same split M4 made for file specs.
+
+**Validation:** generate rollups for two real pilot-repo directories: one with ≥2 spec-bearing files (confirm `_index.md` is written, lists all of them, frontmatter hashes match) and one single-file directory, e.g. an `app/api/<route>/` folder (confirm no `_index.md` is produced — this is the M4 validation bullet that only passed vacuously until now).
+
+**MVP value:** the "module orientation" document kind actually exists, and M7's staleness validation (which assumes a directory `_index.md` to edit and re-check) becomes runnable as written instead of silently depending on unbuilt scaffolding.
+
+---
+
+### M7 — Staleness & invalidation end-to-end
+**Size:** M · **Builds on:** M6
+
+**Scope:** Wire up the parts of M2's hashing that M4/M5/M6 didn't yet exercise, across **all document kinds**: `get_spec` on a stale node returns the last-known-good spec flagged `stale` with what changed (not just `missing`), `/codeowl generate` on a stale node does a real cascade-bounded regeneration, and a feature spec goes stale when any entry in its `participants` map moves (or the participant set itself changes — a new route literal appears).
 
 **Validation — this is the milestone that specifically proves gaps 1–3 work *together*, not just individually:**
 - Generate specs for a small module tree (a file with 2–3 functions, contained in a directory with an `_index.md`).
@@ -121,8 +134,8 @@ Done against the pilot repo (`lib/utils.ts`, real MCP stdio session, both symbol
 
 ---
 
-### M7 — Completeness & correction mechanics
-**Size:** M · **Builds on:** M6
+### M8 — Completeness & correction mechanics
+**Size:** M · **Builds on:** M7
 
 **Scope:** `get_spec_coverage(scope?)` (reporting against the granularity rules' document *inventory*, not raw file count), `/codeowl generate --all` and `--all --budget=N`, and the full four-case human-correction reconciliation from "Human corrections." Budget spend order is the decided priority: **system spec → feature specs → high-fan-in files → long tail** — so on a brownfield repo, the first budgeted runs build exactly the documents a human would want first.
 
@@ -135,8 +148,8 @@ Done against the pilot repo (`lib/utils.ts`, real MCP stdio session, both symbol
 
 ---
 
-### M8 — Incremental indexing (live sessions)
-**Size:** S · **Builds on:** M7
+### M9 — Incremental indexing (live sessions)
+**Size:** S · **Builds on:** M8
 
 **Scope:** `notify`-based file watcher for the remainder of an MCP server session, plus the fresh-spawn catch-up pass (hash-check everything against `.codeowl/` on startup).
 
@@ -146,8 +159,8 @@ Done against the pilot repo (`lib/utils.ts`, real MCP stdio session, both symbol
 
 ---
 
-### M9 — SQL/schema boundary resolution
-**Size:** M · **Builds on:** M2 (graph), independent of M3–M8
+### M10 — SQL/schema boundary resolution
+**Size:** M · **Builds on:** M2 (graph), independent of M3–M9
 
 **Scope:** The dedicated SQL DDL extractor (schema nodes for tables/columns/constraints) plus the fuzzy string/ORM-aware matcher on the application-code side, per open question 3's second bullet in `ARCHITECTURE.md`. Called out there as "directly relevant to the Phase 1 pilot… not a future concern" — the pilot repo's Supabase migrations are real, not hypothetical.
 
@@ -155,14 +168,14 @@ Done against the pilot repo (`lib/utils.ts`, real MCP stdio session, both symbol
 
 **Validation:** point it at the pilot repo's actual migration files, confirm schema nodes are created for known tables, and confirm at least one known ORM/string-literal reference in application code resolves to the right schema node (fuzzy match, so "resolves to a plausible candidate" is the bar, not exact precision).
 
-**MVP value:** without this, any exit-criterion task touching schema-coupled code (exactly the kind of task the deleted exp-01 scaffolding picked, for good reason) gets an unfairly degraded test — schema nodes would just be invisible. This milestone is what makes M10 a fair test rather than an easy one.
+**MVP value:** without this, any exit-criterion task touching schema-coupled code (exactly the kind of task the deleted exp-01 scaffolding picked, for good reason) gets an unfairly degraded test — schema nodes would just be invisible. This milestone is what makes M11 a fair test rather than an easy one.
 
 ---
 
-### M10 — Exit criterion validation
-**Size:** S (mechanically) · **Builds on:** M7 and M9
+### M11 — Exit criterion validation
+**Size:** S (mechanically) · **Builds on:** M8 and M10
 
-**Scope:** The thing Phase 1 actually exists to answer. Populate `docs/specs/` for a meaningful slice of the pilot repo (via M7's `--budget=N`, which now builds the system + feature layer first), add the `CLAUDE.md` line telling an agent to check specs first, then run several real tasks with and without CodeOwl available and compare — using `utility/mine.py`, already built, for the token/exploration-tool measurement.
+**Scope:** The thing Phase 1 actually exists to answer. Populate `docs/specs/` for a meaningful slice of the pilot repo (via M8's `--budget=N`, which now builds the system + feature layer first), add the `CLAUDE.md` line telling an agent to check specs first, then run several real tasks with and without CodeOwl available and compare — using `utility/mine.py`, already built, for the token/exploration-tool measurement.
 
 **Validation:** this milestone *is* the validation — the deliverable is a verdict, not code. Concretely: for each task, does `mine.py`'s exploration-tool count and token estimate drop meaningfully with specs available, and does the agent actually use `get_spec` rather than defaulting to `Read`/`Grep` (the H1 gate from the deleted exp-01 scaffolding's framing — worth reusing that hypothesis table even though the manual pre-code version isn't being run). Plus the BA-side gate added when feature specs became a Phase 1 must-have: a feature-shaped question ("how does artwork submission work?") is answerable from the feature spec alone, judged by a human reading it without the code.
 
@@ -170,9 +183,9 @@ Done against the pilot repo (`lib/utils.ts`, real MCP stdio session, both symbol
 
 ---
 
-## Phase 2 — sketch only, revisit after M10
+## Phase 2 — sketch only, revisit after M11
 
-Deliberately coarse — detailed planning here is premature until M10 answers whether Phase 2 happens at all. Rough shape, in likely order:
+Deliberately coarse — detailed planning here is premature until M11 answers whether Phase 2 happens at all. Rough shape, in likely order:
 
 1. **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio, repo-scoped tool calls.
 2. **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1 (see `ARCHITECTURE.md` "Storage"), now justified by multi-user load.
@@ -184,7 +197,9 @@ Deliberately coarse — detailed planning here is premature until M10 answers wh
 ## Provisional decisions this ordering makes
 
 Worth flagging since I made these calls rather than asking:
-- **M9 (SQL) is sequenced before M10**, not folded into M4–M8's core TS pipeline. If you'd rather ship M10 sooner and pick a validation task that avoids schema-coupled code, M9 can move after M10 or drop out of Phase 1 entirely — it's the one milestone here that isn't strictly load-bearing for the others.
-- **`CLAUDE.md`'s two pending items** (tool-surface trimming, spec-regen commit hygiene) aren't given their own milestones — the plan resolves the tool-surface one implicitly (M3–M7 only ever build the tools actually used: `get_spec`, `get_symbol`, `get_callers`/`get_callees`, `search_code`, the three generation tools, `get_spec_coverage` — `trace_path`/`get_tests_for`/`get_dependencies` simply never get built unless a later milestone needs them), and commit hygiene is a workflow habit to adopt once M7 exists, not something to build.
+- **M10 (SQL) is sequenced before M11**, not folded into M4–M9's core TS pipeline. If you'd rather ship M11 sooner and pick a validation task that avoids schema-coupled code, M10 can move after M11 or drop out of Phase 1 entirely — it's the one milestone here that isn't strictly load-bearing for the others.
+- **`CLAUDE.md`'s two pending items** (tool-surface trimming, spec-regen commit hygiene) aren't given their own milestones — the plan resolves the tool-surface one implicitly (M3–M8 only ever build the tools actually used: `get_spec`, `get_symbol`, `get_callers`/`get_callees`, `search_code`, the three generation tools, `get_spec_coverage` — `trace_path`/`get_tests_for`/`get_dependencies` simply never get built unless a later milestone needs them), and commit hygiene is a workflow habit to adopt once M8 exists, not something to build.
 
 Revised 2026-09-06: the spec-format decision (see `ARCHITECTURE.md` "Spec document format") inserted the feature layer as its own M5 and renumbered everything after it — old M5–M9 are now M6–M10. Feature specs were promoted from a Phase 2 idea to a Phase 1 must-have after tracing a real pilot-repo feature and finding its two load-bearing hops (UI→API via `fetch("/api/…")`, API→DB via `.from("table")`) are string literals the import graph structurally cannot see — meaning directory-mirrored specs alone would have rigged M10's exit test against exactly the feature-shaped questions it needs to answer.
+
+Revised again 2026-09-06, after M4's real-repo validation: M4 shipped the file-spec granularity rule but never wrote directory rollups (their document shape was never templated — see `ARCHITECTURE.md`'s open question 5), and that gap turned out to be silently load-bearing — the staleness milestone's own validation assumes a directory `_index.md` already exists to edit and re-check. Rather than leave that implicit, directory rollups became their own milestone, inserted as the new M6 right after the feature layer; everything from the old M6 (Staleness) onward shifted up by one, M6–M10 becoming M7–M11.
