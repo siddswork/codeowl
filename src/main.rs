@@ -2,17 +2,59 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use clap::{Parser, Subcommand};
+use codeowl::mcp::CodeOwlServer;
 use codeowl::{Graph, build_resolver, extract_file, extract_imports, resolve_imports};
+use rmcp::ServiceExt;
 
-fn main() -> Result<()> {
-    let root = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .context("usage: codeowl <path-to-repo>")?;
+#[derive(Parser)]
+#[command(name = "codeowl")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
 
+#[derive(Subcommand)]
+enum Command {
+    /// Walk a repo, extract symbols, resolve imports, and print the
+    /// resulting symbol list as JSON.
+    Extract { path: PathBuf },
+    /// Same extraction, then serve the MCP read surface over stdio.
+    Serve { path: PathBuf },
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Extract { path } => {
+            let graph = build_graph(&path)?;
+            println!("{}", serde_json::to_string_pretty(graph.symbols())?);
+            Ok(())
+        }
+        Command::Serve { path } => {
+            let graph = build_graph(&path)?;
+            let server = CodeOwlServer::new(path.clone(), graph);
+            let running = server
+                .serve(rmcp::transport::io::stdio())
+                .await
+                .context("starting MCP server")?;
+            running.waiting().await.context("MCP server exited")?;
+            Ok(())
+        }
+    }
+}
+
+/// Walk `root`, extract every file's symbols and named imports, resolve
+/// those imports against the resulting graph, and persist the result to
+/// `.codeowl/graph` (in `root`, not CodeOwl's own repo — see
+/// `ARCHITECTURE.md`'s "Storage"). Shared by both subcommands: `serve`
+/// needs exactly the same graph `extract` prints, just handed to a running
+/// server instead of stdout.
+fn build_graph(root: &Path) -> Result<Graph> {
     let mut symbols = Vec::new();
     let mut file_imports = HashMap::new();
-    for entry in ignore::WalkBuilder::new(&root).build() {
+    for entry in ignore::WalkBuilder::new(root).build() {
         let entry = entry.context("walking repo")?;
         if !entry.file_type().is_some_and(|t| t.is_file()) {
             continue;
@@ -25,7 +67,7 @@ fn main() -> Result<()> {
         let source =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let rel = path
-            .strip_prefix(&root)
+            .strip_prefix(root)
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
@@ -35,18 +77,15 @@ fn main() -> Result<()> {
 
     let mut graph = Graph::from_symbols(symbols);
     let resolver = build_resolver();
-    let resolved = resolve_imports(&root, &resolver, &file_imports, &graph);
+    let resolved = resolve_imports(root, &resolver, &file_imports, &graph);
     let resolved_count = resolved.iter().filter(|r| r.target.is_some()).count();
     let total_count = resolved.len();
     graph.set_resolved_imports(resolved);
 
-    // `.codeowl/` lives in the *target* repo, not CodeOwl's own — it's the
-    // gitignored local cache described in ARCHITECTURE.md's "Storage".
     graph.save(&root.join(".codeowl").join("graph"))?;
     eprintln!("resolved {resolved_count}/{total_count} named imports");
 
-    println!("{}", serde_json::to_string_pretty(graph.symbols())?);
-    Ok(())
+    Ok(graph)
 }
 
 /// `.ts`/`.tsx` only, and never `.d.ts` — ambient declaration files use

@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// What a declaration represents.
@@ -8,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// `children` has something to point at; it isn't one of the "function/
 /// class/const" kinds named in scope, but a class with no visible members
 /// wouldn't exercise the containment tree at all.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
     Function,
@@ -23,7 +24,7 @@ pub enum SymbolKind {
 /// `<file>::<class>.<method>` for methods) rather than an arena index —
 /// the real `SymbolId` arena (see `CLAUDE.md`'s Rust conventions) is a
 /// later M2 step; this first M2 increment only adds hashing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Symbol {
     pub id: String,
     pub kind: SymbolKind,
