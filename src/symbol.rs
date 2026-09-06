@@ -1,6 +1,27 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// A node's position in a `Graph`'s arena (a `Symbol` or a `FileNode` — see
+/// `graph.rs`'s `Node`). Only meaningful relative to the `Graph` that
+/// produced it — not stable across a re-extraction, since nothing pins a
+/// given node to the same index next time (that stability is what a node's
+/// string id is for). Lives here, not in `graph.rs`, because `Symbol`
+/// itself needs to name the type for `parent`/`children` below; `graph.rs`
+/// re-exports it so callers don't need to know that.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SymbolId(u32);
+
+impl SymbolId {
+    pub(crate) fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// What a declaration represents.
 ///
 /// M1 only extracts top-level function/class/const declarations plus class
@@ -18,13 +39,19 @@ pub enum SymbolKind {
     Const,
 }
 
-/// A single extracted declaration.
+/// A single extracted declaration, resolved into a `Graph`'s arena.
 ///
-/// `id` is a deterministic string (`<file>::<name>`, or
-/// `<file>::<class>.<method>` for methods) rather than an arena index —
-/// the real `SymbolId` arena (see `CLAUDE.md`'s Rust conventions) is a
-/// later M2 step; this first M2 increment only adds hashing.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// `id` stays a deterministic string (`<file>::<name>`, or
+/// `<file>::<class>.<method>` for methods) — that's the stable handle
+/// everything outside the arena (MCP responses, spec frontmatter, a human
+/// re-running `codeowl extract`) uses, since a `SymbolId` is only valid for
+/// the `Graph` that produced it. `parent`/`children` *do* use `SymbolId`:
+/// this is `Graph::build`'s output, not `extract_file`'s (see
+/// `ExtractedSymbol` below for the pre-arena shape) — every symbol has a
+/// container now that files are arena nodes too (a top-level declaration's
+/// parent is its file; only a file with no directory node above it, which
+/// is every file in M4, has no parent of its own).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Symbol {
     pub id: String,
     pub kind: SymbolKind,
@@ -50,6 +77,32 @@ pub struct Symbol {
     /// this file could resolve to it, so it isn't a fixed reference-edge
     /// invalidation key that needs tracking yet. This is gap 2's fix (see
     /// `CLAUDE.md`'s hard invariants).
+    pub interface_hash: Option<String>,
+    pub parent: Option<SymbolId>,
+    pub children: Vec<SymbolId>,
+}
+
+/// What `extract_file` produces directly off the syntax tree, before a
+/// `Graph` exists to assign arena positions.
+///
+/// Containment here is still a *string*, not a `SymbolId` — deliberately:
+/// extraction is per-file and has no cross-file knowledge (see
+/// `ARCHITECTURE.md`'s "Extractors"), so it has no arena to hand out
+/// positions from yet. `parent: None` means "top-level in this file, not
+/// contained by another *symbol*" — it does *not* mean "has no container at
+/// all". `Graph::build` is what resolves every string id into a real
+/// `SymbolId` and gives top-level symbols their file as a parent, once
+/// every file's symbols (and the files themselves) are known together.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtractedSymbol {
+    pub id: String,
+    pub kind: SymbolKind,
+    pub file: String,
+    pub lines: [usize; 2],
+    pub signature: String,
+    pub docstring: Option<String>,
+    pub is_exported: bool,
+    pub source_hash: String,
     pub interface_hash: Option<String>,
     pub parent: Option<String>,
     pub children: Vec<String>,

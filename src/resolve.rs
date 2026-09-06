@@ -150,7 +150,6 @@ impl ResolveCtx<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extract::extract_file;
     use crate::imports::extract_imports;
 
     /// Write a small fixture repo to a fresh temp dir, extract symbols +
@@ -166,17 +165,17 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
 
-        let mut all_symbols = Vec::new();
+        let mut extractions = Vec::new();
         let mut file_imports = HashMap::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
-            all_symbols.extend(extract_file(content, rel));
+            extractions.push(crate::graph::extract_and_hash(rel, content));
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
         }
 
-        let graph = Graph::from_symbols(all_symbols);
+        let graph = Graph::build(extractions);
         let resolver = build_resolver();
         let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
 

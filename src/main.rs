@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use codeowl::graph::extract_and_hash;
 use codeowl::mcp::CodeOwlServer;
-use codeowl::{Graph, build_resolver, extract_file, extract_imports, resolve_imports};
+use codeowl::{Graph, build_resolver, extract_imports, resolve_imports};
 use rmcp::ServiceExt;
 
 #[derive(Parser)]
@@ -28,13 +29,20 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Extract { path } => {
-            let graph = build_graph(&path)?;
-            println!("{}", serde_json::to_string_pretty(graph.symbols())?);
+            let root = canonical_root(&path)?;
+            let graph = build_graph(&root)?;
+            let views: Vec<_> = graph
+                .symbols()
+                .filter_map(|s| graph.find(&s.id))
+                .filter_map(|id| codeowl::graph::SymbolView::from_graph(&graph, id))
+                .collect();
+            println!("{}", serde_json::to_string_pretty(&views)?);
             Ok(())
         }
         Command::Serve { path } => {
-            let graph = build_graph(&path)?;
-            let server = CodeOwlServer::new(path.clone(), graph);
+            let root = canonical_root(&path)?;
+            let graph = build_graph(&root)?;
+            let server = CodeOwlServer::new(root, graph);
             let running = server
                 .serve(rmcp::transport::io::stdio())
                 .await
@@ -45,6 +53,19 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Canonicalize `path` to an absolute root before anything else touches
+/// it. `resolve.rs` strips this same root off `oxc_resolver`'s (always
+/// absolute) resolutions to recover a repo-relative path — passed a
+/// relative root like `.`, that `strip_prefix` silently fails for every
+/// single import (an absolute path never has a relative path as a
+/// component prefix), so every import resolves to `None` with no error at
+/// all. `canonicalize` also resolves symlinks, keeping the graph's path
+/// scheme consistent regardless of how the caller invoked us.
+fn canonical_root(path: &Path) -> Result<PathBuf> {
+    path.canonicalize()
+        .with_context(|| format!("resolving {} to an absolute path", path.display()))
+}
+
 /// Walk `root`, extract every file's symbols and named imports, resolve
 /// those imports against the resulting graph, and persist the result to
 /// `.codeowl/graph` (in `root`, not CodeOwl's own repo — see
@@ -52,7 +73,7 @@ async fn main() -> Result<()> {
 /// needs exactly the same graph `extract` prints, just handed to a running
 /// server instead of stdout.
 fn build_graph(root: &Path) -> Result<Graph> {
-    let mut symbols = Vec::new();
+    let mut extractions = Vec::new();
     let mut file_imports = HashMap::new();
     for entry in ignore::WalkBuilder::new(root).build() {
         let entry = entry.context("walking repo")?;
@@ -71,11 +92,11 @@ fn build_graph(root: &Path) -> Result<Graph> {
             .unwrap_or(path)
             .to_string_lossy()
             .replace('\\', "/");
-        symbols.extend(extract_file(&source, &rel));
         file_imports.insert(rel.clone(), extract_imports(&source, &rel));
+        extractions.push(extract_and_hash(&rel, &source));
     }
 
-    let mut graph = Graph::from_symbols(symbols);
+    let mut graph = Graph::build(extractions);
     let resolver = build_resolver();
     let resolved = resolve_imports(root, &resolver, &file_imports, &graph);
     let resolved_count = resolved.iter().filter(|r| r.target.is_some()).count();

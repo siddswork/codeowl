@@ -12,13 +12,13 @@
 use tree_sitter::{Node, Parser};
 
 use crate::hash::hash_text;
-use crate::symbol::{Symbol, SymbolKind};
+use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its symbols.
 ///
 /// `rel_path`'s extension picks the grammar: `.tsx` gets JSX support,
 /// everything else parses as plain TypeScript.
-pub fn extract_file(source: &str, rel_path: &str) -> Vec<Symbol> {
+pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
     let language = if rel_path.ends_with(".tsx") {
         tree_sitter_typescript::LANGUAGE_TSX
     } else {
@@ -52,7 +52,7 @@ pub fn extract_file(source: &str, rel_path: &str) -> Vec<Symbol> {
 /// Handle one direct child of `program`: unwrap an `export` wrapper if
 /// present, dispatch on the declaration kind, and push whatever symbols it
 /// produces onto `out`.
-fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<Symbol>) {
+fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>) {
     let decl = if node.kind() == "export_statement" {
         match node.child_by_field_name("declaration") {
             Some(d) => d,
@@ -73,14 +73,20 @@ fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<Symbol>) 
     }
 }
 
-fn visit_function(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<Symbol>) {
+fn visit_function(
+    decl: Node,
+    outer: Node,
+    source: &str,
+    file: &str,
+    out: &mut Vec<ExtractedSymbol>,
+) {
     let Some(body) = decl.child_by_field_name("body") else {
         return;
     };
     let name = field_text(decl, "name", source).unwrap_or("<anonymous>");
     let signature = signature_text(decl, body, source);
     let is_exported = outer.kind() == "export_statement";
-    out.push(Symbol {
+    out.push(ExtractedSymbol {
         id: format!("{file}::{name}"),
         kind: SymbolKind::Function,
         file: file.to_string(),
@@ -99,7 +105,7 @@ fn visit_function(decl: Node, outer: Node, source: &str, file: &str, out: &mut V
     });
 }
 
-fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<Symbol>) {
+fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>) {
     let Some(body) = decl.child_by_field_name("body") else {
         return;
     };
@@ -120,7 +126,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         let m_name = field_text(member, "name", source).unwrap_or("<anonymous>");
         let m_id = format!("{class_id}.{m_name}");
         let m_source_hash = hash_text(text(member, source));
-        method_symbols.push(Symbol {
+        method_symbols.push(ExtractedSymbol {
             id: m_id.clone(),
             kind: SymbolKind::Method,
             file: file.to_string(),
@@ -159,7 +165,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         rollup_input.push_str(h);
     }
 
-    out.push(Symbol {
+    out.push(ExtractedSymbol {
         id: class_id,
         kind: SymbolKind::Class,
         file: file.to_string(),
@@ -175,7 +181,13 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
     out.extend(method_symbols);
 }
 
-fn visit_lexical(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<Symbol>) {
+fn visit_lexical(
+    decl: Node,
+    outer: Node,
+    source: &str,
+    file: &str,
+    out: &mut Vec<ExtractedSymbol>,
+) {
     // Only `const` is in scope — `let` (and `var`, a different node kind
     // entirely) aren't declarations CodeOwl generates specs for.
     if field_text(decl, "kind", source) != Some("const") {
@@ -223,7 +235,7 @@ fn visit_lexical(decl: Node, outer: Node, source: &str, file: &str, out: &mut Ve
         };
 
         let is_exported = outer.kind() == "export_statement";
-        out.push(Symbol {
+        out.push(ExtractedSymbol {
             id,
             kind,
             file: file.to_string(),

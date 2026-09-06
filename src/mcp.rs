@@ -1,7 +1,11 @@
-//! The MCP read surface — M3. Every tool here is a pure read: nothing in
-//! this module calls an LLM or writes anything, ever. `get_next_spec_task`/
-//! `submit_spec` (the write side that drives generation) don't exist until
-//! M4 — see `CLAUDE.md`'s hard invariants on `get_spec` staying a pure read.
+//! The MCP surface — read tools from M3, plus M4's write side driving
+//! generation. `get_spec`/`get_symbol`/`get_callers`/`get_callees`/
+//! `search_code` are pure reads, always: none of them ever writes
+//! anything or calls an LLM — see `CLAUDE.md`'s hard invariants.
+//! `get_next_spec_task`/`submit_spec` are the two calls the *client's* own
+//! LLM drives (never CodeOwl itself — it holds no credentials) via
+//! `/codeowl generate`; see `ARCHITECTURE.md`'s "Who actually writes the
+//! spec text".
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,9 +17,8 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::Graph;
+use crate::graph::{Graph, SymbolView};
 use crate::search::SearchMatch;
-use crate::symbol::Symbol;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IdRequest {
@@ -49,11 +52,55 @@ pub struct CalleeInfo {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SpecResponse {
     pub id: String,
-    /// One of `"missing"` | `"current"` | `"stale"`. Only `"missing"` is
-    /// possible until M4 (generation) and M5 (staleness) exist.
+    /// One of `"missing"` | `"current"`. `"stale"` doesn't exist until M6
+    /// (staleness/invalidation) lands — see `ARCHITECTURE.md`'s "Ordering".
     pub status: String,
     pub signature: String,
     pub docstring: Option<String>,
+    /// The LLM-written prose `submit_spec` persisted, when `status` is
+    /// `"current"`. `None` while `status` is `"missing"`.
+    pub content: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GenerateTaskRequest {
+    /// The `/codeowl generate <id>` target — currently must be a file id
+    /// (a repo-relative path, e.g. "lib/utils.ts"). Stateless: safe to call
+    /// repeatedly with the same target until it reports nothing left.
+    pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SpecTaskResponse {
+    Symbol {
+        id: String,
+        signature: String,
+        docstring: Option<String>,
+        source: String,
+        dependencies: Vec<String>,
+    },
+    File {
+        id: String,
+        source: String,
+    },
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SubmitSpecRequest {
+    /// The id `get_next_spec_task` returned — a symbol or file id.
+    pub id: String,
+    /// For a symbol task: markdown containing `### Summary` and
+    /// `### Behavior` headings. For a file task: plain prose, becomes the
+    /// file's `## Summary`.
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SubmitSpecResponse {
+    pub id: String,
+    pub source_hash: String,
+    pub spec_hash: String,
 }
 
 #[derive(Clone)]
@@ -77,6 +124,24 @@ impl CodeOwlServer {
     }
 }
 
+/// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
+/// what `get_next_spec_task` hands the agent as a symbol task's own
+/// source, per `ARCHITECTURE.md`'s "Bottom-up composition".
+fn read_lines(
+    root: &std::path::Path,
+    rel_path: &str,
+    lines: [usize; 2],
+) -> std::io::Result<String> {
+    let content = std::fs::read_to_string(root.join(rel_path))?;
+    let [start, end] = lines;
+    Ok(content
+        .lines()
+        .skip(start.saturating_sub(1))
+        .take(end + 1 - start)
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
 #[tool_router]
 impl CodeOwlServer {
     #[tool(
@@ -85,12 +150,14 @@ impl CodeOwlServer {
     async fn get_symbol(
         &self,
         Parameters(req): Parameters<IdRequest>,
-    ) -> Result<Json<Symbol>, String> {
+    ) -> Result<Json<SymbolView>, String> {
         let id = self
             .graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        Ok(Json(self.graph.get(id).clone()))
+        SymbolView::from_graph(&self.graph, id)
+            .map(Json)
+            .ok_or_else(|| Self::not_found(&req.id))
     }
 
     #[tool(
@@ -128,7 +195,12 @@ impl CodeOwlServer {
             .graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let file = self.graph.get(id).file.clone();
+        let file = self
+            .graph
+            .get_symbol(id)
+            .ok_or_else(|| Self::not_found(&req.id))?
+            .file
+            .clone();
         let callees = self
             .graph
             .imports()
@@ -137,14 +209,14 @@ impl CodeOwlServer {
             .map(|imp| CalleeInfo {
                 specifier: imp.specifier.clone(),
                 imported_name: imp.imported_name.clone(),
-                resolved_id: imp.target.map(|t| self.graph.get(t).id.clone()),
+                resolved_id: imp.target.map(|t| self.graph.string_id(t).to_string()),
             })
             .collect();
         Ok(Json(callees))
     }
 
     #[tool(
-        description = "Get the spec for a symbol. Always a pure read -- never triggers generation. Until M4/M5 land, nothing has ever been generated, so this always returns status \"missing\" alongside the signature/docstring CodeOwl already extracted structurally."
+        description = "Get the spec for a symbol or file id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" with the structurally-extracted signature/docstring stub if nothing's been generated yet, or \"current\" with the LLM-written prose if it has."
     )]
     async fn get_spec(
         &self,
@@ -154,12 +226,146 @@ impl CodeOwlServer {
             .graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let symbol = self.graph.get(id);
-        Ok(Json(SpecResponse {
-            id: symbol.id.clone(),
-            status: "missing".to_string(),
-            signature: symbol.signature.clone(),
-            docstring: symbol.docstring.clone(),
+
+        match self.graph.get(id) {
+            crate::graph::Node::Symbol(symbol) => {
+                let file_id = symbol.parent.ok_or_else(|| Self::not_found(&req.id))?;
+                let file = self
+                    .graph
+                    .get_file(file_id)
+                    .ok_or_else(|| Self::not_found(&req.id))?;
+                let existing =
+                    crate::spec::read_file_spec(&self.root, &file.id).map_err(|e| e.to_string())?;
+                let current = existing.and_then(|spec| {
+                    let (_, hash) = spec
+                        .symbols
+                        .iter()
+                        .find(|(sid, _)| sid == &symbol.id)?
+                        .clone();
+                    (hash.source_hash == symbol.source_hash).then_some(spec)
+                });
+                match current.and_then(|spec| {
+                    spec.sections
+                        .iter()
+                        .find(|(sid, _)| sid == &symbol.id)
+                        .map(|(_, p)| p.clone())
+                }) {
+                    Some(prose) => Ok(Json(SpecResponse {
+                        id: symbol.id.clone(),
+                        status: "current".to_string(),
+                        signature: symbol.signature.clone(),
+                        docstring: symbol.docstring.clone(),
+                        content: Some(format!(
+                            "### Summary\n{}\n\n### Behavior\n{}",
+                            prose.summary, prose.behavior
+                        )),
+                    })),
+                    None => Ok(Json(SpecResponse {
+                        id: symbol.id.clone(),
+                        status: "missing".to_string(),
+                        signature: symbol.signature.clone(),
+                        docstring: symbol.docstring.clone(),
+                        content: None,
+                    })),
+                }
+            }
+            crate::graph::Node::File(file) => {
+                let existing =
+                    crate::spec::read_file_spec(&self.root, &file.id).map_err(|e| e.to_string())?;
+                match existing.filter(|spec| spec.file.source_hash == file.source_hash) {
+                    Some(spec) => Ok(Json(SpecResponse {
+                        id: file.id.clone(),
+                        status: "current".to_string(),
+                        signature: String::new(),
+                        docstring: None,
+                        content: Some(spec.file_summary),
+                    })),
+                    None => Ok(Json(SpecResponse {
+                        id: file.id.clone(),
+                        status: "missing".to_string(),
+                        signature: String::new(),
+                        docstring: None,
+                        content: None,
+                    })),
+                }
+            }
+        }
+    }
+
+    #[tool(
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols before the file itself. Returns null when the target isn't spec-bearing (e.g. a barrel file) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
+    )]
+    async fn get_next_spec_task(
+        &self,
+        Parameters(req): Parameters<GenerateTaskRequest>,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let target_id = self
+            .graph
+            .find(&req.target)
+            .ok_or_else(|| Self::not_found(&req.target))?;
+        let task = crate::spec::next_task(&self.graph, &self.root, target_id)
+            .map_err(|e| e.to_string())?;
+
+        let Some(task) = task else {
+            return Ok(Json(None));
+        };
+        let response = match task {
+            crate::spec::SpecTask::Symbol {
+                id,
+                signature,
+                docstring,
+                lines,
+            } => {
+                let sym_id = self.graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
+                let file_id = self
+                    .graph
+                    .parent_id(sym_id)
+                    .ok_or_else(|| Self::not_found(&id))?;
+                let file = self
+                    .graph
+                    .get_file(file_id)
+                    .ok_or_else(|| Self::not_found(&id))?;
+                let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
+                let dependencies = self
+                    .graph
+                    .imports()
+                    .iter()
+                    .filter(|imp| imp.from_file == file.id)
+                    .map(|imp| match imp.target {
+                        Some(t) => format!("{} ({})", self.graph.string_id(t), imp.specifier),
+                        None => format!("{} ({}, unresolved)", imp.imported_name, imp.specifier),
+                    })
+                    .collect();
+                SpecTaskResponse::Symbol {
+                    id,
+                    signature,
+                    docstring,
+                    source,
+                    dependencies,
+                }
+            }
+            crate::spec::SpecTask::File { id } => {
+                let source =
+                    std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
+                SpecTaskResponse::File { id, source }
+            }
+        };
+        Ok(Json(Some(response)))
+    }
+
+    #[tool(
+        description = "Persist LLM-written spec prose for a symbol or file id (from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's content is plain prose for its '## Summary'. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
+    )]
+    async fn submit_spec(
+        &self,
+        Parameters(req): Parameters<SubmitSpecRequest>,
+    ) -> Result<Json<SubmitSpecResponse>, String> {
+        let hash = crate::spec::submit(&self.graph, &self.root, &req.id, &req.content)
+            .map_err(|e| e.to_string())?;
+        Ok(Json(SubmitSpecResponse {
+            id: req.id,
+            source_hash: hash.source_hash,
+            spec_hash: hash.spec_hash,
         }))
     }
 
@@ -198,7 +404,6 @@ impl ServerHandler for CodeOwlServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::extract::extract_file;
     use crate::graph::Graph;
     use crate::imports::extract_imports;
     use crate::resolve::{build_resolver, resolve_imports};
@@ -219,17 +424,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("codeowl-mcp-test-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
-        let mut all_symbols = Vec::new();
+        let mut extractions = Vec::new();
         let mut file_imports = HashMap::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
-            all_symbols.extend(extract_file(content, rel));
+            extractions.push(crate::graph::extract_and_hash(rel, content));
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
         }
 
-        let mut graph = Graph::from_symbols(all_symbols);
+        let mut graph = Graph::build(extractions);
         let resolver = build_resolver();
         let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
@@ -318,7 +523,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_spec_always_reports_missing_in_m3() {
+    async fn get_spec_reports_missing_when_nothing_generated_yet() {
         let server = test_server(&[(
             "a.ts",
             "/** Doubles a number. */\nexport function double(x: number) {}\n",
@@ -331,6 +536,86 @@ mod tests {
             .unwrap();
         assert_eq!(result.0.status, "missing");
         assert_eq!(result.0.docstring.as_deref(), Some("Doubles a number."));
+        assert_eq!(result.0.content, None);
+    }
+
+    #[tokio::test]
+    async fn generate_loop_walks_symbol_then_file_then_reports_done() {
+        let server = test_server(&[(
+            "a.ts",
+            "/** Doubles a number. */\nexport function double(x: number) {}\n",
+        )]);
+
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let Some(SpecTaskResponse::Symbol { id, source, .. }) = task.0 else {
+            panic!("expected a symbol task, got {:?}", task.0);
+        };
+        assert_eq!(id, "a.ts::double");
+        assert!(source.contains("function double"));
+
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: id.clone(),
+                content: "### Summary\nDoubles a number.\n### Behavior\nMultiplies by two."
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Re-running get_spec now finds a real, current spec instead of
+        // the missing stub -- this is the M4 validation's core claim.
+        let spec = server
+            .get_spec(Parameters(IdRequest { id: id.clone() }))
+            .await
+            .unwrap();
+        assert_eq!(spec.0.status, "current");
+        assert!(spec.0.content.unwrap().contains("Multiplies by two."));
+
+        // Re-running generate with source unchanged must skip the
+        // now-current symbol and move on to the file-level task.
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let Some(SpecTaskResponse::File { id: file_id, .. }) = task.0 else {
+            panic!("expected a file task, got {:?}", task.0);
+        };
+        assert_eq!(file_id, "a.ts");
+
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: file_id,
+                content: "A file with one doubling helper.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let done = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(done.0, None);
+    }
+
+    #[tokio::test]
+    async fn generate_loop_skips_a_barrel_file() {
+        let server = test_server(&[("a.ts", "export { Foo } from './foo';\n")]);
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(task.0, None);
     }
 
     #[tokio::test]
