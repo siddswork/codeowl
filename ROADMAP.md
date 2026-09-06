@@ -4,7 +4,7 @@
 
 ## Test repos
 
-Fixed set of real repos the milestone validations below run against — chosen for language coverage and for actually stressing specific open questions, not just for being famous. Not part of CodeOwl's own repo; live as siblings on disk.
+Fixed set of real repos the milestone validations below run against — chosen for language coverage and for actually stressing specific open questions, not just for being famous. The non-CodeOwl ones live as siblings on disk.
 
 | Repo | Path | Language | Size | Why this one |
 |---|---|---|---|---|
@@ -12,8 +12,9 @@ Fixed set of real repos the milestone validations below run against — chosen f
 | memolink | `~/dev/openSource/inspirations/memolink` | Java (+ a little Python) | 45 Java files, Maven multi-module | The project CodeOwl is architecturally inspired by. Multi-module Maven build exercises build-manifest parsing beyond a single-module case. |
 | leveldb | `~/dev/openSource/test-repos/leveldb` | C++ | 132 files, CMake | Stresses open question 1 directly — tree-sitter's weak spot on overloads/virtual dispatch. Real interface hierarchies (`Comparator`, `Iterator`, `WriteBatch::Handler`), well-documented enough to check generated specs against. |
 | commons-lang | `~/dev/openSource/test-repos/commons-lang` | Java | 627 files, Maven | Plain classic Java, no framework magic — a second Java data point distinct from memolink's Spring-adjacent style. |
+| codeowl (this repo) | `~/dev/openSource/codeowl` | Rust | ~14 files, ~8k lines | Rust coverage, and the one repo the author knows line-for-line — the sharpest check on whether a generated spec is actually *right*. Phase 1's extractor is TypeScript-only, so this is a target for the Phase 2 Rust grammar; the eventual dogfood is CodeOwl describing itself. |
 
-Only the pilot repo is load-bearing for the Phase 1 milestones as written (M1–M11 all target it). The other three exist to catch language-specific extraction bugs early rather than discovering them only once Phase 2's polyglot ambitions are actually being built — worth a quick M1/M2 smoke pass against each once the TS pipeline works, even though the detailed milestone validations above are TS-specific.
+Only the pilot repo is load-bearing for the Phase 1 milestones as written (M1–M11 all target it). The others exist to catch language-specific extraction bugs early rather than discovering them only once Phase 2's polyglot ambitions are actually being built — worth a quick M1/M2 smoke pass against each once the TS pipeline works, even though the detailed milestone validations above are TS-specific.
 
 ## Sequencing principle
 
@@ -211,6 +212,19 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 
 ---
 
+### Stack modularization — brackets M10, not its own milestone
+
+The extractor / resolver / framework-convention layers are coupled to TypeScript + Next.js App Router (`extract.rs`, `imports.rs`, `resolve.rs`, `features.rs`, one line in `index.rs`); everything above them (`graph.rs`, `spec.rs`, `mcp.rs`, `index.rs`, `watch.rs`) is language-agnostic. Making the coupled layers pluggable is committed work, sequenced in three increments around M10:
+
+1. **Before M10 (~30 min):** doc-mark the four coupled files as "the TypeScript + Next pack — Phase 2 seam here", and dedup the `.tsx`/`.ts` grammar pick that's copy-pasted across three of them. Pure labeling and cleanup, no abstraction.
+2. **M10 itself** lands the SQL DDL extractor and the Supabase `.from("table")` matcher — a second framework-convention resolver alongside M5's route literals, and a second extractor kind (schema nodes). Built ad hoc against the current structure; that's fine.
+3. **After M10:** a `src/lang.rs` that centralizes the coupling — the grammar pick, `is_extractable`, the resolver extension list, and a `detect(root)` that fails fast on a repo it can't parse instead of silently serving an empty graph — and relocates M10's schema extractor / matcher into it. Free functions plus `detect()`, no trait: the interface is designed against two convention resolvers and two extractor kinds, not one.
+4. **Phase 2:** promote `lang.rs` to a `LanguagePack` trait with a second real implementation (Rust or C++). This is the only step that actually validates the seams — a same-stack extension like M10 can't.
+
+**Why this order:** M10 is on the critical path to M11's corpus (the pilot's domain is largely its database); modularization is on no critical path. Doing M10 first also means the `lang.rs` boundaries in step 3 are designed from a better sample. Neither order buys the strong validation — that needs a genuinely different language, which is step 4.
+
+---
+
 ## Phase 2 — sketch only, revisit after M11
 
 Deliberately coarse — detailed planning waits until the M11 corpus exists and its quality is known. Rough shape, in likely order (the first two moved up when Phase 1's framing shifted to "the specs are the product" — see the revision note at the end):
@@ -234,3 +248,5 @@ Revised 2026-09-06: the spec-format decision (see `ARCHITECTURE.md` "Spec docume
 Revised again 2026-09-06, after M4's real-repo validation: M4 shipped the file-spec granularity rule but never wrote directory rollups (their document shape was never templated — see `ARCHITECTURE.md`'s open question 5), and that gap turned out to be silently load-bearing — the staleness milestone's own validation assumes a directory `_index.md` already exists to edit and re-check. Rather than leave that implicit, directory rollups became their own milestone, inserted as the new M6 right after the feature layer; everything from the old M6 (Staleness) onward shifted up by one, M6–M10 becoming M7–M11.
 
 Revised again 2026-09-06, after M9: Phase 1's framing shifted. The original exit criterion — does spec generation measurably cut an agent's token use, a go/no-go gate on whether to continue — is retired. The value proposition is taken as settled: accurate, current, dual-audience (human + LLM) documentation of a brownfield codebase. So **M11 changes from "run tasks and reach a verdict" to "generate a real spec corpus over the pilot and hold it to a dual-audience quality bar"**; **M10's rationale shifts** from "makes M11 a fair test" to "lets the corpus describe the database" (which also makes it load-bearing rather than optional); the agent-side token measurement survives only as an optional data point. `REQUIREMENTS.md`'s problem statement, goal, and success criterion were updated to match, and Phase 2 was reprioritized — web viewer and headless generation move to the front, since the human audience and corpus freshness are now first-class concerns.
+
+Revised again 2026-09-06: added CodeOwl's own repo to the test-repo list as the Rust case (Phase 2 grammar target), and added the "Stack modularization" section above — the TS+Next coupling gets made pluggable in three increments bracketing M10 (label + dedup now, `lang.rs` + `detect()` after M10, the `LanguagePack` trait + a second language in Phase 2). Order settled as M10-before-modularization: M10 is critical-path for M11's corpus and gives the eventual `lang.rs` boundaries a two-example sample to design against, and building M10 through the seams would only weakly test them anyway (it's a same-stack extension, not a second language).
