@@ -56,9 +56,16 @@ fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<Extracted
     let decl = if node.kind() == "export_statement" {
         match node.child_by_field_name("declaration") {
             Some(d) => d,
-            // `export { X } from './y'`, `export * from './y'`, or
-            // `export default <expr>` — nothing new is *declared* here for
-            // M1 to extract. Barrel files are exactly this case.
+            // `export { X } from './y'`, `export * from './y'`, or an
+            // *anonymous* `export default <expr>` (an arrow function, an
+            // identifier, a literal) — nothing new is *declared* here for
+            // M1 to extract. Barrel files are exactly this case. A
+            // *named* default export (`export default function Page()
+            // {}`, `export default class Foo {}`) does have a
+            // `declaration` field and falls through to the match below
+            // like any other declaration — Next.js page/route components
+            // routinely take this shape, so M5's feature layer relies on
+            // it being extracted, not skipped.
             None => return,
         }
     } else {

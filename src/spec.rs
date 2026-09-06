@@ -1,7 +1,8 @@
-//! The spec document format and file writer — M4. Implements
-//! `ARCHITECTURE.md`'s "Spec document format" for file specs: the mirrored
-//! `docs/specs/` tree, per-symbol/per-file hash frontmatter, and the
-//! granularity rule deciding whether a file gets a document at all.
+//! The spec document format and file writer — M4 (file specs) and M5
+//! (feature specs). Implements `ARCHITECTURE.md`'s "Spec document format":
+//! the mirrored `docs/specs/` tree, per-symbol/per-file hash frontmatter,
+//! and the granularity rule deciding whether a file gets a document at
+//! all.
 //!
 //! Frontmatter here is hand-parsed rather than run through a general YAML
 //! library: it's one fixed, CodeOwl-owned shape (see the `render`/`parse`
@@ -9,18 +10,19 @@
 //! exactly to that shape is simpler — and easier to reason about — than a
 //! full grammar for something we control both ends of.
 //!
-//! Directory rollups, feature specs, and the token-budget recursion
-//! threshold (open question 2) are out of scope here — this module only
-//! ever produces the two-level (file, its top-level function/class
-//! symbols) document M4 scopes in.
+//! Directory rollups and the token-budget recursion threshold (open
+//! question 2) are still out of scope here.
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
+use crate::features::{
+    EntryPoint, Participants, RouteLiteral, assemble_participants, feature_slug,
+};
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
-use crate::symbol::SymbolKind;
+use crate::symbol::{Symbol, SymbolKind};
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
 /// the source extension: `lib/utils.ts` -> `docs/specs/lib/utils.ts.md`.
@@ -154,8 +156,12 @@ impl FileSpec {
 /// needed to pull each symbol's current signature and the file's
 /// dependency list — both CodeOwl-written, so they're recomputed fresh on
 /// every render rather than stored in `FileSpec` itself (see the module
-/// doc comment on what CodeOwl writes vs. what the LLM writes).
-pub fn render(graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> String {
+/// doc comment on what CodeOwl writes vs. what the LLM writes). `root` is
+/// needed to read each symbol's own source text back off disk, so its
+/// "Depends on" section can be scoped to what *that symbol* actually
+/// references (see `dependency_lines`) rather than every import the whole
+/// file happens to have.
+pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
     out.push_str("kind: file\n");
@@ -195,7 +201,11 @@ pub fn render(graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> String {
         out.push_str(prose.behavior.trim());
         out.push('\n');
         out.push_str("### Depends on\n");
-        let deps = dependency_lines(graph, file_id);
+        let deps = graph
+            .find(id)
+            .and_then(|sym_id| graph.get_symbol(sym_id))
+            .map(|sym| dependency_lines(graph, root, file_id, sym))
+            .unwrap_or_default();
         if deps.is_empty() {
             out.push_str("- (none)\n");
         } else {
@@ -207,20 +217,29 @@ pub fn render(graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> String {
     out
 }
 
-/// The file's resolved imports, one bullet per import — CodeOwl-written,
-/// never the LLM's job (see `ARCHITECTURE.md`'s "What CodeOwl writes vs.
-/// what the LLM writes"). File-level granularity, same limitation
-/// `get_callees` already documents: M2 resolves file-to-file edges, not
-/// per-symbol ones, so every symbol section in a file currently repeats
-/// the same file-wide dependency list.
-fn dependency_lines(graph: &Graph, file_id: SymbolId) -> Vec<String> {
+/// `sym`'s dependency list — CodeOwl-written, never the LLM's job (see
+/// `ARCHITECTURE.md`'s "What CodeOwl writes vs. what the LLM writes").
+/// Scoped to `sym` specifically: M2 only resolves imports at file
+/// granularity, but listing every one of the *file's* imports against
+/// every symbol in it is actively misleading, not just imprecise (a
+/// symbol that never touches half the file's imports would still claim
+/// to depend on them). Narrowed with a whole-word text search over the
+/// symbol's own source span instead — a heuristic, not semantic analysis,
+/// but far closer to the truth than file-wide attribution, and needs no
+/// new resolution machinery.
+fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> Vec<String> {
     let Node::File(file) = graph.get(file_id) else {
+        return Vec::new();
+    };
+    let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
         return Vec::new();
     };
     graph
         .imports()
         .iter()
-        .filter(|imp| imp.from_file == file.id)
+        .filter(|imp| {
+            imp.from_file == file.id && contains_identifier(&symbol_text, &imp.imported_name)
+        })
         .map(|imp| match imp.target {
             Some(target) => format!("`{}` — {}", graph.string_id(target), imp.specifier),
             None => format!(
@@ -229,6 +248,44 @@ fn dependency_lines(graph: &Graph, file_id: SymbolId) -> Vec<String> {
             ),
         })
         .collect()
+}
+
+/// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
+/// the same scheme `mcp.rs`'s `read_lines` uses for a symbol task's own
+/// source.
+fn read_symbol_text(root: &Path, rel_path: &str, lines: [usize; 2]) -> Result<String> {
+    let content = std::fs::read_to_string(root.join(rel_path))
+        .with_context(|| format!("reading {rel_path}"))?;
+    let [start, end] = lines;
+    Ok(content
+        .lines()
+        .skip(start.saturating_sub(1))
+        .take(end + 1 - start)
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
+/// Whole-word substring search: `name` must not be immediately preceded
+/// or followed by another identifier character, so `useLabel` doesn't
+/// count as a use of the import `Label`.
+fn contains_identifier(text: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let is_ident_char = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$';
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(name) {
+        let idx = start + pos;
+        let before_ok = idx == 0 || !is_ident_char(bytes[idx - 1]);
+        let after = idx + name.len();
+        let after_ok = after >= bytes.len() || !is_ident_char(bytes[after]);
+        if before_ok && after_ok {
+            return true;
+        }
+        start = idx + 1;
+    }
+    false
 }
 
 /// Parse a spec file's own rendered output back into a `FileSpec`. Only
@@ -373,7 +430,7 @@ fn write(root: &Path, graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> Resu
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render(graph, file_id, spec))
+    std::fs::write(&path, render(graph, root, file_id, spec))
         .with_context(|| format!("writing {}", path.display()))
 }
 
@@ -528,6 +585,289 @@ fn reorder_symbols(graph: &Graph, file_id: SymbolId, spec: &mut FileSpec) {
     spec.sections = sections;
 }
 
+/// A feature spec, kept a lot flatter than `FileSpec` — one document, one
+/// `spec_hash` over the whole LLM-written body, since (unlike a file's
+/// per-symbol sections) nothing else in the design ever reads back a
+/// piece of a feature spec on its own. `body` is everything after the
+/// title line onward, title included: "human-friendly titles live inside
+/// the document" (`ARCHITECTURE.md`), not synthesized by CodeOwl the way
+/// a file spec's `# lib/utils.ts` heading is.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FeatureSpec {
+    pub slug: String,
+    pub entry_point: String,
+    /// Each participant's hash *as observed at generation time* — a
+    /// file's `source_hash` for a core participant, a symbol's
+    /// `interface_hash` for a dependency (see `Participants`'s doc
+    /// comment on why the split matters).
+    pub participants: Vec<(String, String)>,
+    pub spec_hash: String,
+    pub body: String,
+}
+
+pub fn feature_spec_path(root: &Path, slug: &str) -> PathBuf {
+    root.join("docs")
+        .join("specs")
+        .join("_features")
+        .join(format!("{slug}.md"))
+}
+
+pub fn render_feature(spec: &FeatureSpec) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("kind: feature\n");
+    out.push_str(&format!("entry_point: {}\n", spec.entry_point));
+    out.push_str("participants:\n");
+    for (id, hash) in &spec.participants {
+        out.push_str(&format!("  {id}: {hash}\n"));
+    }
+    out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
+    out.push_str("---\n");
+    out.push_str(spec.body.trim());
+    out.push('\n');
+    out
+}
+
+pub fn parse_feature(content: &str) -> Result<FeatureSpec> {
+    let mut lines = content.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        bail!("feature spec missing frontmatter opening `---`");
+    }
+
+    let mut entry_point = String::new();
+    let mut participants = Vec::new();
+    let mut spec_hash = String::new();
+    let mut in_participants = false;
+    let mut consumed = 1;
+
+    for line in lines.by_ref() {
+        consumed += 1;
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("  ")
+            && in_participants
+        {
+            // rsplit, not split: a symbol participant id contains `::`
+            // (colons), but its hash value never does.
+            let (id, hash) = rest
+                .rsplit_once(':')
+                .context("malformed participants entry in feature frontmatter")?;
+            participants.push((id.trim().to_string(), hash.trim().to_string()));
+            continue;
+        }
+        in_participants = line.trim() == "participants:";
+        if in_participants {
+            continue;
+        }
+        let (key, value) = line
+            .split_once(':')
+            .context("malformed feature frontmatter line")?;
+        match key.trim() {
+            "entry_point" => entry_point = value.trim().to_string(),
+            "spec_hash" => spec_hash = value.trim().to_string(),
+            _ => {}
+        }
+    }
+
+    let body = content
+        .lines()
+        .skip(consumed)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+    let slug = feature_slug(&entry_point);
+
+    Ok(FeatureSpec {
+        slug,
+        entry_point,
+        participants,
+        spec_hash,
+        body,
+    })
+}
+
+pub fn read_feature_spec(root: &Path, slug: &str) -> Result<Option<FeatureSpec>> {
+    let path = feature_spec_path(root, slug);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    parse_feature(&content).map(Some)
+}
+
+/// Each participant's hash as the graph currently reports it — compared
+/// against a persisted `FeatureSpec.participants` to decide whether a
+/// feature spec is current. Also doubles as what a fresh generation
+/// records.
+pub fn current_participant_hashes(
+    graph: &Graph,
+    participants: &Participants,
+) -> Result<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    for file in &participants.core {
+        let id = graph
+            .find(file)
+            .with_context(|| format!("core participant {file:?} not in graph"))?;
+        let f = graph
+            .get_file(id)
+            .with_context(|| format!("core participant {file:?} is not a file"))?;
+        out.push((file.clone(), f.source_hash.clone()));
+    }
+    for dep in &participants.dependencies {
+        let id = graph
+            .find(dep)
+            .with_context(|| format!("dependency participant {dep:?} not in graph"))?;
+        let sym = graph
+            .get_symbol(id)
+            .with_context(|| format!("dependency participant {dep:?} is not a symbol"))?;
+        // Falls back to source_hash on the rare case a resolved import
+        // target isn't itself exported (no interface_hash) -- still a
+        // meaningful staleness signal, just not the shape-only one.
+        let hash = sym
+            .interface_hash
+            .clone()
+            .unwrap_or_else(|| sym.source_hash.clone());
+        out.push((dep.clone(), hash));
+    }
+    Ok(out)
+}
+
+/// A dependency participant's context for the LLM: its own already-
+/// generated summary if one exists and is current, otherwise a
+/// deterministic stub (signature + docstring) -- the same reference-edge
+/// read path "Recursive spec generation" defines for file specs' own
+/// dependency context, just reused here (never triggers generation of the
+/// dependency itself).
+fn dependency_context(graph: &Graph, root: &Path, dep_id: &str) -> Result<String> {
+    let Some(sym_id) = graph.find(dep_id) else {
+        return Ok(format!("{dep_id} (unresolved)"));
+    };
+    let Some(sym) = graph.get_symbol(sym_id) else {
+        return Ok(format!("{dep_id} (not a symbol)"));
+    };
+    if let Some(file_id) = sym.parent
+        && let Some(file) = graph.get_file(file_id)
+        && let Some(spec) = read_file_spec(root, &file.id)?
+        && spec
+            .symbol_hash(&sym.id)
+            .is_some_and(|h| h.source_hash == sym.source_hash)
+        && let Some(prose) = spec.section(&sym.id)
+    {
+        return Ok(prose.summary.clone());
+    }
+    Ok(format!(
+        "{}{}",
+        sym.signature,
+        sym.docstring
+            .as_ref()
+            .map(|d| format!(" -- {d}"))
+            .unwrap_or_default()
+    ))
+}
+
+/// One unit of work for a feature entry point -- unlike a file's bottom-up
+/// symbol-then-file chase, a feature spec is generated in a single task:
+/// there's exactly one document, one `spec_hash`, no per-participant
+/// subsections needing their own LLM call.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FeatureTask {
+    pub slug: String,
+    pub entry_point: String,
+    /// (file id, raw source) for the feature's own code -- the entry
+    /// point plus whatever it reaches via route-literal edges.
+    pub core_sources: Vec<(String, String)>,
+    /// (symbol id, summary-or-stub) for what that code depends on.
+    pub dependencies: Vec<(String, String)>,
+}
+
+/// The feature task for `entry`, or `None` if its spec is already current
+/// (every participant's hash matches, and the participant set itself
+/// hasn't changed -- a new `fetch()` literal appearing is a real change
+/// even though no existing participant moved).
+pub fn next_feature_task(
+    graph: &Graph,
+    root: &Path,
+    entry: &EntryPoint,
+    route_literals: &[RouteLiteral],
+) -> Result<Option<FeatureTask>> {
+    let participants = assemble_participants(graph, route_literals, &entry.file);
+    let current = current_participant_hashes(graph, &participants)?;
+
+    let existing = read_feature_spec(root, &entry.slug)?;
+    let is_current = existing.is_some_and(|spec| {
+        spec.participants.len() == current.len()
+            && spec
+                .participants
+                .iter()
+                .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
+    });
+    if is_current {
+        return Ok(None);
+    }
+
+    let mut core_sources = Vec::new();
+    for file in &participants.core {
+        let path = root.join(file);
+        let source = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        core_sources.push((file.clone(), source));
+    }
+
+    let mut dependencies = Vec::new();
+    for dep in &participants.dependencies {
+        dependencies.push((dep.clone(), dependency_context(graph, root, dep)?));
+    }
+
+    Ok(Some(FeatureTask {
+        slug: entry.slug.clone(),
+        entry_point: entry.file.clone(),
+        core_sources,
+        dependencies,
+    }))
+}
+
+/// Persist `content` (the agent's LLM-written feature narrative, title
+/// included) as `entry_file`'s feature spec.
+pub fn submit_feature(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+    entry_file: &str,
+    content: &str,
+) -> Result<FeatureSpec> {
+    let body = content.trim().to_string();
+    if body.is_empty() {
+        bail!("submitted feature content is empty");
+    }
+    if !body.starts_with("# ") {
+        bail!("submitted feature content must start with a `# Title` heading");
+    }
+
+    let slug = feature_slug(entry_file);
+    let participants = assemble_participants(graph, route_literals, entry_file);
+    let hashes = current_participant_hashes(graph, &participants)?;
+
+    let spec = FeatureSpec {
+        slug: slug.clone(),
+        entry_point: entry_file.to_string(),
+        participants: hashes,
+        spec_hash: hash_text(&body),
+        body,
+    };
+
+    let path = feature_spec_path(root, &slug);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    std::fs::write(&path, render_feature(&spec))
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    Ok(spec)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,10 +958,72 @@ mod tests {
             )],
         };
 
-        let rendered = render(&graph, file_id, &spec);
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
         assert!(rendered.contains("function double(x: number): number"));
         let parsed = parse(&rendered).expect("should parse what we just rendered");
         assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn depends_on_is_scoped_to_what_each_symbol_actually_uses() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-depends", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let a_content = "import { clsx } from 'clsx';\nimport { twMerge } from 'tailwind-merge';\n\nexport function usesClsx(x: string) {\n  return clsx(x);\n}\n\nexport function usesNeither() {\n  return 1;\n}\n";
+        let b_content = "export function clsx(x: string): string { return x; }\n";
+        let c_content = "export function twMerge(x: string): string { return x; }\n";
+        for (rel, content) in [
+            ("a.ts", a_content),
+            ("clsx.ts", b_content),
+            ("tailwind-merge.ts", c_content),
+        ] {
+            let path = dir.join(rel);
+            std::fs::write(&path, content).unwrap();
+        }
+        // Only need a.ts's own imports resolved against real sibling
+        // files here (module resolution isn't the point of this test),
+        // so build a minimal graph + resolved imports by hand rather than
+        // pulling in a real tsconfig/node_modules fixture.
+        let extractions = vec![
+            crate::graph::extract_and_hash("a.ts", a_content),
+            crate::graph::extract_and_hash("clsx.ts", b_content),
+            crate::graph::extract_and_hash("tailwind-merge.ts", c_content),
+        ];
+        let mut graph = Graph::build(extractions);
+        let file_imports = crate::imports::extract_imports(a_content, "a.ts");
+        let resolved = file_imports
+            .imports
+            .iter()
+            .map(|imp| crate::resolve::ResolvedImport {
+                from_file: "a.ts".to_string(),
+                specifier: imp.specifier.clone(),
+                imported_name: imp.imported_name.clone(),
+                target: graph.find(&format!(
+                    "{}.ts::{}",
+                    imp.specifier.trim_start_matches("./"),
+                    imp.imported_name
+                )),
+            })
+            .collect();
+        graph.set_resolved_imports(resolved);
+
+        let file_id = graph.find("a.ts").unwrap();
+        let uses_clsx = graph
+            .get_symbol(graph.find("a.ts::usesClsx").unwrap())
+            .unwrap();
+        let uses_neither = graph
+            .get_symbol(graph.find("a.ts::usesNeither").unwrap())
+            .unwrap();
+
+        let clsx_deps = dependency_lines(&graph, &dir, file_id, uses_clsx);
+        assert_eq!(clsx_deps.len(), 1);
+        assert!(clsx_deps[0].contains("clsx.ts::clsx"));
+
+        let neither_deps = dependency_lines(&graph, &dir, file_id, uses_neither);
+        assert!(neither_deps.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -735,6 +1137,140 @@ mod tests {
             }
         );
 
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Write a small fixture repo to a fresh temp dir with imports
+    /// resolved and route literals extracted -- the full pipeline
+    /// `main.rs`'s `build_graph` runs, needed for feature-spec tests since
+    /// they read real files off disk and need real import resolution.
+    fn build_feature_fixture(
+        files: &[(&str, &str)],
+        suffix: &str,
+    ) -> (Graph, std::path::PathBuf, Vec<RouteLiteral>) {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-feature-spec-test-{}-{suffix}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut extractions = Vec::new();
+        let mut file_imports = std::collections::HashMap::new();
+        let mut route_literals = Vec::new();
+        for (rel, content) in files {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, content).unwrap();
+            extractions.push(crate::graph::extract_and_hash(rel, content));
+            file_imports.insert(
+                rel.to_string(),
+                crate::imports::extract_imports(content, rel),
+            );
+            route_literals.extend(crate::features::extract_route_literals(content, rel));
+        }
+        let mut graph = Graph::build(extractions);
+        let resolver = crate::resolve::build_resolver();
+        let resolved = crate::resolve::resolve_imports(&dir, &resolver, &file_imports, &graph);
+        graph.set_resolved_imports(resolved);
+
+        (graph, dir, route_literals)
+    }
+
+    const ARTWORK_FIXTURE: &[(&str, &str)] = &[
+        (
+            "app/submit/page.tsx",
+            "import { getSupabase } from '../../lib/supabase';\nexport default function Page() {\n  fetch(\"/api/submit-artwork\");\n  getSupabase();\n  return null;\n}\n",
+        ),
+        (
+            "app/api/submit-artwork/route.ts",
+            "import { getSupabase } from '../../../lib/supabase';\nexport async function POST(): Promise<void> {\n  getSupabase();\n}\n",
+        ),
+        (
+            "lib/supabase.ts",
+            "export function getSupabase(): void {}\n",
+        ),
+    ];
+
+    #[test]
+    fn feature_render_then_parse_round_trips() {
+        let spec = FeatureSpec {
+            slug: "submit".to_string(),
+            entry_point: "app/submit/page.tsx".to_string(),
+            participants: vec![
+                ("app/submit/page.tsx".to_string(), "filehash1".to_string()),
+                (
+                    "app/api/submit-artwork/route.ts".to_string(),
+                    "filehash2".to_string(),
+                ),
+                (
+                    "lib/supabase.ts::getSupabase".to_string(),
+                    "ifacehash".to_string(),
+                ),
+            ],
+            spec_hash: "spechash".to_string(),
+            body: "# Artwork submission\n## Summary\nLets an artist submit artwork.".to_string(),
+        };
+        let rendered = render_feature(&spec);
+        let parsed = parse_feature(&rendered).unwrap();
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn feature_generate_loop_produces_a_current_spec_then_reports_done() {
+        let (graph, dir, route_literals) = build_feature_fixture(ARTWORK_FIXTURE, "1");
+        let entry = EntryPoint {
+            file: "app/submit/page.tsx".to_string(),
+            slug: feature_slug("app/submit/page.tsx"),
+        };
+
+        let task = next_feature_task(&graph, &dir, &entry, &route_literals)
+            .unwrap()
+            .expect("first run should need generation");
+        assert_eq!(task.slug, "submit");
+        assert_eq!(
+            task.core_sources
+                .iter()
+                .map(|(id, _)| id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["app/submit/page.tsx", "app/api/submit-artwork/route.ts"]
+        );
+        assert_eq!(
+            task.dependencies,
+            vec![(
+                "lib/supabase.ts::getSupabase".to_string(),
+                "function getSupabase(): void".to_string()
+            )]
+        );
+
+        submit_feature(
+            &graph,
+            &dir,
+            &route_literals,
+            "app/submit/page.tsx",
+            "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
+        )
+        .unwrap();
+
+        assert!(feature_spec_path(&dir, "submit").exists());
+        assert_eq!(
+            next_feature_task(&graph, &dir, &entry, &route_literals).unwrap(),
+            None
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_feature_rejects_content_without_a_title() {
+        let (graph, dir, route_literals) = build_feature_fixture(ARTWORK_FIXTURE, "2");
+        let result = submit_feature(
+            &graph,
+            &dir,
+            &route_literals,
+            "app/submit/page.tsx",
+            "no title here, just prose",
+        );
+        assert!(result.is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

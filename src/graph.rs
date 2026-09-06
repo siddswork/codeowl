@@ -134,6 +134,11 @@ pub struct Graph {
     /// `set_resolved_imports` is called; resolving them needs a `Graph` to
     /// look symbols up in, so they can't be known at `build` time.
     imports: Vec<ResolvedImport>,
+    /// Every `fetch("/api/...")` call site found across the repo — see
+    /// `features.rs`. Stored here (rather than re-walked on every
+    /// `get_next_spec_task` call) the same way `imports` is: computed once
+    /// at graph-build time, persisted with everything else.
+    route_literals: Vec<crate::features::RouteLiteral>,
 }
 
 impl Graph {
@@ -203,6 +208,7 @@ impl Graph {
             nodes,
             by_id,
             imports: Vec::new(),
+            route_literals: Vec::new(),
         }
     }
 
@@ -278,6 +284,14 @@ impl Graph {
 
     pub fn set_resolved_imports(&mut self, imports: Vec<ResolvedImport>) {
         self.imports = imports;
+    }
+
+    pub fn route_literals(&self) -> &[crate::features::RouteLiteral] {
+        &self.route_literals
+    }
+
+    pub fn set_route_literals(&mut self, route_literals: Vec<crate::features::RouteLiteral>) {
+        self.route_literals = route_literals;
     }
 
     pub fn len(&self) -> usize {

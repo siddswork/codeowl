@@ -64,10 +64,27 @@ pub struct SpecResponse {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GenerateTaskRequest {
-    /// The `/codeowl generate <id>` target — currently must be a file id
-    /// (a repo-relative path, e.g. "lib/utils.ts"). Stateless: safe to call
-    /// repeatedly with the same target until it reports nothing left.
+    /// The `/codeowl generate <id>` target — a file id (a repo-relative
+    /// path, e.g. "lib/utils.ts"), which may also be a feature entry point
+    /// (a page or an orphan API route — see `features.rs`). Stateless:
+    /// safe to call repeatedly with the same target until it reports
+    /// nothing left.
     pub target: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct CoreSource {
+    pub file: String,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct DependencyContext {
+    pub id: String,
+    /// The dependency's already-generated summary if it has a current
+    /// spec, otherwise a deterministic stub (signature + docstring) — this
+    /// task never triggers the dependency's own generation.
+    pub summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -84,22 +101,40 @@ pub enum SpecTaskResponse {
         id: String,
         source: String,
     },
+    /// Generated in one shot, unlike the bottom-up symbol-then-file chase
+    /// above: a feature spec is a single document with a single
+    /// `spec_hash`, so there's exactly one task, not several.
+    Feature {
+        /// `"feature:<slug>"` — pass this straight back as `submit_spec`'s
+        /// `id`; it's never a real file/symbol id (see `submit_spec`'s own
+        /// dispatch).
+        id: String,
+        entry_point: String,
+        core_sources: Vec<CoreSource>,
+        dependencies: Vec<DependencyContext>,
+    },
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SubmitSpecRequest {
-    /// The id `get_next_spec_task` returned — a symbol or file id.
+    /// The id `get_next_spec_task` returned — a symbol id, a file id, or
+    /// (for a feature task) the `"feature:<slug>"` id it reported.
     pub id: String,
     /// For a symbol task: markdown containing `### Summary` and
     /// `### Behavior` headings. For a file task: plain prose, becomes the
-    /// file's `## Summary`.
+    /// file's `## Summary`. For a feature task: the whole document body,
+    /// starting with a `# Title` line — see `ARCHITECTURE.md`'s "Feature
+    /// specs" template.
     pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SubmitSpecResponse {
     pub id: String,
-    pub source_hash: String,
+    /// `None` for a feature submission — a feature has no single source
+    /// hash, only a participant map (see `get_spec`/the persisted
+    /// frontmatter for that).
+    pub source_hash: Option<String>,
     pub spec_hash: String,
 }
 
@@ -121,6 +156,42 @@ impl CodeOwlServer {
 
     fn not_found(id: &str) -> String {
         format!("no symbol with id {id:?}")
+    }
+
+    /// `get_next_spec_task`'s fallback once `target`'s own file/symbol
+    /// tasks are exhausted: if `target` is a recognized feature entry
+    /// point and its feature spec isn't current, return that as the next
+    /// task; otherwise there's genuinely nothing left.
+    fn next_feature_task_response(
+        &self,
+        target: &str,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let route_literals = self.graph.route_literals();
+        let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
+        let Some(entry) = entry_points.iter().find(|e| e.file == target) else {
+            return Ok(Json(None));
+        };
+
+        let task = crate::spec::next_feature_task(&self.graph, &self.root, entry, route_literals)
+            .map_err(|e| e.to_string())?;
+        let Some(task) = task else {
+            return Ok(Json(None));
+        };
+
+        Ok(Json(Some(SpecTaskResponse::Feature {
+            id: format!("feature:{}", task.slug),
+            entry_point: task.entry_point,
+            core_sources: task
+                .core_sources
+                .into_iter()
+                .map(|(file, source)| CoreSource { file, source })
+                .collect(),
+            dependencies: task
+                .dependencies
+                .into_iter()
+                .map(|(id, summary)| DependencyContext { id, summary })
+                .collect(),
+        })))
     }
 }
 
@@ -216,12 +287,41 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Get the spec for a symbol or file id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" with the structurally-extracted signature/docstring stub if nothing's been generated yet, or \"current\" with the LLM-written prose if it has."
+        description = "Get the spec for a symbol id, file id, or 'feature:<slug>' id. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" with the structurally-extracted signature/docstring stub if nothing's been generated yet, or \"current\" with the LLM-written prose if it has."
     )]
     async fn get_spec(
         &self,
         Parameters(req): Parameters<IdRequest>,
     ) -> Result<Json<SpecResponse>, String> {
+        if let Some(slug) = req.id.strip_prefix("feature:") {
+            let spec =
+                crate::spec::read_feature_spec(&self.root, slug).map_err(|e| e.to_string())?;
+            let route_literals = self.graph.route_literals();
+            let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
+            let entry = entry_points
+                .iter()
+                .find(|e| e.slug == slug)
+                .ok_or_else(|| Self::not_found(&req.id))?;
+            let participants =
+                crate::features::assemble_participants(&self.graph, route_literals, &entry.file);
+            let is_current = spec.as_ref().is_some_and(|s| {
+                let current = crate::spec::current_participant_hashes(&self.graph, &participants);
+                current.is_ok_and(|current| {
+                    s.participants.len() == current.len()
+                        && s.participants
+                            .iter()
+                            .all(|(id, h)| current.iter().any(|(cid, ch)| cid == id && ch == h))
+                })
+            });
+            return Ok(Json(SpecResponse {
+                id: req.id,
+                status: if is_current { "current" } else { "missing" }.to_string(),
+                signature: String::new(),
+                docstring: None,
+                content: is_current.then(|| spec.unwrap().body),
+            }));
+        }
+
         let id = self
             .graph
             .find(&req.id)
@@ -293,7 +393,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols before the file itself. Returns null when the target isn't spec-bearing (e.g. a barrel file) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. Returns null when the target isn't spec-bearing at all (e.g. a barrel file with no feature either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
@@ -307,7 +407,7 @@ impl CodeOwlServer {
             .map_err(|e| e.to_string())?;
 
         let Some(task) = task else {
-            return Ok(Json(None));
+            return self.next_feature_task_response(&req.target);
         };
         let response = match task {
             crate::spec::SpecTask::Symbol {
@@ -354,17 +454,39 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Persist LLM-written spec prose for a symbol or file id (from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's content is plain prose for its '## Summary'. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
+        description = "Persist LLM-written spec prose for a symbol id, file id, or 'feature:<slug>' id (all from get_next_spec_task). A symbol's content must contain '### Summary' and '### Behavior' headings; a file's content is plain prose for its '## Summary'; a feature's content is the whole document starting with a '# Title' line. Never call this except as part of the get_next_spec_task -> write -> submit_spec loop /codeowl generate drives."
     )]
     async fn submit_spec(
         &self,
         Parameters(req): Parameters<SubmitSpecRequest>,
     ) -> Result<Json<SubmitSpecResponse>, String> {
+        if let Some(slug) = req.id.strip_prefix("feature:") {
+            let route_literals = self.graph.route_literals();
+            let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
+            let entry = entry_points
+                .iter()
+                .find(|e| e.slug == slug)
+                .ok_or_else(|| format!("no feature entry point with slug {slug:?}"))?;
+            let spec = crate::spec::submit_feature(
+                &self.graph,
+                &self.root,
+                route_literals,
+                &entry.file,
+                &req.content,
+            )
+            .map_err(|e| e.to_string())?;
+            return Ok(Json(SubmitSpecResponse {
+                id: req.id,
+                source_hash: None,
+                spec_hash: spec.spec_hash,
+            }));
+        }
+
         let hash = crate::spec::submit(&self.graph, &self.root, &req.id, &req.content)
             .map_err(|e| e.to_string())?;
         Ok(Json(SubmitSpecResponse {
             id: req.id,
-            source_hash: hash.source_hash,
+            source_hash: Some(hash.source_hash),
             spec_hash: hash.spec_hash,
         }))
     }
@@ -426,18 +548,21 @@ mod tests {
 
         let mut extractions = Vec::new();
         let mut file_imports = HashMap::new();
+        let mut route_literals = Vec::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
             extractions.push(crate::graph::extract_and_hash(rel, content));
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
+            route_literals.extend(crate::features::extract_route_literals(content, rel));
         }
 
         let mut graph = Graph::build(extractions);
         let resolver = build_resolver();
         let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
+        graph.set_route_literals(route_literals);
 
         CodeOwlServer::new(dir, graph)
     }
@@ -616,6 +741,123 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(task.0, None);
+    }
+
+    #[tokio::test]
+    async fn generate_loop_produces_a_feature_spec_once_the_target_files_are_covered() {
+        let server = test_server(&[
+            (
+                "app/submit/page.tsx",
+                "import { getSupabase } from '../../lib/supabase';\nexport default function Page() {\n  fetch(\"/api/submit-artwork\");\n  getSupabase();\n  return null;\n}\n",
+            ),
+            (
+                "app/api/submit-artwork/route.ts",
+                "import { getSupabase } from '../../../lib/supabase';\nexport async function POST(): Promise<void> {\n  getSupabase();\n}\n",
+            ),
+            (
+                "lib/supabase.ts",
+                "export function getSupabase(): void {}\n",
+            ),
+        ]);
+
+        // `export default function Page()` is a *named* default export,
+        // so M1 extracts it as a real, exported symbol -- page.tsx is
+        // file-spec-bearing under M4's rule same as any other file. Drain
+        // that ladder (its one symbol, then the file itself) before the
+        // feature task appears, exactly like a real `/codeowl generate`
+        // run against this target would.
+        let symbol_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/submit/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected the page's own symbol task");
+        assert!(matches!(symbol_task, SpecTaskResponse::Symbol { .. }));
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "app/submit/page.tsx::Page".to_string(),
+                content: "### Summary\nRenders the submission form.\n### Behavior\nCalls the submit-artwork API.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+        let file_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/submit/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected the page's own file task");
+        assert!(matches!(file_task, SpecTaskResponse::File { .. }));
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "app/submit/page.tsx".to_string(),
+                content: "The artwork submission page.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Now that page.tsx's own symbol+file specs are current, the next
+        // task on this same target is the feature.
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/submit/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0
+            .expect("expected a feature task");
+        let SpecTaskResponse::Feature {
+            id,
+            entry_point,
+            core_sources,
+            dependencies,
+        } = task
+        else {
+            panic!("expected a Feature task");
+        };
+        assert_eq!(id, "feature:submit");
+        assert_eq!(entry_point, "app/submit/page.tsx");
+        assert_eq!(
+            core_sources
+                .iter()
+                .map(|c| c.file.as_str())
+                .collect::<Vec<_>>(),
+            vec!["app/submit/page.tsx", "app/api/submit-artwork/route.ts"]
+        );
+        assert_eq!(dependencies.len(), 1);
+        assert_eq!(dependencies[0].id, "lib/supabase.ts::getSupabase");
+
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: id.clone(),
+                content: "# Artwork submission\n## Summary\nLets an artist submit artwork.\n"
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let spec = server
+            .get_spec(Parameters(IdRequest { id: id.clone() }))
+            .await
+            .unwrap();
+        assert_eq!(spec.0.status, "current");
+        assert!(
+            spec.0
+                .content
+                .unwrap()
+                .contains("Lets an artist submit artwork.")
+        );
+
+        let done = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/submit/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(done.0, None);
     }
 
     #[tokio::test]
