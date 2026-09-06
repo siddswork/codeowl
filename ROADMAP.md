@@ -8,7 +8,7 @@ Fixed set of real repos the milestone validations below run against — chosen f
 
 | Repo | Path | Language | Size | Why this one |
 |---|---|---|---|---|
-| the pilot repo | *(private)* | TypeScript/TSX | ~300 files | A real Next.js 16 (App Router) / React 19 / Supabase / Upstash application — matches `REQUIREMENTS.md`'s pilot description. Primary target for every Phase 1 milestone. |
+| the pilot repo (`talentTrail`) | `~/dev/startup/talentTrail` *(private)* | TypeScript/TSX | ~300 files | A real Next.js 16 (App Router) / React 19 / Supabase / Upstash application — matches `REQUIREMENTS.md`'s pilot description. Primary target for every Phase 1 milestone. Named here once; everywhere else it's just "the pilot repo". |
 | memolink | `~/dev/openSource/inspirations/memolink` | Java (+ a little Python) | 45 Java files, Maven multi-module | The project CodeOwl is architecturally inspired by. Multi-module Maven build exercises build-manifest parsing beyond a single-module case. |
 | leveldb | `~/dev/openSource/test-repos/leveldb` | C++ | 132 files, CMake | Stresses open question 1 directly — tree-sitter's weak spot on overloads/virtual dispatch. Real interface hierarchies (`Comparator`, `Iterator`, `WriteBatch::Handler`), well-documented enough to check generated specs against. |
 | commons-lang | `~/dev/openSource/test-repos/commons-lang` | Java | 627 files, Maven | Plain classic Java, no framework magic — a second Java data point distinct from memolink's Spring-adjacent style. |
