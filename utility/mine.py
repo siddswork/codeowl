@@ -3,14 +3,10 @@
 Mine a Claude Code session transcript for CodeOwl experiment metrics.
 
 Usage:
-    python3 mine.py --run A                       # newest transcript in the target project dir
+    python3 mine.py --run A                      # newest transcript in the target project dir
     python3 mine.py --run B --session <uuid>
     python3 mine.py --run A --file /path/to.jsonl
     python3 mine.py --list                        # show candidate transcripts, newest first
-
-The "target project dir" is a directory under ~/.claude/projects. Pass
---project-dir <name-or-path> to pick one; otherwise the most recently
-active project dir is used.
 
 Writes runs/<RUN>/metrics.md, runs/<RUN>/files-read.md and runs/<RUN>/plan.md.
 No third-party dependencies.
@@ -27,10 +23,12 @@ from collections import Counter, OrderedDict
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECTS = os.path.expanduser("~/.claude/projects")
 
-# Claude Code slugifies the cwd a session was launched from into a directory
-# under ~/.claude/projects. The pilot experiment runs from the target repo, so
-# its transcripts land in that repo's slug dir. Pass --project-dir to name it;
-# otherwise the most recently modified project dir is used.
+# Claude Code slugifies the cwd it was launched from. Running from the repo root
+# gives this dir; the parent-dir form is a fallback for a session started one level up.
+CANDIDATE_PROJECT_DIRS = [
+    "-home-sidd-dev-startup-talentTrail",
+    "-home-sidd-dev-startup",
+]
 
 # Tools that pull repo content into context. This is the number CodeOwl claims to reduce.
 EXPLORATION_TOOLS = {"Read", "Grep", "Glob", "NotebookRead"}
@@ -43,23 +41,16 @@ VOCAB_RE = re.compile(r"discrepan", re.I)
 SPEC_PATH_RE = re.compile(r"docs/specs", re.I)
 
 
-def find_project_dir(explicit=None):
-    if explicit:
-        p = explicit if os.path.isabs(explicit) else os.path.join(PROJECTS, explicit)
+def find_project_dir():
+    for name in CANDIDATE_PROJECT_DIRS:
+        p = os.path.join(PROJECTS, name)
         if os.path.isdir(p):
             return p
-        sys.exit(f"No transcript dir at {p}")
-    dirs = [
-        os.path.join(PROJECTS, d)
-        for d in os.listdir(PROJECTS)
-        if os.path.isdir(os.path.join(PROJECTS, d))
-    ]
-    if not dirs:
-        sys.exit(
-            f"No project dirs under {PROJECTS}. Run a Claude Code session from "
-            "the target repo first, then pass --project-dir <name>."
-        )
-    return max(dirs, key=os.path.getmtime)
+    sys.exit(
+        "No transcript dir found. Looked for:\n  "
+        + "\n  ".join(os.path.join(PROJECTS, d) for d in CANDIDATE_PROJECT_DIRS)
+        + "\nRun the experiment from /home/sidd/dev/startup/talentTrail first."
+    )
 
 
 def transcripts(project_dir):
@@ -342,15 +333,10 @@ def main():
     ap.add_argument("--session", help="session uuid")
     ap.add_argument("--file", help="explicit .jsonl path")
     ap.add_argument("--list", action="store_true", help="list candidate transcripts")
-    ap.add_argument(
-        "--project-dir",
-        help="dir under ~/.claude/projects (name or absolute path); "
-        "defaults to the most recently modified one",
-    )
     a = ap.parse_args()
 
     if a.list:
-        d = find_project_dir(a.project_dir)
+        d = find_project_dir()
         print(f"{d}\n")
         for p in transcripts(d)[:15]:
             ts = dt.datetime.fromtimestamp(os.path.getmtime(p)).strftime("%Y-%m-%d %H:%M")
@@ -363,7 +349,7 @@ def main():
     if a.file:
         src = a.file
     else:
-        d = find_project_dir(a.project_dir)
+        d = find_project_dir()
         cands = transcripts(d)
         if a.session:
             src = next((p for p in cands if a.session in p), None)
