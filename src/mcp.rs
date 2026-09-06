@@ -893,9 +893,17 @@ impl ServerHandler for CodeOwlServer {
         info.protocol_version = ProtocolVersion::LATEST;
         info.capabilities = ServerCapabilities::builder().enable_tools().build();
         info.instructions = Some(
-            "CodeOwl's read-only structural surface over this repo. get_spec always returns \
-             status \"missing\" until spec generation exists -- this server exposes structural \
-             facts extracted from source, not LLM-written summaries, yet."
+            "CodeOwl is a read-only structural index of this repository -- reach for it before \
+             grep/file-reading on \"how is this wired\" questions. get_symbol gives a definition \
+             and signature; get_callers / get_callees give the reference graph (\"what breaks if \
+             I change this\"); search_code is a plain regex sweep (no semantic search in Phase \
+             1). get_spec returns an LLM-authored prose spec for a symbol id, a file path, \
+             \"feature:<slug>\", \"rollup:<dir>\", or \"system\": status \"missing\" means none \
+             exists yet, \"stale\" means the code moved since it was written (the last-good text \
+             is still returned), and non-empty `smells` flags a spec a quality check distrusts. \
+             Those specs are populated by a separate, deliberate generation loop \
+             (get_spec_coverage -> get_next_spec_task -> submit_spec) that a normal consuming \
+             session never needs to touch."
                 .to_string(),
         );
         info
