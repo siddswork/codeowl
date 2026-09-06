@@ -723,7 +723,25 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
         let human_edited = symbol_prose_is_human_edited(hash, &prose);
 
         match (source_changed, human_edited) {
-            (false, false) => continue, // case 1: current, check the next symbol
+            (false, false) => {
+                // Case 1 by the four-case reconciliation rules, but a
+                // quality smell is a real, hash-invisible reason to
+                // revisit this symbol anyway -- see "Quality smells" in
+                // ARCHITECTURE.md. No `prior` here: there's nothing to
+                // reconcile against, just a plain "please rewrite this."
+                let smelly = !prose_smells(&prose.summary).is_empty()
+                    || !prose_smells(&prose.behavior).is_empty();
+                if smelly {
+                    return Ok(Some(SpecTask::Symbol {
+                        id: sym.id.clone(),
+                        signature: sym.signature.clone(),
+                        docstring: sym.docstring.clone(),
+                        lines: sym.lines,
+                        prior: None,
+                    }));
+                }
+                continue;
+            }
             (true, false) => {
                 // case 2: plain regeneration, nothing to preserve
                 return Ok(Some(SpecTask::Symbol {
@@ -764,7 +782,15 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
         let source_changed = !file_changes(graph, target_file_id, &spec.file).is_empty();
         let human_edited = file_prose_is_human_edited(&spec.file, &spec.file_summary);
         match (source_changed, human_edited) {
-            (false, false) => return Ok(None),
+            (false, false) => {
+                if !prose_smells(&spec.file_summary).is_empty() {
+                    return Ok(Some(SpecTask::File {
+                        id: file.id.clone(),
+                        prior: None,
+                    }));
+                }
+                return Ok(None);
+            }
             (true, false) => {
                 return Ok(Some(SpecTask::File {
                     id: file.id.clone(),
@@ -1096,8 +1122,13 @@ pub fn next_feature_task(
     let current = current_participant_hashes(graph, &participants)?;
 
     let existing = read_feature_spec(root, &entry.slug)?;
-    let is_current =
-        existing.is_some_and(|spec| diff_hash_lists(&current, &spec.participants).is_empty());
+    // A quality smell is a hash-invisible reason to revisit this feature
+    // even when every participant's hash still matches -- see "Quality
+    // smells" in ARCHITECTURE.md.
+    let is_current = existing.is_some_and(|spec| {
+        diff_hash_lists(&current, &spec.participants).is_empty()
+            && body_smells(&spec.body).is_empty()
+    });
     if is_current {
         return Ok(None);
     }
@@ -1372,7 +1403,9 @@ pub fn next_rollup_task(graph: &Graph, root: &Path, dir_path: &str) -> Result<Op
         return Ok(None);
     }
     let existing = read_rollup_spec(root, dir_path)?;
-    let is_current = existing.is_some_and(|spec| diff_hash_lists(&current, &spec.files).is_empty());
+    let is_current = existing.is_some_and(|spec| {
+        diff_hash_lists(&current, &spec.files).is_empty() && body_smells(&spec.body).is_empty()
+    });
     if is_current {
         return Ok(None);
     }
@@ -1685,11 +1718,12 @@ pub fn next_system_task(
 
     let existing = read_system_spec(root)?;
     let is_current = existing.is_some_and(|spec| {
+        let smells_clean = body_smells(&spec.body).is_empty();
         let mut current_all = current_modules.clone();
         current_all.extend(current_features.clone());
         let mut stored_all = spec.modules;
         stored_all.extend(spec.features);
-        diff_hash_lists(&current_all, &stored_all).is_empty()
+        diff_hash_lists(&current_all, &stored_all).is_empty() && smells_clean
     });
     if is_current {
         return Ok(None);
@@ -1766,6 +1800,100 @@ pub struct CoverageItem {
     /// one. Always 0 for non-file kinds; this is what "high-fan-in files"
     /// in `ARCHITECTURE.md`'s "Generation priority" is computed from.
     pub fan_in: usize,
+    /// Deterministic quality smells found in this document's own current
+    /// content — never empty just because `status` is `"missing"`
+    /// (nothing to smell-check) but can be non-empty even when `status`
+    /// is `"current"`: hash-based staleness only verifies a spec's
+    /// *inputs* haven't moved, never that its prose was ever meaningful.
+    /// See `prose_smells`/`ARCHITECTURE.md`'s "Quality smells".
+    pub smells: Vec<String>,
+}
+
+/// A deterministic, non-LLM check for prose that looks like a stub or a
+/// cop-out rather than real content — independent of hash-based
+/// staleness. Catches the two failure modes `CLAUDE.md`/the generate
+/// prompt already call out by name: a "see the source" cop-out that
+/// defeats the whole point of the document, and prose so short it can
+/// only be a template placeholder (found, concretely, in two real
+/// pre-M5 specs during a quality audit: `"<name> does its job."` /
+/// `"See source."`). Deliberately not exhaustive or clever — a small,
+/// named denylist plus a word-count floor, both easy to reason about and
+/// cheap to extend if a new failure mode turns up.
+pub fn prose_smells(text: &str) -> Vec<String> {
+    const COP_OUT_PHRASES: &[&str] = &[
+        "see the source",
+        "see source",
+        "see the route handler",
+        "see the handler",
+        "see the file for details",
+        "see the code for details",
+        "refer to the source",
+        "check the implementation",
+        "check the source",
+    ];
+    let mut smells = Vec::new();
+    let lower = text.to_lowercase();
+    if COP_OUT_PHRASES.iter().any(|phrase| lower.contains(phrase)) {
+        smells.push("cop_out_phrase".to_string());
+    }
+    if text.split_whitespace().count() < 4 {
+        smells.push("suspiciously_short".to_string());
+    }
+    smells
+}
+
+/// The union of every quality smell anywhere in a file spec — the file's
+/// own summary, every symbol's summary/behavior, and a whole-file check
+/// for the pre-M5 file-wide-dependency-attribution bug's signature (every
+/// symbol sharing one identical, non-empty dependency list). That bug is
+/// structurally impossible in a freshly-generated spec after M5's
+/// per-symbol scoping fix, but this stays as a detector for specs that
+/// predate it and were never regenerated since. This is the coarse,
+/// whole-document signal `get_spec_coverage` needs ("does this document
+/// need another look at all"); `get_spec` on one specific symbol id
+/// checks `prose_smells` directly against just that symbol's own prose
+/// instead, for a narrower answer.
+pub fn file_spec_smells(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    spec: &FileSpec,
+) -> Vec<String> {
+    let mut smells = prose_smells(&spec.file_summary);
+    for (_, prose) in &spec.sections {
+        smells.extend(prose_smells(&prose.summary));
+        smells.extend(prose_smells(&prose.behavior));
+    }
+    if spec.symbols.len() >= 2 {
+        let dep_lists: Vec<Vec<String>> = spec
+            .symbols
+            .iter()
+            .filter_map(|(id, _)| {
+                let sym_id = graph.find(id)?;
+                let sym = graph.get_symbol(sym_id)?;
+                Some(dependency_lines(graph, root, file_id, sym))
+            })
+            .collect();
+        if dep_lists.len() == spec.symbols.len()
+            && !dep_lists[0].is_empty()
+            && dep_lists.iter().all(|d| *d == dep_lists[0])
+        {
+            smells.push("identical_dependencies_across_symbols".to_string());
+        }
+    }
+    smells.sort();
+    smells.dedup();
+    smells
+}
+
+/// The same coarse signal as `file_spec_smells`, for a feature/rollup/
+/// system spec's single-blob body — checked against just the LLM-written
+/// `## Summary` section (a `RollupSpec`/`SystemSpec`'s `body` already
+/// *is* just that; a `FeatureSpec`'s `body` is the whole document, title
+/// included, so this extracts the `## Summary` section out of it first).
+pub fn body_smells(body: &str) -> Vec<String> {
+    let summary = extract_section(body, "## Summary", "\n## ").unwrap_or_else(|| body.to_string());
+    prose_smells(&summary)
 }
 
 fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
@@ -1783,36 +1911,53 @@ fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
 /// generated for it (neither any symbol nor its own summary — the same
 /// `HashPair`-is-empty/`symbols`-is-empty signal `next_task` itself uses
 /// to distinguish a first-ever generation from a reconciliation), else
-/// "current" iff `next_task` finds nothing left to do, else "stale" (some
-/// symbol or the file itself needs attention, but something here was
-/// already generated at some point).
-fn file_status(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<String> {
+/// "current" iff every symbol's and the file's own hashes still match,
+/// else "stale". Deliberately *not* implemented via `next_task` (which
+/// also treats a quality smell as a reason to offer a task, so the
+/// generate loop can act on one) — `status` here stays purely hash-based,
+/// so it never contradicts `smells` being reported as a *separate* signal
+/// on a document that's otherwise fully current. See "Quality smells" in
+/// `ARCHITECTURE.md`.
+fn file_status(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<(String, Vec<String>)> {
     let file = graph.get_file(file_id).context("not a file id")?;
-    let existing = read_file_spec(root, &file.id)?;
-    let has_any_content =
-        existing.is_some_and(|s| !s.file.spec_hash.is_empty() || !s.symbols.is_empty());
+    let Some(spec) = read_file_spec(root, &file.id)? else {
+        return Ok(("missing".to_string(), Vec::new()));
+    };
+    let has_any_content = !spec.file.spec_hash.is_empty() || !spec.symbols.is_empty();
     if !has_any_content {
-        return Ok("missing".to_string());
+        return Ok(("missing".to_string(), Vec::new()));
     }
-    Ok(if next_task(graph, root, file_id)?.is_some() {
-        "stale"
-    } else {
-        "current"
+
+    let mut hash_current = true;
+    for sym_id in spec_bearing_children(graph, file_id) {
+        let sym = graph.get_symbol(sym_id).expect("filtered to symbol ids");
+        let up_to_date = spec
+            .symbol_hash(&sym.id)
+            .is_some_and(|hash| symbol_changes(graph, root, file_id, sym, hash).is_empty());
+        if !up_to_date {
+            hash_current = false;
+            break;
+        }
     }
-    .to_string())
+    if hash_current {
+        hash_current = file_changes(graph, file_id, &spec.file).is_empty();
+    }
+    let status = if hash_current { "current" } else { "stale" }.to_string();
+    Ok((status, file_spec_smells(graph, root, file_id, &spec)))
 }
 
-fn rollup_status(graph: &Graph, root: &Path, dir: &str) -> Result<String> {
+fn rollup_status(graph: &Graph, root: &Path, dir: &str) -> Result<(String, Vec<String>)> {
     let Some(spec) = read_rollup_spec(root, dir)? else {
-        return Ok("missing".to_string());
+        return Ok(("missing".to_string(), Vec::new()));
     };
     let current = current_file_hashes(graph, root, dir)?;
-    Ok(if diff_hash_lists(&current, &spec.files).is_empty() {
+    let status = if diff_hash_lists(&current, &spec.files).is_empty() {
         "current"
     } else {
         "stale"
     }
-    .to_string())
+    .to_string();
+    Ok((status, body_smells(&spec.body)))
 }
 
 fn feature_status(
@@ -1820,36 +1965,41 @@ fn feature_status(
     root: &Path,
     route_literals: &[RouteLiteral],
     entry: &EntryPoint,
-) -> Result<String> {
+) -> Result<(String, Vec<String>)> {
     let Some(spec) = read_feature_spec(root, &entry.slug)? else {
-        return Ok("missing".to_string());
+        return Ok(("missing".to_string(), Vec::new()));
     };
     let participants = assemble_participants(graph, route_literals, &entry.file);
     let current = current_participant_hashes(graph, &participants)?;
-    Ok(
-        if diff_hash_lists(&current, &spec.participants).is_empty() {
-            "current"
-        } else {
-            "stale"
-        }
-        .to_string(),
-    )
-}
-
-fn system_status(graph: &Graph, root: &Path, route_literals: &[RouteLiteral]) -> Result<String> {
-    let Some(spec) = read_system_spec(root)? else {
-        return Ok("missing".to_string());
-    };
-    let mut current_all = current_module_hashes(graph, root)?;
-    current_all.extend(current_feature_hashes(graph, root, route_literals)?);
-    let mut stored_all = spec.modules;
-    stored_all.extend(spec.features);
-    Ok(if diff_hash_lists(&current_all, &stored_all).is_empty() {
+    let status = if diff_hash_lists(&current, &spec.participants).is_empty() {
         "current"
     } else {
         "stale"
     }
-    .to_string())
+    .to_string();
+    Ok((status, body_smells(&spec.body)))
+}
+
+fn system_status(
+    graph: &Graph,
+    root: &Path,
+    route_literals: &[RouteLiteral],
+) -> Result<(String, Vec<String>)> {
+    let Some(spec) = read_system_spec(root)? else {
+        return Ok(("missing".to_string(), Vec::new()));
+    };
+    let smells = body_smells(&spec.body);
+    let mut current_all = current_module_hashes(graph, root)?;
+    current_all.extend(current_feature_hashes(graph, root, route_literals)?);
+    let mut stored_all = spec.modules;
+    stored_all.extend(spec.features);
+    let status = if diff_hash_lists(&current_all, &stored_all).is_empty() {
+        "current"
+    } else {
+        "stale"
+    }
+    .to_string();
+    Ok((status, smells))
 }
 
 /// Whether `path` (a file or directory) falls under `scope` — an exact
@@ -1887,9 +2037,11 @@ pub fn coverage(
         if scope.is_some_and(|s| !within_scope(&path, s)) {
             continue;
         }
+        let (status, smells) = file_status(graph, root, id)?;
         items.push(CoverageItem {
-            status: file_status(graph, root, id)?,
+            status,
             fan_in: file_fan_in(graph, id),
+            smells,
             id: path,
             kind: "file".to_string(),
         });
@@ -1899,9 +2051,11 @@ pub fn coverage(
         if scope.is_some_and(|s| !within_scope(&dir, s)) {
             continue;
         }
+        let (status, smells) = rollup_status(graph, root, &dir)?;
         items.push(CoverageItem {
-            status: rollup_status(graph, root, &dir)?,
+            status,
             fan_in: 0,
+            smells,
             id: format!("rollup:{dir}"),
             kind: "rollup".to_string(),
         });
@@ -1909,16 +2063,20 @@ pub fn coverage(
 
     if scope.is_none() {
         for entry in enumerate_entry_points(graph, route_literals) {
+            let (status, smells) = feature_status(graph, root, route_literals, &entry)?;
             items.push(CoverageItem {
-                status: feature_status(graph, root, route_literals, &entry)?,
+                status,
                 fan_in: 0,
+                smells,
                 id: format!("feature:{}", entry.slug),
                 kind: "feature".to_string(),
             });
         }
+        let (status, smells) = system_status(graph, root, route_literals)?;
         items.push(CoverageItem {
-            status: system_status(graph, root, route_literals)?,
+            status,
             fan_in: 0,
+            smells,
             id: "system".to_string(),
             kind: "system".to_string(),
         });
@@ -1932,6 +2090,11 @@ pub struct CoverageSummary {
     pub current: usize,
     pub stale: usize,
     pub missing: usize,
+    /// Count of items with at least one quality smell, of *any* status —
+    /// deliberately not exclusive with `current`: a document can be
+    /// hash-current and still carry a smell, which is exactly the case
+    /// this field exists to surface (see `CoverageItem.smells`).
+    pub smelly: usize,
 }
 
 pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
@@ -1943,6 +2106,9 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
             "missing" => summary.missing += 1,
             _ => {}
         }
+        if !item.smells.is_empty() {
+            summary.smelly += 1;
+        }
     }
     summary
 }
@@ -1951,12 +2117,21 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
 /// `/codeowl generate --all`/`--budget=N` should spend a limited budget:
 /// the system spec first, then feature specs, then files by descending
 /// import fan-in, then everything else (rollups) — see
-/// `ARCHITECTURE.md`'s "Generation priority". Ties within a tier break on
-/// `id` for a stable, reproducible order.
+/// `ARCHITECTURE.md`'s "Generation priority". Within a tier, an honestly
+/// `"missing"` or `"stale"` document outranks a merely smelly-but-
+/// `"current"` one; ties beyond that break on `id` for a stable,
+/// reproducible order.
+///
+/// Includes a `"current"` item when it has a quality smell — hash-based
+/// staleness only verifies a spec's *inputs* haven't moved, never that
+/// its prose was ever meaningful (a "see the source" stub, once written,
+/// stays hash-`"current"` forever unless something else flags it). Never
+/// filtering on smells too would mean a `--all --budget=N` run could run
+/// to completion while silently leaving known-bad content in place.
 pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
     let mut pending: Vec<CoverageItem> = items
         .into_iter()
-        .filter(|i| i.status != "current")
+        .filter(|i| i.status != "current" || !i.smells.is_empty())
         .collect();
     pending.sort_by(|a, b| {
         fn tier(kind: &str) -> u8 {
@@ -1967,8 +2142,16 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
                 _ => 3,
             }
         }
+        fn urgency(status: &str) -> u8 {
+            match status {
+                "missing" => 0,
+                "stale" => 1,
+                _ => 2, // "current" but smelly -- the only other way in
+            }
+        }
         tier(&a.kind)
             .cmp(&tier(&b.kind))
+            .then(urgency(&a.status).cmp(&urgency(&b.status)))
             .then(b.fan_in.cmp(&a.fan_in))
             .then(a.id.cmp(&b.id))
     });
@@ -2176,7 +2359,7 @@ mod tests {
             &graph,
             &dir,
             "a.ts::one",
-            "### Summary\nDoes one thing.\n### Behavior\nNo-op.\n",
+            "### Summary\nDoes one specific, deliberate thing.\n### Behavior\nIntentionally performs no operation.\n",
         )
         .unwrap();
         let task = next_task(&graph, &dir, file_id).unwrap().unwrap();
@@ -2195,7 +2378,7 @@ mod tests {
             &graph,
             &dir,
             "a.ts::two",
-            "### Summary\nDoes two.\n### Behavior\nNo-op.\n",
+            "### Summary\nDoes a second, related thing.\n### Behavior\nIntentionally performs no operation.\n",
         )
         .unwrap();
         let task = next_task(&graph, &dir, file_id).unwrap().unwrap();
@@ -2207,7 +2390,13 @@ mod tests {
             }
         );
 
-        submit(&graph, &dir, "a.ts", "Two no-op helpers.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts",
+            "A file with two deliberate no-op helpers.",
+        )
+        .unwrap();
         assert_eq!(next_task(&graph, &dir, file_id).unwrap(), None);
 
         std::fs::remove_dir_all(&dir).ok();
@@ -2250,7 +2439,7 @@ mod tests {
             &graph,
             &dir,
             "a.ts::one",
-            "### Summary\nS.\n### Behavior\nB.\n",
+            "### Summary\nDoes one small, specific job.\n### Behavior\nRuns without any side effects.\n",
         )
         .unwrap();
         // Re-running generate against the same, unchanged graph should
@@ -2352,6 +2541,44 @@ mod tests {
                     summary: "A human-corrected summary.".to_string(),
                     behavior: "Original behavior.".to_string(),
                 }),
+            })
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_smelly_but_hash_current_symbol_is_offered_again_by_next_task() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-smelly-retrigger",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\none does its job.\n### Behavior\nSee the source for details.\n",
+        )
+        .unwrap();
+
+        // Nothing about the source changed and nobody hand-edited the
+        // file -- by hash alone this is "case 1: current" -- but the
+        // prose itself is a cop-out stub. next_task must still offer it
+        // again (with no `prior`: there's nothing to reconcile against,
+        // just a plain "please rewrite this").
+        let task = next_task(&graph, &dir, file_id).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::Symbol {
+                id: "a.ts::one".to_string(),
+                signature: "function one(): void".to_string(),
+                docstring: None,
+                lines: [1, 1],
+                prior: None,
             })
         );
 
@@ -2546,18 +2773,30 @@ mod tests {
             &graph,
             &dir,
             "lib/one.ts::one",
-            "### Summary\nS1.\n### Behavior\nB1.\n",
+            "### Summary\nDoes the first specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
         )
         .unwrap();
-        submit(&graph, &dir, "lib/one.ts", "Does one thing.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/one.ts",
+            "Performs one specific, deliberate task.",
+        )
+        .unwrap();
         submit(
             &graph,
             &dir,
             "lib/two.ts::two",
-            "### Summary\nS2.\n### Behavior\nB2.\n",
+            "### Summary\nDoes a second, different thing.\n### Behavior\nAlso runs synchronously with no side effects.\n",
         )
         .unwrap();
-        submit(&graph, &dir, "lib/two.ts", "Does two things.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/two.ts",
+            "Performs a couple of related tasks.",
+        )
+        .unwrap();
 
         // Both files are now current -- the directory chase is exhausted,
         // and the rollup task itself becomes available.
@@ -2568,8 +2807,14 @@ mod tests {
         assert_eq!(
             rollup_task.files,
             vec![
-                ("lib/one.ts".to_string(), "Does one thing.".to_string()),
-                ("lib/two.ts".to_string(), "Does two things.".to_string()),
+                (
+                    "lib/one.ts".to_string(),
+                    "Performs one specific, deliberate task.".to_string()
+                ),
+                (
+                    "lib/two.ts".to_string(),
+                    "Performs a couple of related tasks.".to_string()
+                ),
             ]
         );
 
@@ -2586,22 +2831,46 @@ mod tests {
             ("lib/two.ts", "export function two(): void {}\n"),
         ]);
         for (id, content) in [
-            ("lib/one.ts::one", "### Summary\nS1.\n### Behavior\nB1.\n"),
-            ("lib/two.ts::two", "### Summary\nS2.\n### Behavior\nB2.\n"),
+            (
+                "lib/one.ts::one",
+                "### Summary\nDoes the first specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
+            ),
+            (
+                "lib/two.ts::two",
+                "### Summary\nDoes a second, different thing.\n### Behavior\nAlso runs synchronously with no side effects.\n",
+            ),
         ] {
             submit(&graph, &dir, id, content).unwrap();
         }
-        submit(&graph, &dir, "lib/one.ts", "Does one thing.").unwrap();
-        submit(&graph, &dir, "lib/two.ts", "Does two things.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/one.ts",
+            "Performs one specific, deliberate task.",
+        )
+        .unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/two.ts",
+            "Performs a couple of related tasks.",
+        )
+        .unwrap();
 
-        let spec = submit_rollup(&graph, &dir, "lib", "Small shared helpers.").unwrap();
+        let spec = submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "Small shared helper functions for this module.",
+        )
+        .unwrap();
         assert_eq!(spec.files.len(), 2);
         assert!(spec.files.iter().all(|(_, h)| !h.is_empty()));
 
         assert!(rollup_spec_path(&dir, "lib").exists());
         assert_eq!(
             read_rollup_spec(&dir, "lib").unwrap().unwrap().body,
-            "Small shared helpers."
+            "Small shared helper functions for this module."
         );
         assert_eq!(next_rollup_task(&graph, &dir, "lib").unwrap(), None);
 
@@ -2692,8 +2961,14 @@ mod tests {
             ("lib/one.ts::one", "lib/one.ts"),
             ("lib/two.ts::two", "lib/two.ts"),
         ] {
-            submit(&graph, &dir, sym_id, "### Summary\nS.\n### Behavior\nB.\n").unwrap();
-            submit(&graph, &dir, file_id, "A helper file.").unwrap();
+            submit(
+                &graph,
+                &dir,
+                sym_id,
+                "### Summary\nDoes one small, specific job.\n### Behavior\nRuns without any side effects.\n",
+            )
+            .unwrap();
+            submit(&graph, &dir, file_id, "A small file of helper functions.").unwrap();
         }
         assert!(directory_is_spec_bearing(&graph, "lib"));
         assert_eq!(
@@ -2701,7 +2976,13 @@ mod tests {
             None,
             "lib's own rollup isn't generated yet"
         );
-        submit_rollup(&graph, &dir, "lib", "Shared helpers.").unwrap();
+        submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "Small shared helper functions for this module.",
+        )
+        .unwrap();
 
         assert_eq!(
             next_system_task(&graph, &dir, &route_literals).unwrap(),
@@ -2713,10 +2994,16 @@ mod tests {
             &graph,
             &dir,
             "app/submit/page.tsx::Page",
-            "### Summary\nS.\n### Behavior\nB.\n",
+            "### Summary\nRenders the artwork submission form.\n### Behavior\nSubmits data to the API on save.\n",
         )
         .unwrap();
-        submit(&graph, &dir, "app/submit/page.tsx", "The submit page.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "app/submit/page.tsx",
+            "The artwork submission page for competitors.",
+        )
+        .unwrap();
         submit_feature(
             &graph,
             &dir,
@@ -2731,7 +3018,10 @@ mod tests {
             .expect("everything current, system task should now appear");
         assert_eq!(
             task.modules,
-            vec![("lib".to_string(), "Shared helpers.".to_string())]
+            vec![(
+                "lib".to_string(),
+                "Small shared helper functions for this module.".to_string()
+            )]
         );
         assert_eq!(task.features.len(), 1);
         assert_eq!(task.features[0].0, "submit");
@@ -2746,7 +3036,7 @@ mod tests {
             &graph,
             &dir,
             &route_literals,
-            "# TalentTrail\n## Summary\nA competition platform.\n",
+            "# TalentTrail\n## Summary\nA platform for running art competitions.\n",
         )
         .unwrap();
         assert_eq!(
@@ -2813,30 +3103,48 @@ mod tests {
             ("lib/one.ts::one", "lib/one.ts"),
             ("lib/two.ts::two", "lib/two.ts"),
         ] {
-            submit(&graph, &dir, sym_id, "### Summary\nS.\n### Behavior\nB.\n").unwrap();
-            submit(&graph, &dir, file_id, "A helper file.").unwrap();
+            submit(
+                &graph,
+                &dir,
+                sym_id,
+                "### Summary\nDoes one small, specific job.\n### Behavior\nRuns without any side effects.\n",
+            )
+            .unwrap();
+            submit(&graph, &dir, file_id, "A small file of helper functions.").unwrap();
         }
-        submit_rollup(&graph, &dir, "lib", "Shared helpers.").unwrap();
+        submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "Small shared helper functions for this module.",
+        )
+        .unwrap();
         submit(
             &graph,
             &dir,
             "app/submit/page.tsx::Page",
-            "### Summary\nS.\n### Behavior\nB.\n",
+            "### Summary\nRenders the artwork submission form.\n### Behavior\nSubmits data to the API on save.\n",
         )
         .unwrap();
-        submit(&graph, &dir, "app/submit/page.tsx", "The submit page.").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "app/submit/page.tsx",
+            "The artwork submission page for competitors.",
+        )
+        .unwrap();
         submit(
             &graph,
             &dir,
             "app/api/submit-artwork/route.ts::POST",
-            "### Summary\nS.\n### Behavior\nB.\n",
+            "### Summary\nAccepts an artwork submission request.\n### Behavior\nPersists the submission to storage.\n",
         )
         .unwrap();
         submit(
             &graph,
             &dir,
             "app/api/submit-artwork/route.ts",
-            "The submit-artwork route.",
+            "The API route that accepts artwork submissions.",
         )
         .unwrap();
         submit_feature(
@@ -2844,14 +3152,14 @@ mod tests {
             &dir,
             &route_literals,
             "app/submit/page.tsx",
-            "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
+            "# Artwork submission\n## Summary\nLets an artist submit artwork for judging.\n",
         )
         .unwrap();
         submit_system(
             &graph,
             &dir,
             &route_literals,
-            "# TalentTrail\n## Summary\nA competition platform.\n",
+            "# TalentTrail\n## Summary\nA platform for running art competitions.\n",
         )
         .unwrap();
 
@@ -2893,5 +3201,188 @@ mod tests {
         assert!(!within_scope("lib/email.ts", "lib/email"));
         assert!(!within_scope("lib/email-utils/x.ts", "lib/email"));
         assert!(within_scope("anything", ""));
+    }
+
+    #[test]
+    fn prose_smells_flags_cop_out_phrases_and_short_text_but_not_real_prose() {
+        assert_eq!(
+            prose_smells("Returns the cached client. See the source for details."),
+            vec!["cop_out_phrase"]
+        );
+        assert_eq!(prose_smells("Does one thing."), vec!["suspiciously_short"]);
+        assert!(
+            prose_smells(
+                "Formats a date string into a human-readable form, returning \
+                 a fallback for invalid input."
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn file_spec_smells_catches_the_real_pre_m5_stub_pattern() {
+        // The exact shape found auditing two real pre-M5 specs: every
+        // symbol's prose is a template stub ("<name> does its job." /
+        // "See source."), and every symbol shares an identical,
+        // non-empty dependency list (the file-wide-attribution bug).
+        // dependency_lines needs each symbol's own source text on disk
+        // (see read_symbol_text), so this needs a real temp dir, the same
+        // pattern depends_on_is_scoped_to_what_each_symbol_actually_uses
+        // uses.
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-smell-fixture",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let a_content = "import { helper } from './util';\n\nexport function one() {\n  helper();\n}\n\nexport function two() {\n  helper();\n}\n";
+        let util_content = "export function helper(): void {}\n";
+        for (rel, content) in [("a.ts", a_content), ("util.ts", util_content)] {
+            std::fs::write(dir.join(rel), content).unwrap();
+        }
+        let extractions = vec![
+            crate::graph::extract_and_hash("a.ts", a_content),
+            crate::graph::extract_and_hash("util.ts", util_content),
+        ];
+        let mut graph = Graph::build(extractions);
+        let file_imports = crate::imports::extract_imports(a_content, "a.ts");
+        let resolved = file_imports
+            .imports
+            .iter()
+            .map(|imp| crate::resolve::ResolvedImport {
+                from_file: "a.ts".to_string(),
+                specifier: imp.specifier.clone(),
+                imported_name: imp.imported_name.clone(),
+                target: graph.find(&format!(
+                    "{}.ts::{}",
+                    imp.specifier.trim_start_matches("./"),
+                    imp.imported_name
+                )),
+            })
+            .collect();
+        graph.set_resolved_imports(resolved);
+        let file_id = graph.find("a.ts").unwrap();
+
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair::default(),
+            symbols: vec![
+                ("a.ts::one".to_string(), HashPair::default()),
+                ("a.ts::two".to_string(), HashPair::default()),
+            ],
+            file_summary: "a.ts summary.".to_string(),
+            sections: vec![
+                (
+                    "a.ts::one".to_string(),
+                    SymbolProse {
+                        summary: "one does its job.".to_string(),
+                        behavior: "See source.".to_string(),
+                    },
+                ),
+                (
+                    "a.ts::two".to_string(),
+                    SymbolProse {
+                        summary: "two does its job.".to_string(),
+                        behavior: "See source.".to_string(),
+                    },
+                ),
+            ],
+        };
+
+        let mut smells = file_spec_smells(&graph, &dir, file_id, &spec);
+        smells.sort();
+        assert_eq!(
+            smells,
+            vec![
+                "cop_out_phrase",
+                "identical_dependencies_across_symbols",
+                "suspiciously_short"
+            ]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn file_spec_smells_is_empty_for_real_looking_prose_with_distinct_dependencies() {
+        let graph = build_graph_from_sources(&[(
+            "a.ts",
+            "export function one(): void {}\nexport function two(): void {}\n",
+        )]);
+        let file_id = graph.find("a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair::default(),
+            symbols: vec![
+                ("a.ts::one".to_string(), HashPair::default()),
+                ("a.ts::two".to_string(), HashPair::default()),
+            ],
+            file_summary: "Two small, unrelated utility functions used across the app.".to_string(),
+            sections: vec![
+                (
+                    "a.ts::one".to_string(),
+                    SymbolProse {
+                        summary: "Does the first specific thing this file needs.".to_string(),
+                        behavior: "Runs synchronously with no side effects at all.".to_string(),
+                    },
+                ),
+                (
+                    "a.ts::two".to_string(),
+                    SymbolProse {
+                        summary: "Does a second, unrelated specific thing.".to_string(),
+                        behavior: "Also runs synchronously with no side effects.".to_string(),
+                    },
+                ),
+            ],
+        };
+        assert!(file_spec_smells(&graph, Path::new("/nonexistent"), file_id, &spec).is_empty());
+    }
+
+    #[test]
+    fn body_smells_checks_only_the_summary_section_of_a_feature_or_rollup_body() {
+        assert_eq!(
+            body_smells(
+                "# Title\n## Summary\nSee the route handler for details.\n## How it works\n1. Does something else entirely, at length, in this other section.\n"
+            ),
+            vec!["cop_out_phrase"]
+        );
+        assert!(
+            body_smells(
+                "# Title\n## Summary\nLets a registered competitor submit their artwork \
+                 for judging in a competition.\n## How it works\n1. Step one.\n"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn coverage_includes_a_current_but_smelly_file_in_pending() {
+        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "coverage3");
+        submit(
+            &graph,
+            &dir,
+            "lib/supabase.ts::getSupabase",
+            "### Summary\nGetSupabase does its job.\n### Behavior\nSee the source for details.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "lib/supabase.ts", "lib/supabase.ts summary.").unwrap();
+
+        let items = coverage(&graph, &dir, &route_literals, Some("lib/supabase.ts")).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].status, "current");
+        assert!(!items[0].smells.is_empty());
+
+        let summary = summarize(&items);
+        assert_eq!(summary.current, 1);
+        assert_eq!(summary.smelly, 1);
+
+        let pending = prioritize(items);
+        assert_eq!(
+            pending.len(),
+            1,
+            "a current-but-smelly document must still show up as pending"
+        );
+        assert_eq!(pending[0].status, "current");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

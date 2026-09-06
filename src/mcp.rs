@@ -47,12 +47,20 @@ pub struct CoverageItemResponse {
     pub id: String,
     /// One of `"file"` | `"rollup"` | `"feature"` | `"system"`.
     pub kind: String,
-    /// One of `"missing"` | `"stale"` (never `"current"` — `pending` only
-    /// ever lists what still needs attention).
+    /// One of `"missing"` | `"stale"` | `"current"`. `"current"` only
+    /// appears here when `smells` is non-empty -- a hash-current document
+    /// that a deterministic quality check still flagged (see `smells`).
     pub status: String,
     /// Import fan-in — how many other files import something from this
     /// one. Always 0 for non-file kinds.
     pub fan_in: usize,
+    /// Deterministic quality smells found in this document's current
+    /// content (e.g. `"cop_out_phrase"`, `"suspiciously_short"`,
+    /// `"identical_dependencies_across_symbols"`) — independent of
+    /// `status`, since hash-based staleness only verifies inputs haven't
+    /// moved, never that the prose was ever meaningful. Empty for a
+    /// genuinely clean document.
+    pub smells: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -60,8 +68,12 @@ pub struct CoverageResponse {
     pub current: usize,
     pub stale: usize,
     pub missing: usize,
-    /// Every non-current document, in priority order — see
-    /// `ARCHITECTURE.md`'s "Generation priority".
+    /// Count of documents (of any status) carrying at least one quality
+    /// smell — not exclusive with `current`.
+    pub smelly: usize,
+    /// Every document still needing attention — non-current, or
+    /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
+    /// "Generation priority" and "Quality smells".
     pub pending: Vec<CoverageItemResponse>,
 }
 
@@ -103,6 +115,13 @@ pub struct SpecResponse {
     /// compute; see `ARCHITECTURE.md`'s "Ordering" ("plus which inputs
     /// moved (deterministic, off the graph)").
     pub changed: Vec<String>,
+    /// Deterministic quality smells found in `content` itself (e.g.
+    /// `"cop_out_phrase"`, `"suspiciously_short"`) — can be non-empty even
+    /// when `status` is `"current"`, since hash-based staleness only
+    /// verifies inputs haven't moved, never that the prose was ever
+    /// meaningful. Always empty when `status` is `"missing"`. See
+    /// `ARCHITECTURE.md`'s "Quality smells".
+    pub smells: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -496,6 +515,7 @@ impl CodeOwlServer {
                 docstring,
                 content: None,
                 changed: Vec::new(),
+                smells: Vec::new(),
             }
         }
 
@@ -505,6 +525,7 @@ impl CodeOwlServer {
             else {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
+            let smells = crate::spec::body_smells(&spec.body);
             let route_literals = self.graph.route_literals();
             let current_modules = crate::spec::current_module_hashes(&self.graph, &self.root)
                 .map_err(|e| e.to_string())?;
@@ -528,6 +549,7 @@ impl CodeOwlServer {
                 docstring: None,
                 content: Some(spec.body),
                 changed,
+                smells,
             }));
         }
         if let Some(dir_path) = req.id.strip_prefix("rollup:") {
@@ -536,6 +558,7 @@ impl CodeOwlServer {
             else {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
+            let smells = crate::spec::body_smells(&spec.body);
             let current = crate::spec::current_file_hashes(&self.graph, &self.root, dir_path)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.files);
@@ -551,6 +574,7 @@ impl CodeOwlServer {
                 docstring: None,
                 content: Some(spec.body),
                 changed,
+                smells,
             }));
         }
         if let Some(slug) = req.id.strip_prefix("feature:") {
@@ -559,6 +583,7 @@ impl CodeOwlServer {
             else {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
+            let smells = crate::spec::body_smells(&spec.body);
             let route_literals = self.graph.route_literals();
             let entry_points = crate::features::enumerate_entry_points(&self.graph, route_literals);
             let entry = entry_points
@@ -582,6 +607,7 @@ impl CodeOwlServer {
                 docstring: None,
                 content: Some(spec.body),
                 changed,
+                smells,
             }));
         }
 
@@ -620,6 +646,10 @@ impl CodeOwlServer {
                 };
                 let changed =
                     crate::spec::symbol_changes(&self.graph, &self.root, file_id, symbol, &stored);
+                let mut smells = crate::spec::prose_smells(&prose.summary);
+                smells.extend(crate::spec::prose_smells(&prose.behavior));
+                smells.sort();
+                smells.dedup();
                 Ok(Json(SpecResponse {
                     id: symbol.id.clone(),
                     status: if changed.is_empty() {
@@ -635,6 +665,7 @@ impl CodeOwlServer {
                         prose.summary, prose.behavior
                     )),
                     changed,
+                    smells,
                 }))
             }
             crate::graph::Node::File(file) => {
@@ -644,6 +675,7 @@ impl CodeOwlServer {
                     return Ok(Json(missing(file.id.clone(), String::new(), None)));
                 };
                 let changed = crate::spec::file_changes(&self.graph, id, &spec.file);
+                let smells = crate::spec::file_spec_smells(&self.graph, &self.root, id, &spec);
                 Ok(Json(SpecResponse {
                     id: file.id.clone(),
                     status: if changed.is_empty() {
@@ -654,8 +686,9 @@ impl CodeOwlServer {
                     .to_string(),
                     signature: String::new(),
                     docstring: None,
-                    content: Some(spec.file_summary),
+                    content: Some(spec.file_summary.clone()),
                     changed,
+                    smells,
                 }))
             }
         }
@@ -802,7 +835,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing. `pending` lists every non-current one, its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: the system spec, then feature specs, then files by descending import fan-in, then everything else (rollups). Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: the system spec, then feature specs, then files by descending import fan-in, then everything else (rollups). Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -824,12 +857,14 @@ impl CodeOwlServer {
                 kind: i.kind,
                 status: i.status,
                 fan_in: i.fan_in,
+                smells: i.smells,
             })
             .collect();
         Ok(Json(CoverageResponse {
             current: summary.current,
             stale: summary.stale,
             missing: summary.missing,
+            smelly: summary.smelly,
             pending,
         }))
     }
@@ -1006,6 +1041,58 @@ mod tests {
     // --- M8: completeness & correction mechanics ------------------------
 
     #[tokio::test]
+    async fn a_cop_out_symbol_spec_is_flagged_smelly_via_get_spec_and_coverage_even_though_current()
+    {
+        let server = test_server(&[("a.ts", "export function one(): void {}\n")]);
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts::one".to_string(),
+                content:
+                    "### Summary\none does its job.\n### Behavior\nSee the source for details.\n"
+                        .to_string(),
+            }))
+            .await
+            .unwrap();
+        // Give the file itself a clean summary so the whole file's own
+        // status is genuinely "current" -- isolating this test to the
+        // "current but smelly because of one bad symbol" case, not also
+        // exercising "the file's own summary was never submitted."
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts".to_string(),
+                content: "A small file with one exported helper function.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let spec = server
+            .get_spec(Parameters(IdRequest {
+                id: "a.ts::one".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            spec.0.status, "current",
+            "hashes match -- nothing has moved"
+        );
+        assert_eq!(spec.0.smells, vec!["cop_out_phrase"]);
+
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .await
+            .unwrap();
+        let item = coverage
+            .0
+            .pending
+            .iter()
+            .find(|i| i.id == "a.ts")
+            .expect("the smelly file should still show up in pending despite being current");
+        assert_eq!(item.status, "current");
+        assert!(!item.smells.is_empty());
+        assert!(coverage.0.smelly >= 1);
+    }
+
+    #[tokio::test]
     async fn get_spec_coverage_orders_pending_items_and_a_budgeted_walk_stops_early() {
         let server = test_server(&[
             ("util.ts", "export function helper(): void {}\n"),
@@ -1065,9 +1152,9 @@ mod tests {
                     other => panic!("expected a Symbol or File task, got {other:?}"),
                 };
                 let content = if matches!(task, SpecTaskResponse::Symbol { .. }) {
-                    "### Summary\nS.\n### Behavior\nB.\n".to_string()
+                    "### Summary\nDoes one small, specific job.\n### Behavior\nRuns without any side effects.\n".to_string()
                 } else {
-                    "A helper file.".to_string()
+                    "A small file of helper functions.".to_string()
                 };
                 server
                     .submit_spec(Parameters(SubmitSpecRequest { id, content }))
@@ -1172,15 +1259,15 @@ mod tests {
         for (sym_id, sym_content, file_id, file_content) in [
             (
                 "user.ts::sumThree",
-                "### Summary\nAdds three numbers.\n### Behavior\nCalls add then adds c.\n",
+                "### Summary\nAdds together three given numbers.\n### Behavior\nCalls add then adds the third value.\n",
                 "user.ts",
-                "Sums three numbers via add.",
+                "Sums three numbers together via the add helper.",
             ),
             (
                 "other.ts::noop",
-                "### Summary\nDoes nothing.\n### Behavior\nNo-op.\n",
+                "### Summary\nDoes nothing at all.\n### Behavior\nIntentionally performs no operation.\n",
                 "other.ts",
-                "An intentional no-op.",
+                "An intentional, deliberate no-op function.",
             ),
         ] {
             server
@@ -1303,15 +1390,15 @@ mod tests {
         for (sym_id, sym_content, file_id, file_content) in [
             (
                 "lib/math.ts::add",
-                "### Summary\nAdds two numbers.\n### Behavior\nReturns a + b.\n",
+                "### Summary\nAdds together two given numbers.\n### Behavior\nReturns the sum of its two arguments.\n",
                 "lib/math.ts",
-                "Numeric addition helper.",
+                "A small numeric addition helper module.",
             ),
             (
                 "lib/sibling.ts::noop",
-                "### Summary\nDoes nothing.\n### Behavior\nNo-op.\n",
+                "### Summary\nDoes nothing at all.\n### Behavior\nIntentionally performs no operation.\n",
                 "lib/sibling.ts",
-                "An intentional no-op.",
+                "An intentional, deliberate no-op function.",
             ),
         ] {
             server
@@ -1343,7 +1430,7 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: rollup_id.clone(),
-                content: "Small numeric/no-op helpers.".to_string(),
+                content: "Small numeric and no-op helper functions.".to_string(),
             }))
             .await
             .unwrap();
@@ -1463,7 +1550,7 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: "app/widget/page.tsx".to_string(),
-                content: "The widget page.".to_string(),
+                content: "The page that renders the widget for visitors.".to_string(),
             }))
             .await
             .unwrap();
@@ -1569,7 +1656,7 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: id.clone(),
-                content: "### Summary\nDoubles a number.\n### Behavior\nMultiplies by two."
+                content: "### Summary\nDoubles the given number.\n### Behavior\nMultiplies its input by two and returns it."
                     .to_string(),
             }))
             .await
@@ -1582,7 +1669,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(spec.0.status, "current");
-        assert!(spec.0.content.unwrap().contains("Multiplies by two."));
+        assert!(
+            spec.0
+                .content
+                .unwrap()
+                .contains("Multiplies its input by two and returns it.")
+        );
 
         // Re-running generate with source unchanged must skip the
         // now-current symbol and move on to the file-level task.
@@ -1765,15 +1857,15 @@ mod tests {
         for (sym_id, sym_content, file_id, file_content) in [
             (
                 "lib/one.ts::one",
-                "### Summary\nS1.\n### Behavior\nB1.\n",
+                "### Summary\nDoes the first specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
                 "lib/one.ts",
-                "Does one thing.",
+                "Performs one specific, deliberate task.",
             ),
             (
                 "lib/two.ts::two",
-                "### Summary\nS2.\n### Behavior\nB2.\n",
+                "### Summary\nDoes a second, different thing.\n### Behavior\nAlso runs synchronously with no side effects.\n",
                 "lib/two.ts",
-                "Does two things.",
+                "Performs a couple of related tasks.",
             ),
         ] {
             server
@@ -1815,11 +1907,11 @@ mod tests {
             vec![
                 RollupFile {
                     file: "lib/one.ts".to_string(),
-                    summary: "Does one thing.".to_string(),
+                    summary: "Performs one specific, deliberate task.".to_string(),
                 },
                 RollupFile {
                     file: "lib/two.ts".to_string(),
-                    summary: "Does two things.".to_string(),
+                    summary: "Performs a couple of related tasks.".to_string(),
                 },
             ]
         );
@@ -1827,7 +1919,7 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: id.clone(),
-                content: "Small shared helpers.".to_string(),
+                content: "Small shared helper functions for this module.".to_string(),
             }))
             .await
             .unwrap();
@@ -1837,7 +1929,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(spec.0.status, "current");
-        assert_eq!(spec.0.content.unwrap(), "Small shared helpers.");
+        assert_eq!(
+            spec.0.content.unwrap(),
+            "Small shared helper functions for this module."
+        );
 
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
@@ -1883,7 +1978,7 @@ mod tests {
                     server
                         .submit_spec(Parameters(SubmitSpecRequest {
                             id: id.clone(),
-                            content: "### Summary\nS.\n### Behavior\nB.\n".to_string(),
+                            content: "### Summary\nDoes one small, specific job.\n### Behavior\nRuns without any side effects.\n".to_string(),
                         }))
                         .await
                         .unwrap();
@@ -1893,7 +1988,7 @@ mod tests {
                     server
                         .submit_spec(Parameters(SubmitSpecRequest {
                             id: id.clone(),
-                            content: "A helper file.".to_string(),
+                            content: "A small file of helper functions.".to_string(),
                         }))
                         .await
                         .unwrap();
@@ -1903,7 +1998,7 @@ mod tests {
                     server
                         .submit_spec(Parameters(SubmitSpecRequest {
                             id: id.clone(),
-                            content: "Shared helpers.".to_string(),
+                            content: "Small shared helper functions for this module.".to_string(),
                         }))
                         .await
                         .unwrap();
@@ -1914,7 +2009,7 @@ mod tests {
                         .submit_spec(Parameters(SubmitSpecRequest {
                             id: id.clone(),
                             content:
-                                "# Artwork submission\n## Summary\nLets an artist submit artwork.\n"
+                                "# Artwork submission\n## Summary\nLets an artist submit artwork for judging.\n"
                                     .to_string(),
                         }))
                         .await
@@ -1940,7 +2035,7 @@ mod tests {
             modules,
             vec![ModuleSummary {
                 dir: "lib".to_string(),
-                summary: "Shared helpers.".to_string(),
+                summary: "Small shared helper functions for this module.".to_string(),
             }]
         );
         assert_eq!(features.len(), 1);
@@ -1958,7 +2053,8 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: system_id.clone(),
-                content: "# TalentTrail\n## Summary\nA competition platform.\n".to_string(),
+                content: "# TalentTrail\n## Summary\nA platform for running art competitions.\n"
+                    .to_string(),
             }))
             .await
             .unwrap();
@@ -1970,7 +2066,12 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(spec.0.status, "current");
-        assert!(spec.0.content.unwrap().contains("A competition platform."));
+        assert!(
+            spec.0
+                .content
+                .unwrap()
+                .contains("A platform for running art competitions.")
+        );
 
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {

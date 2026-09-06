@@ -121,6 +121,15 @@ Repeat the following until `get_next_spec_task` returns `null`:
    what the actual source diff affects. Don't silently discard a human's
    correction just because you're rewriting the section — read it first,
    the same way you'd read `source`.
+
+   **You may see the same target offered again even though nothing in
+   `source`/`dependencies` looks different from last time, and `prior` is
+   `null`.** That means the previously-submitted content failed a
+   deterministic quality check (a "see the source" cop-out, or prose too
+   short to be real) — not that the source changed again. Write genuinely
+   better content this time: more specific, actually describing behavior.
+   Resubmitting similarly thin content will just get offered back to you
+   again.
 4. Call `submit_spec` with `id` set to the task's `id` and `content` set
    to what you just wrote.
 5. Go back to step 1.
