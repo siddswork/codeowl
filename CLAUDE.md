@@ -21,16 +21,11 @@ CodeOwl extracts a structural graph from a codebase and serves LLM-authored spec
 
 **Phase 1 complete** — `7661141` ("Mark M11 validated by sample; Phase 1 complete"). M1–M10 shipped; **M11 "validated by sample"** — owner reviewed the pilot feature specs and judged them clearly good. Clincher: a spec correctly reported a flow as *dormant* after it was disabled by a one-line flag flip (`b6d8965f` in the pilot). Full corpus generation deliberately stopped at ~15% — the rest is mechanical volume.
 
-### In progress — ONE uncommitted change
+### Where we stopped
 
-**`ROADMAP.md` + `CLAUDE.md` are modified on top of `7661141`, NOT committed** (`ROADMAP.md` staged; `CLAUDE.md` partly staged + this handoff rewrite unstaged — `git add -A` before committing). This is the detailed Phase 2 plan + 8 review fixes folded in. Content is final and reviewed; it just needs the owner's go-ahead to commit (per the workflow rule — only commit/push when a message says "commit" or "push").
+Phase 2 is planned and committed (`2b43810` — Phase 2 detailed plan + 8 review fixes). **No Phase 2 code has been written yet.** Next work is M12.
 
-Proposed commit message:
-> **Plan Phase 2's polyglot core (M12–M15) and fold in the review**
->
-> LanguagePack→StackPack, cache versioning as M12's first task, optional feature layer + M13-pre spike, FlowEdge resolution as pack hooks, classify()→FileRole, honest "identical spec output" (not cache) and test-churn budget. Full M1–M11 coupling inventory + a "where the risk concentrates" note on the feature layer.
-
-The Phase 2 plan itself (now in `ROADMAP.md` "Phase 2 — the polyglot core first" — read the whole section before starting):
+The Phase 2 plan (now in `ROADMAP.md` "Phase 2 — the polyglot core first" — read the whole section before starting):
 - **M12** (S) — interim de-coupling. **First job: add a cache `format_version: u32`** to the persisted index/graph; mismatch/absence → full rebuild. This fixes a **latent M11 bug**: a `#[serde(default)]` field reads empty on an old `.codeowl/` cache with no rebuild, yielding wrong data. Then `is_test_path`/`is_ui_primitive` → a `classify(path) -> FileRole` seam (`Domain|Primitive|Test|Generated`); doc-mark `graph.rs`'s 4 pack-contributed fields; `SourceKind` enum for the `.sql` dispatch. No behavior change — pilot regenerates identical spec files.
 - **M13-pre** (XS) — paper spike: what would CodeOwl's own feature specs be? Drives making the feature layer *optional* in the trait.
 - **M13** (M–L) — `trait StackPack` (renamed from `LanguagePack` — the unit is a *stack*: TS + SQL + Next + Supabase, not one language); move `extract/imports/resolve/schema/features` behind `TypeScriptNextStack`. `graph.rs`'s 4 typed edge fields → one generic `flow_edges` resolved via `pack.resolve_flow_edge`; `assemble_participants` becomes generic traversal + `admits_to_core` hook. `feature_model() -> Option<&dyn FeatureModel>`. ~97 pack call sites = real test churn, absorbed via free-function shims. Spec files + `get_spec_coverage` stay byte-identical to M11; the `.codeowl/graph` JSON is *expected* to change.
@@ -47,12 +42,11 @@ The Phase 2 plan itself (now in `ROADMAP.md` "Phase 2 — the polyglot core firs
 
 ### Exact next step to resume
 
-1. If the owner says "commit"/"push": `git add -A` (`CLAUDE.md` + `ROADMAP.md`), commit with the message above, push.
-2. Then **start M12**: TDD. Failing test first — an old persisted index/graph JSON with no `format_version` (or a wrong one) must trigger a full rebuild, not `#[serde(default)]`-silent partial reuse. Add `format_version: u32` to the persisted `RepoIndex` and `Graph`, bump on read-mismatch. `src/index.rs` + `src/graph.rs`. Keep it the smallest standalone commit; the `classify()`/doc-mark/`SourceKind` parts of M12 are separate commits after it.
+**Start M12**: TDD. Failing test first — an old persisted index/graph JSON with no `format_version` (or a wrong one) must trigger a full rebuild, not `#[serde(default)]`-silent partial reuse. Add `format_version: u32` to the persisted `RepoIndex` and `Graph`, bump on read-mismatch. `src/index.rs` + `src/graph.rs`. Keep it the smallest standalone commit; the `classify()`/doc-mark/`SourceKind` parts of M12 are separate commits after it.
 
 ### State
 
-`cargo test`: **134 unit + 10 integration**, all green (`tests/`: extraction 2, feature_components 1, incremental 3, schema 4). `clippy -D warnings` / `fmt --check` were clean at the last code commit (`2dd2b90`); the only working-tree change is docs (`ROADMAP.md` + this `CLAUDE.md`). `origin/master` = `HEAD` = `7661141`, with the Phase 2-plan edits uncommitted on top, pending approval.
+`cargo test`: **134 unit + 10 integration**, all green (`tests/`: extraction 2, feature_components 1, incremental 3, schema 4). `clippy -D warnings` / `fmt --check` were clean at the last code commit (`2dd2b90`); no code has changed since. `origin/master` = `HEAD` = `2b43810` (Phase 2 plan). Working tree clean apart from this handoff touch-up.
 
 ## Hard invariants
 
