@@ -11,9 +11,16 @@
 //! enumerating the source file's whole export list to chase through — all
 //! three are left untracked here rather than guessed at. See `CLAUDE.md`'s
 //! pending decisions.
+//!
+//! **TypeScript + Next.js pack — Phase 2 seam here.** The grammar and the
+//! `import_statement`/`export_statement` node handling are TypeScript's; a
+//! second language needs its own import parser. See `ROADMAP.md`'s "Stack
+//! modularization".
 
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
+
+use crate::parse::ts_parser;
 
 /// One named import: `import { <imported_name> } from '<specifier>'`. A
 /// local alias (`import { Foo as Bar }`), if any, is purely a local rename
@@ -42,16 +49,7 @@ pub struct FileImports {
 /// Parse `source` (the contents of `rel_path`) and extract its named
 /// imports and named re-exports.
 pub fn extract_imports(source: &str, rel_path: &str) -> FileImports {
-    let language = if rel_path.ends_with(".tsx") {
-        tree_sitter_typescript::LANGUAGE_TSX
-    } else {
-        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-    };
-
-    let mut parser = Parser::new();
-    parser
-        .set_language(&language.into())
-        .expect("bundled tree-sitter-typescript grammar should always load");
+    let mut parser = ts_parser(rel_path);
 
     let Some(tree) = parser.parse(source, None) else {
         return FileImports::default();

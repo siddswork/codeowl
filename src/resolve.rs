@@ -10,6 +10,11 @@
 //! target file might be a barrel forwarding it via a named re-export (see
 //! `imports.rs`) — we chase through those, depth-capped, until we find a
 //! real declaration or run out of re-exports to follow.
+//!
+//! **TypeScript + Next.js pack — Phase 2 seam here.** `build_resolver`'s
+//! extension list and the `tsconfig.json` alias discovery are Node/TS
+//! resolution semantics. A second language needs its own module resolver
+//! (or an LSP). See `ROADMAP.md`'s "Stack modularization".
 
 use std::collections::HashMap;
 use std::path::Path;

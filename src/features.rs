@@ -5,13 +5,20 @@
 //! narrow (only `fetch(...)` calls, only `/api/...` literals, only a
 //! Next.js path-convention join), not general call-graph analysis, which
 //! stays deferred past Phase 1 (see `ARCHITECTURE.md`'s open question 3).
+//!
+//! **TypeScript + Next.js pack — Phase 2 seam here.** This layer is the
+//! most framework-coupled of all: the `fetch("/api/...")` convention and
+//! the Next.js App Router path join are specific to this one stack. A
+//! different framework needs a different entry-point + route resolver. See
+//! `ROADMAP.md`'s "Stack modularization".
 
 use std::collections::{HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::graph::{Graph, SymbolId};
+use crate::parse::ts_parser;
 
 /// One `fetch("/api/...")` call site found anywhere in a file — not just
 /// top-level, since these calls are almost always inside event handlers or
@@ -29,16 +36,7 @@ pub struct RouteLiteral {
 /// walk — a `fetch` call can be arbitrarily nested) looking for
 /// `fetch(<literal>)` call expressions.
 pub fn extract_route_literals(source: &str, rel_path: &str) -> Vec<RouteLiteral> {
-    let language = if rel_path.ends_with(".tsx") {
-        tree_sitter_typescript::LANGUAGE_TSX
-    } else {
-        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-    };
-
-    let mut parser = Parser::new();
-    parser
-        .set_language(&language.into())
-        .expect("bundled tree-sitter-typescript grammar should always load");
+    let mut parser = ts_parser(rel_path);
 
     let Some(tree) = parser.parse(source, None) else {
         return Vec::new();

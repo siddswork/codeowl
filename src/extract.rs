@@ -1,6 +1,11 @@
 //! Walks a single TypeScript/TSX source file with tree-sitter and pulls out
 //! its top-level `Symbol`s.
 //!
+//! **TypeScript + Next.js pack — Phase 2 seam here.** The tree-sitter
+//! grammar and every `node.kind()` string below are TypeScript-specific; a
+//! second language needs its own extractor. See `ROADMAP.md`'s "Stack
+//! modularization".
+//!
 //! Deliberately *not* a recursive walk of every node in the tree: we only
 //! look at `program`'s direct children (unwrapping `export` statements) and,
 //! for classes, one level into `class_body`. Nested closures, callbacks
@@ -9,9 +14,10 @@
 //! generation only recurses containment edges between *symbols*, not every
 //! syntax node.
 
-use tree_sitter::{Node, Parser};
+use tree_sitter::Node;
 
 use crate::hash::hash_text;
+use crate::parse::ts_parser;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its symbols.
@@ -19,16 +25,7 @@ use crate::symbol::{ExtractedSymbol, SymbolKind};
 /// `rel_path`'s extension picks the grammar: `.tsx` gets JSX support,
 /// everything else parses as plain TypeScript.
 pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
-    let language = if rel_path.ends_with(".tsx") {
-        tree_sitter_typescript::LANGUAGE_TSX
-    } else {
-        tree_sitter_typescript::LANGUAGE_TYPESCRIPT
-    };
-
-    let mut parser = Parser::new();
-    parser
-        .set_language(&language.into())
-        .expect("bundled tree-sitter-typescript grammar should always load");
+    let mut parser = ts_parser(rel_path);
 
     // `tree` owns the arena the whole `Node<'_>` chain below borrows from.
     // We never let a `Node` outlive this function — every value we push

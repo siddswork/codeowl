@@ -317,6 +317,11 @@ fn rel_path(root: &Path, path: &Path) -> String {
 /// handle; see `ROADMAP.md`'s M1 scope. Public so `main.rs`, the catch-up
 /// pass, and the file watcher all share exactly one definition of what
 /// counts as source.
+///
+/// **TypeScript + Next.js pack — Phase 2 seam here.** This is the one
+/// stack-coupled line in an otherwise language-agnostic module; M11's
+/// `src/lang.rs` folds it in with the grammar pick from `parse.rs` and the
+/// resolver extension list. See `ROADMAP.md`'s "Stack modularization".
 pub fn is_extractable(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
