@@ -115,14 +115,20 @@ pub struct FileExtraction {
 }
 
 /// Extract `source` (already read from `rel_path`) and hash it in one
-/// step — the shape `main.rs`'s repo walk and every multi-file test fixture
-/// in this codebase wants, so it's a real (non-test-only) helper rather
-/// than duplicated per call site.
+/// step — the shape every multi-file test fixture in this codebase wants,
+/// so it's a real (non-test-only) helper rather than duplicated per call
+/// site. Dispatches on extension: `.sql` goes to `schema.rs`, everything
+/// else to the TypeScript extractor.
 pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
+    let symbols = if rel_path.ends_with(".sql") {
+        crate::schema::extract_tables(source, rel_path)
+    } else {
+        extract_file(source, rel_path)
+    };
     FileExtraction {
         rel_path: rel_path.to_string(),
         source_hash: hash_text(source),
-        symbols: extract_file(source, rel_path),
+        symbols,
     }
 }
 
@@ -139,6 +145,11 @@ pub struct Graph {
     /// `get_next_spec_task` call) the same way `imports` is: computed once
     /// at graph-build time, persisted with everything else.
     route_literals: Vec<crate::features::RouteLiteral>,
+    /// Every `.from("<table>")` call site found across the repo (M10) —
+    /// stored the same way `route_literals` is, resolved against the
+    /// `SymbolKind::Table` nodes `schema.rs` extracts.
+    #[serde(default)]
+    table_refs: Vec<crate::features::TableRef>,
 }
 
 impl Graph {
@@ -209,6 +220,7 @@ impl Graph {
             by_id,
             imports: Vec::new(),
             route_literals: Vec::new(),
+            table_refs: Vec::new(),
         }
     }
 
@@ -292,6 +304,28 @@ impl Graph {
 
     pub fn set_route_literals(&mut self, route_literals: Vec<crate::features::RouteLiteral>) {
         self.route_literals = route_literals;
+    }
+
+    pub fn table_refs(&self) -> &[crate::features::TableRef] {
+        &self.table_refs
+    }
+
+    pub fn set_table_refs(&mut self, table_refs: Vec<crate::features::TableRef>) {
+        self.table_refs = table_refs;
+    }
+
+    /// Every file with a `.from("<table>")` call that resolves to `table_id`
+    /// (a `SymbolKind::Table` node) — the schema-side answer to "what app
+    /// code touches this table", surfaced through `get_callers` (M10).
+    pub fn table_callers(&self, table_id: &str) -> Vec<crate::features::TableRef> {
+        let Some(target) = self.find(table_id) else {
+            return Vec::new();
+        };
+        self.table_refs
+            .iter()
+            .filter(|r| crate::features::resolve_table_ref(self, &r.table) == Some(target))
+            .cloned()
+            .collect()
     }
 
     pub fn len(&self) -> usize {

@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::{Graph, SymbolView};
 use crate::search::SearchMatch;
+use crate::symbol::SymbolKind;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IdRequest {
@@ -459,7 +460,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List every file that imports this symbol by name, via a resolved reference edge (M2)."
+        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge (M2); for a SQL table node, the files with a `.from(\"table\")` call that resolves to it (M10)."
     )]
     async fn get_callers(
         &self,
@@ -469,6 +470,22 @@ impl CodeOwlServer {
         let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
+
+        if graph
+            .get_symbol(id)
+            .is_some_and(|s| s.kind == SymbolKind::Table)
+        {
+            let callers = graph
+                .table_callers(&req.id)
+                .into_iter()
+                .map(|r| CallerInfo {
+                    from_file: r.from_file,
+                    imported_name: r.table,
+                })
+                .collect();
+            return Ok(Json(callers));
+        }
+
         let callers = graph
             .imports()
             .iter()
@@ -897,7 +914,10 @@ impl ServerHandler for CodeOwlServer {
              grep/file-reading on \"how is this wired\" questions. get_symbol gives a definition \
              and signature; get_callers / get_callees give the reference graph (\"what breaks if \
              I change this\"); search_code is a plain regex sweep (no semantic search in Phase \
-             1). The index tracks the working tree live -- files you edit during this session \
+             1). If the repo has a SQL schema, its CREATE TABLEs are indexed as `table` nodes \
+             (id \"<schema-file>::<table>\"): get_symbol lists a table's columns, and get_callers \
+             on it lists the files with a `.from(\"<table>\")` query against it. \
+             The index tracks the working tree live -- files you edit during this session \
              are re-parsed within about a second, no restart needed. \
              get_spec returns an LLM-authored prose spec for a symbol id, a file path, \
              \"feature:<slug>\" (a cross-cutting flow the import graph alone can't see, e.g. \
@@ -951,6 +971,7 @@ mod tests {
         let mut extractions = Vec::new();
         let mut file_imports = HashMap::new();
         let mut route_literals = Vec::new();
+        let mut table_refs = Vec::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -958,6 +979,7 @@ mod tests {
             extractions.push(crate::graph::extract_and_hash(rel, content));
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
             route_literals.extend(crate::features::extract_route_literals(content, rel));
+            table_refs.extend(crate::features::extract_table_refs(content, rel));
         }
 
         let mut graph = Graph::build(extractions);
@@ -965,6 +987,7 @@ mod tests {
         let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
         graph.set_route_literals(route_literals);
+        graph.set_table_refs(table_refs);
 
         CodeOwlServer::new(dir, graph)
     }

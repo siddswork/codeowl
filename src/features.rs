@@ -153,6 +153,95 @@ fn is_dynamic_segment(seg: &str) -> bool {
     seg.starts_with('[') && seg.ends_with(']')
 }
 
+/// One `.from("<table>")` call site — the Supabase/PostgREST convention for
+/// naming the table a query runs against (M10). Stored on `Graph` like
+/// `RouteLiteral`, resolved against the schema nodes `schema.rs` extracts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableRef {
+    pub from_file: String,
+    pub table: String,
+}
+
+/// Every `.from("<table>")` member call in `source`. Deliberately narrow,
+/// like `extract_route_literals`: the argument must be a single plain
+/// string literal shaped like a table name (`[a-z_][a-z0-9_]*`), which
+/// filters out `Array.from(...)` / `Buffer.from(...)` and any dynamic
+/// `.from(tableVar)`. A fuzzier ORM-aware matcher (`db.payments`,
+/// `Payment.findMany`) stays deferred — see `ROADMAP.md`'s M10 scope.
+pub fn extract_table_refs(source: &str, rel_path: &str) -> Vec<TableRef> {
+    let mut parser = ts_parser(rel_path);
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    walk_for_from(tree.root_node(), source, rel_path, &mut out);
+    out
+}
+
+fn walk_for_from(node: Node, source: &str, rel_path: &str, out: &mut Vec<TableRef>) {
+    if node.kind() == "call_expression"
+        && let Some(func) = node.child_by_field_name("function")
+        && func.kind() == "member_expression"
+        && func
+            .child_by_field_name("property")
+            .is_some_and(|p| text(p, source) == "from")
+        && !is_builtin_from_receiver(func, source)
+        && let Some(args) = node.child_by_field_name("arguments")
+        && let Some(first) = args.named_child(0)
+        && args.named_child(1).is_none()
+        && first.kind() == "string"
+        && let Some(table) = first.named_child(0).map(|frag| text(frag, source))
+        && is_table_name(table)
+    {
+        out.push(TableRef {
+            from_file: rel_path.to_string(),
+            table: table.to_string(),
+        });
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_from(child, source, rel_path, out);
+    }
+}
+
+fn is_table_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+        && s.chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// `Array.from(...)` / `Buffer.from(...)` / `Object.from...` — a `.from` on
+/// a global constructor, not a query builder. A Supabase client is always
+/// a lowercase-initial variable (`supabase`, `db`) or a call expression, so
+/// an uppercase-initial identifier receiver is the tell.
+fn is_builtin_from_receiver(member: Node, source: &str) -> bool {
+    member
+        .child_by_field_name("object")
+        .filter(|o| o.kind() == "identifier")
+        .and_then(|o| text(o, source).chars().next())
+        .is_some_and(|c| c.is_ascii_uppercase())
+}
+
+/// Resolve a table name to its schema node, by exact name match against the
+/// `SymbolKind::Table` symbols `schema.rs` produced. `None` for a name with
+/// no `CREATE TABLE` (a database view, or a typo) — the "resolves to a
+/// plausible candidate" bar from `ROADMAP.md`'s M10 validation, not a
+/// guarantee.
+pub fn resolve_table_ref(graph: &Graph, table: &str) -> Option<SymbolId> {
+    graph
+        .symbols()
+        .find(|s| s.kind == crate::symbol::SymbolKind::Table && table_name_of(&s.id) == table)
+        .and_then(|s| graph.find(&s.id))
+}
+
+fn table_name_of(symbol_id: &str) -> &str {
+    symbol_id.rsplit("::").next().unwrap_or(symbol_id)
+}
+
 /// One framework-enumerated entry point — a page, or an API route no page
 /// reaches via a resolved `fetch()` literal (a webhook, a cron target).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -439,5 +528,48 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn from_call_with_a_string_literal_is_extracted() {
+        let src = "async function f(db) { await db.from(\"payments\").select(\"*\"); }\n";
+        let refs = extract_table_refs(src, "route.ts");
+        assert_eq!(
+            refs,
+            vec![TableRef {
+                from_file: "route.ts".to_string(),
+                table: "payments".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn chained_and_nested_from_calls_are_all_found() {
+        let src = "async function f(db) {\n  const a = await db.from(\"a\").select();\n  if (a) { await db.from(\"b_two\").insert({}); }\n}\n";
+        let tables: Vec<String> = extract_table_refs(src, "r.ts")
+            .into_iter()
+            .map(|r| r.table)
+            .collect();
+        assert_eq!(tables, vec!["a".to_string(), "b_two".to_string()]);
+    }
+
+    #[test]
+    fn array_from_and_dynamic_from_are_ignored() {
+        let src = "function f(db, name) {\n  const xs = Array.from(\"abc\");\n  db.from(name);\n  db.from(`t_${name}`);\n}\n";
+        assert!(extract_table_refs(src, "r.ts").is_empty());
+    }
+
+    #[test]
+    fn resolve_table_ref_matches_a_schema_node_by_bare_name() {
+        let graph = build_graph_from_sources(&[(
+            "supabase/schema.sql",
+            "CREATE TABLE public.payments (id integer NOT NULL);\n",
+        )]);
+        let id = resolve_table_ref(&graph, "payments");
+        assert_eq!(
+            id.map(|i| graph.string_id(i).to_string()),
+            Some("supabase/schema.sql::payments".to_string())
+        );
+        assert_eq!(resolve_table_ref(&graph, "nonexistent"), None);
     }
 }

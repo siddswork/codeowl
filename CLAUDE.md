@@ -2,7 +2,14 @@
 
 CodeOwl extracts a structural graph from a codebase and serves LLM-authored specs (the semantic layer) over MCP. Design lives in `ARCHITECTURE.md` (how it's built) and `REQUIREMENTS.md` (what and for whom); `ROADMAP.md` has the build sequence and test repos. Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
 
-## Last Session (2026-09-06, cont.)
+## Last Session (2026-09-07)
+
+**M10 — SQL/schema boundary resolution — done.** Two commits:
+- `1c6c603` (docs) folded the stack-modularization increments into the M10/M11 milestone bodies; `0c0b4ac` did M10's first part — `src/parse.rs` dedups the `.tsx`/`.ts` grammar pick (was copy-pasted in extract/imports/features), plus "Phase 2 seam here" doc-marks on the four TS+Next-coupled modules.
+- M10 main (uncommitted at handoff, or the commit after `0c0b4ac`): `src/schema.rs` parses `CREATE TABLE` from `.sql` files (via `tree-sitter-sequel`, + a `CREATE TABLE` header line-scan backstop for tables the grammar drops) into `SymbolKind::Table` nodes. `features.rs` gains `extract_table_refs` / `resolve_table_ref` for `.from("table")` call sites, stored on `Graph` like route literals. `get_callers` on a table id lists the files that `.from()` it. `is_extractable` now accepts `.sql`. Validated on the pilot: 25/25 tables, 275/304 `.from()` refs resolve (the 29 misses are all DB views, out of scope). 120 unit + 8 integration tests. Out of scope: column types, FK edges, `CREATE VIEW`.
+- Tables are graph nodes, not spec-bearing — `spec.rs` granularity only generates for `Function`/`Class`, so tables never get their own document (revisit in M11 if the corpus wants table specs).
+
+## Prior Session (2026-09-06, cont.)
 
 **Completed this session, each its own commit, all pushed to `origin/master`:**
 1. `f865e81` — **M9, incremental indexing + in-session file watcher.** New `RepoIndex` (`src/index.rs`) caches per-file inputs at `.codeowl/index`; `RepoIndex::open` is the fresh-spawn catch-up, `apply_changes` the watcher's incremental update. `src/watch.rs` is the `notify` watcher (300ms debounce, per-directory watches over the gitignore-visible tree). MCP server graph went `Arc<Graph>` → `Arc<ArcSwap<Graph>>`; handlers snapshot once up front. 112 unit + 5 integration tests.
@@ -19,9 +26,9 @@ CodeOwl extracts a structural graph from a codebase and serves LLM-authored spec
 **Open / not decided:**
 - Feature/rollup/system human-edit reconciliation is still file-specs-only (from M8).
 
-**Exact next step:** M10, starting with its first part — the stack-modularization prep (doc-mark the four coupled files, dedup the grammar pick). Then the SQL DDL extractor + Supabase `.from("table")` matcher.
+**Exact next step:** M11 — the spec corpus + dual-audience quality bar (see `ROADMAP.md`). Its scope also carries the `src/lang.rs` + `detect(root)` centralization as a separate work item. M10 is done.
 
-**State:** `cargo test` 112 unit + 5 integration, `clippy -D warnings` / `fmt --check` clean as of `ccda54c`; release binary rebuilt (has M9 + new instructions); working tree clean; `origin/master` up to date.
+**State:** `cargo test` 120 unit + 8 integration, `clippy -D warnings` / `fmt --check` clean; release binary rebuilt (M9 + M10); `tree-sitter-sequel` 0.3.11 added (forced `cc` 1.4→1.2 in the lockfile — its build-dep constraint). `origin/master` at `0c0b4ac` + the M10-main commit.
 
 ## Hard invariants
 

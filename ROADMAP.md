@@ -185,7 +185,7 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 ---
 
 ### M10 — SQL/schema boundary resolution
-**Size:** M · **Builds on:** M2 (graph), independent of M3–M9
+**Size:** M · **Builds on:** M2 (graph), independent of M3–M9 · **Status: done** (stack-modularization prep + SQL extractor + `.from()` matcher)
 
 **Scope:** The dedicated SQL DDL extractor (schema nodes for tables/columns/constraints) plus the fuzzy string/ORM-aware matcher on the application-code side, per open question 3's second bullet in `ARCHITECTURE.md`. Called out there as "directly relevant to the Phase 1 pilot… not a future concern" — the pilot repo's Supabase migrations are real, not hypothetical.
 
@@ -194,6 +194,8 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 **Stack-modularization prep (part of this milestone, done first):** before the SQL work, doc-mark the four TypeScript + Next.js–coupled files (`extract.rs`, `imports.rs`, `resolve.rs`, `features.rs`; plus the one line in `index.rs`) as "the TypeScript + Next pack — Phase 2 seam here", and dedup the `.tsx`/`.ts` grammar pick copy-pasted across three of them. Pure labeling and cleanup, no abstraction (~30 min). Then the SQL DDL extractor and Supabase `.from("table")` matcher land ad hoc against the current structure — a second framework-convention resolver alongside M5's route literals, and a second extractor kind. Centralizing all of it behind `src/lang.rs` is deferred to M11 (see its scope), and the `LanguagePack` trait to Phase 2.
 
 **Validation:** point it at the pilot repo's actual migration files, confirm schema nodes are created for known tables, and confirm at least one known ORM/string-literal reference in application code resolves to the right schema node (fuzzy match, so "resolves to a plausible candidate" is the bar, not exact precision).
+
+**Validation result (2026-09-07):** against the pilot's real `supabase/schema.sql` (4998-line pg_dump), 25/25 `CREATE TABLE`s become `SymbolKind::Table` nodes — `tree-sitter-sequel` parses 24, a `CREATE TABLE` header line-scan backstops the one it drops on a nested CHECK cast. 304 `.from("table")` call sites extracted across the app; 275 (90%) resolve to a table node. The 29 that don't are all database *views* (`registrations_detailed`, `judge_artworks_anonymized`, …) — `CREATE VIEW` is deliberately out of scope, so "unresolved" is correct there, not a miss. `get_callers` on a table id lists the files that `.from()` it. Column types, foreign-key edges, and views stay out of scope (candidates for a follow-up if M11's corpus wants them). `src/schema.rs`; `tests/schema.rs` + unit tests; `tree-sitter-sequel` 0.3.11 added.
 
 **MVP value:** the pilot is a payments/registration app — its domain *is* the database. Without schema nodes a feature spec's "Data touched" section can't name the tables a flow reads and writes, and a file spec for `processWebhookEvent` can't say it marks `payments` and `registrations` — the specs stay vague exactly where the domain is richest. This directly determines whether the M11 corpus passes its BA cut on any payments/registration question, and it's the last framework-convention resolver Phase 1 needs (after M5's route literals).
 

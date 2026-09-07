@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::features::{RouteLiteral, extract_route_literals};
+use crate::features::{RouteLiteral, TableRef, extract_route_literals};
 use crate::graph::{FileExtraction, Graph};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, extract_imports};
@@ -35,18 +35,31 @@ pub struct FileInputs {
     pub symbols: Vec<ExtractedSymbol>,
     pub imports: FileImports,
     pub route_literals: Vec<RouteLiteral>,
+    #[serde(default)]
+    pub table_refs: Vec<TableRef>,
 }
 
 impl FileInputs {
-    /// The three tree-sitter passes (symbols, imports, route literals) plus
-    /// the raw-text hash — everything that depends on a file's contents,
-    /// recomputed together whenever that file changes.
+    /// Everything that depends on a file's contents, recomputed together
+    /// whenever that file changes. A `.sql` file is a schema file — only
+    /// `schema.rs`'s table pass applies; the TypeScript passes are skipped.
     fn extract(rel_path: &str, source: &str) -> Self {
+        let source_hash = hash_text(source);
+        if rel_path.ends_with(".sql") {
+            return Self {
+                source_hash,
+                symbols: crate::schema::extract_tables(source, rel_path),
+                imports: FileImports::default(),
+                route_literals: Vec::new(),
+                table_refs: Vec::new(),
+            };
+        }
         Self {
-            source_hash: hash_text(source),
+            source_hash,
             symbols: crate::extract::extract_file(source, rel_path),
             imports: extract_imports(source, rel_path),
             route_literals: extract_route_literals(source, rel_path),
+            table_refs: crate::features::extract_table_refs(source, rel_path),
         }
     }
 }
@@ -271,6 +284,12 @@ impl RepoIndex {
                 .flat_map(|f| f.route_literals.iter().cloned())
                 .collect(),
         );
+        graph.set_table_refs(
+            self.files
+                .values()
+                .flat_map(|f| f.table_refs.iter().cloned())
+                .collect(),
+        );
 
         graph.save(&Self::graph_path(&self.root))?;
         self.save()?;
@@ -312,14 +331,14 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// `.ts`/`.tsx` only, and never `.d.ts` — ambient declaration files use
-/// different grammar shapes (`declare function`, etc.) that M1 doesn't
-/// handle; see `ROADMAP.md`'s M1 scope. Public so `main.rs`, the catch-up
-/// pass, and the file watcher all share exactly one definition of what
-/// counts as source.
+/// `.ts`/`.tsx` (never `.d.ts` — ambient declaration files use different
+/// grammar shapes that M1 doesn't handle; see `ROADMAP.md`'s M1 scope) and
+/// `.sql` (M10 schema files — see `schema.rs`). Public so `main.rs`, the
+/// catch-up pass, and the file watcher all share exactly one definition of
+/// what counts as source.
 ///
-/// **TypeScript + Next.js pack — Phase 2 seam here.** This is the one
-/// stack-coupled line in an otherwise language-agnostic module; M11's
+/// **Stack-coupled — Phase 2 seam here.** This extension list is the one
+/// stack-coupled thing in an otherwise language-agnostic module; M11's
 /// `src/lang.rs` folds it in with the grammar pick from `parse.rs` and the
 /// resolver extension list. See `ROADMAP.md`'s "Stack modularization".
 pub fn is_extractable(path: &Path) -> bool {
@@ -331,7 +350,7 @@ pub fn is_extractable(path: &Path) -> bool {
     }
     matches!(
         path.extension().and_then(|e| e.to_str()),
-        Some("ts") | Some("tsx")
+        Some("ts") | Some("tsx") | Some("sql")
     )
 }
 

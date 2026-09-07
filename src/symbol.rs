@@ -30,6 +30,11 @@ impl SymbolId {
 /// `children` has something to point at; it isn't one of the "function/
 /// class/const" kinds named in scope, but a class with no visible members
 /// wouldn't exercise the containment tree at all.
+///
+/// `Table` is M10's SQL schema node — a `CREATE TABLE` from a `.sql` file
+/// (see `schema.rs`). It's a graph node, not a spec-bearing one: the
+/// granularity rules in `spec.rs` only generate for `Function`/`Class`, so
+/// tables are resolvable and queryable but never get their own document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
@@ -37,6 +42,7 @@ pub enum SymbolKind {
     Class,
     Method,
     Const,
+    Table,
 }
 
 /// A single extracted declaration, resolved into a `Graph`'s arena.

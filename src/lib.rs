@@ -7,6 +7,7 @@ pub mod index;
 pub mod mcp;
 pub mod parse;
 pub mod resolve;
+pub mod schema;
 pub mod search;
 pub mod spec;
 pub mod symbol;
