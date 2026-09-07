@@ -377,7 +377,14 @@ trait FeatureModel {
     // whether a flow-reachable or rendered file joins a feature's `core` is pack judgment
     fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool;
 }
+
+// EntryPoint carries a pack-owned `kind` (M13-pre spike): a Quarkus service has
+// http-resource / kafka-consumer / scheduled-job / grpc entry points coexisting,
+// so it can't be a closed Page|ApiRoute enum, and titling is per-kind pack-internal.
+struct EntryPoint { kind: String, id: String, title: String, source: SymbolId }
 ```
+
+`EntryPoint.kind`, the optional `feature_model()`, and the "don't build an entry-point manifest yet" call all come from the M13-pre spike — see `experiments/exp-02-feature-layer.md` for the reasoning and the per-milestone execution notes.
 
 `graph.rs` loses its four typed fields and gains **one** generic `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at graph-build time by calling `pack.resolve_flow_edge` on each `UnresolvedFlowEdge` the pack extracted. `assemble_participants` becomes a generic **traversal** over `flow_edges` + one-hop imports — but with two pack hooks it can't do without: `resolve_flow_edge` (which file/node does this edge point at) and `admits_to_core` (does that file belong in the feature's `core` or stay a stub dependency). The Next.js `is_page` / `is_api_route` / path-join logic, and the `is_colocated || does_data_work` policy, are `TypeScriptNextStack`-internal.
 
