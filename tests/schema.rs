@@ -132,11 +132,7 @@ fn a_features_data_participants_are_the_tables_its_core_code_queries() {
     let graph = build(&dir);
 
     // The pay route is an orphan API route -> its own feature entry point.
-    let participants = codeowl::features::assemble_participants(
-        &graph,
-        graph.route_literals(),
-        "app/api/pay/route.ts",
-    );
+    let participants = codeowl::features::assemble_participants(&graph, "app/api/pay/route.ts");
 
     assert_eq!(
         participants.data,
@@ -148,11 +144,11 @@ fn a_features_data_participants_are_the_tables_its_core_code_queries() {
     );
 
     // And the feature task hands the agent each table's column list.
-    let entry = codeowl::features::enumerate_entry_points(&graph, graph.route_literals())
+    let entry = codeowl::features::enumerate_entry_points(&graph)
         .into_iter()
         .find(|e| e.file == "app/api/pay/route.ts")
         .unwrap();
-    let task = codeowl::spec::next_feature_task(&graph, &dir, &entry, graph.route_literals())
+    let task = codeowl::spec::next_feature_task(&graph, &dir, &entry)
         .unwrap()
         .expect("payments feature needs a spec");
     let payments = task

@@ -74,12 +74,7 @@ fn core_follows_the_rendered_component_subtree_into_its_fetches() {
     let dir = tempdir("subtree");
     let graph = build(&dir);
 
-    let core = assemble_participants(
-        &graph,
-        graph.route_literals(),
-        "app/judge/evaluate/page.tsx",
-    )
-    .core;
+    let core = assemble_participants(&graph, "app/judge/evaluate/page.tsx").core;
 
     for expected in [
         "app/judge/evaluate/page.tsx",               // the entry point

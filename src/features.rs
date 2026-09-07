@@ -354,10 +354,11 @@ fn is_api_route(file_id: &str) -> bool {
 }
 
 /// Every `app/**/page.tsx`, plus every `app/api/**/route.ts` that no
-/// resolved route literal targets. `route_literals` should be every one
-/// `extract_route_literals` found across the whole repo walk.
-pub fn enumerate_entry_points(graph: &Graph, route_literals: &[RouteLiteral]) -> Vec<EntryPoint> {
-    let targeted: HashSet<String> = route_literals
+/// resolved route literal targets. Reads the repo-wide route literals off
+/// the graph (`Graph::set_route_literals`, populated by `RepoIndex`).
+pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint> {
+    let targeted: HashSet<String> = graph
+        .route_literals()
         .iter()
         .filter_map(|lit| resolve_route_literal(graph, &lit.static_path))
         .map(|id| graph.string_id(id).to_string())
@@ -423,11 +424,7 @@ pub struct Participants {
     pub data: Vec<String>,
 }
 
-pub fn assemble_participants(
-    graph: &Graph,
-    route_literals: &[RouteLiteral],
-    entry_file: &str,
-) -> Participants {
+pub fn assemble_participants(graph: &Graph, entry_file: &str) -> Participants {
     let mut core = Vec::new();
     let mut seen = HashSet::new();
     let mut queue = VecDeque::from([entry_file.to_string()]);
@@ -437,7 +434,11 @@ pub fn assemble_participants(
             continue;
         }
         core.push(file.clone());
-        for lit in route_literals.iter().filter(|l| l.from_file == file) {
+        for lit in graph
+            .route_literals()
+            .iter()
+            .filter(|l| l.from_file == file)
+        {
             if let Some(target_id) = resolve_route_literal(graph, &lit.static_path) {
                 let target_file = graph.string_id(target_id).to_string();
                 if !seen.contains(&target_file) {
@@ -499,6 +500,25 @@ pub fn assemble_participants(
 mod tests {
     use super::*;
     use crate::graph::build_graph_from_sources;
+
+    /// Write `files` to a fresh temp dir and build the whole graph off it
+    /// (`RepoIndex::rebuild` — imports resolved, flow edges set), the way
+    /// production does. Returns the graph and the dir (caller cleans up).
+    fn fixture(tag: &str, files: &[(&str, &str)]) -> (Graph, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-features-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (rel, content) in files {
+            let path = dir.join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, content).unwrap();
+        }
+        let graph = crate::index::RepoIndex::build(&dir)
+            .unwrap()
+            .rebuild()
+            .unwrap();
+        (graph, dir)
+    }
 
     #[test]
     fn plain_string_fetch_is_extracted() {
@@ -582,71 +602,52 @@ mod tests {
 
     #[test]
     fn enumerate_lists_pages_and_only_orphan_routes() {
-        let graph = build_graph_from_sources(&[
-            (
-                "app/submit/page.tsx",
-                "export default function Page() { fetch(\"/api/submit-artwork\"); return null; }\n",
-            ),
-            (
-                "app/api/submit-artwork/route.ts",
-                "export async function POST(): Promise<void> {}\n",
-            ),
-            (
-                "app/api/stripe-webhook/route.ts",
-                "export async function POST(): Promise<void> {}\n",
-            ),
-        ]);
-        let lits = extract_route_literals(
-            "export default function Page() { fetch(\"/api/submit-artwork\"); return null; }\n",
-            "app/submit/page.tsx",
+        let (graph, dir) = fixture(
+            "enumerate",
+            &[
+                (
+                    "app/submit/page.tsx",
+                    "export default function Page() { fetch(\"/api/submit-artwork\"); return null; }\n",
+                ),
+                (
+                    "app/api/submit-artwork/route.ts",
+                    "export async function POST(): Promise<void> {}\n",
+                ),
+                (
+                    "app/api/stripe-webhook/route.ts",
+                    "export async function POST(): Promise<void> {}\n",
+                ),
+            ],
         );
-        let entries = enumerate_entry_points(&graph, &lits);
+        let entries = enumerate_entry_points(&graph);
         let files: Vec<&str> = entries.iter().map(|e| e.file.as_str()).collect();
         assert!(files.contains(&"app/submit/page.tsx"));
         assert!(files.contains(&"app/api/stripe-webhook/route.ts"));
         assert!(!files.contains(&"app/api/submit-artwork/route.ts"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn assemble_participants_follows_route_literal_then_collects_direct_imports() {
-        let files: &[(&str, &str)] = &[
-            (
-                "app/submit/page.tsx",
-                "import { getSupabase } from '../../lib/supabase';\nexport default function Page() { fetch(\"/api/submit-artwork\"); getSupabase(); return null; }\n",
-            ),
-            (
-                "app/api/submit-artwork/route.ts",
-                "import { getSupabase } from '../../../lib/supabase';\nexport async function POST(): Promise<void> { getSupabase(); }\n",
-            ),
-            (
-                "lib/supabase.ts",
-                "export function getSupabase(): void {}\n",
-            ),
-        ];
+        let (graph, dir) = fixture(
+            "assemble",
+            &[
+                (
+                    "app/submit/page.tsx",
+                    "import { getSupabase } from '../../lib/supabase';\nexport default function Page() { fetch(\"/api/submit-artwork\"); getSupabase(); return null; }\n",
+                ),
+                (
+                    "app/api/submit-artwork/route.ts",
+                    "import { getSupabase } from '../../../lib/supabase';\nexport async function POST(): Promise<void> { getSupabase(); }\n",
+                ),
+                (
+                    "lib/supabase.ts",
+                    "export function getSupabase(): void {}\n",
+                ),
+            ],
+        );
 
-        let dir =
-            std::env::temp_dir().join(format!("codeowl-features-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut extractions = Vec::new();
-        let mut file_imports = std::collections::HashMap::new();
-        let mut route_literals = Vec::new();
-        for (rel, content) in files {
-            let path = dir.join(rel);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(&path, content).unwrap();
-            extractions.push(crate::graph::extract_and_hash(rel, content));
-            file_imports.insert(
-                rel.to_string(),
-                crate::imports::extract_imports(content, rel),
-            );
-            route_literals.extend(extract_route_literals(content, rel));
-        }
-        let mut graph = Graph::build(extractions);
-        let resolver = crate::resolve::build_resolver();
-        let resolved = crate::resolve::resolve_imports(&dir, &resolver, &file_imports, &graph);
-        graph.set_resolved_imports(resolved);
-
-        let participants = assemble_participants(&graph, &route_literals, "app/submit/page.tsx");
+        let participants = assemble_participants(&graph, "app/submit/page.tsx");
         assert_eq!(
             participants.core,
             vec![

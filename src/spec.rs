@@ -18,8 +18,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::features::{
-    EntryPoint, Participants, RouteLiteral, assemble_participants, enumerate_entry_points,
-    feature_slug,
+    EntryPoint, Participants, assemble_participants, enumerate_entry_points, feature_slug,
 };
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
@@ -1147,9 +1146,8 @@ pub fn next_feature_task(
     graph: &Graph,
     root: &Path,
     entry: &EntryPoint,
-    route_literals: &[RouteLiteral],
 ) -> Result<Option<FeatureTask>> {
-    let participants = assemble_participants(graph, route_literals, &entry.file);
+    let participants = assemble_participants(graph, &entry.file);
     let current = current_participant_hashes(graph, &participants)?;
 
     let existing = read_feature_spec(root, &entry.slug)?;
@@ -1201,7 +1199,6 @@ pub fn next_feature_task(
 pub fn submit_feature(
     graph: &Graph,
     root: &Path,
-    route_literals: &[RouteLiteral],
     entry_file: &str,
     content: &str,
 ) -> Result<FeatureSpec> {
@@ -1214,7 +1211,7 @@ pub fn submit_feature(
     }
 
     let slug = feature_slug(entry_file);
-    let participants = assemble_participants(graph, route_literals, entry_file);
+    let participants = assemble_participants(graph, entry_file);
     let hashes = current_participant_hashes(graph, &participants)?;
 
     let spec = FeatureSpec {
@@ -1559,14 +1556,10 @@ pub fn current_module_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, 
 /// Each currently-enumerated feature entry point's own current
 /// `spec_hash` (empty if that feature isn't itself current yet) — the
 /// system spec's per-feature half of its staleness key.
-pub fn current_feature_hashes(
-    graph: &Graph,
-    root: &Path,
-    route_literals: &[RouteLiteral],
-) -> Result<Vec<(String, String)>> {
+pub fn current_feature_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
-    for entry in enumerate_entry_points(graph, route_literals) {
-        let participants = assemble_participants(graph, route_literals, &entry.file);
+    for entry in enumerate_entry_points(graph) {
+        let participants = assemble_participants(graph, &entry.file);
         let current = current_participant_hashes(graph, &participants)?;
         let hash = read_feature_spec(root, &entry.slug)?
             .filter(|s| diff_hash_lists(&current, &s.participants).is_empty())
@@ -1747,13 +1740,9 @@ pub struct SystemTask {
 /// rollup or any feature's spec isn't itself current yet — callers should
 /// exhaust each module's and each feature's own chase first, the same
 /// "children before parent" order every other document kind uses.
-pub fn next_system_task(
-    graph: &Graph,
-    root: &Path,
-    route_literals: &[RouteLiteral],
-) -> Result<Option<SystemTask>> {
+pub fn next_system_task(graph: &Graph, root: &Path) -> Result<Option<SystemTask>> {
     let current_modules = current_module_hashes(graph, root)?;
-    let current_features = current_feature_hashes(graph, root, route_literals)?;
+    let current_features = current_feature_hashes(graph, root)?;
     if current_modules.iter().any(|(_, h)| h.is_empty())
         || current_features.iter().any(|(_, h)| h.is_empty())
     {
@@ -1799,12 +1788,7 @@ pub fn next_system_task(
 
 /// Persist `content` (the agent's LLM-written product narrative, title
 /// included) as the system spec.
-pub fn submit_system(
-    graph: &Graph,
-    root: &Path,
-    route_literals: &[RouteLiteral],
-    content: &str,
-) -> Result<SystemSpec> {
+pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<SystemSpec> {
     let body = content.trim().to_string();
     if body.is_empty() {
         bail!("submitted system content is empty");
@@ -1815,7 +1799,7 @@ pub fn submit_system(
 
     let spec = SystemSpec {
         modules: current_module_hashes(graph, root)?,
-        features: current_feature_hashes(graph, root, route_literals)?,
+        features: current_feature_hashes(graph, root)?,
         spec_hash: hash_text(&body),
         body,
     };
@@ -2009,16 +1993,11 @@ fn rollup_status(graph: &Graph, root: &Path, dir: &str) -> Result<(String, Vec<S
     Ok((status, body_smells(&spec.body)))
 }
 
-fn feature_status(
-    graph: &Graph,
-    root: &Path,
-    route_literals: &[RouteLiteral],
-    entry: &EntryPoint,
-) -> Result<(String, Vec<String>)> {
+fn feature_status(graph: &Graph, root: &Path, entry: &EntryPoint) -> Result<(String, Vec<String>)> {
     let Some(spec) = read_feature_spec(root, &entry.slug)? else {
         return Ok(("missing".to_string(), Vec::new()));
     };
-    let participants = assemble_participants(graph, route_literals, &entry.file);
+    let participants = assemble_participants(graph, &entry.file);
     let current = current_participant_hashes(graph, &participants)?;
     let status = if diff_hash_lists(&current, &spec.participants).is_empty() {
         "current"
@@ -2029,17 +2008,13 @@ fn feature_status(
     Ok((status, body_smells(&spec.body)))
 }
 
-fn system_status(
-    graph: &Graph,
-    root: &Path,
-    route_literals: &[RouteLiteral],
-) -> Result<(String, Vec<String>)> {
+fn system_status(graph: &Graph, root: &Path) -> Result<(String, Vec<String>)> {
     let Some(spec) = read_system_spec(root)? else {
         return Ok(("missing".to_string(), Vec::new()));
     };
     let smells = body_smells(&spec.body);
     let mut current_all = current_module_hashes(graph, root)?;
-    current_all.extend(current_feature_hashes(graph, root, route_literals)?);
+    current_all.extend(current_feature_hashes(graph, root)?);
     let mut stored_all = spec.modules;
     stored_all.extend(spec.features);
     let status = if diff_hash_lists(&current_all, &stored_all).is_empty() {
@@ -2068,12 +2043,7 @@ fn within_scope(path: &str, scope: &str) -> bool {
 /// unaffected by `scope` — both are repo-wide concepts, and `scope`
 /// itself excludes the system spec entirely (a system spec scoped to one
 /// directory isn't a coherent thing to ask for).
-pub fn coverage(
-    graph: &Graph,
-    root: &Path,
-    route_literals: &[RouteLiteral],
-    scope: Option<&str>,
-) -> Result<Vec<CoverageItem>> {
+pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<CoverageItem>> {
     let mut items = Vec::new();
 
     let mut file_ids: Vec<SymbolId> = graph.files().filter_map(|f| graph.find(&f.id)).collect();
@@ -2111,8 +2081,8 @@ pub fn coverage(
     }
 
     if scope.is_none() {
-        for entry in enumerate_entry_points(graph, route_literals) {
-            let (status, smells) = feature_status(graph, root, route_literals, &entry)?;
+        for entry in enumerate_entry_points(graph) {
+            let (status, smells) = feature_status(graph, root, &entry)?;
             items.push(CoverageItem {
                 status,
                 fan_in: 0,
@@ -2121,7 +2091,7 @@ pub fn coverage(
                 kind: "feature".to_string(),
             });
         }
-        let (status, smells) = system_status(graph, root, route_literals)?;
+        let (status, smells) = system_status(graph, root)?;
         items.push(CoverageItem {
             status,
             fan_in: 0,
@@ -2690,40 +2660,27 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// Write a small fixture repo to a fresh temp dir with imports
-    /// resolved and route literals extracted -- the full pipeline
-    /// `main.rs`'s `build_graph` runs, needed for feature-spec tests since
-    /// they read real files off disk and need real import resolution.
-    fn build_feature_fixture(
-        files: &[(&str, &str)],
-        suffix: &str,
-    ) -> (Graph, std::path::PathBuf, Vec<RouteLiteral>) {
+    /// Write a small fixture repo to a fresh temp dir and build the *whole*
+    /// graph off it — imports resolved, route literals / table refs /
+    /// rendered components extracted and set — exactly the pipeline
+    /// `RepoIndex::rebuild` runs. Feature-spec tests need the real thing
+    /// because they read files off disk and traverse the flow edges.
+    fn build_feature_fixture(files: &[(&str, &str)], suffix: &str) -> (Graph, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!(
             "codeowl-feature-spec-test-{}-{suffix}",
             std::process::id()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-
-        let mut extractions = Vec::new();
-        let mut file_imports = std::collections::HashMap::new();
-        let mut route_literals = Vec::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
-            extractions.push(crate::graph::extract_and_hash(rel, content));
-            file_imports.insert(
-                rel.to_string(),
-                crate::imports::extract_imports(content, rel),
-            );
-            route_literals.extend(crate::features::extract_route_literals(content, rel));
         }
-        let mut graph = Graph::build(extractions);
-        let resolver = crate::resolve::build_resolver();
-        let resolved = crate::resolve::resolve_imports(&dir, &resolver, &file_imports, &graph);
-        graph.set_resolved_imports(resolved);
-
-        (graph, dir, route_literals)
+        let graph = crate::index::RepoIndex::build(&dir)
+            .unwrap()
+            .rebuild()
+            .unwrap();
+        (graph, dir)
     }
 
     const ARTWORK_FIXTURE: &[(&str, &str)] = &[
@@ -2767,13 +2724,13 @@ mod tests {
 
     #[test]
     fn feature_generate_loop_produces_a_current_spec_then_reports_done() {
-        let (graph, dir, route_literals) = build_feature_fixture(ARTWORK_FIXTURE, "1");
+        let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "1");
         let entry = EntryPoint {
             file: "app/submit/page.tsx".to_string(),
             slug: feature_slug("app/submit/page.tsx"),
         };
 
-        let task = next_feature_task(&graph, &dir, &entry, &route_literals)
+        let task = next_feature_task(&graph, &dir, &entry)
             .unwrap()
             .expect("first run should need generation");
         assert_eq!(task.slug, "submit");
@@ -2795,28 +2752,23 @@ mod tests {
         submit_feature(
             &graph,
             &dir,
-            &route_literals,
             "app/submit/page.tsx",
             "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
         )
         .unwrap();
 
         assert!(feature_spec_path(&dir, "submit").exists());
-        assert_eq!(
-            next_feature_task(&graph, &dir, &entry, &route_literals).unwrap(),
-            None
-        );
+        assert_eq!(next_feature_task(&graph, &dir, &entry).unwrap(), None);
 
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn submit_feature_rejects_content_without_a_title() {
-        let (graph, dir, route_literals) = build_feature_fixture(ARTWORK_FIXTURE, "2");
+        let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "2");
         let result = submit_feature(
             &graph,
             &dir,
-            &route_literals,
             "app/submit/page.tsx",
             "no title here, just prose",
         );
@@ -3053,10 +3005,10 @@ mod tests {
 
     #[test]
     fn next_system_task_is_none_until_every_module_and_feature_is_current() {
-        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "system1");
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "system1");
 
         assert_eq!(
-            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            next_system_task(&graph, &dir).unwrap(),
             None,
             "nothing generated yet"
         );
@@ -3077,7 +3029,7 @@ mod tests {
         }
         assert!(directory_is_spec_bearing(&graph, "lib"));
         assert_eq!(
-            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            next_system_task(&graph, &dir).unwrap(),
             None,
             "lib's own rollup isn't generated yet"
         );
@@ -3090,7 +3042,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            next_system_task(&graph, &dir, &route_literals).unwrap(),
+            next_system_task(&graph, &dir).unwrap(),
             None,
             "the feature isn't generated yet"
         );
@@ -3112,13 +3064,12 @@ mod tests {
         submit_feature(
             &graph,
             &dir,
-            &route_literals,
             "app/submit/page.tsx",
             "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
         )
         .unwrap();
 
-        let task = next_system_task(&graph, &dir, &route_literals)
+        let task = next_system_task(&graph, &dir)
             .unwrap()
             .expect("everything current, system task should now appear");
         assert_eq!(
@@ -3140,14 +3091,10 @@ mod tests {
         submit_system(
             &graph,
             &dir,
-            &route_literals,
             "# Acme\n## Summary\nA platform for running art competitions.\n",
         )
         .unwrap();
-        assert_eq!(
-            next_system_task(&graph, &dir, &route_literals).unwrap(),
-            None
-        );
+        assert_eq!(next_system_task(&graph, &dir).unwrap(), None);
         assert!(read_system_spec(&dir).unwrap().is_some());
 
         std::fs::remove_dir_all(&dir).ok();
@@ -3155,17 +3102,17 @@ mod tests {
 
     #[test]
     fn submit_system_rejects_content_without_a_title() {
-        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "system2");
-        let result = submit_system(&graph, &dir, &route_literals, "no title here, just prose");
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "system2");
+        let result = submit_system(&graph, &dir, "no title here, just prose");
         assert!(result.is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn coverage_reports_everything_missing_then_everything_current() {
-        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "coverage1");
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "coverage1");
 
-        let items = coverage(&graph, &dir, &route_literals, None).unwrap();
+        let items = coverage(&graph, &dir, None).unwrap();
         let summary = summarize(&items);
         assert_eq!(
             summary.missing, 8,
@@ -3256,7 +3203,6 @@ mod tests {
         submit_feature(
             &graph,
             &dir,
-            &route_literals,
             "app/submit/page.tsx",
             "# Artwork submission\n## Summary\nLets an artist submit artwork for judging.\n",
         )
@@ -3264,12 +3210,11 @@ mod tests {
         submit_system(
             &graph,
             &dir,
-            &route_literals,
             "# Acme\n## Summary\nA platform for running art competitions.\n",
         )
         .unwrap();
 
-        let items = coverage(&graph, &dir, &route_literals, None).unwrap();
+        let items = coverage(&graph, &dir, None).unwrap();
         let summary = summarize(&items);
         assert_eq!(summary.current, 8);
         assert_eq!(summary.stale, 0);
@@ -3281,8 +3226,8 @@ mod tests {
 
     #[test]
     fn coverage_scope_narrows_to_files_and_rollups_under_that_prefix() {
-        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "coverage2");
-        let items = coverage(&graph, &dir, &route_literals, Some("lib")).unwrap();
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "coverage2");
+        let items = coverage(&graph, &dir, Some("lib")).unwrap();
         let ids: std::collections::HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -3462,7 +3407,7 @@ mod tests {
 
     #[test]
     fn coverage_includes_a_current_but_smelly_file_in_pending() {
-        let (graph, dir, route_literals) = build_feature_fixture(SYSTEM_FIXTURE, "coverage3");
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "coverage3");
         submit(
             &graph,
             &dir,
@@ -3472,7 +3417,7 @@ mod tests {
         .unwrap();
         submit(&graph, &dir, "lib/supabase.ts", "lib/supabase.ts summary.").unwrap();
 
-        let items = coverage(&graph, &dir, &route_literals, Some("lib/supabase.ts")).unwrap();
+        let items = coverage(&graph, &dir, Some("lib/supabase.ts")).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].status, "current");
         assert!(!items[0].smells.is_empty());
