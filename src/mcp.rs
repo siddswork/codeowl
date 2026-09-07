@@ -323,14 +323,13 @@ impl CodeOwlServer {
         graph: &Graph,
         target: &str,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let route_literals = graph.route_literals();
-        let entry_points = crate::features::enumerate_entry_points(graph, route_literals);
+        let entry_points = crate::features::enumerate_entry_points(graph);
         let Some(entry) = entry_points.iter().find(|e| e.file == target) else {
             return Ok(Json(None));
         };
 
-        let task = crate::spec::next_feature_task(graph, &self.root, entry, route_literals)
-            .map_err(|e| e.to_string())?;
+        let task =
+            crate::spec::next_feature_task(graph, &self.root, entry).map_err(|e| e.to_string())?;
         let Some(task) = task else {
             return Ok(Json(None));
         };
@@ -501,9 +500,9 @@ impl CodeOwlServer {
             let callers = graph
                 .table_callers(&req.id)
                 .into_iter()
-                .map(|r| CallerInfo {
-                    from_file: r.from_file,
-                    imported_name: r.table,
+                .map(|(from_file, table)| CallerInfo {
+                    from_file,
+                    imported_name: table,
                 })
                 .collect();
             return Ok(Json(callers));
@@ -578,12 +577,10 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let route_literals = graph.route_literals();
             let current_modules = crate::spec::current_module_hashes(&graph, &self.root)
                 .map_err(|e| e.to_string())?;
-            let current_features =
-                crate::spec::current_feature_hashes(&graph, &self.root, route_literals)
-                    .map_err(|e| e.to_string())?;
+            let current_features = crate::spec::current_feature_hashes(&graph, &self.root)
+                .map_err(|e| e.to_string())?;
             let mut current_all = current_modules;
             current_all.extend(current_features);
             let mut stored_all = spec.modules;
@@ -636,14 +633,16 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let route_literals = graph.route_literals();
-            let entry_points = crate::features::enumerate_entry_points(&graph, route_literals);
+            let entry_points = crate::features::enumerate_entry_points(&graph);
             let entry = entry_points
                 .iter()
-                .find(|e| e.slug == slug)
+                .find(|e| e.id == slug)
                 .ok_or_else(|| Self::not_found(&req.id))?;
-            let participants =
-                crate::features::assemble_participants(&graph, route_literals, &entry.file);
+            let participants = crate::features::assemble_participants(
+                &graph,
+                crate::features::default_feature_model(),
+                entry,
+            );
             let current = crate::spec::current_participant_hashes(&graph, &participants)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.participants);
@@ -770,10 +769,9 @@ impl CodeOwlServer {
         // get_spec/submit_spec take -- a budgeted --all walk hands these
         // straight back here.
         if let Some(slug) = target.strip_prefix("feature:") {
-            let route_literals = graph.route_literals();
-            let Some(entry) = crate::features::enumerate_entry_points(&graph, route_literals)
+            let Some(entry) = crate::features::enumerate_entry_points(&graph)
                 .into_iter()
-                .find(|e| e.slug == slug)
+                .find(|e| e.id == slug)
             else {
                 return Ok(Json(None));
             };
@@ -815,21 +813,19 @@ impl CodeOwlServer {
         &self,
         graph: &Graph,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
-        let route_literals = graph.route_literals();
-
         for dir in crate::spec::enumerate_modules(graph) {
             if let Json(Some(response)) = self.next_directory_task_response(graph, &dir)? {
                 return Ok(Json(Some(response)));
             }
         }
-        for entry in crate::features::enumerate_entry_points(graph, route_literals) {
+        for entry in crate::features::enumerate_entry_points(graph) {
             if let Json(Some(response)) = self.next_task_for_target(graph, &entry.file)? {
                 return Ok(Json(Some(response)));
             }
         }
 
-        let Some(task) = crate::spec::next_system_task(graph, &self.root, route_literals)
-            .map_err(|e| e.to_string())?
+        let Some(task) =
+            crate::spec::next_system_task(graph, &self.root).map_err(|e| e.to_string())?
         else {
             return Ok(Json(None));
         };
@@ -857,8 +853,7 @@ impl CodeOwlServer {
     ) -> Result<Json<SubmitSpecResponse>, String> {
         let graph = self.graph.load_full();
         if req.id == "system" {
-            let route_literals = graph.route_literals();
-            let spec = crate::spec::submit_system(&graph, &self.root, route_literals, &req.content)
+            let spec = crate::spec::submit_system(&graph, &self.root, &req.content)
                 .map_err(|e| e.to_string())?;
             return Ok(Json(SubmitSpecResponse {
                 id: req.id,
@@ -876,20 +871,13 @@ impl CodeOwlServer {
             }));
         }
         if let Some(slug) = req.id.strip_prefix("feature:") {
-            let route_literals = graph.route_literals();
-            let entry_points = crate::features::enumerate_entry_points(&graph, route_literals);
+            let entry_points = crate::features::enumerate_entry_points(&graph);
             let entry = entry_points
                 .iter()
-                .find(|e| e.slug == slug)
+                .find(|e| e.id == slug)
                 .ok_or_else(|| format!("no feature entry point with slug {slug:?}"))?;
-            let spec = crate::spec::submit_feature(
-                &graph,
-                &self.root,
-                route_literals,
-                &entry.file,
-                &req.content,
-            )
-            .map_err(|e| e.to_string())?;
+            let spec = crate::spec::submit_feature(&graph, &self.root, &entry.file, &req.content)
+                .map_err(|e| e.to_string())?;
             return Ok(Json(SubmitSpecResponse {
                 id: req.id,
                 source_hash: None,
@@ -927,8 +915,7 @@ impl CodeOwlServer {
         Parameters(req): Parameters<CoverageRequest>,
     ) -> Result<Json<CoverageResponse>, String> {
         let graph = self.graph.load_full();
-        let route_literals = graph.route_literals();
-        let items = crate::spec::coverage(&graph, &self.root, route_literals, req.scope.as_deref())
+        let items = crate::spec::coverage(&graph, &self.root, req.scope.as_deref())
             .map_err(|e| e.to_string())?;
         let summary = crate::spec::summarize(&items);
         let pending = crate::spec::prioritize(items)
@@ -989,10 +976,6 @@ impl ServerHandler for CodeOwlServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::Graph;
-    use crate::imports::extract_imports;
-    use crate::resolve::{build_resolver, resolve_imports};
-    use std::collections::HashMap;
 
     /// Build a small in-memory server the same way `main.rs`'s `serve`
     /// subcommand will: extract, resolve, wrap in a `Graph`. Files are
@@ -1018,35 +1001,15 @@ mod tests {
     /// the first call is still sitting on disk underneath it, exactly like
     /// a real edit-then-re-run-generate session.
     fn rebuild_server(dir: std::path::PathBuf, files: &[(&str, &str)]) -> CodeOwlServer {
-        let mut extractions = Vec::new();
-        let mut file_imports = HashMap::new();
-        let mut route_literals = Vec::new();
-        let mut table_refs = Vec::new();
-        let mut rendered_components = Vec::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
-            extractions.push(crate::graph::extract_and_hash(rel, content));
-            file_imports.insert(rel.to_string(), extract_imports(content, rel));
-            route_literals.extend(crate::features::extract_route_literals(content, rel));
-            table_refs.extend(crate::features::extract_table_refs(content, rel));
-            rendered_components.extend(crate::features::extract_rendered_components(content, rel));
         }
-
-        let mut graph = Graph::build(extractions);
-        let resolver = build_resolver();
-        let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
-        graph.set_resolved_imports(resolved);
-        graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
-            &dir,
-            &resolver,
-            &file_imports,
-        ));
-        graph.set_route_literals(route_literals);
-        graph.set_table_refs(table_refs);
-        graph.set_rendered_components(rendered_components);
-
+        let graph = crate::index::RepoIndex::build(&dir)
+            .unwrap()
+            .rebuild()
+            .unwrap();
         CodeOwlServer::new(dir, graph)
     }
 

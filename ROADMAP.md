@@ -346,54 +346,78 @@ De-risking is built into the plan: M13-pre before the trait freezes, `feature_mo
 ### M13 — The `StackPack` trait; extract the TS+Next pack behind it
 **Size:** M–L (see "test churn" below) · **Builds on:** M12, M13-pre
 
-**Scope:** Define `trait StackPack` and move all of `extract.rs` / `imports.rs` / `resolve.rs` / `schema.rs` / `features.rs` behind a single `struct TypeScriptNextStack: StackPack`. `lang::detect(root) -> Result<Box<dyn StackPack>>` returns it when the repo has `.ts`/`.tsx`, errors otherwise. **Still one pack** — this milestone's whole point is forcing every coupling point through an interface so M14 has something to implement against.
+#### In plain terms
 
-The trait, first cut (exact shape is M13's design work — see "Design decisions" below):
+Today CodeOwl only knows how to read TypeScript/Next.js, and that knowledge is *wired directly* into the code that builds the graph. M13 puts a **universal socket** on CodeOwl's core (`trait StackPack`) and builds one **adapter** that fits it (`struct TypeScriptNextStack`). The adapter for now just forwards every call to the code that already exists — **nothing behaves differently**. The point is the socket: once it's there, adding Rust (M14) or Java (M16) is writing a new adapter, not editing the core.
+
+**Still one adapter.** M13 ships with exactly `TypeScriptNextStack`. `lang::detect(root)` looks at the repo, sees `.ts`/`.tsx`, and hands back that one pack; anything else is an error. M14 is where a second adapter first proves the socket is shaped right.
+
+#### The three pieces of work
+
+1. **The socket + moving TypeScript behind it.** Define `trait StackPack` — the list of questions the core needs answered about *any* codebase (what files do you read, what's in this file, where does this import point). `TypeScriptNextStack` answers each by calling today's functions in `extract.rs` / `imports.rs` / `resolve.rs` / `schema.rs` / `features.rs`, which stay `pub` as thin shims. The core (`index.rs`, later `spec.rs`) stops naming those functions and asks `pack.…` instead.
+
+2. **Collapse four graph fields into one.** `graph.rs` currently carries four separate, TypeScript-shaped lists of "this file reaches that thing" — API-route calls (`route_literals`), DB-table calls (`table_refs`), rendered React components (`rendered_components`), resolved default-imports. Replace all four with **one generic list**, `flow_edges: Vec<FlowEdge>`. The pack produces the raw edges (`pack.extract_flow_edges`) and resolves each one against the built graph (`pack.resolve_flow_edge`). A stack with none of these conventions just produces an empty list.
+
+3. **The feature layer becomes optional and pack-owned.** "A feature is a web page plus everything it reaches" is a Next.js idea. Move the Next-specific parts (`is_page`, `is_api_route`, route-path joining, the `is_colocated || does_data_work` rule for what counts as a feature's `core`) *inside* `TypeScriptNextStack`. What stays generic in `features.rs` is a plain graph walk with two holes the pack fills: `resolve_flow_edge` (where does this edge point) and `admits_to_core` (does that file belong in the feature, or stay a one-line dependency). A stack with no feature concept at all returns `feature_model() -> None`, and the system spec is composed from module rollups alone — M14 (CodeOwl-on-itself) and M16 (commons-lang) both do this; see `experiments/exp-02-feature-layer.md`.
+
+#### Progress
+
+- **Commit 1 (`3b6e34a`) — done.** `ExtractedSymbol`/`Symbol`/`SymbolView` gain `markers: Vec<String>` for annotations (M13 design decision 9 — the Java feature/schema model is entirely annotation-driven; empty for TS). `FORMAT_VERSION` 1 → 2.
+- **Commit 2 (`fcac579`) — done.** `trait StackPack` (piece 1) with `name` / `source_kind` / `classify` / `extract_symbols` / `extract_imports` / `resolve_imports`; `TypeScriptNextStack` delegating to the free functions; `detect() -> Box<dyn StackPack>`; `RepoIndex` routed through `self.pack.*`. Zero test churn (build/open signatures unchanged — they call `detect()` internally). A test asserts each method returns exactly what the old free function does.
+- **Commits 3–4 (`9e5c427`, `cb774df`) — done.** Drop the redundant `route_literals` parameter (read it off the graph); collapse `graph.rs`'s three typed edge collections (`route_literals` / `table_refs` / `rendered_components`) into one `flow_edges: Vec<FlowEdge { from_file, kind, raw, target: FlowTarget }>`, resolved at build time by `pack.extract_flow_edges` + `pack.resolve_flow_edge`. `FORMAT_VERSION` 2 → 3. Byte-identical on the pilot.
+- **Commit 5 — done.** The feature layer (piece 3). `trait FeatureModel { enumerate_entry_points, admits_to_core }` + `TypeScriptNextFeatureModel` (holds `is_page` / `is_api_route` / the route-path slug / the `is_colocated || does_data_work` rule); `StackPack::feature_model() -> Option<&dyn FeatureModel>` (default `None`; TS returns `Some`). `assemble_participants` is now a generic walk over `flow_edges` + one-hop imports — a file-node edge joins `core` iff `fm.admits_to_core`, a symbol-node edge is the `data` tier. `EntryPoint { file, slug }` → `{ kind, id, title, file }` with `id` == the old slug (spec filenames unchanged). No persisted-shape change, so `FORMAT_VERSION` stays 3. Test churn absorbed: 2 integration tests + 2 spec.rs tests move onto `default_feature_model()`; the rest ride the `enumerate_entry_points` free-fn shim.
+- **Next:** verification (`utility/structural_sweep.py` on the pilot), then the M13 PR.
+
+#### The trait, current + planned shape
+
 ```
 trait StackPack {
-    fn name(&self) -> &str;
-    fn is_source_file(&self, path: &Path) -> Option<SourceKind>;   // was is_extractable + is_schema_file
-    fn classify(&self, path: &str) -> FileRole;                    // Domain | Primitive | Test | Generated
-
-    // extraction
-    fn extract_symbols(&self, rel_path: &str, source: &str, kind: SourceKind) -> Vec<ExtractedSymbol>;
-    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports;
-
-    // resolution (pack owns it end to end — oxc for TS, module-tree walk for Rust)
+    fn name(&self) -> &str;                                        // "typescript-next" — DONE
+    fn source_kind(&self, path: &Path) -> Option<SourceKind>;      // reads this file? code or schema? — DONE
+    fn classify(&self, rel_path: &str) -> FileRole;                // Domain | Primitive | Test | Generated — DONE
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol>;   // DONE
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports;            // DONE
     fn resolve_imports(&self, root: &Path, file_imports: &HashMap<String, FileImports>, graph: &Graph)
-        -> Vec<ResolvedImport>;
+        -> Vec<ResolvedImport>;                                    // pack owns the resolver — DONE
 
-    // flow edges — extraction AND resolution are both pack-specific
-    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;
-    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> Option<FlowTarget>;
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;    // DONE
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget;      // DONE
 
-    // feature layer — OPTIONAL (see M13-pre). None => this stack has no feature specs,
-    // and the system spec composes over module rollups alone.
-    fn feature_model(&self) -> Option<&dyn FeatureModel>;
+    // OPTIONAL — None means "this stack has no feature specs" (M13-pre). Default `None`;
+    // TS overrides. M14/M16 take the default; M17 gives it a second impl.
+    fn feature_model(&self) -> Option<&dyn FeatureModel>;                                     // DONE
 }
 
-trait FeatureModel {
+trait FeatureModel {                                                                         // DONE
     fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint>;
-    // whether a flow-reachable or rendered file joins a feature's `core` is pack judgment
     fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool;
 }
 
-// EntryPoint carries a pack-owned `kind` (M13-pre spike): a Quarkus service has
-// http-resource / kafka-consumer / scheduled-job / grpc entry points coexisting,
-// so it can't be a closed Page|ApiRoute enum, and titling is per-kind pack-internal.
-// `id` must be unique ACROSS kinds -- it names the spec file. `file`, not SymbolId:
-// a SymbolId is only valid for the graph that produced it and must never reach a
-// spec file or a coverage id. Today's shape is EntryPoint { file, slug }.
-struct EntryPoint { kind: String, id: String, title: String, file: String }
+// `kind` is pack-owned free text — a Quarkus service has http-resource / kafka-consumer /
+// scheduled-job / grpc entry points at once, so no closed Page|ApiRoute enum. `id` must be
+// unique across kinds (it names the spec file). `file`, never SymbolId — a SymbolId is only
+// valid for the graph that made it and must never reach a spec file. TS: kind is
+// "page"/"api-route", id is the route slug (unchanged), title is the URL path.
+struct EntryPoint { kind: String, id: String, title: String, file: String }                  // DONE
 ```
 
-`EntryPoint.kind`, the optional `feature_model()`, and the "don't build an entry-point manifest yet" call all come from the M13-pre spike — see `experiments/exp-02-feature-layer.md` for the reasoning and the per-milestone execution notes.
+`graph.rs` ends up with **one** `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at build time by `pack.resolve_flow_edge` on each `UnresolvedFlowEdge`. `assemble_participants` becomes a generic walk over `flow_edges` + one-hop imports with those two pack hooks. The `SymbolKind` question (design decision 1) is **decided and written down in M13 but not implemented** — reshaping the enum with no second stack to check against is exactly what design decision 8 warns against; M14 does the remap when it adds Rust's kinds.
 
-`graph.rs` loses its four typed fields and gains **one** generic `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at graph-build time by calling `pack.resolve_flow_edge` on each `UnresolvedFlowEdge` the pack extracted. `assemble_participants` becomes a generic **traversal** over `flow_edges` + one-hop imports — but with two pack hooks it can't do without: `resolve_flow_edge` (which file/node does this edge point at) and `admits_to_core` (does that file belong in the feature's `core` or stay a stub dependency). The Next.js `is_page` / `is_api_route` / path-join logic, and the `is_colocated || does_data_work` policy, are `TypeScriptNextStack`-internal.
+#### Test churn — real, not "zero"
 
-**Test churn is real and not "zero."** There are ~97 direct call sites of pack functions across `src/` (23 in `features.rs`, 19 in `extract.rs`, 13 in `imports.rs`, 10 in `spec.rs`, …) and the `tests/` dir. Plan: keep thin free-function shims (`extract::extract_file` → `default_ts_stack().extract_symbols(...)`) through M13 so existing unit tests compile unchanged, then move tests onto the trait in a dedicated follow-up commit — or take one large, reviewed churn commit. Don't pretend it's free.
+~97 direct call sites of pack functions across `src/` (23 in `features.rs`, 19 in `extract.rs`, 13 in `imports.rs`, 10 in `spec.rs`, …) plus `tests/`. Plan: keep the free functions `pub` as shims through the refactor so existing tests compile untouched, then a dedicated commit moves tests onto the trait (or drops the shim and takes one reviewed churn commit). Commits 1–2 hit **zero** churn by not changing public signatures; the flow-edge / feature-layer commit won't be so lucky.
 
-**Validation:** the *spec files* and `get_spec_coverage` output for the pilot are byte-identical to `origin/master` at M11 (the `.codeowl/graph` JSON is *expected* to differ — new `flow_edges` shape, new `format_version`). Every existing test passes, via shims if needed.
+#### Validation
+
+The pilot's **spec files** and **`get_spec_coverage` output** are byte-identical to `origin/master` — that's the whole test: a refactor that changes what CodeOwl *writes* is a bug. The `.codeowl/graph` JSON on disk **is** expected to change (new `flow_edges` shape, new `format_version`). Every existing test passes.
+
+`utility/structural_sweep.py` is the standard check for this (and every Phase 2 refactor milestone) — it builds two `codeowl` binaries and diffs `codeowl extract`, `get_spec_coverage`, `get_next_spec_task` for every feature/rollup/system/sample-file, and `get_callers`/`get_callees`/`get_symbol`, against a target repo, restoring its `.codeowl/` afterwards:
+
+```
+python3 utility/structural_sweep.py --repo ~/dev/startup/talentTrail
+```
+
+M13's own runs so far: every commit through the feature-layer split (commit 5) comes back fully byte-identical on the pilot — `codeowl extract`, `get_spec_coverage`, `get_next_spec_task` (103 targets), `get_callers` (25 tables), `get_callees`, `get_symbol`, all against `origin/master`.
 
 ---
 
@@ -458,9 +482,22 @@ struct EntryPoint { kind: String, id: String, title: String, file: String }
 
 ---
 
-### Design decisions to resolve during M13 (flagged, not yet decided)
+### Design decisions to resolve during M13
 
-1. **`SymbolKind`** — Rust adds `Enum`/`Trait`/`Impl`/`Mod`/`Macro`; Java adds `Enum`/`Record`/`AnnotationType`/`Interface`; C++ adds `Namespace`/`Template`/`Union`. Options: (a) small generic set — `Container` / `Callable` / `Value` / `Schema` — plus a `raw: String` for display and the pack owns the mapping; (b) keep a large closed enum; (c) `SymbolKind(String)` open set + a `pack.spec_granularity(kind) -> Granularity`. Leaning (a): `spec.rs`'s granularity rule becomes "generate for `Container`/`Callable`" and stays pack-agnostic. A Java `record` is the test — is it a `Container` (has members) or a `Value` (data-carrier, no spec of its own)? The pack decides.
+These are the "how exactly" questions M13 has to answer as it builds the socket. Each one is a place where a wrong early guess is expensive to undo once a second stack depends on it. "Leaning X" = the current best answer, to be confirmed (or overturned) while implementing; items now marked **decided** were settled during M13 (M13-pre for 3/8/9, the feature-layer commit for 1/2/4).
+
+1. **`SymbolKind`** — **decided in M13 (option a); implemented in M14.** The enum becomes a small stack-neutral set the generic core reasons about, plus a pack-owned `raw: String` (e.g. `"record"`, `"macro_rules"`, `"@interface"`) carried on the symbol for display and pack-internal logic:
+
+   ```
+   enum SymbolKind { Container, Callable, Value, Schema }
+   ```
+
+   - `Container` — has members that get their own specs: TS `class`, Rust `struct`/`enum`/`trait`/`impl`/`mod`, Java `class`/`interface`/`enum`.
+   - `Callable` — TS `function`/`method`, Rust `fn`, Java method/constructor.
+   - `Value` — a data-carrier with no spec of its own: TS `const`, Rust `const`/`static`, a plain-data Java `record`. Rolls up into its file spec.
+   - `Schema` — today's `Table`; M18 widens it off the `.sql` assumption.
+
+   `spec.rs`'s granularity rule becomes "generate a symbol spec for `Container` and `Callable`, fold `Value`/`Schema` into the file" — no pack branch. The mapping from grammar node kind → `SymbolKind` is the pack's (`extract_symbols` already returns `ExtractedSymbol.kind`); M14 does the actual enum reshape + remap of the TS mapping when it has `tree-sitter-rust` output to check the generic set against. **Open sub-question for the owner:** a Java `record` with methods — `Container` or `Value`? Leaning: `Value` unless it declares non-accessor methods, decided for real in M16 against commons-lang's records.
 2. **`Graph` derived edges** — leaning: one generic `flow_edges: Vec<FlowEdge>` (see M13), resolved at build time via `pack.resolve_flow_edge`; not four typed fields, not `Box<dyn Any>` pack data.
 3. **Feature layer optionality** — decided (M13-pre forces it): `StackPack::feature_model() -> Option<&dyn FeatureModel>`. A stack with no feature model still gets symbol/file/rollup/system specs. `spec.rs`'s system-spec composition already has to tolerate "zero features" — verify that path. M16 (commons-lang) is the milestone that exercises `None` on a real corpus; the M14 Rust spike may or may not conclude `None`, but a pure utility library certainly does.
 4. **`core` admission** — the traversal is generic; `resolve_flow_edge` and `admits_to_core` are the two pack hooks it can't do without. Do not try to make admission a generic rule — it's a per-stack heuristic with no mechanical ground truth (the TS one took three iterations against one repo).

@@ -98,11 +98,13 @@ fn a_from_call_resolves_to_its_table_node() {
 
     let payments = graph.find("supabase/schema.sql::payments").unwrap();
     let touched: Vec<&str> = graph
-        .table_refs()
+        .flow_edges()
         .iter()
-        .filter(|r| r.from_file == "app/api/pay/route.ts")
-        .filter_map(|r| codeowl::features::resolve_table_ref(&graph, &r.table))
-        .map(|id| graph.string_id(id))
+        .filter(|e| e.kind == "table-ref" && e.from_file == "app/api/pay/route.ts")
+        .filter_map(|e| match e.target {
+            codeowl::graph::FlowTarget::Node(id) => Some(graph.string_id(id)),
+            codeowl::graph::FlowTarget::Unresolved => None,
+        })
         .collect();
 
     assert!(
@@ -120,7 +122,7 @@ fn get_callers_on_a_table_lists_the_app_code_that_touches_it() {
     let callers: Vec<String> = graph
         .table_callers("supabase/schema.sql::registrations")
         .into_iter()
-        .map(|c| c.from_file)
+        .map(|(from_file, _table)| from_file)
         .collect();
 
     assert_eq!(callers, vec!["app/api/pay/route.ts".to_string()]);
@@ -132,11 +134,13 @@ fn a_features_data_participants_are_the_tables_its_core_code_queries() {
     let graph = build(&dir);
 
     // The pay route is an orphan API route -> its own feature entry point.
-    let participants = codeowl::features::assemble_participants(
-        &graph,
-        graph.route_literals(),
-        "app/api/pay/route.ts",
-    );
+    let fm = codeowl::features::default_feature_model();
+    let entry = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.file == "app/api/pay/route.ts")
+        .unwrap();
+    let participants = codeowl::features::assemble_participants(&graph, fm, &entry);
 
     assert_eq!(
         participants.data,
@@ -146,13 +150,7 @@ fn a_features_data_participants_are_the_tables_its_core_code_queries() {
         ],
         "both .from() targets should be data participants"
     );
-
-    // And the feature task hands the agent each table's column list.
-    let entry = codeowl::features::enumerate_entry_points(&graph, graph.route_literals())
-        .into_iter()
-        .find(|e| e.file == "app/api/pay/route.ts")
-        .unwrap();
-    let task = codeowl::spec::next_feature_task(&graph, &dir, &entry, graph.route_literals())
+    let task = codeowl::spec::next_feature_task(&graph, &dir, &entry)
         .unwrap()
         .expect("payments feature needs a spec");
     let payments = task

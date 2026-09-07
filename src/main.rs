@@ -28,7 +28,6 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Extract { path } => {
             let root = canonical_root(&path)?;
-            codeowl::lang::detect(&root)?;
             let graph = RepoIndex::build(&root)?.rebuild()?;
             let views: Vec<_> = graph
                 .symbols()
@@ -40,7 +39,6 @@ async fn main() -> Result<()> {
         }
         Command::Serve { path } => {
             let root = canonical_root(&path)?;
-            codeowl::lang::detect(&root)?;
             let (index, graph, caught) = RepoIndex::open(&root)?;
             let resolved = graph
                 .imports()

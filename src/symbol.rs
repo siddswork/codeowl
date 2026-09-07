@@ -84,6 +84,16 @@ pub struct Symbol {
     /// invalidation key that needs tracking yet. This is gap 2's fix (see
     /// `CLAUDE.md`'s hard invariants).
     pub interface_hash: Option<String>,
+    /// Stack-specific syntactic decorations on this declaration, verbatim
+    /// as the pack's extractor chose to record them — a Rust `#[tool]` /
+    /// `#[derive(...)]`, a Java `@Path` / `@Entity`, a Python `@app.route`.
+    /// The generic core never interprets these; a `StackPack` reads its
+    /// own back out (M13-pre spike / M13 design decision 9 — the Java
+    /// feature and schema model is entirely annotation-driven, and
+    /// `signature` string-matching is not a substitute). Empty for the
+    /// TypeScript+Next pack in M13; populated from M14 on.
+    #[serde(default)]
+    pub markers: Vec<String>,
     pub parent: Option<SymbolId>,
     pub children: Vec<SymbolId>,
 }
@@ -110,6 +120,10 @@ pub struct ExtractedSymbol {
     pub is_exported: bool,
     pub source_hash: String,
     pub interface_hash: Option<String>,
+    /// See [`Symbol::markers`]. Set by the pack's extractor; `Graph::build`
+    /// carries it straight through to the arena `Symbol`.
+    #[serde(default)]
+    pub markers: Vec<String>,
     pub parent: Option<String>,
     pub children: Vec<String>,
 }

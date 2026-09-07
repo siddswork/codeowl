@@ -10,6 +10,7 @@ pub mod resolve;
 pub mod schema;
 pub mod search;
 pub mod spec;
+pub mod stack;
 pub mod symbol;
 pub mod watch;
 
