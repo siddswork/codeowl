@@ -2173,22 +2173,35 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
     summary
 }
 
-/// A file imported by at least this many resolved reference edges is
-/// "shared infrastructure" — worth documenting before the features that
-/// depend on it, so those features are generated with a real dependency
-/// summary instead of a bare signature stub (see `ARCHITECTURE.md`'s
-/// "Generation priority"). A laptop-scale heuristic, not a tuned value.
+/// The "shared infrastructure" tier that gets documented before features
+/// is the `SHARED_CODE_MAX_FILES` files with the highest import fan-in
+/// across the whole repo (only counting those imported at least
+/// `SHARED_CODE_FAN_IN` times, and never a UI primitive — see
+/// `is_ui_primitive`). It's an *absolute* set anchored to the whole repo,
+/// not the top-N of whatever's left to generate — otherwise a budgeted
+/// `--all` run keeps promoting the next batch into tier 0 and never
+/// reaches a feature. Laptop-scale heuristics, not tuned values.
 const SHARED_CODE_FAN_IN: usize = 3;
+const SHARED_CODE_MAX_FILES: usize = 8;
+
+/// A `components/ui/` primitive (Button, Card, Dialog…). Imported almost
+/// everywhere, so it dominates a fan-in ranking — but its summary tells a
+/// dependent feature spec nothing it couldn't guess, so it's kept out of
+/// the shared-code tier. Still gets a file spec, in the long tail.
+fn is_ui_primitive(path: &str) -> bool {
+    path.starts_with("components/ui/") || path.contains("/components/ui/")
+}
 
 /// `coverage`'s items that still need attention, ordered the way
 /// `/codeowl generate --all`/`--budget=N` should spend a limited budget
 /// (see `ARCHITECTURE.md`'s "Generation priority"):
 ///
-/// 1. high-fan-in files (`fan_in >= SHARED_CODE_FAN_IN`) — their real
-///    summaries upgrade every dependent spec's context for free
+/// 1. the shared-code tier — the top `SHARED_CODE_MAX_FILES` files by
+///    import fan-in (`fan_in >= SHARED_CODE_FAN_IN`), whose real summaries
+///    upgrade every dependent spec's context for free
 /// 2. feature specs — the BA-facing payoff, now written with real
 ///    dependency summaries rather than stubs
-/// 3. the long tail of lower-fan-in files
+/// 3. the long tail of files (everything not in tier 1)
 /// 4. directory rollups (need their files first)
 /// 5. test code (`is_test_path`) — file specs only, always after the
 ///    product, whatever its fan-in
@@ -2206,24 +2219,48 @@ const SHARED_CODE_FAN_IN: usize = 3;
 /// filtering on smells too would mean a `--all --budget=N` run could run
 /// to completion while silently leaving known-bad content in place.
 pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
+    // The fan-in floor for the shared-code tier: the higher of
+    // SHARED_CODE_FAN_IN and the Nth-highest fan-in among *all* candidate
+    // files in the repo — computed from `items` before the `pending`
+    // filter, on purpose. Using `pending` instead would recompute the
+    // cutoff every run as the top files get generated, quietly promoting
+    // the next batch into tier 0 forever; anchoring it to the whole repo
+    // means once the real top-N are current, tier 0 is empty and features
+    // lead. (Ties at the cutoff can nudge the count slightly over N.)
+    let shared_cutoff = {
+        let mut fan_ins: Vec<usize> = items
+            .iter()
+            .filter(|i| i.kind == "file" && !is_test_path(&i.id) && !is_ui_primitive(&i.id))
+            .map(|i| i.fan_in)
+            .filter(|&f| f >= SHARED_CODE_FAN_IN)
+            .collect();
+        fan_ins.sort_unstable_by(|a, b| b.cmp(a));
+        fan_ins
+            .get(SHARED_CODE_MAX_FILES - 1)
+            .copied()
+            .unwrap_or(SHARED_CODE_FAN_IN)
+            .max(SHARED_CODE_FAN_IN)
+    };
+
     let mut pending: Vec<CoverageItem> = items
         .into_iter()
         .filter(|i| i.status != "current" || !i.smells.is_empty())
         .collect();
+
     pending.sort_by(|a, b| {
-        fn tier(item: &CoverageItem) -> u8 {
+        let tier = |item: &CoverageItem| -> u8 {
             if item.kind == "file" && is_test_path(&item.id) {
                 return 5;
             }
             match item.kind.as_str() {
-                "file" if item.fan_in >= SHARED_CODE_FAN_IN => 0,
+                "file" if item.fan_in >= shared_cutoff && !is_ui_primitive(&item.id) => 0,
                 "feature" => 1,
                 "file" => 2,
                 "rollup" => 3,
                 "system" => 6,
                 _ => 7,
             }
-        }
+        };
         fn urgency(status: &str) -> u8 {
             match status {
                 "missing" => 0,
@@ -3528,6 +3565,91 @@ mod tests {
                 "app/dashboard/card.test.tsx", // fan-in only orders within the tier
                 "system",                      // system still dead last
             ]
+        );
+    }
+
+    #[test]
+    fn prioritize_caps_the_shared_code_tier_so_features_are_reachable() {
+        fn item(id: &str, kind: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: "missing".into(),
+                fan_in,
+                smells: Vec::new(),
+            }
+        }
+        // 12 files, fan-in 20 down to 9 — all well over SHARED_CODE_FAN_IN.
+        let mut items = vec![item("feature:x", "feature", 0)];
+        for fan in (9..=20).rev() {
+            items.push(item(&format!("lib/f{fan:02}.ts"), "file", fan));
+        }
+        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+
+        // Only the top SHARED_CODE_MAX_FILES (fan-in 20..13) come before
+        // the feature; the rest (12..9) fall to the long tail after it.
+        assert_eq!(ids[0], "lib/f20.ts");
+        assert_eq!(ids[SHARED_CODE_MAX_FILES - 1], "lib/f13.ts");
+        assert_eq!(ids[SHARED_CODE_MAX_FILES], "feature:x");
+        assert_eq!(ids[SHARED_CODE_MAX_FILES + 1], "lib/f12.ts");
+        assert_eq!(ids.last().unwrap(), "lib/f09.ts");
+    }
+
+    #[test]
+    fn shared_cutoff_is_anchored_to_the_whole_repo_not_whats_left() {
+        fn item(id: &str, kind: &str, status: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: status.into(),
+                fan_in,
+                smells: Vec::new(),
+            }
+        }
+        // The repo's 8 highest-fan-in files are already current. What's
+        // left is a mid-fan-in file and a feature. The mid file must NOT be
+        // treated as shared code just because it's now the top of pending.
+        let mut items = vec![
+            item("lib/mid.ts", "file", "missing", 9),
+            item("feature:x", "feature", "missing", 0),
+        ];
+        for fan in (12..=19).rev() {
+            items.push(item(&format!("lib/hot{fan}.ts"), "file", "current", fan));
+        }
+        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids,
+            vec!["feature:x", "lib/mid.ts"],
+            "cutoff is set by the 8 current files (fan-in 12), so lib/mid.ts (9) is long tail"
+        );
+    }
+
+    #[test]
+    fn ui_primitives_stay_out_of_the_shared_tier_even_at_high_fan_in() {
+        fn item(id: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: "file".into(),
+                status: "missing".into(),
+                fan_in,
+                smells: Vec::new(),
+            }
+        }
+        let items = vec![
+            item("components/ui/button.tsx", 40), // imported everywhere
+            item("lib/db.ts", 12),
+            CoverageItem {
+                id: "feature:x".into(),
+                kind: "feature".into(),
+                status: "missing".into(),
+                fan_in: 0,
+                smells: Vec::new(),
+            },
+        ];
+        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids,
+            vec!["lib/db.ts", "feature:x", "components/ui/button.tsx"]
         );
     }
 

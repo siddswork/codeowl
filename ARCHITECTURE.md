@@ -344,9 +344,9 @@ spec_hash: <blake3>
 
 **Generation priority.** `get_spec_coverage` returns `pending` — and a budgeted `--all --budget=N` run walks it — in this order:
 
-1. **high-fan-in files** (`fan_in >= SHARED_CODE_FAN_IN`, a laptop-scale constant in `spec.rs`; fan-in counts *non-test* importers only) — a file imported by many others is shared infrastructure; its real summary is what a dependent feature spec gets *instead of* a bare signature stub, so it must come first
-2. **feature specs** — the BA-facing payoff, now generated with real dependency summaries
-3. the **long tail** of lower-fan-in files
+1. **the shared-code tier** — the `SHARED_CODE_MAX_FILES` highest-fan-in files in the repo (over a `SHARED_CODE_FAN_IN` floor; fan-in counts *non-test* importers, and a `components/ui/` primitive never qualifies however widely it's imported — its summary tells a feature spec nothing). Both laptop-scale constants in `spec.rs`. Their real summaries are what a dependent feature spec gets *instead of* bare signature stubs. **Bounded on purpose**, and the cutoff is anchored to the *whole repo*, not to what's left to generate — without either, a budgeted `--all` run spends every generation on the shared layer for a dozen runs before reaching a single feature, inverting the point. Once the real top-N are current they leave `pending`, this tier is empty, and features lead.
+2. **feature specs** — the BA-facing payoff, now generated with real dependency summaries for the shared tier (and stubs for the rest, upgraded whenever those files are later specced)
+3. the **long tail** — every other file, by descending fan-in
 4. **directory rollups** (compose over their files)
 5. **test code** (`is_test_path` — `e2e/`, `__tests__/`, `*.test.*`, `*.spec.*`, `cypress/`, `playwright/`) — file specs only, always after the product regardless of fan-in; test directories are never modules, so the system spec doesn't wait on them
 6. the **system spec** — the capstone, only writable once every module and feature is current, so always last (and `get_next_spec_task("system")` still runs the full module-then-feature sweep of "Generation" above before offering the system task itself)

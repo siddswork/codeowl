@@ -77,13 +77,15 @@ rollups and the system spec.
 from the import graph. `get_spec_coverage` returns everything still
 missing in this order, and a budgeted `--all` run spends down that list:
 
-1. **high-fan-in files** — code imported by many others (shared clients,
-   auth, utils). Documented first because a feature spec that depends on
-   one gets its real summary instead of a bare signature. Imports from
-   test files don't count toward fan-in.
+1. **the shared-code tier** — the ~8 most-imported files (shared clients,
+   auth, core utils). Just those, not the whole `lib/`, and not
+   `components/ui/` primitives however widely they're imported — capping
+   the tier is what keeps features a couple of runs away, not a dozen.
+   Once these 8 are done the tier is empty for good; it doesn't refill
+   with the next batch. Imports from test files don't count toward fan-in.
 2. **feature specs** — the BA-facing narratives, now written with real
-   dependency context.
-3. the **long tail** of lower-fan-in files.
+   dependency context for the shared tier.
+3. the **long tail** — every other file, by fan-in.
 4. **directory rollups**.
 5. **test code** — `e2e/`, `__tests__/`, `*.test.*`, `*.spec.*`. Gets
    file specs, but always after the product code and never a rollup or a
