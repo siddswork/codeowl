@@ -636,9 +636,13 @@ impl CodeOwlServer {
             let entry_points = crate::features::enumerate_entry_points(&graph);
             let entry = entry_points
                 .iter()
-                .find(|e| e.slug == slug)
+                .find(|e| e.id == slug)
                 .ok_or_else(|| Self::not_found(&req.id))?;
-            let participants = crate::features::assemble_participants(&graph, &entry.file);
+            let participants = crate::features::assemble_participants(
+                &graph,
+                crate::features::default_feature_model(),
+                entry,
+            );
             let current = crate::spec::current_participant_hashes(&graph, &participants)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.participants);
@@ -767,7 +771,7 @@ impl CodeOwlServer {
         if let Some(slug) = target.strip_prefix("feature:") {
             let Some(entry) = crate::features::enumerate_entry_points(&graph)
                 .into_iter()
-                .find(|e| e.slug == slug)
+                .find(|e| e.id == slug)
             else {
                 return Ok(Json(None));
             };
@@ -870,7 +874,7 @@ impl CodeOwlServer {
             let entry_points = crate::features::enumerate_entry_points(&graph);
             let entry = entry_points
                 .iter()
-                .find(|e| e.slug == slug)
+                .find(|e| e.id == slug)
                 .ok_or_else(|| format!("no feature entry point with slug {slug:?}"))?;
             let spec = crate::spec::submit_feature(&graph, &self.root, &entry.file, &req.content)
                 .map_err(|e| e.to_string())?;

@@ -18,7 +18,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::features::{
-    EntryPoint, Participants, assemble_participants, enumerate_entry_points, feature_slug,
+    EntryPoint, Participants, assemble_participants, default_feature_model, enumerate_entry_points,
+    feature_slug,
 };
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
@@ -1147,10 +1148,10 @@ pub fn next_feature_task(
     root: &Path,
     entry: &EntryPoint,
 ) -> Result<Option<FeatureTask>> {
-    let participants = assemble_participants(graph, &entry.file);
+    let participants = assemble_participants(graph, default_feature_model(), entry);
     let current = current_participant_hashes(graph, &participants)?;
 
-    let existing = read_feature_spec(root, &entry.slug)?;
+    let existing = read_feature_spec(root, &entry.id)?;
     // A quality smell is a hash-invisible reason to revisit this feature
     // even when every participant's hash still matches -- see "Quality
     // smells" in ARCHITECTURE.md.
@@ -1186,7 +1187,7 @@ pub fn next_feature_task(
     }
 
     Ok(Some(FeatureTask {
-        slug: entry.slug.clone(),
+        slug: entry.id.clone(),
         entry_point: entry.file.clone(),
         core_sources,
         dependencies,
@@ -1210,8 +1211,19 @@ pub fn submit_feature(
         bail!("submitted feature content must start with a `# Title` heading");
     }
 
-    let slug = feature_slug(entry_file);
-    let participants = assemble_participants(graph, entry_file);
+    let fm = default_feature_model();
+    let entry = fm
+        .enumerate_entry_points(graph)
+        .into_iter()
+        .find(|e| e.file == entry_file)
+        .unwrap_or_else(|| EntryPoint {
+            kind: String::new(),
+            id: feature_slug(entry_file),
+            title: String::new(),
+            file: entry_file.to_string(),
+        });
+    let slug = entry.id.clone();
+    let participants = assemble_participants(graph, fm, &entry);
     let hashes = current_participant_hashes(graph, &participants)?;
 
     let spec = FeatureSpec {
@@ -1558,14 +1570,15 @@ pub fn current_module_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, 
 /// system spec's per-feature half of its staleness key.
 pub fn current_feature_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
-    for entry in enumerate_entry_points(graph) {
-        let participants = assemble_participants(graph, &entry.file);
+    let fm = default_feature_model();
+    for entry in fm.enumerate_entry_points(graph) {
+        let participants = assemble_participants(graph, fm, &entry);
         let current = current_participant_hashes(graph, &participants)?;
-        let hash = read_feature_spec(root, &entry.slug)?
+        let hash = read_feature_spec(root, &entry.id)?
             .filter(|s| diff_hash_lists(&current, &s.participants).is_empty())
             .map(|s| s.spec_hash)
             .unwrap_or_default();
-        out.push((entry.slug, hash));
+        out.push((entry.id, hash));
     }
     Ok(out)
 }
@@ -1994,10 +2007,10 @@ fn rollup_status(graph: &Graph, root: &Path, dir: &str) -> Result<(String, Vec<S
 }
 
 fn feature_status(graph: &Graph, root: &Path, entry: &EntryPoint) -> Result<(String, Vec<String>)> {
-    let Some(spec) = read_feature_spec(root, &entry.slug)? else {
+    let Some(spec) = read_feature_spec(root, &entry.id)? else {
         return Ok(("missing".to_string(), Vec::new()));
     };
-    let participants = assemble_participants(graph, &entry.file);
+    let participants = assemble_participants(graph, default_feature_model(), entry);
     let current = current_participant_hashes(graph, &participants)?;
     let status = if diff_hash_lists(&current, &spec.participants).is_empty() {
         "current"
@@ -2087,7 +2100,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
                 status,
                 fan_in: 0,
                 smells,
-                id: format!("feature:{}", entry.slug),
+                id: format!("feature:{}", entry.id),
                 kind: "feature".to_string(),
             });
         }
@@ -2725,10 +2738,10 @@ mod tests {
     #[test]
     fn feature_generate_loop_produces_a_current_spec_then_reports_done() {
         let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "1");
-        let entry = EntryPoint {
-            file: "app/submit/page.tsx".to_string(),
-            slug: feature_slug("app/submit/page.tsx"),
-        };
+        let entry = enumerate_entry_points(&graph)
+            .into_iter()
+            .find(|e| e.file == "app/submit/page.tsx")
+            .unwrap();
 
         let task = next_feature_task(&graph, &dir, &entry)
             .unwrap()

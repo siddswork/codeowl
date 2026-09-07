@@ -364,8 +364,9 @@ Today CodeOwl only knows how to read TypeScript/Next.js, and that knowledge is *
 
 - **Commit 1 (`3b6e34a`) — done.** `ExtractedSymbol`/`Symbol`/`SymbolView` gain `markers: Vec<String>` for annotations (M13 design decision 9 — the Java feature/schema model is entirely annotation-driven; empty for TS). `FORMAT_VERSION` 1 → 2.
 - **Commit 2 (`fcac579`) — done.** `trait StackPack` (piece 1) with `name` / `source_kind` / `classify` / `extract_symbols` / `extract_imports` / `resolve_imports`; `TypeScriptNextStack` delegating to the free functions; `detect() -> Box<dyn StackPack>`; `RepoIndex` routed through `self.pack.*`. Zero test churn (build/open signatures unchanged — they call `detect()` internally). A test asserts each method returns exactly what the old free function does.
-- **Next (one merged commit):** pieces 2 and 3 together — they're entangled (`assemble_participants` needs both `resolve_flow_edge` and `admits_to_core` to go generic in the same move). `FORMAT_VERSION` → 3.
-- **After that:** the test-churn commit, then verification.
+- **Commits 3–4 (`9e5c427`, `cb774df`) — done.** Drop the redundant `route_literals` parameter (read it off the graph); collapse `graph.rs`'s three typed edge collections (`route_literals` / `table_refs` / `rendered_components`) into one `flow_edges: Vec<FlowEdge { from_file, kind, raw, target: FlowTarget }>`, resolved at build time by `pack.extract_flow_edges` + `pack.resolve_flow_edge`. `FORMAT_VERSION` 2 → 3. Byte-identical on the pilot.
+- **Commit 5 — done.** The feature layer (piece 3). `trait FeatureModel { enumerate_entry_points, admits_to_core }` + `TypeScriptNextFeatureModel` (holds `is_page` / `is_api_route` / the route-path slug / the `is_colocated || does_data_work` rule); `StackPack::feature_model() -> Option<&dyn FeatureModel>` (default `None`; TS returns `Some`). `assemble_participants` is now a generic walk over `flow_edges` + one-hop imports — a file-node edge joins `core` iff `fm.admits_to_core`, a symbol-node edge is the `data` tier. `EntryPoint { file, slug }` → `{ kind, id, title, file }` with `id` == the old slug (spec filenames unchanged). No persisted-shape change, so `FORMAT_VERSION` stays 3. Test churn absorbed: 2 integration tests + 2 spec.rs tests move onto `default_feature_model()`; the rest ride the `enumerate_entry_points` free-fn shim.
+- **Next:** verification (`utility/structural_sweep.py` on the pilot), then the M13 PR.
 
 #### The trait, current + planned shape
 
@@ -379,15 +380,15 @@ trait StackPack {
     fn resolve_imports(&self, root: &Path, file_imports: &HashMap<String, FileImports>, graph: &Graph)
         -> Vec<ResolvedImport>;                                    // pack owns the resolver — DONE
 
-    // --- next commit ---
-    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;
-    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> Option<FlowTarget>;
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;    // DONE
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget;      // DONE
 
-    // OPTIONAL — None means "this stack has no feature specs" (M13-pre)
-    fn feature_model(&self) -> Option<&dyn FeatureModel>;
+    // OPTIONAL — None means "this stack has no feature specs" (M13-pre). Default `None`;
+    // TS overrides. M14/M16 take the default; M17 gives it a second impl.
+    fn feature_model(&self) -> Option<&dyn FeatureModel>;                                     // DONE
 }
 
-trait FeatureModel {
+trait FeatureModel {                                                                         // DONE
     fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint>;
     fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool;
 }
@@ -395,8 +396,9 @@ trait FeatureModel {
 // `kind` is pack-owned free text — a Quarkus service has http-resource / kafka-consumer /
 // scheduled-job / grpc entry points at once, so no closed Page|ApiRoute enum. `id` must be
 // unique across kinds (it names the spec file). `file`, never SymbolId — a SymbolId is only
-// valid for the graph that made it and must never reach a spec file. Today: { file, slug }.
-struct EntryPoint { kind: String, id: String, title: String, file: String }
+// valid for the graph that made it and must never reach a spec file. TS: kind is
+// "page"/"api-route", id is the route slug (unchanged), title is the URL path.
+struct EntryPoint { kind: String, id: String, title: String, file: String }                  // DONE
 ```
 
 `graph.rs` ends up with **one** `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at build time by `pack.resolve_flow_edge` on each `UnresolvedFlowEdge`. `assemble_participants` becomes a generic walk over `flow_edges` + one-hop imports with those two pack hooks. The `SymbolKind` question (design decision 1) is **decided and written down in M13 but not implemented** — reshaping the enum with no second stack to check against is exactly what design decision 8 warns against; M14 does the remap when it adds Rust's kinds.
@@ -415,7 +417,7 @@ The pilot's **spec files** and **`get_spec_coverage` output** are byte-identical
 python3 utility/structural_sweep.py --repo ~/dev/startup/talentTrail
 ```
 
-M13's own runs so far: the `route_literals`-parameter drop and the `flow_edges` collapse (`cb774df`) both came back fully byte-identical on the pilot.
+M13's own runs so far: every commit through the feature-layer split (commit 5) comes back fully byte-identical on the pilot — `codeowl extract`, `get_spec_coverage`, `get_next_spec_task` (103 targets), `get_callers` (25 tables), `get_callees`, `get_symbol`, all against `origin/master`.
 
 ---
 

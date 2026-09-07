@@ -8,11 +8,12 @@
 //! through this trait so M14 (`RustStack`) has an interface to implement
 //! against rather than a scatter of free functions to shadow.
 //!
-//! The trait grows milestone by milestone: M13 covers source classification,
-//! symbol + import extraction, and import resolution. Flow edges
-//! (`extract_flow_edges` / `resolve_flow_edge`) and the optional
-//! `feature_model()` land in their own M13 commits — see `ROADMAP.md`'s
-//! "Phase 2" and `experiments/exp-02-feature-layer.md`.
+//! The trait grows milestone by milestone: M13 covers source
+//! classification, symbol + import extraction, import resolution, flow
+//! edges (`extract_flow_edges` / `resolve_flow_edge`), and the optional
+//! `feature_model()` (the Next-specific "a feature is a page plus what it
+//! reaches" concept — `None` for a stack with no runtime entry surface).
+//! See `ROADMAP.md`'s "Phase 2" and `experiments/exp-02-feature-layer.md`.
 //!
 //! **Still one pack.** `TypeScriptNextStack` here just delegates to the
 //! existing free functions, which stay `pub` as shims so the ~90 test call
@@ -74,6 +75,16 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// for an edge whose raw string points nowhere (external URL, DB view,
     /// dynamic path, typo).
     fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget;
+
+    /// The stack's model of "what is a feature", or `None` if it has no
+    /// runtime entry surface — a CLI or a utility library gets symbol /
+    /// file / rollup / system specs and no feature layer (M13-pre;
+    /// `ROADMAP.md` M13 piece 3, design decision 3). M14 (`RustStack`) and
+    /// M16 (commons-lang) both return `None`; M17 (Quarkus) is where this
+    /// gets its second implementation.
+    fn feature_model(&self) -> Option<&dyn crate::features::FeatureModel> {
+        None
+    }
 }
 
 /// The Phase 1 stack: TypeScript / TSX + SQL schema files, Next.js App
@@ -152,6 +163,10 @@ impl StackPack for TypeScriptNextStack {
         };
         resolved.map_or(FlowTarget::Unresolved, FlowTarget::Node)
     }
+
+    fn feature_model(&self) -> Option<&dyn crate::features::FeatureModel> {
+        Some(crate::features::default_feature_model())
+    }
 }
 
 /// The default pack as a trait object — the shape `RepoIndex` and the test
@@ -193,6 +208,13 @@ mod tests {
         );
         assert_eq!(pack.source_kind(Path::new("a/b.md")), None);
         assert_eq!(pack.name(), "typescript-next");
+    }
+
+    #[test]
+    fn ts_pack_exposes_a_feature_model() {
+        // The TS+Next stack has a feature layer; a `None`-returning pack
+        // (M14/M16) exercises the trait default instead.
+        assert!(TypeScriptNextStack.feature_model().is_some());
     }
 
     #[test]

@@ -13,6 +13,16 @@
 //! the Next.js App Router path join are specific to this one stack. A
 //! different framework needs a different entry-point + route resolver. See
 //! `ROADMAP.md`'s "Stack modularization".
+//!
+//! M13 split it in two: [`assemble_participants`] is now a generic graph
+//! walk (flow edges + one-hop imports), and every Next-specific judgment —
+//! `is_page`, the route-path slug, the `is_colocated || does_data_work`
+//! admission rule — lives behind [`trait FeatureModel`](FeatureModel),
+//! implemented once here by [`TypeScriptNextFeatureModel`]. A stack with
+//! no runtime entry surface returns `None` from
+//! [`crate::stack::StackPack::feature_model`] and has no feature layer at
+//! all. The `extract_*` / `resolve_*` free functions below stay `pub` as
+//! shims for `TypeScriptNextStack` and the tests.
 
 use std::collections::{BTreeSet, HashSet, VecDeque};
 
@@ -340,12 +350,125 @@ fn is_colocated(component_file: &str, entry_file: &str) -> bool {
     !entry_dir.is_empty() && component_file.starts_with(&format!("{entry_dir}/"))
 }
 
-/// One framework-enumerated entry point — a page, or an API route no page
-/// reaches via a resolved `fetch()` literal (a webhook, a cron target).
+/// One framework-enumerated entry point. `kind` names the framework
+/// convention it came from — `"page"` / `"api-route"` for Next.js; M17
+/// (Quarkus) adds `"http"`, `"kafka"`, … so `enumerate_entry_points` can
+/// return a heterogeneous list. `id` is the unique slug that names the
+/// spec file (`docs/specs/_features/<id>.md`) and must not collide across
+/// kinds — Next.js pages and API routes come from disjoint path spaces so
+/// `feature_slug` alone suffices here; M17 kind-prefixes. `title` is the
+/// human-facing label rendered inside the document (nothing reads it yet
+/// — it's here so the shape is right before a second `FeatureModel`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryPoint {
+    pub kind: String,
+    pub id: String,
+    pub title: String,
     pub file: String,
-    pub slug: String,
+}
+
+/// The pack-owned model of "what is a feature" for a stack that has one.
+/// A stack with no runtime entry surface (a CLI, a utility library)
+/// returns `None` from [`crate::stack::StackPack::feature_model`] and
+/// never constructs this — its corpus is symbol / file / rollup / system
+/// specs alone (see `ROADMAP.md` M13 piece 3 and
+/// `experiments/exp-02-feature-layer.md`).
+///
+/// Two methods, deliberately (M13 design decision 8 — keep this minimal;
+/// it gets its second implementation only at M17). Entry-point
+/// enumeration and `core` admission are the only judgments the otherwise
+/// generic walk in [`assemble_participants`] can't make for itself: where
+/// a flow edge points is [`crate::stack::StackPack::resolve_flow_edge`],
+/// and whether the file it lands on belongs *inside* the feature (a body
+/// change is a feature change) or stays a one-hop dependency is
+/// [`FeatureModel::admits_to_core`].
+pub trait FeatureModel: Send + Sync {
+    /// Every entry point the framework's file/annotation conventions
+    /// expose in `graph`.
+    fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint>;
+
+    /// Does `candidate_file` — reached from `entry` by a resolved flow
+    /// edge into a file node — belong in the feature's `core` (tracked by
+    /// `source_hash`), or is it a one-hop dependency (`interface_hash`)?
+    fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool;
+}
+
+/// The TypeScript + Next.js App Router feature model: a feature is an
+/// `app/**/page.tsx` (or an orphan `app/api/**/route.ts`) plus the
+/// component subtree and API routes it reaches. This is the whole of the
+/// Next-specific "feature" concept — `is_page`, the route-path slug, and
+/// the `is_colocated || does_data_work` admission rule all live here, not
+/// in the generic walk.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TypeScriptNextFeatureModel;
+
+impl FeatureModel for TypeScriptNextFeatureModel {
+    fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint> {
+        let targeted: HashSet<String> = graph
+            .flow_edges()
+            .iter()
+            .filter(|e| e.kind == "route-literal")
+            .filter_map(|e| match e.target {
+                FlowTarget::Node(id) => Some(graph.string_id(id).to_string()),
+                FlowTarget::Unresolved => None,
+            })
+            .collect();
+
+        let mut entries: Vec<EntryPoint> = graph
+            .files()
+            .filter(|f| is_page(&f.id))
+            .map(|f| EntryPoint {
+                kind: "page".to_string(),
+                id: feature_slug(&f.id),
+                title: entry_route_path(&f.id),
+                file: f.id.clone(),
+            })
+            .collect();
+
+        entries.extend(
+            graph
+                .files()
+                .filter(|f| is_api_route(&f.id) && !targeted.contains(&f.id))
+                .map(|f| EntryPoint {
+                    kind: "api-route".to_string(),
+                    id: feature_slug(&f.id),
+                    title: entry_route_path(&f.id),
+                    file: f.id.clone(),
+                }),
+        );
+
+        entries
+    }
+
+    fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool {
+        // The generic walk asks this for *every* resolved file edge. Old
+        // behavior: a `route-literal` target joined unconditionally, a
+        // `rendered-component` target only if the feature's own code.
+        // Route-literal targets are always `app/api/**/route.ts`, so
+        // `is_api_route` reproduces the unconditional case; component
+        // targets are `.tsx`, so they fall to the co-location / data-work
+        // test exactly as before.
+        is_api_route(candidate_file)
+            || is_colocated(candidate_file, &entry.file)
+            || file_does_data_work(graph, candidate_file)
+    }
+}
+
+/// The feature model for the one stack M13 ships. M14+ replaces these
+/// call sites with [`crate::stack::StackPack::feature_model`] routing once
+/// a second stack disagrees; deferring it is safe because a Rust or Java
+/// repo has no `app/**/page.tsx`, so this model simply enumerates nothing
+/// there (ROADMAP M13 piece 1 — the core stops naming pack functions
+/// "later").
+pub fn default_feature_model() -> &'static dyn FeatureModel {
+    &TypeScriptNextFeatureModel
+}
+
+/// Back-compat free-function shim — [`default_feature_model`] plus
+/// [`FeatureModel::enumerate_entry_points`]. Callers that already hold a
+/// `&dyn FeatureModel` should prefer the method.
+pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint> {
+    default_feature_model().enumerate_entry_points(graph)
 }
 
 fn is_page(file_id: &str) -> bool {
@@ -356,40 +479,17 @@ fn is_api_route(file_id: &str) -> bool {
     file_id.starts_with("app/api/") && file_id.ends_with("/route.ts")
 }
 
-/// Every `app/**/page.tsx`, plus every `app/api/**/route.ts` that no
-/// resolved `route-literal` flow edge targets. Reads the repo-wide flow
-/// edges off the graph (populated by `RepoIndex`).
-pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint> {
-    let targeted: HashSet<String> = graph
-        .flow_edges()
-        .iter()
-        .filter(|e| e.kind == "route-literal")
-        .filter_map(|e| match e.target {
-            crate::graph::FlowTarget::Node(id) => Some(graph.string_id(id).to_string()),
-            crate::graph::FlowTarget::Unresolved => None,
-        })
-        .collect();
-
-    let mut entries: Vec<EntryPoint> = graph
-        .files()
-        .filter(|f| is_page(&f.id))
-        .map(|f| EntryPoint {
-            file: f.id.clone(),
-            slug: feature_slug(&f.id),
-        })
-        .collect();
-
-    entries.extend(
-        graph
-            .files()
-            .filter(|f| is_api_route(&f.id) && !targeted.contains(&f.id))
-            .map(|f| EntryPoint {
-                file: f.id.clone(),
-                slug: feature_slug(&f.id),
-            }),
-    );
-
-    entries
+/// The URL path an entry file serves — `app/submit/page.tsx` -> `/submit`,
+/// `app/page.tsx` -> `/`, `app/api/stripe-webhook/route.ts` ->
+/// `/api/stripe-webhook`. Only used for [`EntryPoint::title`].
+fn entry_route_path(entry_file: &str) -> String {
+    let path = entry_file
+        .strip_prefix("app/")
+        .unwrap_or(entry_file)
+        .trim_end_matches("page.tsx")
+        .trim_end_matches("route.ts")
+        .trim_end_matches('/');
+    format!("/{path}")
 }
 
 /// A human-followable slug from a route path — `app/submit/page.tsx` ->
@@ -430,10 +530,20 @@ pub struct Participants {
     pub data: Vec<String>,
 }
 
-pub fn assemble_participants(graph: &Graph, entry_file: &str) -> Participants {
+/// Walk the feature rooted at `entry`, using `fm` for the two judgments
+/// the walk can't make itself. Generic over the stack: it follows
+/// `flow_edges` and one-hop imports off the graph and never names a
+/// framework convention — `fm.admits_to_core` decides what joins `core`,
+/// and edges that resolve to a *symbol* rather than a file (a SQL table)
+/// are the `data` tier.
+pub fn assemble_participants(
+    graph: &Graph,
+    fm: &dyn FeatureModel,
+    entry: &EntryPoint,
+) -> Participants {
     let mut core = Vec::new();
     let mut seen = HashSet::new();
-    let mut queue = VecDeque::from([entry_file.to_string()]);
+    let mut queue = VecDeque::from([entry.file.clone()]);
 
     while let Some(file) = queue.pop_front() {
         if !seen.insert(file.clone()) {
@@ -444,23 +554,18 @@ pub fn assemble_participants(graph: &Graph, entry_file: &str) -> Participants {
             let FlowTarget::Node(target) = edge.target else {
                 continue;
             };
+            // Only an edge into a *file* can pull that file into `core`;
+            // an edge into a symbol (a SQL table) is the `data` tier,
+            // collected below.
+            if graph.get_file(target).is_none() {
+                continue;
+            }
             let target_file = graph.string_id(target).to_string();
             if seen.contains(&target_file) {
                 continue;
             }
-            match edge.kind.as_str() {
-                // A resolved API-route call is always part of the feature.
-                "route-literal" => queue.push_back(target_file),
-                // A rendered component joins only if it's the feature's
-                // own code — co-located, or doing data work of its own.
-                "rendered-component"
-                    if is_colocated(&target_file, entry_file)
-                        || file_does_data_work(graph, &target_file) =>
-                {
-                    queue.push_back(target_file)
-                }
-                // `table-ref` targets are the `data` tier, not `core`.
-                _ => {}
+            if fm.admits_to_core(graph, entry, &target_file) {
+                queue.push_back(target_file);
             }
         }
     }
@@ -477,19 +582,23 @@ pub fn assemble_participants(graph: &Graph, entry_file: &str) -> Participants {
         }
     }
 
+    // The `data` tier: every flow edge from a `core` file that resolves
+    // to a *symbol* rather than a file. For the TS+SQL pack those are the
+    // Supabase `.from("table")` refs landing on a `SymbolKind::Table`;
+    // the walk doesn't need to know that.
     let mut data = Vec::new();
     let mut seen_data = HashSet::new();
     for file in &core {
-        for edge in graph
-            .flow_edges()
-            .iter()
-            .filter(|e| e.kind == "table-ref" && &e.from_file == file)
-        {
-            if let FlowTarget::Node(target) = edge.target {
-                let id = graph.string_id(target).to_string();
-                if seen_data.insert(id.clone()) {
-                    data.push(id);
-                }
+        for edge in graph.flow_edges().iter().filter(|e| &e.from_file == file) {
+            let FlowTarget::Node(target) = edge.target else {
+                continue;
+            };
+            if graph.get_file(target).is_some() {
+                continue;
+            }
+            let id = graph.string_id(target).to_string();
+            if seen_data.insert(id.clone()) {
+                data.push(id);
             }
         }
     }
@@ -630,6 +739,60 @@ mod tests {
         assert!(files.contains(&"app/submit/page.tsx"));
         assert!(files.contains(&"app/api/stripe-webhook/route.ts"));
         assert!(!files.contains(&"app/api/submit-artwork/route.ts"));
+
+        // The new EntryPoint shape: kind names the convention, id is the
+        // spec-file slug (unchanged from feature_slug), title is the path.
+        let page = entries
+            .iter()
+            .find(|e| e.file == "app/submit/page.tsx")
+            .unwrap();
+        assert_eq!(page.kind, "page");
+        assert_eq!(page.id, "submit");
+        assert_eq!(page.title, "/submit");
+        let route = entries
+            .iter()
+            .find(|e| e.file == "app/api/stripe-webhook/route.ts")
+            .unwrap();
+        assert_eq!(route.kind, "api-route");
+        assert_eq!(route.id, "api-stripe-webhook");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn admits_to_core_keeps_the_m11_rule_for_the_ts_model() {
+        let fm = TypeScriptNextFeatureModel;
+        let (graph, dir) = fixture(
+            "admits",
+            &[
+                (
+                    "app/submit/page.tsx",
+                    "export default function Page() { return null; }\n",
+                ),
+                (
+                    "app/submit/uploader.tsx",
+                    "export default function Uploader() { return null; }\n",
+                ),
+                (
+                    "components/ui/button.tsx",
+                    "export default function Button() { return null; }\n",
+                ),
+                (
+                    "app/api/x/route.ts",
+                    "export async function POST(): Promise<void> {}\n",
+                ),
+            ],
+        );
+        let entry = EntryPoint {
+            kind: "page".to_string(),
+            id: "submit".to_string(),
+            title: "/submit".to_string(),
+            file: "app/submit/page.tsx".to_string(),
+        };
+        // co-located -> in; shared primitive -> out; API route -> always in.
+        assert!(fm.admits_to_core(&graph, &entry, "app/submit/uploader.tsx"));
+        assert!(!fm.admits_to_core(&graph, &entry, "components/ui/button.tsx"));
+        assert!(fm.admits_to_core(&graph, &entry, "app/api/x/route.ts"));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -653,7 +816,13 @@ mod tests {
             ],
         );
 
-        let participants = assemble_participants(&graph, "app/submit/page.tsx");
+        let fm = default_feature_model();
+        let entry = fm
+            .enumerate_entry_points(&graph)
+            .into_iter()
+            .find(|e| e.file == "app/submit/page.tsx")
+            .unwrap();
+        let participants = assemble_participants(&graph, fm, &entry);
         assert_eq!(
             participants.core,
             vec![
