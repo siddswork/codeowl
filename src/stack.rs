@@ -15,9 +15,11 @@
 //! reaches" concept — `None` for a stack with no runtime entry surface).
 //! See `ROADMAP.md`'s "Phase 2" and `experiments/exp-02-feature-layer.md`.
 //!
-//! **Still one pack.** `TypeScriptNextStack` here just delegates to the
-//! existing free functions, which stay `pub` as shims so the ~90 test call
-//! sites compile unchanged. The point is the seam, not new behaviour.
+//! `TypeScriptNextStack` delegates to the existing free functions, which
+//! stay `pub` as shims. M14 adds `RustStack` (`tree-sitter-rust` over
+//! `.rs`, no feature layer) as the second implementation — the one that
+//! actually exercises the seams. `lang::detect` still hands back the TS
+//! pack unconditionally until M14's `detect()`-branching commit.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -176,6 +178,65 @@ pub fn typescript_next() -> Box<dyn StackPack> {
     Box::new(TypeScriptNextStack)
 }
 
+/// The Rust stack (M14): `tree-sitter-rust` extraction over `.rs` files,
+/// exercised on CodeOwl's own repo. No feature layer (`feature_model()`
+/// takes the trait default `None` — CodeOwl has cross-cutting workflows
+/// but no mechanically enumerable entry surface; see
+/// `experiments/exp-02-feature-layer.md`). Import resolution (the `mod`
+/// tree walk) and any flow edges land in later M14 commits; for now
+/// `extract_imports` / `resolve_imports` / `extract_flow_edges` are empty,
+/// so the graph has symbols and containment but no reference edges yet.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RustStack;
+
+impl StackPack for RustStack {
+    fn name(&self) -> &str {
+        "rust"
+    }
+
+    fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+        (path.extension().and_then(|e| e.to_str()) == Some("rs")).then_some(SourceKind::Code)
+    }
+
+    fn classify(&self, rel_path: &str) -> FileRole {
+        if rel_path.starts_with("tests/")
+            || rel_path.starts_with("benches/")
+            || rel_path.contains("/tests/")
+        {
+            FileRole::Test
+        } else {
+            // Rust has no `components/ui`-style primitive tier, and
+            // `target/` is gitignored so a walk never reaches it.
+            FileRole::Domain
+        }
+    }
+
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+        crate::rust::extract_file(source, rel_path)
+    }
+
+    fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
+        FileImports::default()
+    }
+
+    fn resolve_imports(
+        &self,
+        _root: &Path,
+        _file_imports: &HashMap<String, FileImports>,
+        _graph: &Graph,
+    ) -> Vec<ResolvedImport> {
+        Vec::new()
+    }
+
+    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
+        Vec::new()
+    }
+
+    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
+        FlowTarget::Unresolved
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,6 +276,36 @@ mod tests {
         // The TS+Next stack has a feature layer; a `None`-returning pack
         // (M14/M16) exercises the trait default instead.
         assert!(TypeScriptNextStack.feature_model().is_some());
+    }
+
+    #[test]
+    fn rust_pack_reads_rs_and_has_no_feature_model() {
+        let pack = RustStack;
+        assert_eq!(pack.name(), "rust");
+        assert_eq!(
+            pack.source_kind(Path::new("src/graph.rs")),
+            Some(SourceKind::Code)
+        );
+        assert_eq!(pack.source_kind(Path::new("src/graph.ts")), None);
+        assert_eq!(pack.source_kind(Path::new("Cargo.toml")), None);
+        assert_eq!(pack.classify("src/lib.rs"), FileRole::Domain);
+        assert_eq!(pack.classify("tests/schema.rs"), FileRole::Test);
+        assert_eq!(pack.classify("benches/bench.rs"), FileRole::Test);
+        // M14 Rust is a library/CLI — no runtime entry surface, so the
+        // trait's `None` default stands (exp-02).
+        assert!(pack.feature_model().is_none());
+
+        let syms = pack.extract_symbols("src/x.rs", "pub fn go() {}\npub struct S;\n");
+        assert_eq!(syms.len(), 2);
+        assert_eq!(syms[0].raw, "fn");
+        assert_eq!(syms[1].raw, "struct");
+        // Reference edges are a later M14 commit.
+        assert!(
+            pack.extract_imports("src/x.rs", "use crate::y;\n")
+                .imports
+                .is_empty()
+        );
+        assert!(pack.extract_flow_edges("src/x.rs", "").is_empty());
     }
 
     #[test]
