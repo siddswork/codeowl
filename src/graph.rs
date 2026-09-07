@@ -137,9 +137,50 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// source, never partially reused (the latent M11 bug this closes).
 ///
 /// History: 1 = M12 (introduced). 2 = M13 (`ExtractedSymbol` / `Symbol`
-/// gain `markers`). Bumped again later in M13 when the four typed edge
-/// fields collapse to `flow_edges`.
-pub const FORMAT_VERSION: u32 = 2;
+/// gain `markers`). 3 = M13 (the three typed edge fields — route literals,
+/// table refs, rendered components — collapse into one generic
+/// `flow_edges`).
+pub const FORMAT_VERSION: u32 = 3;
+
+/// One "this file reaches that thing" edge the structural import graph
+/// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
+/// The pack extracts them unresolved (one raw string each) and resolves
+/// every one against the built graph. `kind` is pack-owned free text so
+/// the feature model can dispatch on it. Replaces M10/M11's route-literal
+/// / table-ref / rendered-component fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlowEdge {
+    pub from_file: String,
+    /// Pack-owned: `"route-literal"` | `"table-ref"` | `"rendered-component"`
+    /// for `TypeScriptNextStack`.
+    pub kind: String,
+    /// The literal the pack matched — a path, a table name, a JSX tag.
+    /// Kept so `kind`-specific consumers (`get_callers` on a table) don't
+    /// need a parallel structure, and for display.
+    pub raw: String,
+    pub target: FlowTarget,
+}
+
+/// Where a [`FlowEdge`] points, once resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FlowTarget {
+    /// Resolved to this arena node — a file, or a schema symbol.
+    Node(SymbolId),
+    /// The raw string resolved to nothing: an external URL, a DB view, a
+    /// dynamic path, a typo. The edge still counts as "this file does data
+    /// work"; it just has no destination to follow.
+    Unresolved,
+}
+
+/// A flow edge before resolution — what `pack.extract_flow_edges` produces
+/// per file, cached in `RepoIndex`, resolved by `pack.resolve_flow_edge`
+/// at graph-build time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UnresolvedFlowEdge {
+    pub from_file: String,
+    pub kind: String,
+    pub raw: String,
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Graph {
@@ -159,39 +200,22 @@ pub struct Graph {
     /// look symbols up in, so they can't be known at `build` time.
     imports: Vec<ResolvedImport>,
 
-    // ---- Pack-contributed derived edges ------------------------------------
-    // The four fields below are all *derived* edges — populated after `build`
-    // by a convention resolver in `features.rs` / `resolve.rs`, not by the
-    // structural walk — and every one is a convention of the active stack
-    // (Next.js routes, Supabase `.from()`, React JSX + default exports). On a
-    // repo the active pack doesn't cover they are simply empty. M13 collapses
-    // the group into one generic `flow_edges: Vec<FlowEdge>` resolved via
-    // `pack.resolve_flow_edge`; `imports` above stays separate (the traversal
-    // in `assemble_participants` walks flow edges *plus* one-hop imports).
-    // See ROADMAP.md's "Phase 2".
-    /// Every `fetch("/api/...")` call site found across the repo — see
-    /// `features.rs`. Stored here (rather than re-walked on every
-    /// `get_next_spec_task` call) the same way `imports` is: computed once
-    /// at graph-build time, persisted with everything else.
-    route_literals: Vec<crate::features::RouteLiteral>,
-    /// Every `.from("<table>")` call site found across the repo (M10) —
-    /// stored the same way `route_literals` is, resolved against the
-    /// `SymbolKind::Table` nodes `schema.rs` extracts.
+    /// Every pack-contributed [`FlowEdge`] across the repo, resolved — see
+    /// `pack.extract_flow_edges` / `pack.resolve_flow_edge`. Computed once
+    /// at graph-build time and persisted, the same way `imports` is. Empty
+    /// on a repo whose pack has no such conventions. `assemble_participants`
+    /// walks these *plus* one-hop `imports`.
     #[serde(default)]
-    table_refs: Vec<crate::features::TableRef>,
-    /// Every `<Component/>` rendered in each file (M11) — the JSX
-    /// containment edges `assemble_participants` follows into a feature's
-    /// `core`, since the import graph can't tell a rendered component from
-    /// an imported utility.
-    #[serde(default)]
-    rendered_components: Vec<crate::features::RenderedComponent>,
+    flow_edges: Vec<FlowEdge>,
     /// Every `import Name from './x'` resolved to the file it points at
     /// (M11) — file-level only. Needed because React components are
     /// default-exported, so the named-import list can't resolve
-    /// `<Component/>`.
+    /// `<Component/>`. The one remaining pack-specific field: it's
+    /// import-resolution plumbing for the rendered-component flow edge, not
+    /// a flow edge itself — folds into `pack.resolve_imports`'s output in
+    /// M18 when resolution ownership fully moves to the pack.
     #[serde(default)]
     resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
-    // ---- end pack-contributed edges ---------------------------------------
 }
 
 impl Graph {
@@ -263,9 +287,7 @@ impl Graph {
             nodes,
             by_id,
             imports: Vec::new(),
-            route_literals: Vec::new(),
-            table_refs: Vec::new(),
-            rendered_components: Vec::new(),
+            flow_edges: Vec::new(),
             resolved_default_imports: Vec::new(),
         }
     }
@@ -344,31 +366,12 @@ impl Graph {
         self.imports = imports;
     }
 
-    pub fn route_literals(&self) -> &[crate::features::RouteLiteral] {
-        &self.route_literals
+    pub fn flow_edges(&self) -> &[FlowEdge] {
+        &self.flow_edges
     }
 
-    pub fn set_route_literals(&mut self, route_literals: Vec<crate::features::RouteLiteral>) {
-        self.route_literals = route_literals;
-    }
-
-    pub fn table_refs(&self) -> &[crate::features::TableRef] {
-        &self.table_refs
-    }
-
-    pub fn set_table_refs(&mut self, table_refs: Vec<crate::features::TableRef>) {
-        self.table_refs = table_refs;
-    }
-
-    pub fn rendered_components(&self) -> &[crate::features::RenderedComponent] {
-        &self.rendered_components
-    }
-
-    pub fn set_rendered_components(
-        &mut self,
-        rendered_components: Vec<crate::features::RenderedComponent>,
-    ) {
-        self.rendered_components = rendered_components;
+    pub fn set_flow_edges(&mut self, flow_edges: Vec<FlowEdge>) {
+        self.flow_edges = flow_edges;
     }
 
     pub fn resolved_default_imports(&self) -> &[crate::resolve::ResolvedDefaultImport] {
@@ -382,17 +385,18 @@ impl Graph {
         self.resolved_default_imports = resolved_default_imports;
     }
 
-    /// Every file with a `.from("<table>")` call that resolves to `table_id`
-    /// (a `SymbolKind::Table` node) — the schema-side answer to "what app
-    /// code touches this table", surfaced through `get_callers` (M10).
-    pub fn table_callers(&self, table_id: &str) -> Vec<crate::features::TableRef> {
+    /// Every `(file, table-name)` for a `.from("<table>")` flow edge that
+    /// resolved to `table_id` (a `SymbolKind::Table` node) — the
+    /// schema-side answer to "what app code touches this table", surfaced
+    /// through `get_callers` (M10).
+    pub fn table_callers(&self, table_id: &str) -> Vec<(String, String)> {
         let Some(target) = self.find(table_id) else {
             return Vec::new();
         };
-        self.table_refs
+        self.flow_edges
             .iter()
-            .filter(|r| crate::features::resolve_table_ref(self, &r.table) == Some(target))
-            .cloned()
+            .filter(|e| e.kind == "table-ref" && e.target == FlowTarget::Node(target))
+            .map(|e| (e.from_file.clone(), e.raw.clone()))
             .collect()
     }
 

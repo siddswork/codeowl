@@ -19,7 +19,7 @@ use std::collections::{BTreeSet, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
-use crate::graph::{Graph, SymbolId};
+use crate::graph::{FlowTarget, Graph, SymbolId};
 use crate::lang::ts_parser;
 
 /// One `fetch("/api/...")` call site found anywhere in a file — not just
@@ -302,8 +302,9 @@ fn walk_for_jsx(node: Node, source: &str, out: &mut BTreeSet<String>) {
 /// `None` when the component's import resolved outside the repo (an
 /// external UI library) or not at all. Checks default imports first
 /// (`import Name from './x'` — how React components are almost always
-/// imported), then falls back to a named import.
-fn resolve_rendered_component(graph: &Graph, from_file: &str, name: &str) -> Option<String> {
+/// imported), then falls back to a named import. `pub` so
+/// `TypeScriptNextStack::resolve_flow_edge` can call it.
+pub fn resolve_rendered_component(graph: &Graph, from_file: &str, name: &str) -> Option<String> {
     if let Some(di) = graph
         .resolved_default_imports()
         .iter()
@@ -321,11 +322,13 @@ fn resolve_rendered_component(graph: &Graph, from_file: &str, name: &str) -> Opt
 }
 
 /// A rendered component joins a feature's `core` iff it does data work
-/// (contains a resolved `fetch("/api/...")` or `.from("table")`) — i.e.
-/// it's part of the feature's behavior, not just its chrome.
+/// (contains a `fetch("/api/...")` or `.from("table")` flow edge, resolved
+/// or not) — i.e. it's part of the feature's behavior, not just its chrome.
 fn file_does_data_work(graph: &Graph, file: &str) -> bool {
-    graph.route_literals().iter().any(|r| r.from_file == file)
-        || graph.table_refs().iter().any(|r| r.from_file == file)
+    graph
+        .flow_edges()
+        .iter()
+        .any(|e| e.from_file == file && matches!(e.kind.as_str(), "route-literal" | "table-ref"))
 }
 
 /// ...or it's co-located with the entry point — in the entry's own
@@ -354,14 +357,17 @@ fn is_api_route(file_id: &str) -> bool {
 }
 
 /// Every `app/**/page.tsx`, plus every `app/api/**/route.ts` that no
-/// resolved route literal targets. Reads the repo-wide route literals off
-/// the graph (`Graph::set_route_literals`, populated by `RepoIndex`).
+/// resolved `route-literal` flow edge targets. Reads the repo-wide flow
+/// edges off the graph (populated by `RepoIndex`).
 pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint> {
     let targeted: HashSet<String> = graph
-        .route_literals()
+        .flow_edges()
         .iter()
-        .filter_map(|lit| resolve_route_literal(graph, &lit.static_path))
-        .map(|id| graph.string_id(id).to_string())
+        .filter(|e| e.kind == "route-literal")
+        .filter_map(|e| match e.target {
+            crate::graph::FlowTarget::Node(id) => Some(graph.string_id(id).to_string()),
+            crate::graph::FlowTarget::Unresolved => None,
+        })
         .collect();
 
     let mut entries: Vec<EntryPoint> = graph
@@ -434,31 +440,27 @@ pub fn assemble_participants(graph: &Graph, entry_file: &str) -> Participants {
             continue;
         }
         core.push(file.clone());
-        for lit in graph
-            .route_literals()
-            .iter()
-            .filter(|l| l.from_file == file)
-        {
-            if let Some(target_id) = resolve_route_literal(graph, &lit.static_path) {
-                let target_file = graph.string_id(target_id).to_string();
-                if !seen.contains(&target_file) {
-                    queue.push_back(target_file);
-                }
-            }
-        }
-        for rc in graph
-            .rendered_components()
-            .iter()
-            .filter(|r| r.from_file == file)
-        {
-            let Some(component_file) = resolve_rendered_component(graph, &file, &rc.name) else {
+        for edge in graph.flow_edges().iter().filter(|e| e.from_file == file) {
+            let FlowTarget::Node(target) = edge.target else {
                 continue;
             };
-            if !seen.contains(&component_file)
-                && (is_colocated(&component_file, entry_file)
-                    || file_does_data_work(graph, &component_file))
-            {
-                queue.push_back(component_file);
+            let target_file = graph.string_id(target).to_string();
+            if seen.contains(&target_file) {
+                continue;
+            }
+            match edge.kind.as_str() {
+                // A resolved API-route call is always part of the feature.
+                "route-literal" => queue.push_back(target_file),
+                // A rendered component joins only if it's the feature's
+                // own code — co-located, or doing data work of its own.
+                "rendered-component"
+                    if is_colocated(&target_file, entry_file)
+                        || file_does_data_work(graph, &target_file) =>
+                {
+                    queue.push_back(target_file)
+                }
+                // `table-ref` targets are the `data` tier, not `core`.
+                _ => {}
             }
         }
     }
@@ -478,8 +480,12 @@ pub fn assemble_participants(graph: &Graph, entry_file: &str) -> Participants {
     let mut data = Vec::new();
     let mut seen_data = HashSet::new();
     for file in &core {
-        for r in graph.table_refs().iter().filter(|r| &r.from_file == file) {
-            if let Some(target) = resolve_table_ref(graph, &r.table) {
+        for edge in graph
+            .flow_edges()
+            .iter()
+            .filter(|e| e.kind == "table-ref" && &e.from_file == file)
+        {
+            if let FlowTarget::Node(target) = edge.target {
                 let id = graph.string_id(target).to_string();
                 if seen_data.insert(id.clone()) {
                     data.push(id);

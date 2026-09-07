@@ -20,8 +20,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::features::{RenderedComponent, RouteLiteral, TableRef, extract_route_literals};
-use crate::graph::{FileExtraction, Graph};
+use crate::graph::{FileExtraction, FlowEdge, Graph, UnresolvedFlowEdge};
 use crate::hash::hash_text;
 use crate::imports::FileImports;
 use crate::lang::SourceKind;
@@ -35,19 +34,17 @@ pub struct FileInputs {
     pub source_hash: String,
     pub symbols: Vec<ExtractedSymbol>,
     pub imports: FileImports,
-    pub route_literals: Vec<RouteLiteral>,
+    /// Unresolved flow edges from `pack.extract_flow_edges` — resolved
+    /// against the whole graph in `rebuild`.
     #[serde(default)]
-    pub table_refs: Vec<TableRef>,
-    #[serde(default)]
-    pub rendered_components: Vec<RenderedComponent>,
+    pub flow_edges: Vec<UnresolvedFlowEdge>,
 }
 
 impl FileInputs {
     /// Everything that depends on a file's contents, recomputed together
-    /// whenever that file changes. A schema file gets only `schema.rs`'s
-    /// table pass (folded into `extract_symbols`); the TypeScript
-    /// convention passes — imports, route literals, `.from()` refs,
-    /// rendered components — are skipped.
+    /// whenever that file changes. A schema file gets only the table pass
+    /// (folded into `pack.extract_symbols`); the pack's import and
+    /// flow-edge passes are skipped for it.
     fn extract(pack: &dyn StackPack, rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
         let symbols = pack.extract_symbols(rel_path, source);
@@ -56,17 +53,13 @@ impl FileInputs {
                 source_hash,
                 symbols,
                 imports: FileImports::default(),
-                route_literals: Vec::new(),
-                table_refs: Vec::new(),
-                rendered_components: Vec::new(),
+                flow_edges: Vec::new(),
             },
             Some(SourceKind::Code) | None => Self {
                 source_hash,
                 symbols,
                 imports: pack.extract_imports(rel_path, source),
-                route_literals: extract_route_literals(source, rel_path),
-                table_refs: crate::features::extract_table_refs(source, rel_path),
-                rendered_components: crate::features::extract_rendered_components(source, rel_path),
+                flow_edges: pack.extract_flow_edges(rel_path, source),
             },
         }
     }
@@ -327,31 +320,30 @@ impl RepoIndex {
             .collect();
         let resolved = self.pack.resolve_imports(&self.root, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
-        // `resolve_default_imports` folds into `pack.extract_flow_edges` in
-        // the next M13 commit; still a free-function call for now.
+        // Still a free-function call: `resolved_default_imports` is
+        // import-resolution plumbing for the rendered-component flow edge,
+        // not a flow edge itself — folds into `pack.resolve_imports`'s
+        // output in M18.
         graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
             &self.root,
             &crate::resolve::build_resolver(),
             &file_imports,
         ));
-        graph.set_route_literals(
-            self.files
-                .values()
-                .flat_map(|f| f.route_literals.iter().cloned())
-                .collect(),
-        );
-        graph.set_table_refs(
-            self.files
-                .values()
-                .flat_map(|f| f.table_refs.iter().cloned())
-                .collect(),
-        );
-        graph.set_rendered_components(
-            self.files
-                .values()
-                .flat_map(|f| f.rendered_components.iter().cloned())
-                .collect(),
-        );
+
+        // Resolve every file's unresolved flow edges against the whole
+        // graph now that imports (and default imports) are in place.
+        let flow_edges: Vec<FlowEdge> = self
+            .files
+            .values()
+            .flat_map(|f| f.flow_edges.iter())
+            .map(|e| FlowEdge {
+                from_file: e.from_file.clone(),
+                kind: e.kind.clone(),
+                raw: e.raw.clone(),
+                target: self.pack.resolve_flow_edge(&graph, e),
+            })
+            .collect();
+        graph.set_flow_edges(flow_edges);
 
         graph.save(&Self::graph_path(&self.root))?;
         self.save()?;

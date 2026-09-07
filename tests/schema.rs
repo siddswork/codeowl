@@ -98,11 +98,13 @@ fn a_from_call_resolves_to_its_table_node() {
 
     let payments = graph.find("supabase/schema.sql::payments").unwrap();
     let touched: Vec<&str> = graph
-        .table_refs()
+        .flow_edges()
         .iter()
-        .filter(|r| r.from_file == "app/api/pay/route.ts")
-        .filter_map(|r| codeowl::features::resolve_table_ref(&graph, &r.table))
-        .map(|id| graph.string_id(id))
+        .filter(|e| e.kind == "table-ref" && e.from_file == "app/api/pay/route.ts")
+        .filter_map(|e| match e.target {
+            codeowl::graph::FlowTarget::Node(id) => Some(graph.string_id(id)),
+            codeowl::graph::FlowTarget::Unresolved => None,
+        })
         .collect();
 
     assert!(
@@ -120,7 +122,7 @@ fn get_callers_on_a_table_lists_the_app_code_that_touches_it() {
     let callers: Vec<String> = graph
         .table_callers("supabase/schema.sql::registrations")
         .into_iter()
-        .map(|c| c.from_file)
+        .map(|(from_file, _table)| from_file)
         .collect();
 
     assert_eq!(callers, vec!["app/api/pay/route.ts".to_string()]);

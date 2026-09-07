@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::graph::Graph;
+use crate::graph::{FlowTarget, Graph, UnresolvedFlowEdge};
 use crate::imports::FileImports;
 use crate::lang::{FileRole, SourceKind};
 use crate::resolve::ResolvedImport;
@@ -62,6 +62,18 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
         file_imports: &HashMap<String, FileImports>,
         graph: &Graph,
     ) -> Vec<ResolvedImport>;
+
+    /// The "this file reaches that thing" edges the import graph can't see
+    /// — for `TypeScriptNextStack`, `fetch("/api/…")`, `.from("table")`,
+    /// `<Component/>`. One raw string per edge; resolution is a separate
+    /// step. A pack with no such conventions returns an empty vec.
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;
+
+    /// Resolve one flow edge against the built graph. Called per edge at
+    /// graph-build time, after imports are resolved. `FlowTarget::Unresolved`
+    /// for an edge whose raw string points nowhere (external URL, DB view,
+    /// dynamic path, typo).
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget;
 }
 
 /// The Phase 1 stack: TypeScript / TSX + SQL schema files, Next.js App
@@ -100,6 +112,45 @@ impl StackPack for TypeScriptNextStack {
     ) -> Vec<ResolvedImport> {
         let resolver = crate::resolve::build_resolver();
         crate::resolve::resolve_imports(root, &resolver, file_imports, graph)
+    }
+
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {
+        let mut out = Vec::new();
+        for rl in crate::features::extract_route_literals(source, rel_path) {
+            out.push(UnresolvedFlowEdge {
+                from_file: rl.from_file,
+                kind: "route-literal".to_string(),
+                raw: rl.static_path,
+            });
+        }
+        for tr in crate::features::extract_table_refs(source, rel_path) {
+            out.push(UnresolvedFlowEdge {
+                from_file: tr.from_file,
+                kind: "table-ref".to_string(),
+                raw: tr.table,
+            });
+        }
+        for rc in crate::features::extract_rendered_components(source, rel_path) {
+            out.push(UnresolvedFlowEdge {
+                from_file: rc.from_file,
+                kind: "rendered-component".to_string(),
+                raw: rc.name,
+            });
+        }
+        out
+    }
+
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
+        let resolved = match edge.kind.as_str() {
+            "route-literal" => crate::features::resolve_route_literal(graph, &edge.raw),
+            "table-ref" => crate::features::resolve_table_ref(graph, &edge.raw),
+            "rendered-component" => {
+                crate::features::resolve_rendered_component(graph, &edge.from_file, &edge.raw)
+                    .and_then(|file| graph.find(&file))
+            }
+            _ => None,
+        };
+        resolved.map_or(FlowTarget::Unresolved, FlowTarget::Node)
     }
 }
 

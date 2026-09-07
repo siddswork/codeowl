@@ -500,9 +500,9 @@ impl CodeOwlServer {
             let callers = graph
                 .table_callers(&req.id)
                 .into_iter()
-                .map(|r| CallerInfo {
-                    from_file: r.from_file,
-                    imported_name: r.table,
+                .map(|(from_file, table)| CallerInfo {
+                    from_file,
+                    imported_name: table,
                 })
                 .collect();
             return Ok(Json(callers));
@@ -972,10 +972,6 @@ impl ServerHandler for CodeOwlServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::Graph;
-    use crate::imports::extract_imports;
-    use crate::resolve::{build_resolver, resolve_imports};
-    use std::collections::HashMap;
 
     /// Build a small in-memory server the same way `main.rs`'s `serve`
     /// subcommand will: extract, resolve, wrap in a `Graph`. Files are
@@ -1001,35 +997,15 @@ mod tests {
     /// the first call is still sitting on disk underneath it, exactly like
     /// a real edit-then-re-run-generate session.
     fn rebuild_server(dir: std::path::PathBuf, files: &[(&str, &str)]) -> CodeOwlServer {
-        let mut extractions = Vec::new();
-        let mut file_imports = HashMap::new();
-        let mut route_literals = Vec::new();
-        let mut table_refs = Vec::new();
-        let mut rendered_components = Vec::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
-            extractions.push(crate::graph::extract_and_hash(rel, content));
-            file_imports.insert(rel.to_string(), extract_imports(content, rel));
-            route_literals.extend(crate::features::extract_route_literals(content, rel));
-            table_refs.extend(crate::features::extract_table_refs(content, rel));
-            rendered_components.extend(crate::features::extract_rendered_components(content, rel));
         }
-
-        let mut graph = Graph::build(extractions);
-        let resolver = build_resolver();
-        let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
-        graph.set_resolved_imports(resolved);
-        graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
-            &dir,
-            &resolver,
-            &file_imports,
-        ));
-        graph.set_route_literals(route_literals);
-        graph.set_table_refs(table_refs);
-        graph.set_rendered_components(rendered_components);
-
+        let graph = crate::index::RepoIndex::build(&dir)
+            .unwrap()
+            .rebuild()
+            .unwrap();
         CodeOwlServer::new(dir, graph)
     }
 
