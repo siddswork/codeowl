@@ -46,24 +46,24 @@ pub fn is_test_path(path: &str) -> bool {
     matches!(classify(path), FileRole::Test)
 }
 
-/// A file is spec-bearing iff it declares at least one exported function or
-/// class among its top-level symbols — barrel files, const-only route
-/// config, and metadata-only boilerplate get no document (see
+/// A file is spec-bearing iff it declares at least one exported `Callable`
+/// or `Container` among its top-level symbols — barrel files, const-only
+/// route config, and metadata-only boilerplate get no document (see
 /// `ARCHITECTURE.md`'s granularity rules).
 pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool {
     graph.children_ids(file_id).iter().any(|&id| {
         graph.get_symbol(id).is_some_and(|s| {
-            s.is_exported && matches!(s.kind, SymbolKind::Function | SymbolKind::Class)
+            s.is_exported && matches!(s.kind, SymbolKind::Callable | SymbolKind::Container)
         })
     })
 }
 
 /// The top-level symbols a file spec gives their own section — both
-/// exported and unexported functions/classes (the point is describing how
-/// the file works, not only its public API). Top-level `const`s get no
-/// subsection of their own; a class's methods are covered inside the
-/// class's own section, not separately, matching how M2 already treats a
-/// class as one containment unit.
+/// exported and unexported `Callable`s/`Container`s (the point is
+/// describing how the file works, not only its public API). Top-level
+/// `Value`s (a `const`) get no subsection of their own; a container's
+/// members are covered inside the container's own section, not separately,
+/// matching how M2 already treats a class as one containment unit.
 fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
     graph
         .children_ids(file_id)
@@ -72,7 +72,7 @@ fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
         .filter(|&id| {
             graph
                 .get_symbol(id)
-                .is_some_and(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Class))
+                .is_some_and(|s| matches!(s.kind, SymbolKind::Callable | SymbolKind::Container))
         })
         .collect()
 }
@@ -150,7 +150,7 @@ pub struct SymbolProse {
 pub struct FileSpec {
     pub source_path: String,
     pub file: HashPair,
-    /// Per top-level function/class symbol, in declaration order.
+    /// Per top-level `Callable`/`Container` symbol, in declaration order.
     pub symbols: Vec<(String, HashPair)>,
     /// The file's own `## Summary` prose (LLM-written).
     pub file_summary: String,

@@ -82,7 +82,8 @@ fn schema_nodes_are_created_for_every_create_table() {
             .find(&format!("supabase/schema.sql::{table}"))
             .unwrap_or_else(|| panic!("no schema node for {table}"));
         let sym = graph.get_symbol(id).unwrap();
-        assert_eq!(sym.kind, SymbolKind::Table);
+        assert_eq!(sym.kind, SymbolKind::Schema);
+        assert_eq!(sym.raw, "table");
         assert!(
             sym.signature.contains("status"),
             "{table} signature should list its columns, got {:?}",
@@ -111,7 +112,7 @@ fn a_from_call_resolves_to_its_table_node() {
         touched.contains(&"supabase/schema.sql::payments"),
         "the route's .from(\"payments\") should resolve to the payments node, got {touched:?}"
     );
-    assert_eq!(graph.get_symbol(payments).unwrap().kind, SymbolKind::Table);
+    assert_eq!(graph.get_symbol(payments).unwrap().kind, SymbolKind::Schema);
 }
 
 #[test]

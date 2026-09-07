@@ -239,14 +239,14 @@ fn is_builtin_from_receiver(member: Node, source: &str) -> bool {
 }
 
 /// Resolve a table name to its schema node, by exact name match against the
-/// `SymbolKind::Table` symbols `schema.rs` produced. `None` for a name with
+/// `SymbolKind::Schema` symbols `schema.rs` produced. `None` for a name with
 /// no `CREATE TABLE` (a database view, or a typo) — the "resolves to a
 /// plausible candidate" bar from `ROADMAP.md`'s M10 validation, not a
 /// guarantee.
 pub fn resolve_table_ref(graph: &Graph, table: &str) -> Option<SymbolId> {
     graph
         .symbols()
-        .find(|s| s.kind == crate::symbol::SymbolKind::Table && table_name_of(&s.id) == table)
+        .find(|s| s.kind == crate::symbol::SymbolKind::Schema && table_name_of(&s.id) == table)
         .and_then(|s| graph.find(&s.id))
 }
 
@@ -584,7 +584,7 @@ pub fn assemble_participants(
 
     // The `data` tier: every flow edge from a `core` file that resolves
     // to a *symbol* rather than a file. For the TS+SQL pack those are the
-    // Supabase `.from("table")` refs landing on a `SymbolKind::Table`;
+    // Supabase `.from("table")` refs landing on a `SymbolKind::Schema`;
     // the walk doesn't need to know that.
     let mut data = Vec::new();
     let mut seen_data = HashSet::new();

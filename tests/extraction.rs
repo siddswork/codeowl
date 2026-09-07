@@ -21,7 +21,11 @@ fn react_component_with_hooks_and_generics() {
             "component.tsx::fetchUser",
         ]
     );
-    assert!(symbols.iter().all(|s| s.kind == SymbolKind::Function));
+    assert!(
+        symbols
+            .iter()
+            .all(|s| s.kind == SymbolKind::Callable && s.raw == "function")
+    );
 
     let badge = &symbols[0];
     assert_eq!(

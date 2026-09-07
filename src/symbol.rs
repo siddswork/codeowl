@@ -22,27 +22,32 @@ impl SymbolId {
     }
 }
 
-/// What a declaration represents.
+/// What a declaration represents, in **stack-neutral** terms — the generic
+/// core reasons about these four; the pack records the concrete grammar
+/// kind (`"function"`, `"struct"`, `"macro_rules"`, `"@interface"`, …) in
+/// [`ExtractedSymbol::raw`] for display and its own logic (M13 design
+/// decision 1).
 ///
-/// M1 only extracts top-level function/class/const declarations plus class
-/// methods — nested closures, interfaces, and type aliases are out of scope
-/// for now (see `ROADMAP.md`'s M1 entry). `Method` exists so a class's
-/// `children` has something to point at; it isn't one of the "function/
-/// class/const" kinds named in scope, but a class with no visible members
-/// wouldn't exercise the containment tree at all.
+/// - `Container` — has members that get their own specs: a TS/Java class,
+///   a Rust `struct` / `enum` / `trait` / `impl` / `mod`.
+/// - `Callable` — a function, method, or constructor: the unit a caller
+///   invokes. TS `function`/`method`, Rust `fn`, later Java methods.
+/// - `Value` — a data-carrier with no spec of its own: a TS/Rust `const`
+///   or `static`, a plain-data record. Rolls up into its file spec.
+/// - `Schema` — M10's SQL `CREATE TABLE` (see `schema.rs`); M18 widens the
+///   source off the `.sql`-file assumption. Resolvable and queryable but
+///   never spec-bearing.
 ///
-/// `Table` is M10's SQL schema node — a `CREATE TABLE` from a `.sql` file
-/// (see `schema.rs`). It's a graph node, not a spec-bearing one: the
-/// granularity rules in `spec.rs` only generate for `Function`/`Class`, so
-/// tables are resolvable and queryable but never get their own document.
+/// `spec.rs`'s granularity rule generates a document for a *top-level*
+/// `Container` or `Callable` (a method is a `Callable` whose parent is a
+/// `Container`, so it stays inside the container's section) — pack-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
-    Function,
-    Class,
-    Method,
-    Const,
-    Table,
+    Container,
+    Callable,
+    Value,
+    Schema,
 }
 
 /// A single extracted declaration, resolved into a `Graph`'s arena.
@@ -61,6 +66,14 @@ pub enum SymbolKind {
 pub struct Symbol {
     pub id: String,
     pub kind: SymbolKind,
+    /// The pack's concrete grammar kind for this declaration —
+    /// `"function"` / `"method"` / `"class"` / `"const"` for TS, `"table"`
+    /// for SQL, `"fn"` / `"struct"` / `"trait"` / `"macro_rules"` / … from
+    /// M14. The generic core never branches on it; it's for display and
+    /// pack-internal logic (M13 design decision 1). `#[serde(default)]` for
+    /// pre-v4 caches, which `FORMAT_VERSION` forces a rebuild of anyway.
+    #[serde(default)]
+    pub raw: String,
     pub file: String,
     /// 1-indexed `[start_line, end_line]`, inclusive.
     pub lines: [usize; 2],
@@ -68,9 +81,10 @@ pub struct Symbol {
     pub docstring: Option<String>,
     /// Whether this declaration is reachable via `import` from another
     /// file — i.e. whether it's a valid target for the reference-edge
-    /// resolution M2 wires in next. `false` for every `Method`: a method
-    /// isn't imported on its own, only reached through an instance of an
-    /// already-imported class, which is call-level resolution M2 defers.
+    /// resolution M2 wires in next. `false` for every method (a `Callable`
+    /// with a `Container` parent): a method isn't imported on its own, only
+    /// reached through an instance of an already-imported class, which is
+    /// call-level resolution M2 defers.
     pub is_exported: bool,
     /// Content hash over this symbol's *entire* span (signature and body),
     /// rolled up Merkle-style for container symbols (a `Class`'s hash folds
@@ -113,6 +127,10 @@ pub struct Symbol {
 pub struct ExtractedSymbol {
     pub id: String,
     pub kind: SymbolKind,
+    /// See [`Symbol::raw`]. Set by the pack's extractor; `Graph::build`
+    /// carries it straight through to the arena `Symbol`.
+    #[serde(default)]
+    pub raw: String,
     pub file: String,
     pub lines: [usize; 2],
     pub signature: String,

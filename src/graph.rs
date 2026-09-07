@@ -38,6 +38,8 @@ use crate::symbol::{ExtractedSymbol, Symbol, SymbolKind};
 pub struct SymbolView {
     pub id: String,
     pub kind: SymbolKind,
+    #[serde(default)]
+    pub raw: String,
     pub file: String,
     pub lines: [usize; 2],
     pub signature: String,
@@ -57,6 +59,7 @@ impl SymbolView {
         Some(Self {
             id: s.id.clone(),
             kind: s.kind,
+            raw: s.raw.clone(),
             file: s.file.clone(),
             lines: s.lines,
             signature: s.signature.clone(),
@@ -140,7 +143,7 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// gain `markers`). 3 = M13 (the three typed edge fields — route literals,
 /// table refs, rendered components — collapse into one generic
 /// `flow_edges`).
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
@@ -258,6 +261,7 @@ impl Graph {
                 symbol_nodes.push(Node::Symbol(Symbol {
                     id: sym.id,
                     kind: sym.kind,
+                    raw: sym.raw,
                     file: sym.file,
                     lines: sym.lines,
                     signature: sym.signature,
@@ -386,7 +390,7 @@ impl Graph {
     }
 
     /// Every `(file, table-name)` for a `.from("<table>")` flow edge that
-    /// resolved to `table_id` (a `SymbolKind::Table` node) — the
+    /// resolved to `table_id` (a `SymbolKind::Schema` node) — the
     /// schema-side answer to "what app code touches this table", surfaced
     /// through `get_callers` (M10).
     pub fn table_callers(&self, table_id: &str) -> Vec<(String, String)> {
@@ -519,7 +523,8 @@ mod tests {
         // `@Path`/`@Entity`) will rely on — extraction -> arena -> cache.
         let sym = ExtractedSymbol {
             id: "a.ts::handler".into(),
-            kind: SymbolKind::Function,
+            kind: SymbolKind::Callable,
+            raw: "function".into(),
             file: "a.ts".into(),
             lines: [1, 1],
             signature: "function handler()".into(),

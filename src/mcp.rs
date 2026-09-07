@@ -495,7 +495,7 @@ impl CodeOwlServer {
 
         if graph
             .get_symbol(id)
-            .is_some_and(|s| s.kind == SymbolKind::Table)
+            .is_some_and(|s| s.kind == SymbolKind::Schema)
         {
             let callers = graph
                 .table_callers(&req.id)

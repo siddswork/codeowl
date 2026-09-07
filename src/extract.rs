@@ -92,7 +92,8 @@ fn visit_function(
     let is_exported = outer.kind() == "export_statement";
     out.push(ExtractedSymbol {
         id: format!("{file}::{name}"),
-        kind: SymbolKind::Function,
+        kind: SymbolKind::Callable,
+        raw: "function".to_string(),
         file: file.to_string(),
         lines: node_lines(decl),
         // `decl`, not `outer` — signature text skips `export`/`export
@@ -133,7 +134,8 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         let m_source_hash = hash_text(text(member, source));
         method_symbols.push(ExtractedSymbol {
             id: m_id.clone(),
-            kind: SymbolKind::Method,
+            kind: SymbolKind::Callable,
+            raw: "method".to_string(),
             file: file.to_string(),
             lines: node_lines(member),
             signature: signature_text(member, m_body, source),
@@ -173,7 +175,8 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
 
     out.push(ExtractedSymbol {
         id: class_id,
-        kind: SymbolKind::Class,
+        kind: SymbolKind::Container,
+        raw: "class".to_string(),
         file: file.to_string(),
         lines: node_lines(decl),
         source_hash: hash_text(&rollup_input),
@@ -218,11 +221,12 @@ fn visit_lexical(
         let id = format!("{file}::{name}");
         let value = declarator.child_by_field_name("value");
 
-        let (kind, signature) = match value {
+        let (kind, raw, signature) = match value {
             Some(v) if v.kind() == "arrow_function" || v.kind() == "function_expression" => {
                 let body = v.child_by_field_name("body").unwrap_or(v);
                 (
-                    SymbolKind::Function,
+                    SymbolKind::Callable,
+                    "function",
                     format!("const {name} = {}", signature_text(v, body, source)),
                 )
             }
@@ -237,7 +241,11 @@ fn visit_lexical(
                     .child_by_field_name("type")
                     .map(|t| text(t, source))
                     .unwrap_or("");
-                (SymbolKind::Const, format!("const {name}{type_text}"))
+                (
+                    SymbolKind::Value,
+                    "const",
+                    format!("const {name}{type_text}"),
+                )
             }
         };
 
@@ -245,6 +253,7 @@ fn visit_lexical(
         out.push(ExtractedSymbol {
             id,
             kind,
+            raw: raw.to_string(),
             file: file.to_string(),
             lines: node_lines(declarator),
             source_hash: hash_text(text(declarator, source)),
@@ -350,7 +359,8 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         let s = &symbols[0];
         assert_eq!(s.id, "a.ts::double");
-        assert_eq!(s.kind, SymbolKind::Function);
+        assert_eq!(s.kind, SymbolKind::Callable);
+        assert_eq!(s.raw, "function");
         assert_eq!(s.file, "a.ts");
         assert_eq!(s.lines, [1, 3]);
         assert_eq!(s.signature, "function double(x: number): number");
@@ -432,24 +442,26 @@ mod tests {
     }
 
     #[test]
-    fn arrow_function_const_is_function_kind() {
+    fn arrow_function_const_is_a_callable() {
         let src = "export const double = (x: number): number => x * 2;\n";
         let symbols = extract_file(src, "a.ts");
         assert_eq!(symbols.len(), 1);
         let s = &symbols[0];
         assert_eq!(s.id, "a.ts::double");
-        assert_eq!(s.kind, SymbolKind::Function);
+        assert_eq!(s.kind, SymbolKind::Callable);
+        assert_eq!(s.raw, "function");
         assert_eq!(s.signature, "const double = (x: number): number =>");
     }
 
     #[test]
-    fn plain_const_is_const_kind() {
+    fn plain_const_is_a_value() {
         let src = "export const PI = 3.14;\n";
         let symbols = extract_file(src, "a.ts");
         assert_eq!(symbols.len(), 1);
         let s = &symbols[0];
         assert_eq!(s.id, "a.ts::PI");
-        assert_eq!(s.kind, SymbolKind::Const);
+        assert_eq!(s.kind, SymbolKind::Value);
+        assert_eq!(s.raw, "const");
         assert_eq!(s.signature, "const PI");
     }
 
@@ -482,7 +494,8 @@ mod tests {
 
         let class = &symbols[0];
         assert_eq!(class.id, "a.ts::Foo");
-        assert_eq!(class.kind, SymbolKind::Class);
+        assert_eq!(class.kind, SymbolKind::Container);
+        assert_eq!(class.raw, "class");
         assert_eq!(class.signature, "class Foo<T> extends Bar implements Baz");
         assert_eq!(class.parent, None);
         assert_eq!(
@@ -494,7 +507,8 @@ mod tests {
 
         let ctor = &symbols[1];
         assert_eq!(ctor.id, "a.ts::Foo.constructor");
-        assert_eq!(ctor.kind, SymbolKind::Method);
+        assert_eq!(ctor.kind, SymbolKind::Callable);
+        assert_eq!(ctor.raw, "method");
         assert_eq!(ctor.parent.as_deref(), Some("a.ts::Foo"));
         assert_eq!(ctor.docstring.as_deref(), Some("ctor doc"));
         // Methods are never independently exported — see the doc comment
@@ -504,7 +518,8 @@ mod tests {
 
         let method = &symbols[2];
         assert_eq!(method.id, "a.ts::Foo.doThing");
-        assert_eq!(method.kind, SymbolKind::Method);
+        assert_eq!(method.kind, SymbolKind::Callable);
+        assert_eq!(method.raw, "method");
         assert_eq!(method.parent.as_deref(), Some("a.ts::Foo"));
         assert_eq!(method.docstring.as_deref(), Some("plain method"));
         assert!(
@@ -542,6 +557,7 @@ mod tests {
         let src = "export const Widget = ({ label }: { label: string }) => {\n    return <span>{label}</span>;\n};\n";
         let symbols = extract_file(src, "a.tsx");
         assert_eq!(symbols.len(), 1);
-        assert_eq!(symbols[0].kind, SymbolKind::Function);
+        assert_eq!(symbols[0].kind, SymbolKind::Callable);
+        assert_eq!(symbols[0].raw, "function");
     }
 }
