@@ -56,6 +56,7 @@ pub fn extract_tables(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
                 docstring: None,
                 is_exported: false,
                 interface_hash: None,
+                markers: Vec::new(),
                 parent: None,
                 children: Vec::new(),
             }

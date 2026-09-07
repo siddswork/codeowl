@@ -45,6 +45,8 @@ pub struct SymbolView {
     pub is_exported: bool,
     pub source_hash: String,
     pub interface_hash: Option<String>,
+    #[serde(default)]
+    pub markers: Vec<String>,
     pub parent: Option<String>,
     pub children: Vec<String>,
 }
@@ -62,6 +64,7 @@ impl SymbolView {
             is_exported: s.is_exported,
             source_hash: s.source_hash.clone(),
             interface_hash: s.interface_hash.clone(),
+            markers: s.markers.clone(),
             parent: s.parent.map(|p| graph.string_id(p).to_string()),
             children: s
                 .children
@@ -132,7 +135,11 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// a field whose absence yields wrong answers rather than merely fewer.
 /// A cache stamped with any other value is discarded and rebuilt from
 /// source, never partially reused (the latent M11 bug this closes).
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// History: 1 = M12 (introduced). 2 = M13 (`ExtractedSymbol` / `Symbol`
+/// gain `markers`). Bumped again later in M13 when the four typed edge
+/// fields collapse to `flow_edges`.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Graph {
@@ -234,6 +241,7 @@ impl Graph {
                     is_exported: sym.is_exported,
                     source_hash: sym.source_hash,
                     interface_hash: sym.interface_hash,
+                    markers: sym.markers,
                     parent,
                     children: sym
                         .children
@@ -498,6 +506,52 @@ mod tests {
         let one = serde_json::to_string(&build_graph_from_sources(sources)).unwrap();
         let two = serde_json::to_string(&build_graph_from_sources(sources)).unwrap();
         assert_eq!(one, two);
+    }
+
+    #[test]
+    fn markers_carry_from_extraction_through_the_arena_and_a_round_trip() {
+        // The TS+Next pack leaves `markers` empty in M13; this proves the
+        // plumbing that M14 (Rust `#[tool]`/`#[derive]`) and M17 (Java
+        // `@Path`/`@Entity`) will rely on — extraction -> arena -> cache.
+        let sym = ExtractedSymbol {
+            id: "a.ts::handler".into(),
+            kind: SymbolKind::Function,
+            file: "a.ts".into(),
+            lines: [1, 1],
+            signature: "function handler()".into(),
+            docstring: None,
+            is_exported: true,
+            source_hash: hash_text("x"),
+            interface_hash: Some(hash_text("function handler()")),
+            markers: vec!["#[tool]".into(), "#[derive(Debug)]".into()],
+            parent: None,
+            children: Vec::new(),
+        };
+        let graph = Graph::build(vec![FileExtraction {
+            rel_path: "a.ts".into(),
+            source_hash: hash_text("x"),
+            symbols: vec![sym],
+        }]);
+
+        let id = graph.find("a.ts::handler").unwrap();
+        assert_eq!(
+            graph.get_symbol(id).unwrap().markers,
+            ["#[tool]", "#[derive(Debug)]"]
+        );
+
+        let dir = std::env::temp_dir().join(format!("codeowl-markers-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("graph");
+        graph.save(&path).unwrap();
+        let loaded = Graph::load(&path).unwrap();
+        assert_eq!(
+            loaded
+                .get_symbol(loaded.find("a.ts::handler").unwrap())
+                .unwrap()
+                .markers,
+            ["#[tool]", "#[derive(Debug)]"],
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
