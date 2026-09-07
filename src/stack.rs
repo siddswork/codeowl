@@ -309,16 +309,37 @@ mod tests {
     }
 
     #[test]
-    fn detect_returns_the_ts_pack_for_a_repo_with_source() {
+    fn detect_picks_the_pack_that_matches_and_errors_on_ambiguity() {
         let dir = std::env::temp_dir().join(format!("codeowl-detect-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+
+        // TS repo (a lone .sql wouldn't be enough — Schema, not Code).
         std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(dir.join("schema.sql"), "CREATE TABLE t (id int);\n").unwrap();
         assert_eq!(crate::lang::detect(&dir).unwrap().name(), "typescript-next");
 
+        // Rust repo.
         std::fs::remove_file(dir.join("a.ts")).unwrap();
+        std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
+        assert_eq!(crate::lang::detect(&dir).unwrap().name(), "rust");
+
+        // Both -> one-stack-per-repo error (design decision 6).
+        std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
+        assert!(crate::lang::detect(&dir).is_err());
+
+        // Neither.
+        std::fs::remove_file(dir.join("a.ts")).unwrap();
+        std::fs::remove_file(dir.join("lib.rs")).unwrap();
         std::fs::write(dir.join("notes.md"), "hi\n").unwrap();
         assert!(crate::lang::detect(&dir).is_err());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detect_recognises_this_crate_as_rust() {
+        // The M14 dogfood: CodeOwl's own repo root.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(crate::lang::detect(root).unwrap().name(), "rust");
     }
 }

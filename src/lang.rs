@@ -1,18 +1,14 @@
-//! The one module that knows CodeOwl's Phase 1 extractor is TypeScript +
-//! SQL and nothing else. Everything stack-specific that used to be spread
-//! across `extract.rs`, `imports.rs`, `features.rs`, `resolve.rs`,
-//! `schema.rs`, and `index.rs` — which extensions count as source, which
-//! tree-sitter grammar to load, which extractor a file goes to, which
-//! extensions the module resolver tries — is centralized here.
+//! Stack selection ([`detect`]) plus the TypeScript + SQL pack's own
+//! internals — which extensions count as source, which tree-sitter
+//! grammar to load, which extractor a file goes to, which extensions the
+//! module resolver tries, the JS test-path / UI-primitive heuristics.
+//! `TypeScriptNextStack` (in `stack.rs`) delegates to the free functions
+//! here; `RustStack` has its own in `rust.rs`.
 //!
-//! Free functions and constants, deliberately not a trait: the interface
-//! is shaped against two extractor kinds ([`SourceKind`]) and — via
-//! `features.rs` — a handful of convention resolvers (route literals,
-//! `.from()` table refs, rendered components), which is enough to see the
-//! seam but not enough to design a good abstraction. M13 promotes this to
-//! a `StackPack` trait (renamed from `LanguagePack` — the Phase 1 pack
-//! already spans TS + SQL + Next + Supabase, a *stack*, not a language)
-//! once a genuinely different stack (Rust) is there to check it against.
+//! [`SourceKind`] and [`FileRole`] are stack-neutral (the `StackPack`
+//! trait returns them); everything else in this module is TS-specific and
+//! moves fully behind `TypeScriptNextStack` in a later M14 commit, at
+//! which point `detect` is all that's left here worth keeping generic.
 //! See `ROADMAP.md`'s "Phase 2".
 
 use std::path::Path;
@@ -156,28 +152,65 @@ fn is_ui_primitive(path: &str) -> bool {
     path.starts_with("components/ui/") || path.contains("/components/ui/")
 }
 
-/// Pick the `StackPack` for `root`, or fail fast if no pack recognises it
-/// — rather than silently building and serving an empty graph. Called once
-/// at startup, from `RepoIndex::build`/`open`. Phase 1 has one pack
-/// (`TypeScriptNextStack`); the walk here becomes a per-pack `recognises`
-/// probe when there's a second one (M14).
+/// Pick the one `StackPack` for `root`, or fail fast — rather than
+/// silently building and serving an empty graph. Called once at startup,
+/// from `RepoIndex::build`/`open`.
+///
+/// A pack "recognises" a repo by the count of files whose `source_kind`
+/// is [`SourceKind::Code`] — its *primary* language (`.ts`/`.tsx` for TS,
+/// `.rs` for Rust). A `.sql` schema file is `SourceKind::Schema`, not
+/// `Code`, so it never makes a repo "TypeScript" on its own (a Rust repo
+/// with migrations is still a Rust repo — its schema story is M18's).
+///
+/// Exactly one pack may claim the repo (M13 design decision 6 — a repo
+/// that's genuinely two stacks is out of scope for Phase 2; multi-pack
+/// per repo is deferred). Zero → error naming the supported stacks.
 pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
-    let pack = crate::stack::TypeScriptNextStack;
-    let has_source = ignore::WalkBuilder::new(root)
-        .build()
-        .filter_map(|entry| entry.ok())
-        .any(|entry| {
-            entry.file_type().is_some_and(|t| t.is_file())
-                && StackPack::source_kind(&pack, entry.path()).is_some()
-        });
-    if !has_source {
-        bail!(
-            "no .ts/.tsx or .sql files found under {} — CodeOwl's Phase 1 extractor only \
-             handles TypeScript/TSX and SQL schema files (see ROADMAP.md)",
-            root.display()
-        );
+    // A repo's stack identity is its *source*, not its test trees — a
+    // `tests/fixtures/foo.tsx` read as a string by a Rust test mustn't
+    // make CodeOwl's own repo look like TypeScript. Skip the conventional
+    // test / bench directories for the detection count only (they're still
+    // walked and extracted once a pack is chosen).
+    fn is_test_tree(rel: &str) -> bool {
+        let seg = |d: &str| rel == d || rel.starts_with(&format!("{d}/"));
+        seg("tests") || seg("test") || seg("benches")
     }
-    Ok(Box::new(pack))
+
+    fn primary_count(root: &Path, pack: &dyn StackPack) -> usize {
+        ignore::WalkBuilder::new(root)
+            .build()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
+            .filter(|entry| {
+                entry
+                    .path()
+                    .strip_prefix(root)
+                    .ok()
+                    .and_then(|p| p.to_str())
+                    .is_none_or(|rel| !is_test_tree(rel))
+            })
+            .filter(|entry| pack.source_kind(entry.path()) == Some(SourceKind::Code))
+            .count()
+    }
+
+    let ts = primary_count(root, &crate::stack::TypeScriptNextStack);
+    let rs = primary_count(root, &crate::stack::RustStack);
+
+    match (ts, rs) {
+        (0, 0) => bail!(
+            "no source files CodeOwl can extract were found under {} — it handles \
+             TypeScript/TSX (+ SQL schema) and Rust (see ROADMAP.md)",
+            root.display()
+        ),
+        (_, 0) => Ok(Box::new(crate::stack::TypeScriptNextStack)),
+        (0, _) => Ok(Box::new(crate::stack::RustStack)),
+        (ts, rs) => bail!(
+            "{} contains both TypeScript ({ts} files) and Rust ({rs} files) source — \
+             CodeOwl serves one stack per repo (ROADMAP.md design decision 6). Point it \
+             at a subdirectory that's a single stack.",
+            root.display()
+        ),
+    }
 }
 
 #[cfg(test)]
