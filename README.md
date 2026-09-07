@@ -3,7 +3,8 @@
    (o,o)
    ("v")
   ---"---
-
+  CodeOwl
+  -------
 
 
  #####                          #######
@@ -25,5 +26,6 @@ so they stay current instead of rotting. Served over MCP.
 - **What & why:** `REQUIREMENTS.md`
 - **How it's built:** `ARCHITECTURE.md`
 - **Build sequence:** `ROADMAP.md`
-- **Wire it into your own repo:** [`setup/`](setup/README.md)
+- **Wire it into your own repo:** [`setup/README.md`](setup/README.md)
+- **Use it day to day:** [`setup/USAGE.md`](setup/USAGE.md)
 

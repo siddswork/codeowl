@@ -107,18 +107,5 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
 
 ---
 
-## Day-to-day use
-
-**Reading (most sessions):** `get_spec`, `get_symbol`, `get_callers`,
-`get_callees`, `search_code`. The agent asks CodeOwl "how does X work" /
-"what calls Y" instead of grepping.
-
-**Refreshing (occasional):** when `get_spec` returns `stale` (code moved
-since the spec was written) or reports `smells` (a deterministic quality
-check distrusts the prose), re-run `/codeowl-generate` for that target.
-`get_spec_coverage` lists everything outstanding in priority order.
-
-**`stale` vs `smelly`:** `stale` is hash-based — an input moved.
-`smelly` is content-based — the prose is a cop-out ("see the source") or
-too thin to be useful, regardless of hashes. A spec can be `current` and
-`smelly` at once; both are reasons to regenerate.
+Once it's wired in, see [`USAGE.md`](USAGE.md) for day-to-day use — what
+the agent queries on its own, and when to run `/codeowl-generate`.
