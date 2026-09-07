@@ -29,3 +29,7 @@ so they stay current instead of rotting. Served over MCP.
 - **Wire it into your own repo:** [`setup/README.md`](setup/README.md)
 - **Use it day to day:** [`setup/USAGE.md`](setup/USAGE.md)
 
+## License
+
+MIT — see [`LICENSE`](LICENSE).
+
