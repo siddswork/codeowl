@@ -125,8 +125,22 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
     }
 }
 
+/// On-disk format stamp for the persisted `.codeowl/graph` (and, in
+/// `index.rs`, `.codeowl/index`). Bump it whenever the serialized shape
+/// changes in a way a `#[serde(default)]` on a new field would silently
+/// paper over — a new input that feeds graph edges, a changed hash scheme,
+/// a field whose absence yields wrong answers rather than merely fewer.
+/// A cache stamped with any other value is discarded and rebuilt from
+/// source, never partially reused (the latent M11 bug this closes).
+pub const FORMAT_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Graph {
+    /// See [`FORMAT_VERSION`]. `#[serde(default)]` so a pre-stamp cache
+    /// deserializes to 0 — which never equals the current version, so
+    /// `load` rejects it.
+    #[serde(default)]
+    format_version: u32,
     nodes: Vec<Node>,
     by_id: HashMap<String, SymbolId>,
     /// File-to-file reference edges — see `resolve.rs`. Empty until
@@ -221,6 +235,7 @@ impl Graph {
         }
 
         Self {
+            format_version: FORMAT_VERSION,
             nodes,
             by_id,
             imports: Vec::new(),
@@ -383,7 +398,16 @@ impl Graph {
     pub fn load(path: &Path) -> Result<Self> {
         let file =
             std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
-        serde_json::from_reader(file).with_context(|| format!("parsing {}", path.display()))
+        let graph: Self =
+            serde_json::from_reader(file).with_context(|| format!("parsing {}", path.display()))?;
+        if graph.format_version != FORMAT_VERSION {
+            anyhow::bail!(
+                "{} is format v{}, expected v{FORMAT_VERSION} — rebuild from source",
+                path.display(),
+                graph.format_version,
+            );
+        }
+        Ok(graph)
     }
 }
 

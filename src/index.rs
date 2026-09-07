@@ -98,6 +98,13 @@ impl CatchUp {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RepoIndex {
+    /// On-disk format stamp, shared with `.codeowl/graph` — see
+    /// [`crate::graph::FORMAT_VERSION`]. `#[serde(default)]` so a cache
+    /// written before the stamp existed deserializes to 0; `load` then sees
+    /// the mismatch and forces a full rebuild rather than trusting inputs
+    /// that a newer `#[serde(default)]` field would read empty from.
+    #[serde(default)]
+    format_version: u32,
     /// Repo-relative path → its cached inputs. A `BTreeMap` so a rebuilt
     /// graph's node order is deterministic regardless of walk or
     /// filesystem-event order.
@@ -137,6 +144,7 @@ impl RepoIndex {
             files.insert(rel.clone(), FileInputs::extract(&rel, &source));
         }
         Ok(Self {
+            format_version: crate::graph::FORMAT_VERSION,
             files,
             root: root.to_path_buf(),
         })
@@ -167,6 +175,15 @@ impl RepoIndex {
     fn load(root: &Path) -> Option<Self> {
         let file = std::fs::File::open(Self::index_path(root)).ok()?;
         let mut index: Self = serde_json::from_reader(std::io::BufReader::new(file)).ok()?;
+        // A cache from a different on-disk format — including one written
+        // before the stamp existed, which deserializes to 0 — is not
+        // partially reusable: its `FileInputs` may be missing a field a
+        // newer graph build now depends on, and every hash would still
+        // match, so `rescan` would re-extract nothing. Discard it; `open`
+        // then does a full `build`.
+        if index.format_version != crate::graph::FORMAT_VERSION {
+            return None;
+        }
         index.root = root.to_path_buf();
         Some(index)
     }
@@ -391,6 +408,46 @@ mod tests {
         assert!(
             RepoIndex::index_path(&dir).exists(),
             "cache persisted for next spawn"
+        );
+    }
+
+    #[test]
+    fn open_rebuilds_when_the_cache_predates_the_current_format_version() {
+        // The latent M11 bug: when a field is added to a persisted struct
+        // behind `#[serde(default)]`, an older `.codeowl/` cache still
+        // deserializes cleanly — the new field just reads empty — and
+        // `rescan` sees every file's hash unchanged, so nothing is
+        // re-extracted. The graph is then rebuilt from inputs that are
+        // missing whatever the new field feeds. A `format_version` stamp is
+        // the fix: a cache without the current version is not reused at all.
+        let dir = tempdir("stale-format");
+        let source = "export function real() {}\n";
+        write(&dir, "a.ts", source);
+
+        // A hand-written `.codeowl/index` in the *old* on-disk shape: valid
+        // JSON, `source_hash` matches what's on disk (so `rescan` treats
+        // a.ts as unchanged and skips re-extraction), but `symbols` is stale
+        // and empty and there is no `format_version` key.
+        let stale = serde_json::json!({
+            "files": {
+                "a.ts": {
+                    "source_hash": hash_text(source),
+                    "symbols": [],
+                    "imports": { "imports": [], "re_exports": [] },
+                    "route_literals": []
+                }
+            }
+        });
+        let index_path = RepoIndex::index_path(&dir);
+        std::fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+        std::fs::write(&index_path, serde_json::to_string_pretty(&stale).unwrap()).unwrap();
+
+        let (_index, graph, _caught) = RepoIndex::open(&dir).unwrap();
+
+        assert!(
+            graph.find("a.ts::real").is_some(),
+            "a cache with no format_version must force a full rebuild, not \
+             silent reuse of its stale inputs"
         );
     }
 
