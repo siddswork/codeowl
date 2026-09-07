@@ -234,13 +234,22 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 
 ### Stack modularization — folded into M10, M11, and Phase 2
 
-The extractor / resolver / framework-convention layers are coupled to TypeScript + Next.js App Router (`extract.rs`, `imports.rs`, `resolve.rs`, `features.rs`, one line in `index.rs`); everything above them (`graph.rs`, `spec.rs`, `mcp.rs`, `index.rs`, `watch.rs`) is language-agnostic. Making the coupled layers pluggable is committed work, but it isn't its own milestone — each increment lives in the milestone it belongs to:
+The coupling to TypeScript + Next.js App Router comes in two kinds:
 
-- **M10** — doc-mark the coupled files and dedup the grammar pick (prep, done first), then land the SQL extractor / matcher ad hoc against the current structure.
-- **M11** — `src/lang.rs` centralizes the coupling and adds `detect(root)`; free functions, no trait yet. Separate from the corpus deliverable but sequenced ahead of it (see M11's "Execution / sequencing"), alongside the data-touched participant wiring M10 deferred.
-- **Phase 2** — promote `lang.rs` to a `LanguagePack` trait with a real second-language implementation. The only step that actually validates the seams — a same-stack extension like M10 can't.
+- **Mechanical coupling** — the tree-sitter grammar pick, `is_extractable`, the resolver extension list, the `.sql`-vs-TS extract dispatch. Confined to `extract.rs` / `imports.rs` / `resolve.rs` / `schema.rs` / `features.rs`, and (M11) centralized behind `src/lang.rs` + `detect(root)`.
+- **Model coupling** — the *shape* CodeOwl assumes a repo has, which has leaked upward as M10/M11 added features:
+  - `graph.rs` carries four pack-specific derived-edge collections: `route_literals` (Next `fetch("/api/…")`), `table_refs` (Supabase `.from()`), `rendered_components` (React JSX), `resolved_default_imports` (ES modules). The generic `Graph` struct names four TS+Next concepts.
+  - `spec.rs::prioritize` gained `is_test_path` (JS-ecosystem flavored) and `is_ui_primitive` (`components/ui/` — a shadcn/Next convention), in the module that's meant to be language-neutral.
+  - the whole feature-layer *concept* is routing-shaped: "features come from `app/**/page.tsx` + orphan API routes." A Django app's features are `urls.py` + views, Rails' are `routes.rb` + controllers — same spirit, different mechanics. We've only seen one stack's answer.
 
-**Why this order:** M10 is on the critical path to M11's corpus (the pilot's domain is largely its database); modularization is on none. Doing M10 first also means the `lang.rs` boundaries are designed from a two-example sample. Neither order buys the strong validation — that needs a genuinely different language.
+Making this pluggable, by increment:
+
+- **M10** — doc-mark the coupled files, dedup the grammar pick, land the SQL extractor / matcher ad hoc. *(done)*
+- **M11** — `src/lang.rs` centralizes the mechanical coupling and adds `detect(root)`; free functions, no trait. *(done)*
+- **Interim, before Phase 2 (small, low risk, do anytime):** move `is_test_path` / `is_ui_primitive` out of `spec.rs` behind a named seam (into `lang.rs` or a `conventions` module), and doc-mark the four `graph.rs` fields as "pack-contributed derived edges — empty on a repo the active pack doesn't cover." Turns the Phase 2 extraction into a rename, not archaeology. No behavior change.
+- **Phase 2** — promote `lang.rs` to a `LanguagePack` trait with a real second-language implementation. This is the only step that validates the seams — and it has to abstract *both* kinds of coupling, including "how do I enumerate a stack's user-facing entry points" without baking in routing conventions. A same-stack extension (M10) can't test that; it needs a genuinely different language.
+
+**Why this order:** M10 was on the critical path to M11's corpus; modularization is on none. Doing M10/M11 first also means the eventual trait is designed from a real sample (two extractor kinds, four convention resolvers, the feature model) rather than guessed at. Neither order buys the strong validation — that needs the second language.
 
 ---
 
@@ -249,12 +258,13 @@ The extractor / resolver / framework-convention layers are coupled to TypeScript
 Deliberately coarse — detailed planning waits until the M11 corpus exists and its quality is known. Rough shape, in likely order (the first two moved up when Phase 1's framing shifted to "the specs are the product" — see the revision note at the end):
 
 1. **Web viewer** — a graph + spec browser for BAs/QA/SREs. The human half of the dual audience needs a browser, not an MCP client, so this is no longer a late nice-to-have.
-2. **Headless / scheduled spec generation** — a non-interactive runner (Claude Code SDK or `--print` mode, triggered by CI or a git hook) that drives the `get_next_spec_task → submit_spec` loop so the corpus refreshes without a person running a slash command. CodeOwl still never calls an LLM itself — this is just the calling agent, unattended.
-3. **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio, repo-scoped tool calls.
-4. **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1 (see `ARCHITECTURE.md` "Storage"), now justified by multi-user load.
-5. **Multi-repo namespacing** — per-repo index/graph/spec-cache within one shared process (`REQUIREMENTS.md` "Hosting granularity").
-6. **Stub nodes + cross-team delegation** — the cross-repo dependency model (`REQUIREMENTS.md` "Multi-repo & team ownership").
-7. **Auth/roles** — reopens once multiple users share one hosted instance (`REQUIREMENTS.md` open question 2).
+2. **`LanguagePack` trait + a second language** — promote `src/lang.rs` to a real trait, implemented for a genuinely different stack (Rust or C++ — CodeOwl's own repo is the obvious first target, see the test-repo list). Must abstract *both* the mechanical coupling (grammar, extensions, resolver) and the model coupling (the `graph.rs` derived-edge collections, `spec.rs`'s `is_test_path`/`is_ui_primitive` heuristics, and the routing-shaped feature-enumeration concept). This is the only step that actually validates the Phase 1 seams — see "Stack modularization" above. Sequenced high because every Phase 1 milestone since M10 has added TS+Next-specific surface that a polyglot CodeOwl has to unwind.
+3. **Headless / scheduled spec generation** — a non-interactive runner (Claude Code SDK or `--print` mode, triggered by CI or a git hook) that drives the `get_next_spec_task → submit_spec` loop so the corpus refreshes without a person running a slash command. CodeOwl still never calls an LLM itself — this is just the calling agent, unattended.
+4. **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio, repo-scoped tool calls.
+5. **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1 (see `ARCHITECTURE.md` "Storage"), now justified by multi-user load.
+6. **Multi-repo namespacing** — per-repo index/graph/spec-cache within one shared process (`REQUIREMENTS.md` "Hosting granularity").
+7. **Stub nodes + cross-team delegation** — the cross-repo dependency model (`REQUIREMENTS.md` "Multi-repo & team ownership").
+8. **Auth/roles** — reopens once multiple users share one hosted instance (`REQUIREMENTS.md` open question 2).
 
 ## Provisional decisions this ordering makes
 
@@ -273,3 +283,5 @@ Revised again 2026-09-06: added CodeOwl's own repo to the test-repo list as the 
 Revised 2026-09-07: folded the stack-modularization increments into the milestone bodies so every actionable step lives in an Mn plan — the label + dedup prep is now explicitly part of M10's scope, and `src/lang.rs` + `detect(root)` is a named work item in M11's scope (independent of the corpus deliverable). The "Stack modularization" section is now a short cross-milestone overview, not a plan of its own. Phase 2's `LanguagePack` trait step is unchanged.
 
 Revised again 2026-09-07, after M10 shipped: added an "Execution / sequencing" block to M11 — `src/lang.rs` and the data-touched participant wiring (deferred from M10) both land in the codeowl repo *before* corpus generation; the passes then run via `/codeowl-generate` from a session inside the pilot repo (not the manual stdio loop); the BA cut needs a human, the dev/smell cuts don't.
+
+Revised again 2026-09-07, mid-corpus generation: the "Stack modularization" section was rewritten to name **two** kinds of coupling, not one. M10/M11's feature work (rendered-component `core` expansion, default-import resolution, the `--all` prioritization heuristics) added TS+Next-specific *model* coupling on top of the mechanical coupling `lang.rs` covers: `graph.rs` now carries four pack-specific derived-edge collections, `spec.rs::prioritize` gained `is_test_path`/`is_ui_primitive`, and the feature-layer concept is routing-shaped. Added an **interim step** (move those heuristics behind a named seam + doc-mark the `graph.rs` fields — no behavior change, makes the Phase 2 extraction mechanical) and promoted the `LanguagePack` trait to Phase 2 item 2, explicitly scoped to abstract both kinds of coupling.
