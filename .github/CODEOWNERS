@@ -1,0 +1,5 @@
+# Every change to this repo requires review from the owner.
+# Combined with the "Protect master" ruleset (require a PR, require
+# code-owner review, require last-push approval), this stops any
+# collaborator from self-merging to master.
+* @siddswork

@@ -2,6 +2,9 @@
 name = "codeowl"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "Extracts a structural graph from a codebase and serves LLM-authored specs (the semantic layer) over MCP."
+repository = "https://github.com/siddswork/codeowl"
 
 [dependencies]
 anyhow = "1.0.104"
