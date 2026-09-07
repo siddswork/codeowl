@@ -24,6 +24,7 @@ use crate::features::{RouteLiteral, TableRef, extract_route_literals};
 use crate::graph::{FileExtraction, Graph};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, extract_imports};
+use crate::lang::{is_extractable, is_schema_file};
 use crate::resolve::{build_resolver, resolve_imports};
 use crate::symbol::ExtractedSymbol;
 
@@ -45,10 +46,11 @@ impl FileInputs {
     /// `schema.rs`'s table pass applies; the TypeScript passes are skipped.
     fn extract(rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
-        if rel_path.ends_with(".sql") {
+        let symbols = crate::lang::extract_symbols(rel_path, source);
+        if is_schema_file(rel_path) {
             return Self {
                 source_hash,
-                symbols: crate::schema::extract_tables(source, rel_path),
+                symbols,
                 imports: FileImports::default(),
                 route_literals: Vec::new(),
                 table_refs: Vec::new(),
@@ -56,7 +58,7 @@ impl FileInputs {
         }
         Self {
             source_hash,
-            symbols: crate::extract::extract_file(source, rel_path),
+            symbols,
             imports: extract_imports(source, rel_path),
             route_literals: extract_route_literals(source, rel_path),
             table_refs: crate::features::extract_table_refs(source, rel_path),
@@ -329,29 +331,6 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
-}
-
-/// `.ts`/`.tsx` (never `.d.ts` — ambient declaration files use different
-/// grammar shapes that M1 doesn't handle; see `ROADMAP.md`'s M1 scope) and
-/// `.sql` (M10 schema files — see `schema.rs`). Public so `main.rs`, the
-/// catch-up pass, and the file watcher all share exactly one definition of
-/// what counts as source.
-///
-/// **Stack-coupled — Phase 2 seam here.** This extension list is the one
-/// stack-coupled thing in an otherwise language-agnostic module; M11's
-/// `src/lang.rs` folds it in with the grammar pick from `parse.rs` and the
-/// resolver extension list. See `ROADMAP.md`'s "Stack modularization".
-pub fn is_extractable(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    if name.ends_with(".d.ts") {
-        return false;
-    }
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("ts") | Some("tsx") | Some("sql")
-    )
 }
 
 #[cfg(test)]

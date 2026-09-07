@@ -44,20 +44,17 @@ pub struct ResolvedImport {
 }
 
 /// Build a resolver configured for this project: TypeScript-first
-/// extensions, and `tsconfig.json` path-alias discovery turned on (this is
-/// what makes `@/lib/...`-style aliases resolve without CodeOwl having to
-/// locate and parse `tsconfig.json` itself).
+/// extensions (from `lang::RESOLVER_EXTENSIONS`), and `tsconfig.json`
+/// path-alias discovery turned on (this is what makes `@/lib/...`-style
+/// aliases resolve without CodeOwl having to locate and parse
+/// `tsconfig.json` itself).
 pub fn build_resolver() -> Resolver {
     Resolver::new(ResolveOptions {
         tsconfig: Some(TsconfigDiscovery::Auto),
-        extensions: vec![
-            ".ts".into(),
-            ".tsx".into(),
-            ".d.ts".into(),
-            ".js".into(),
-            ".jsx".into(),
-            ".json".into(),
-        ],
+        extensions: crate::lang::RESOLVER_EXTENSIONS
+            .iter()
+            .map(|e| e.to_string())
+            .collect(),
         ..ResolveOptions::default()
     })
 }

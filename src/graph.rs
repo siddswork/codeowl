@@ -21,7 +21,6 @@ use anyhow::{Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::extract::extract_file;
 use crate::hash::hash_text;
 use crate::resolve::ResolvedImport;
 pub use crate::symbol::SymbolId;
@@ -117,18 +116,12 @@ pub struct FileExtraction {
 /// Extract `source` (already read from `rel_path`) and hash it in one
 /// step — the shape every multi-file test fixture in this codebase wants,
 /// so it's a real (non-test-only) helper rather than duplicated per call
-/// site. Dispatches on extension: `.sql` goes to `schema.rs`, everything
-/// else to the TypeScript extractor.
+/// site. `crate::lang::extract_symbols` picks the extractor by extension.
 pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
-    let symbols = if rel_path.ends_with(".sql") {
-        crate::schema::extract_tables(source, rel_path)
-    } else {
-        extract_file(source, rel_path)
-    };
     FileExtraction {
         rel_path: rel_path.to_string(),
         source_hash: hash_text(source),
-        symbols,
+        symbols: crate::lang::extract_symbols(rel_path, source),
     }
 }
 

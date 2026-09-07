@@ -17,7 +17,7 @@
 use tree_sitter::Node;
 
 use crate::hash::hash_text;
-use crate::parse::ts_parser;
+use crate::lang::ts_parser;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its symbols.

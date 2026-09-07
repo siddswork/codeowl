@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
 use crate::graph::{Graph, SymbolId};
-use crate::parse::ts_parser;
+use crate::lang::ts_parser;
 
 /// One `fetch("/api/...")` call site found anywhere in a file — not just
 /// top-level, since these calls are almost always inside event handlers or
