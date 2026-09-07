@@ -89,7 +89,11 @@ Entry-point kinds coexisting in one repo:
 
 2. **Title derivation is per-kind and per-pack.** Route path, channel name, cron expression — there is no universal "slug from route". `FeatureModel` owns titling.
 
-3. **`admits_to_core` is CDI-graph-shaped, not co-location-shaped.** The Next.js rule (`is_colocated || does_data_work`) doesn't translate. A Java service's `core` follows `@Inject`ed fields / constructor params from the entry-point method to the beans they reference, admitting a bean if it's application logic (`@ApplicationScoped` service, Panache repository/entity) rather than a framework primitive (injected `Config`, `ObjectMapper`). "Does data work" ⇒ "touches an `@Entity` / `PanacheRepository`, or issues a `@RegisterRestClient` call." Expect iterations against the one repo, exactly as M11 warns.
+3. **`admits_to_core` is CDI-graph-shaped, not co-location-shaped.** The Next.js rule (`is_colocated || does_data_work`) doesn't translate. Importantly this is **type-reference classification, not dataflow analysis** — it fits the import graph CodeOwl already has, and needs no call analysis:
+
+   > an `@Inject`ed field or constructor param has a *declared type* → that type resolves through the ordinary import graph to a file → the annotations on that file's class decide admission.
+
+   Admit an `@ApplicationScoped`/`@Singleton` service or a Panache repository/entity; leave a framework primitive (an injected `Config`, `ObjectMapper`) as a one-hop stub dependency. "Does data work" ⇒ "touches an `@Entity` / `PanacheRepository`, or calls a `@RegisterRestClient`." Expect iterations against the one repo, exactly as M11 warns.
 
 4. **Schema is symbol-level for Java, not file-level.** M10's `SourceKind { Code | Schema }` dispatches on file extension (`.sql` → `schema.rs`). Quarkus persistence is a `@Entity` annotation on a Java class extracted by the ordinary `tree-sitter-java` pass — there is no separate schema *file*. M18 finding, flagged now: schema detection needs to be a symbol-level predicate (`is_schema_symbol(symbol) -> bool`, a `classify`-like hook the pack owns) alongside or instead of the file-level `SourceKind::Schema`. (quarkus-super-heroes also has Hibernate `import.sql` seed data and one Liquibase `changeLog.xml` — seed/migration artefacts, not the DDL source of truth here.)
 
@@ -99,6 +103,8 @@ Entry-point kinds coexisting in one repo:
 
 ## Consolidated implications for M13's trait design
 
+Today's shape is `EntryPoint { file: String, slug: String }` (`features.rs`), with kind implied by the `is_page` / `is_api_route` predicates inline. Proposed:
+
 ```
 trait FeatureModel {
     fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint>;
@@ -106,22 +112,33 @@ trait FeatureModel {
 }
 
 struct EntryPoint {
-    kind: String,          // pack-owned: "page" | "api-route" | "http-resource" | "kafka-consumer" | ...
-    id: String,            // stable slug for the spec filename + coverage id
-    title: String,         // human-facing, derived by the pack per kind
-    source: SymbolId,      // the function/method the flow starts from
+    kind:  String,   // pack-owned: "page" | "api-route" | "http-resource" | "kafka-consumer" | ...
+    id:    String,   // stable slug for the spec filename + coverage id — unique ACROSS kinds
+    title: String,   // human-facing, derived by the pack per kind
+    file:  String,   // repo-relative, same scheme as today's EntryPoint.file
 }
 ```
 
-- `feature_model() -> Option<&dyn FeatureModel>` is **confirmed necessary** — commons-lang (M16) returns `None` on a real corpus, and CodeOwl (M14) returns `None` by choice.
+`file: String`, not `SymbolId` — a `SymbolId` is only valid for the graph that produced it and must never reach a spec file or a coverage id (see `graph.rs`'s `SymbolId` doc comment). If M17 finds it needs the specific *method* rather than the file, that's a `String` symbol id, still not a `SymbolId`.
+
+- `feature_model() -> Option<&dyn FeatureModel>` is **confirmed necessary** — commons-lang (M16) returns `None` on a real 627-file corpus, and CodeOwl (M14) returns `None` by choice.
 - `EntryPoint.kind` is a first-class, pack-owned field. No closed enum.
+- **`id` must be unique across kinds.** The pilot never hit this because pages and API routes came from disjoint path spaces; a Quarkus `GET /fights` and a Kafka consumer on channel `fights` both slug to `fights` and collide on `docs/specs/_features/fights.md`. Kind-prefix, or otherwise disambiguate.
 - Titling and `admits_to_core` are entirely pack-internal — no generic fallback, no "generic BFS".
+- **Keep `FeatureModel` minimal.** M14 and M16 both return `None`, so this trait has exactly **one** implementation until M17 — three milestones with no second opinion. An interface with one impl silently accretes that impl's assumptions. Two methods, nothing speculative; let M17 ask for what it actually needs.
+- **`ExtractedSymbol` needs a marker field.** Every Java conclusion above keys on an annotation (`@Path`, `@Entity`, `@ApplicationScoped`, `@RegisterRestClient`), and today's `ExtractedSymbol` has nowhere to record one — `{id, kind, file, lines, signature, docstring, is_exported, source_hash, interface_hash, parent, children}`. Substring-matching `signature` is not a substitute. Add a pack-owned `markers: Vec<String>` in M13 while the symbol shape is open; Rust decorates too (`#[tool]`, `#[derive]`), so M14 exercises it rather than leaving it dead.
 - **Do not** build an entry-point manifest mechanism in M13. If M17 finds Quarkus needs merge/rename/exclude, design it then (ARCHITECTURE open question 4), informed by a stack that actually has framework-enumerable entry points.
-- **Schema layer** (M10) is file-dispatch-only today and M17 breaks that. M13 need not fix it, but should not deepen the `SourceKind::Schema`-is-a-file assumption; M18 generalizes to a symbol-level hook.
+- **Schema layer** (M10) is file-dispatch-only today and M17 breaks that. M13 need not fix it, but should not deepen the `SourceKind::Schema`-is-a-file assumption; M18 generalizes to a symbol-level hook (which the `markers` field above makes cheap).
 
 ## What each milestone executes against
 
-- **M13:** `EntryPoint { kind, … }`; `feature_model() -> Option`; don't touch the schema layer's file-dispatch beyond what M12 left.
-- **M14:** `RustStack::feature_model() -> None`; the self-corpus system spec carries the four flow sections above; verify `spec.rs` tolerates zero features.
-- **M16:** `JavaStack::feature_model() -> None`; confirm the zero-feature path on 627 files.
-- **M17:** `feature_model() -> Some`; implement `enumerate_entry_points` for `@Path` + `@Incoming`/`@Outgoing` first (the kinds actually present), CDI-graph `admits_to_core`, symbol-level `@Entity` schema detection, `@RegisterRestClient` flow edges.
+- **M13:** `EntryPoint { kind, id, title, file }`; `feature_model() -> Option`; `ExtractedSymbol.markers`; keep `FeatureModel` to two methods; don't touch the schema layer's file-dispatch beyond what M12 left.
+- **M14:** `RustStack::feature_model() -> None`; the self-corpus system spec carries the four flow sections above; verify `spec.rs` tolerates zero features; populate `markers` from Rust attributes so the field isn't dead on arrival.
+- **M16:** `JavaStack::feature_model() -> None`; confirm the zero-feature path on 627 files; `classify()` returns `Test` for `src/test/java`; resolution keys on the `src/main/java` layout, not `pom.xml` (Gradle then works for free).
+- **M17:** `feature_model() -> Some`; implement `enumerate_entry_points` for `@Path` + `@Incoming`/`@Outgoing` first (the kinds actually present in quarkus-super-heroes), kind-unique slugs, type-reference `admits_to_core`, symbol-level `@Entity` schema detection, `@RegisterRestClient` flow edges.
+
+## Open, deliberately
+
+- Whether a `record` is a `Container` (has members, gets a spec) or a `Value` (data-carrier, folded into its file spec) — M16 decides against real commons-lang code.
+- Whether M17's `EntryPoint` needs the specific method or just the file. Left as `file` until a Quarkus resource class with several `@GET` methods proves otherwise — likely it does, and that's an M17 ask, not an M13 guess.
+- The merge/rename/exclude manifest (ARCHITECTURE open question 4). Still deferred.
