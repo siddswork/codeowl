@@ -8,13 +8,13 @@ Fixed set of real repos the milestone validations below run against — chosen f
 
 | Repo | Path | Language | Size | Why this one |
 |---|---|---|---|---|
-| the pilot repo (`talentTrail`) | `~/dev/startup/talentTrail` *(private)* | TypeScript/TSX | ~300 files | A real Next.js 16 (App Router) / React 19 / Supabase / Upstash application — matches `REQUIREMENTS.md`'s pilot description. Primary target for every Phase 1 milestone. Named here once; everywhere else it's just "the pilot repo". |
-| quarkus-super-heroes | `~/dev/openSource/test-repos/quarkus-super-heroes` | Java (Quarkus) | ~120 Java files, Maven reactor (7 services) | The official Quarkus reference application — a real microservice system (`rest-heroes`, `rest-villains`, `rest-fights`, `event-statistics`, `rest-narration`, `grpc-locations`, plus a UI), a parent-pom reactor of independently-deployable services. Exercises multi-module build-manifest parsing, and two things the other Java repo doesn't have: annotation-driven structure (Jakarta REST, CDI, Panache) and **cross-service edges carried by string** — `@RegisterRestClient` targets and Kafka `@Incoming`/`@Outgoing` channels — which are the same boundary-resolution shape as M10's SQL `.from()`. Each service ships a README + architecture diagram, so generated specs are checkable against ground truth. |
-| leveldb | `~/dev/openSource/test-repos/leveldb` | C++ | 132 files, CMake | Stresses open question 1 directly — tree-sitter's weak spot on overloads/virtual dispatch. Real interface hierarchies (`Comparator`, `Iterator`, `WriteBatch::Handler`), well-documented enough to check generated specs against. |
-| commons-lang | `~/dev/openSource/test-repos/commons-lang` | Java | 627 files, Maven | Plain classic Java, no framework magic — a second Java data point distinct from quarkus-super-heroes' annotation-heavy framework style. |
-| codeowl (this repo) | `~/dev/openSource/codeowl` | Rust | ~14 files, ~8k lines | Rust coverage, and the one repo the author knows line-for-line — the sharpest check on whether a generated spec is actually *right*. Phase 1's extractor is TypeScript-only, so this is a target for the Phase 2 Rust grammar; the eventual dogfood is CodeOwl describing itself. |
+| the pilot repo (`talentTrail`) | `~/dev/startup/talentTrail` *(private)* | TypeScript/TSX | ~300 files | **Phase 1 + M13 (`TypeScriptNextStack`).** A real Next.js 16 (App Router) / React 19 / Supabase / Upstash application — matches `REQUIREMENTS.md`'s pilot description. Primary target for every Phase 1 milestone. Named here once; everywhere else it's just "the pilot repo". |
+| codeowl (this repo) | `~/dev/openSource/codeowl` | Rust | 16 files, ~10k lines | **M14 (`RustStack`) — the seam validation.** The one repo the author knows line-for-line, so "read ~10 self-specs and judge" is a real check. Cheap: no repo setup, no build system to model, no schema layer. The eventual dogfood is CodeOwl describing itself. |
+| commons-lang | `~/dev/openSource/test-repos/commons-lang` | Java | 627 files, single-module Maven | **M16 (`JavaStack`) — a third stack, and the `feature_model() -> None` path.** Plain classic Java, no framework, no runtime entry surface: proves the trait survives a stack the TS and Rust impls didn't shape, and that a library with no feature layer still gets a coherent corpus. Records/annotation-types stress `SymbolKind`; star imports stress resolution. |
+| quarkus-super-heroes | `~/dev/openSource/test-repos/quarkus-super-heroes` | Java (Quarkus) | ~120 Java files, Maven reactor (7 services) | **M17 — the feature layer for a Java service.** The official Quarkus reference app: a parent-pom reactor of independently-deployable services (`rest-heroes`, `rest-villains`, `rest-fights`, `event-statistics`, `rest-narration`, `grpc-locations`, + a UI). Exercises multi-module resolution, **heterogeneous entry-point kinds** (JAX-RS `@Path`, `@Incoming`/`@Outgoing` Kafka, `@Scheduled`, `@GrpcService`), the JPA-vs-migrations schema question, and **cross-service edges carried by string** (`@RegisterRestClient`) — the same boundary-resolution shape as M10's `.from()`. Each service ships a README + architecture diagram, so specs are checkable against ground truth. |
+| leveldb | `~/dev/openSource/test-repos/leveldb` | C++ | 132 files, CMake | **Not scheduled — a C++ datapoint for whenever a `CppStack` happens.** Stresses open question 1 directly: tree-sitter's weak spot on overloads/virtual dispatch, real interface hierarchies (`Comparator`, `Iterator`, `WriteBatch::Handler`), well-documented enough to check specs against. |
 
-Only the pilot repo is load-bearing for the Phase 1 milestones as written (M1–M11 all target it). The others exist to catch language-specific extraction bugs early rather than discovering them only once Phase 2's polyglot ambitions are actually being built — worth a quick M1/M2 smoke pass against each once the TS pipeline works, even though the detailed milestone validations above are TS-specific.
+The pilot repo is load-bearing for Phase 1 (M1–M11) and is the M13 pack-extraction target. Phase 2's polyglot milestones each own one of the others: **M14 → codeowl, M16 → commons-lang, M17 → quarkus-super-heroes**. `leveldb` isn't on the schedule — it's the C++ case held in reserve. A quick `codeowl extract` smoke pass against each new repo is still worth doing the moment its stack's extractor compiles, ahead of that stack's full milestone.
 
 ## Sequencing principle
 
@@ -261,7 +261,7 @@ Making this pluggable, by increment:
 
 - **M10** — doc-mark the coupled files, dedup the grammar pick, land the SQL extractor / matcher ad hoc. *(done)*
 - **M11** — `src/lang.rs` centralizes the mechanical coupling and adds `detect(root)`; free functions, no trait. *(done)*
-- **Phase 2** — the full breakdown (M12 interim de-coupling → M13-pre entry-point spike → M13 `StackPack` trait → M14 second stack → M15 iterate) is in "Phase 2 — the polyglot core first" below, including the complete M1–M11 coupling inventory and the M13 design decisions. It leads Phase 2 because it's the only step that validates the seams, and every milestone since M10 keeps adding to what it has to unwind.
+- **Phase 2** — the full breakdown (M12 interim de-coupling → M13-pre entry-point spike → M13 `StackPack` trait → M14 `RustStack` → M15 two-stack checkpoint → M16 `JavaStack` on commons-lang → M17 Quarkus on quarkus-super-heroes → M18 iterate + ship) is in "Phase 2 — the polyglot core first" below, including the complete M1–M11 coupling inventory and the M13 design decisions. It leads Phase 2 because it's the only step that validates the seams, and every milestone since M10 keeps adding to what it has to unwind.
 
 **Why this order:** M10 was on the critical path to M11's corpus; modularization is on none. Doing M10/M11 first also means the eventual trait is designed from a real sample (two extractor kinds, four convention resolvers, the feature model) rather than guessed at. Neither order buys the strong validation — that needs the second language.
 
@@ -271,7 +271,17 @@ Making this pluggable, by increment:
 
 Reprioritized 2026-09-07: the `StackPack` work leads. Everything after it (web viewer, headless generation, HTTP, search index, multi-repo) is deferred behind it and stays a sketch — committed `.md` specs are already browsable on GitHub, so the human-audience viewer isn't blocking anything, and every one of those later items is easier to build on a core that isn't secretly single-stack.
 
-The polyglot core is **M12 → M13-pre spike → M13 → M14 → M15**, in order (M12 first because the cache-version fix protects everything after it; the spike is on paper and slots in before M13 freezes the trait). M12/M13 are refactors that must regenerate the Phase 1 corpus **identically** — the *spec files* and `get_spec_coverage` output, not the `.codeowl/` cache (its format is expected to change, see M12). M14 is the first real second stack and the only thing that validates the seams; M15 folds M14's findings back into the trait.
+The polyglot core is **M12 → M13-pre spike → M13 → M14 → M15 → M16 → M17 → M18**, in order:
+- **M12** (done) — cache-version fix + named seams; protects everything after it.
+- **M13-pre** — paper spike, before M13 freezes the trait: CodeOwl's own feature layer (for M14) + a forward sketch of the Java entry-point model (for M16/M17).
+- **M13** — the `StackPack` trait; extract the existing TS+Next+SQL+Supabase code behind `TypeScriptNextStack`. Still one pack.
+- **M14** — `RustStack` on CodeOwl's own repo. Cheap, clean, and the first thing that actually exercises the seams.
+- **M15** — fold M14's findings into the trait; ship the TS+Rust two-stack checkpoint.
+- **M16** — `JavaStack` on **commons-lang**: a third stack the TS/Rust impls didn't shape, and the first real corpus with `feature_model() -> None`.
+- **M17** — **Quarkus** on **quarkus-super-heroes**: the feature layer for a Java *service* — heterogeneous entry-point kinds, multi-module Maven, the JPA-vs-migrations schema call, `@RegisterRestClient` cross-service edges.
+- **M18** — fold M16/M17's findings; generalize the schema layer off its `.sql`-file assumption; finish stack-neutral docs; ship the polyglot core.
+
+M12/M13 are refactors that must regenerate the Phase 1 corpus **identically** — the *spec files* and `get_spec_coverage` output, not the `.codeowl/` cache (its format is expected to change, see M12). Everything from M14 on is real new stacks. The Java track (M16–M17) was pulled into Phase 2 ahead of the deferred items because a JVM service corpus is the highest-value second target for this project's owner; Rust-on-self stays M14 because it validates the seams for near-zero cost.
 
 **Named `StackPack`, not `LanguagePack`, on purpose.** The Phase 1 pack already spans two languages (TypeScript + SQL) and two frameworks (Next.js App Router + Supabase). The unit of pluggability is a *stack*, not a language — calling it a language pack invites someone to write a separate SQL pack and then wonder why it can't see the TS side. One `StackPack` per repo.
 
@@ -319,11 +329,17 @@ De-risking is built into the plan: M13-pre before the trait freezes, `feature_mo
 ---
 
 ### M13-pre — Entry-point spike (on paper, before M13 finalizes the trait)
-**Size:** XS · **Builds on:** M12
+**Size:** XS–S · **Builds on:** M12
 
-**Scope:** Answer, in a short written note (not code): *what would CodeOwl's own feature specs be?* Candidate answers — entry points are `main.rs`'s CLI subcommands + the `#[tool]` MCP handlers; or the crate's `pub` API surface; or a library/CLI stack legitimately has **no** feature layer and the system spec composes over module rollups alone. Each is defensible; the wrong pick makes the second pack's corpus much less valuable, and it's not checkable mechanically — a human has to read the resulting specs and judge. This spike is why M13 makes the feature layer an *optional* pack capability rather than a required trait method.
+**Scope:** Two written answers (not code), in one note:
 
-**Validation:** a paragraph in `ARCHITECTURE.md` (or a scratch note) that M14 can execute against without re-litigating.
+1. **What would CodeOwl's own feature specs be?** (drives M14.) Candidate answers — entry points are `main.rs`'s CLI subcommands + the `#[tool]` MCP handlers; or the crate's `pub` API surface; or a library/CLI stack legitimately has **no** feature layer and the system spec composes over module rollups alone. Each is defensible; the wrong pick makes M14's self-corpus much less valuable, and it's not checkable mechanically — a human reads the resulting specs and judges. This is why M13 makes the feature layer an *optional* pack capability rather than a required trait method.
+
+2. **What is a Java entry point?** (forward sketch for M16/M17, so M13's `trait FeatureModel` isn't shaped by Rust + Next alone.) commons-lang (M16): almost certainly `None` — a pure utility library with no runtime entry surface. A Quarkus service (M17): **several kinds** of entry point coexisting in one repo — JAX-RS `@Path` resources, `@Incoming`/`@Outgoing` Kafka listeners, `@Scheduled` jobs, `@GrpcService` methods, `main`. Implication for M13: `EntryPoint` carries a *kind*; a route slug is a Next-ism, not a universal name; `enumerate_entry_points` may need to return heterogeneous kinds.
+
+**Deliverable:** `experiments/exp-02-feature-layer.md`. Conclusions fold into `ARCHITECTURE.md` open question 4 and the M13 / M14 / M16 / M17 plans as each starts.
+
+**Validation:** the note is concrete enough that M14 *and* M16 can execute against it without re-litigating.
 
 ---
 
@@ -361,7 +377,17 @@ trait FeatureModel {
     // whether a flow-reachable or rendered file joins a feature's `core` is pack judgment
     fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool;
 }
+
+// EntryPoint carries a pack-owned `kind` (M13-pre spike): a Quarkus service has
+// http-resource / kafka-consumer / scheduled-job / grpc entry points coexisting,
+// so it can't be a closed Page|ApiRoute enum, and titling is per-kind pack-internal.
+// `id` must be unique ACROSS kinds -- it names the spec file. `file`, not SymbolId:
+// a SymbolId is only valid for the graph that produced it and must never reach a
+// spec file or a coverage id. Today's shape is EntryPoint { file, slug }.
+struct EntryPoint { kind: String, id: String, title: String, file: String }
 ```
+
+`EntryPoint.kind`, the optional `feature_model()`, and the "don't build an entry-point manifest yet" call all come from the M13-pre spike — see `experiments/exp-02-feature-layer.md` for the reasoning and the per-milestone execution notes.
 
 `graph.rs` loses its four typed fields and gains **one** generic `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at graph-build time by calling `pack.resolve_flow_edge` on each `UnresolvedFlowEdge` the pack extracted. `assemble_participants` becomes a generic **traversal** over `flow_edges` + one-hop imports — but with two pack hooks it can't do without: `resolve_flow_edge` (which file/node does this edge point at) and `admits_to_core` (does that file belong in the feature's `core` or stay a stub dependency). The Next.js `is_page` / `is_api_route` / path-join logic, and the `is_colocated || does_data_work` policy, are `TypeScriptNextStack`-internal.
 
@@ -374,35 +400,75 @@ trait FeatureModel {
 ### M14 — `RustStack` — the second stack
 **Size:** L · **Builds on:** M13, M13-pre
 
-**Scope:** A real `StackPack` for Rust, exercised on **CodeOwl's own repo** (the dogfood — see the test-repo list). This is the milestone that actually validates the trait; M12/M13 only rearrange TS+Next code.
+**Scope:** A real `StackPack` for Rust, exercised on **CodeOwl's own repo** (the dogfood — see the test-repo list). This is the milestone that validates *most* of the trait; M12/M13 only rearrange TS+Next code. **Scope caveat from the M13-pre spike:** since M14 returns `feature_model() -> None`, it validates every part of `StackPack` *except* `FeatureModel` — that seam gets its second implementation only at M17. Keep `FeatureModel` minimal in M13 accordingly (see design decision 8).
 - `tree-sitter-rust`. Extract `fn`, `struct`, `enum`, `trait`, `impl` blocks, `mod`, `const`/`static`, `macro_rules!`. Map its grammar kinds onto whatever `SymbolKind` shape M13 settled on.
 - Module-tree reference resolution: `use crate::…` / `use super::…` / `pub use` re-exports resolved against the `mod` hierarchy — no `oxc_resolver`, no `tsconfig`, no barrel-chasing.
 - `///` / `//!` doc comments.
-- **`feature_model()`** — execute the M13-pre spike's answer. Likely `Some` returning CLI subcommands + `#[tool]` handlers as entry points, or `None` if the spike concluded a CLI/library has no coherent feature layer.
-- Flow edges: a Rust service's cross-file "reach" is plain function calls, not string literals — M14 decides how much call-graph to model (probably: `extract_flow_edges` returns nothing, matching M10's "call analysis stays deferred"; the feature spec, if any, is built from `core_sources` + imports alone).
+- **`feature_model() -> None`** — the M13-pre spike's answer (`experiments/exp-02-feature-layer.md`). CodeOwl has workflows but no mechanical way to enumerate them; instead the self-corpus's **system spec** carries named sections for the four cross-cutting flows (extraction / spec generation / structural query / incremental reindex). Verify `spec.rs`'s system-spec composition tolerates an empty feature set (design decision 3).
+- Flow edges: a Rust service's cross-file "reach" is plain function calls, not string literals — M14 decides how much call-graph to model (probably: `extract_flow_edges` returns nothing, matching M10's "call analysis stays deferred").
 
 **Validation:** `codeowl extract` + `serve` on `~/dev/openSource/codeowl`; generate a spec corpus for CodeOwl describing itself; a dev cut on ~10 of those self-specs by the one person who knows the code line-for-line. Every place `TypeScriptNextStack` assumed something the trait shouldn't have is a finding for M15.
 
 ---
 
-### M15 — Iterate the trait; ship the two-stack state
+### M15 — Iterate the trait; ship the TS+Rust state
 **Size:** M · **Builds on:** M14
 
-**Scope:** Fold M14's findings back into `trait StackPack` — the leaks that only a genuinely different stack exposes. Commit CodeOwl's self-spec corpus. Rewrite `ARCHITECTURE.md`'s "Extractors" / "Feature specs" sections and make `setup/codeowl-generate.md` stack-neutral (it currently says "a page like `app/submit/page.tsx`" — pack-specific examples move behind "your stack's entry points"). At this point the seams are validated and the rest of Phase 2 can proceed on a core that's actually polyglot.
+**Scope:** Fold M14's findings back into `trait StackPack` — the leaks that only a genuinely different stack exposes. Commit CodeOwl's self-spec corpus. First pass at making the docs stack-neutral: rewrite `ARCHITECTURE.md`'s "Extractors" / "Feature specs" sections and `setup/codeowl-generate.md` (it currently says "a page like `app/submit/page.tsx`" — pack-specific examples move behind "your stack's entry points"). This is the **two-stack checkpoint, not the end of the polyglot core** — M16–M17 add Java and M18 does the final trait iteration once a non-Rust, non-web stack has had its say.
 
 **Validation:** both the pilot (TS+Next) and CodeOwl (Rust) generate current corpora from the same binary with no stack-specific branches outside the two `StackPack` impls.
 
 ---
 
+### M16 — `JavaStack` on commons-lang — a third stack, and the no-feature-layer path
+**Size:** L · **Builds on:** M15
+
+**Scope:** A real `StackPack` for plain classic Java, exercised on **commons-lang** (627 files, single-module Maven — see the test-repo list). No framework, no schema, no runtime entry surface: the milestone that proves the trait survives a stack the TS and Rust impls didn't shape, *and* exercises `feature_model() -> None` end to end on a real corpus.
+- `tree-sitter-java`. Extract `class`, `interface`, `enum`, `record`, `@interface` (annotation types), methods, nested types, `static`/instance fields. Map onto whatever `SymbolKind` shape M13 settled on (records and annotation types are the awkward cases).
+- **Package → file reference resolution.** `import com.foo.Bar` → `com/foo/Bar.java` on the source root, plus same-package implicit imports and `import static`. No `oxc_resolver`, no alias config; the hard part is star imports (`import com.foo.*`) and resolving an unqualified name against the enclosing package + `java.lang`. **Key on the `src/main/java` layout convention, not on `pom.xml`** — that way a Gradle repo works for free; only multi-module *discovery* (M17) is build-tool-specific.
+- Javadoc (`/** … */`) as the docstring, including the leading `*` strip.
+- **`classify()` for Java.** `src/test/java` is the test root — today's `is_test_path` is JS-convention (`__tests__/`, `.test.`, `e2e/`) and matches nothing in a Maven layout. M12's pack-owned `classify(path) -> FileRole` is exactly the seam for this; `JavaStack` returns `Test` for the test source root. Generated: `target/generated-sources/**` (already gitignored, so mostly moot).
+- **`feature_model()` returns `None`.** commons-lang is a library; its "surface" is its public API, already covered by symbol/file/rollup specs. Verify `spec.rs`'s system-spec composition tolerates zero features (M13 design decision 3).
+- Flow edges: `extract_flow_edges` returns nothing (same call-analysis-deferred stance as Rust).
+
+**Validation:** `codeowl extract` + `serve` on commons-lang; generate a partial corpus (shared-code tier + a sample of module rollups + the system spec); a human read of ~8–10 specs for correctness. Every place the trait still assumes a resolver config, a route-shaped feature, or a `.sql` schema file is an M18 finding.
+
+---
+
+### M17 — Quarkus: the feature layer for a Java service
+**Size:** L · **Builds on:** M16
+
+**Scope:** Extend `JavaStack` (or add a `QuarkusStack` that composes it) and exercise it on **quarkus-super-heroes** (7-module Maven reactor of independently-deployable services — see the test-repo list). This is where Java gets a feature layer and where the M13-pre "several kinds of entry point" sketch gets implemented.
+- **Multi-module Maven resolution.** Each module has its own `src/main/java` root and its own `pom.xml`. One repo is still **one graph** — the walk covers every module's source root, so a cross-module import resolves by the same package→file rule M16 built, with no reactor modelling needed. What the reactor *does* buy is knowing which roots exist and which modules declare a dependency on which; only read the poms if a resolution ambiguity actually demands it.
+- **Entry-point model — `feature_model() -> Some`.** `enumerate_entry_points` returns heterogeneous kinds: JAX-RS `@Path` + `@GET`/`@POST`/… resource methods, `@Incoming`/`@Outgoing` (or `@Channel`) Kafka listeners, `@Scheduled` jobs, `@GrpcService` methods. `EntryPoint.kind` distinguishes them; the human-facing title is derived per kind (HTTP verb + path, channel name, cron expr). **Slugs must be unique across kinds** — `GET /fights` and a Kafka consumer on channel `fights` would both slug to `fights` and collide on `docs/specs/_features/fights.md`. Kind-prefix the `id` (`http-fights`, `kafka-fights`) or otherwise disambiguate; the pilot never hit this because pages and API routes came from disjoint path spaces.
+- **`admits_to_core`.** A Java service's `core` is CDI-shaped, not co-location-shaped. Note this is **type-reference classification, not dataflow**: an `@Inject`ed field or constructor param has a declared type, that type resolves through the ordinary import graph to a file, and the annotations on *that* file's class decide admission (`@ApplicationScoped`/`@Singleton` service or Panache repository/entity → admit; a framework primitive like an injected `Config` or `ObjectMapper` → stay a stub dependency). No call analysis needed. "Does data work" ⇒ "touches an `@Entity`/`PanacheRepository`, or calls a `@RegisterRestClient`". The M11 `is_colocated || does_data_work` policy is a Next-ism; expect iterations against the one repo, as M11 warns.
+- **Schema decision (deferred from M10's `.sql`-only assumption).** Quarkus persistence is JPA `@Entity` / Panache active-record / Hibernate — annotations on Java classes, not a `.sql` dump — or Flyway/Liquibase migrations (`.sql` / `.xml` under `src/main/resources/db`). M17 picks one as the `SymbolKind::Table` source for Java and records why; the other is a follow-up.
+- **`@RegisterRestClient` cross-service flow edges.** A `@RegisterRestClient` interface plus its `@Path` is a string-carried edge from one service to another's endpoint — the same shape as M10's `.from("table")` and the pilot's `fetch("/api/…")`. `extract_flow_edges` / `resolve_flow_edge` handle it.
+
+**Validation:** `codeowl serve` on quarkus-super-heroes; generate feature specs for a sample of endpoints across ≥2 services plus the cross-service edges; a human read judging whether a BA-style "how does *fights* call *heroes*" question is answered. Findings feed M18.
+
+---
+
+### M18 — Iterate the trait; make the schema layer stack-neutral; ship the polyglot core
+**Size:** M · **Builds on:** M17
+
+**Scope:** Fold M16 + M17's findings back into `trait StackPack` / `trait FeatureModel` — the leaks a non-Rust, non-web stack exposed that M15 couldn't have seen. Generalize the schema layer so `SymbolKind::Table` isn't `.sql`-file-bound (M10's assumption; M17 broke it). Finish the doc neutralization M15 started. Commit the Java corpora (commons-lang partial + quarkus-super-heroes feature sample).
+
+**Validation:** the pilot (TS+Next), CodeOwl (Rust), commons-lang (Java library), and quarkus-super-heroes (Java service) all generate current corpora from one binary, with every stack-specific decision inside a `StackPack` impl and nothing leaking into `graph.rs` / `spec.rs` / `index.rs`.
+
+---
+
 ### Design decisions to resolve during M13 (flagged, not yet decided)
 
-1. **`SymbolKind`** — Rust adds `Enum`/`Trait`/`Impl`/`Mod`/`Macro`; C++ adds `Namespace`/`Template`/`Union`. Options: (a) small generic set — `Container` / `Callable` / `Value` / `Schema` — plus a `raw: String` for display and the pack owns the mapping; (b) keep a large closed enum; (c) `SymbolKind(String)` open set + a `pack.spec_granularity(kind) -> Granularity`. Leaning (a): `spec.rs`'s granularity rule becomes "generate for `Container`/`Callable`" and stays pack-agnostic.
+1. **`SymbolKind`** — Rust adds `Enum`/`Trait`/`Impl`/`Mod`/`Macro`; Java adds `Enum`/`Record`/`AnnotationType`/`Interface`; C++ adds `Namespace`/`Template`/`Union`. Options: (a) small generic set — `Container` / `Callable` / `Value` / `Schema` — plus a `raw: String` for display and the pack owns the mapping; (b) keep a large closed enum; (c) `SymbolKind(String)` open set + a `pack.spec_granularity(kind) -> Granularity`. Leaning (a): `spec.rs`'s granularity rule becomes "generate for `Container`/`Callable`" and stays pack-agnostic. A Java `record` is the test — is it a `Container` (has members) or a `Value` (data-carrier, no spec of its own)? The pack decides.
 2. **`Graph` derived edges** — leaning: one generic `flow_edges: Vec<FlowEdge>` (see M13), resolved at build time via `pack.resolve_flow_edge`; not four typed fields, not `Box<dyn Any>` pack data.
-3. **Feature layer optionality** — decided (M13-pre forces it): `StackPack::feature_model() -> Option<&dyn FeatureModel>`. A stack with no feature model still gets symbol/file/rollup/system specs. `spec.rs`'s system-spec composition already has to tolerate "zero features" — verify that path.
+3. **Feature layer optionality** — decided (M13-pre forces it): `StackPack::feature_model() -> Option<&dyn FeatureModel>`. A stack with no feature model still gets symbol/file/rollup/system specs. `spec.rs`'s system-spec composition already has to tolerate "zero features" — verify that path. M16 (commons-lang) is the milestone that exercises `None` on a real corpus; the M14 Rust spike may or may not conclude `None`, but a pure utility library certainly does.
 4. **`core` admission** — the traversal is generic; `resolve_flow_edge` and `admits_to_core` are the two pack hooks it can't do without. Do not try to make admission a generic rule — it's a per-stack heuristic with no mechanical ground truth (the TS one took three iterations against one repo).
 5. **Resolution ownership** — pack owns imports *and* flow edges end to end. Output shapes (`ResolvedImport`, `FlowEdge`) are generic. No shared resolver infrastructure.
-6. **One pack per repo** — `detect()` picks exactly one `StackPack` and errors on ambiguity (a repo that's both a Next app and a Rust service). Multi-pack in one repo is deferred past Phase 2.
+6. **One pack per repo** — `detect()` picks exactly one `StackPack` and errors on ambiguity (a repo that's both a Next app and a Rust service). Multi-pack in one repo is deferred past Phase 2. quarkus-super-heroes is *not* the counter-example it looks like: `ui-super-heroes/` is a Maven module wrapping ~10 JS files and the whole repo has **zero** `.ts`/`.tsx`, so `detect()` is unambiguous there. The real ambiguity case is still hypothetical — don't over-build for it.
 7. **Cache invalidation on pack change** — `format_version` (M12) covers shape changes; also key the cache on the active pack's `name()`, so switching packs (or upgrading one) forces a rebuild rather than reusing edges the new pack wouldn't produce.
+8. **`FeatureModel` stays minimal** — M14 (Rust) and M16 (Java library) both return `None`, so `FeatureModel` gets its *second* implementation only at M17. Two methods, no speculative surface: an interface with one real impl for three milestones will accrete TS+Next assumptions nobody can see. Anything M17 turns out to need is an M18 addition, not an M13 guess.
+9. **Symbol-level markers** — the entire Java feature and schema model keys on **annotations** (`@Path` → entry point, `@Entity` → schema symbol, `@ApplicationScoped` → admits to core, `@RegisterRestClient` → flow edge). `ExtractedSymbol` today is `{id, kind, file, lines, signature, docstring, is_exported, source_hash, interface_hash, parent, children}` — there is nowhere to put them, and `signature` string-matching is not a substitute. M13 must add a pack-owned marker field (`markers: Vec<String>`, or a typed equivalent) while the symbol shape is already being touched. Cheap now; reopening `ExtractedSymbol` at M17 is not. Rust decorates too (`#[tool]`, `#[derive]`), so M14 exercises the field rather than leaving it dead.
 
 ---
 
@@ -439,3 +505,5 @@ Revised again 2026-09-07, mid-corpus generation: the "Stack modularization" sect
 Revised again 2026-09-07: **M11 marked validated by sample; Phase 1 complete.** The project owner reviewed the pilot's feature specs and judged them to clearly meet the BA and dev bars — the clinching example being a spec that correctly reports a feature as dormant after it was disabled by a one-line variable flip (`b6d8965f` in the pilot). Full corpus generation was stopped at ~15% coverage: the highest-value, highest-risk layer is proven, and the rest is mechanical volume. See M11's "Outcome" for the done/not-done split. Phase 2 is next, led by the `LanguagePack` trait.
 
 Revised again 2026-09-07: **Phase 2 reprioritized and the polyglot core planned in detail**, then reviewed. The stack-pluggability work now leads Phase 2 — the web viewer drops behind it since committed `.md` specs already render on GitHub. The opening is M12 (interim de-coupling, incl. a **cache `format_version`** — M11 shipped a latent bug where a `#[serde(default)]` field silently reads empty on an old cache) → M13-pre (a paper spike on what CodeOwl's own feature specs would be) → M13 (`StackPack` trait — renamed from `LanguagePack`, since the Phase 1 pack already spans TS + SQL + Next + Supabase; a *stack*, not a language) → M14 (`RustStack` on CodeOwl's own repo, the real validation) → M15 (iterate the trait). Review pass added: the feature layer is an **optional** `feature_model()` (a CLI/library may have none); flow edges need `resolve_flow_edge` + `admits_to_core` pack hooks, not a "generic BFS"; `is_ui_primitive` → a `classify(path) -> FileRole` with `Domain/Primitive/Test/Generated`; the "zero behavior change" claim is scoped to *spec files + coverage output*, not the cache JSON; ~97 pack-function call sites mean real test churn, budgeted via shims. The feature layer is flagged as where the risk concentrates — it's the only part that models a product, not code, and its `core`-admission heuristic has no mechanical ground truth.
+
+Revised again 2026-09-07, after M12 shipped: **the Java track pulled into Phase 2.** The owner's highest-value second target is a JVM service corpus, not the eventual Rust self-dogfood. Rust-on-self stays **M14** (it validates the trait seams for near-zero cost — no repo setup, no build system, no schema layer), and Java is added as **M16 (`JavaStack` on commons-lang)** + **M17 (Quarkus on quarkus-super-heroes)**, with **M18** folding the Java findings back into the trait and generalizing the schema layer off M10's `.sql`-file assumption. M13-pre gains a second question — a forward sketch of the Java entry-point model — so M13's `trait FeatureModel` is shaped for heterogeneous entry-point *kinds* (HTTP resource / Kafka listener / scheduled job / gRPC method), not just Next.js pages and Rust subcommands. M16 becomes the milestone that exercises `feature_model() -> None` on a real corpus (commons-lang is a pure utility library). Test-repo table reordered to milestone order; `leveldb` explicitly marked not-scheduled (C++ held in reserve).
