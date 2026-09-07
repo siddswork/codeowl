@@ -74,13 +74,26 @@ truth, kept versioned here rather than duplicated.
 ## 4. Generate the first specs
 
 ```
-/codeowl-generate --all --budget=20      # prioritized batch: system spec,
-                                          # then features, then files by
-                                          # import fan-in
-/codeowl-generate lib/utils.ts            # one file (+ its symbols)
-/codeowl-generate app/submit/page.tsx     # a feature entry point (+ its feature spec)
-/codeowl-generate system                  # the whole repo, bottom-up
+/codeowl-generate --all --budget=15       # the normal path: a budgeted batch,
+                                           # order chosen by CodeOwl
+/codeowl-generate lib/supabase.ts          # one file (+ its symbols)
+/codeowl-generate app/submit/page.tsx      # a feature entry point (+ its feature spec)
+/codeowl-generate system                   # the final capstone spec
 ```
+
+`--budget=N` caps how many **specs** one invocation writes, then stops and
+reports what's left — it is *not* a token, dollar, or time limit. Each
+symbol spec, file spec, feature spec, directory rollup, and the system
+spec counts as one; a file with three undocumented symbols costs four (the
+symbols, then the file). Without `--budget` the run continues until the
+whole scope is covered.
+
+**`--all` picks the order for you** — high-fan-in files first (so feature
+specs get real dependency summaries), then feature specs, then the long
+tail of files, then rollups, then the system spec last. You don't need to
+know the repo: run `/codeowl-generate --all --budget=15`, review the
+batch, commit, repeat. Target a file or feature directly only to jump
+ahead. See `setup/USAGE.md` for the full picture.
 
 Specs land in `docs/specs/` as Markdown, mirroring the source tree
 (`docs/specs/<path>.md` for a file, `docs/specs/_features/<slug>.md` for a

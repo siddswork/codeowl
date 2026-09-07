@@ -2142,14 +2142,29 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
     summary
 }
 
+/// A file imported by at least this many resolved reference edges is
+/// "shared infrastructure" — worth documenting before the features that
+/// depend on it, so those features are generated with a real dependency
+/// summary instead of a bare signature stub (see `ARCHITECTURE.md`'s
+/// "Generation priority"). A laptop-scale heuristic, not a tuned value.
+const SHARED_CODE_FAN_IN: usize = 3;
+
 /// `coverage`'s items that still need attention, ordered the way
-/// `/codeowl generate --all`/`--budget=N` should spend a limited budget:
-/// the system spec first, then feature specs, then files by descending
-/// import fan-in, then everything else (rollups) — see
-/// `ARCHITECTURE.md`'s "Generation priority". Within a tier, an honestly
-/// `"missing"` or `"stale"` document outranks a merely smelly-but-
-/// `"current"` one; ties beyond that break on `id` for a stable,
-/// reproducible order.
+/// `/codeowl generate --all`/`--budget=N` should spend a limited budget
+/// (see `ARCHITECTURE.md`'s "Generation priority"):
+///
+/// 1. high-fan-in files (`fan_in >= SHARED_CODE_FAN_IN`) — their real
+///    summaries upgrade every dependent spec's context for free
+/// 2. feature specs — the BA-facing payoff, now written with real
+///    dependency summaries rather than stubs
+/// 3. the long tail of lower-fan-in files
+/// 4. directory rollups (need their files first)
+/// 5. the system spec — the capstone, only writable once everything it
+///    composes from is current, so always last
+///
+/// Within a tier, an honestly `"missing"` or `"stale"` document outranks a
+/// merely smelly-but-`"current"` one, then descending fan-in, then `id`
+/// for a stable, reproducible order.
 ///
 /// Includes a `"current"` item when it has a quality smell — hash-based
 /// staleness only verifies a spec's *inputs* haven't moved, never that
@@ -2163,12 +2178,14 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
         .filter(|i| i.status != "current" || !i.smells.is_empty())
         .collect();
     pending.sort_by(|a, b| {
-        fn tier(kind: &str) -> u8 {
-            match kind {
-                "system" => 0,
+        fn tier(item: &CoverageItem) -> u8 {
+            match item.kind.as_str() {
+                "file" if item.fan_in >= SHARED_CODE_FAN_IN => 0,
                 "feature" => 1,
                 "file" => 2,
-                _ => 3,
+                "rollup" => 3,
+                "system" => 4,
+                _ => 5,
             }
         }
         fn urgency(status: &str) -> u8 {
@@ -2178,8 +2195,8 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
                 _ => 2, // "current" but smelly -- the only other way in
             }
         }
-        tier(&a.kind)
-            .cmp(&tier(&b.kind))
+        tier(a)
+            .cmp(&tier(b))
             .then(urgency(&a.status).cmp(&urgency(&b.status)))
             .then(b.fan_in.cmp(&a.fan_in))
             .then(a.id.cmp(&b.id))
@@ -3103,7 +3120,6 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "system",
                 "feature:submit",
                 "lib/supabase.ts",
                 "app/api/submit-artwork/route.ts",
@@ -3111,10 +3127,12 @@ mod tests {
                 "lib/one.ts",
                 "lib/two.ts",
                 "rollup:lib",
+                "system",
             ],
-            "system first, then features, then files by descending fan-in \
-             (lib/supabase.ts is imported by both page.tsx and route.ts), \
-             then rollups"
+            "no file here clears the shared-code fan-in bar, so: features, \
+             then files by descending fan-in (lib/supabase.ts is imported \
+             by both page.tsx and route.ts), then rollups, then the system \
+             spec last"
         );
         assert_eq!(
             pending
@@ -3413,5 +3431,36 @@ mod tests {
         assert_eq!(pending[0].status, "current");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn prioritize_puts_shared_code_first_features_next_system_last() {
+        fn item(id: &str, kind: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: "missing".into(),
+                fan_in,
+                smells: Vec::new(),
+            }
+        }
+        let items = vec![
+            item("system", "system", 0),
+            item("feature:checkout", "feature", 0),
+            item("lib/db.ts", "file", 12), // shared infra — many importers
+            item("app/page.tsx", "file", 0), // a leaf
+            item("rollup:lib", "rollup", 0),
+        ];
+        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "lib/db.ts",        // high-fan-in files first: their real
+                "feature:checkout", // summaries upgrade downstream specs
+                "app/page.tsx",     // then the long tail of leaf files
+                "rollup:lib",       // then rollups
+                "system",           // the system spec is always last
+            ]
+        );
     }
 }

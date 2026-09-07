@@ -53,16 +53,19 @@ prose.
 
 What CodeOwl enumerates:
 
+- **Symbols** — every exported function and class. A file's symbols are
+  documented before the file itself.
+- **Files** — every extractable file, once its symbols are done.
+- **Directories** — a rollup per directory with ≥2 spec-bearing files,
+  once its files are done.
 - **Features** — discovered from Next.js routing, not from you. Every
   `app/**/page.tsx`, plus every `app/api/**/route.ts` that no
   `fetch("/api/...")` call reaches (webhooks, cron targets). Each gets a
   mechanical slug (`app/submit/page.tsx` → `submit`); the human-readable
-  title is written by the agent during generation.
-- **Files** — every extractable file, ordered by how many other files
-  import it (the most-depended-on code gets documented first).
-- **Directories** — a rollup per directory with ≥2 spec-bearing files.
-- **System** — one whole-repo spec, written last, composed from the
-  feature and directory specs.
+  title is written by the agent. A feature is written once its entry
+  point's file spec is done.
+- **System** — one whole-repo spec, written last, composed from every
+  feature and directory spec.
 
 A CodeOwl "feature" is **route-shaped** — one entry point plus whatever it
 reaches through a `fetch()` literal. A capability you'd name in
@@ -70,20 +73,45 @@ conversation ("artwork evaluation") may span several pages and routes, so
 it can end up as several feature specs, tied together by the directory
 rollups and the system spec.
 
-Scope options:
+**`--all` order — you don't need to know the repo.** CodeOwl computes it
+from the import graph. `get_spec_coverage` returns everything still
+missing in this order, and a budgeted `--all` run spends down that list:
+
+1. **high-fan-in files** — code imported by many others (shared clients,
+   auth, utils). Documented first because a feature spec that depends on
+   one gets its real summary instead of a bare signature.
+2. **feature specs** — the BA-facing narratives, now written with real
+   dependency context.
+3. the **long tail** of lower-fan-in files.
+4. **directory rollups**, then
+5. the **system spec** — last; it composes over everything above, so it's
+   only writable once they're all current. A budgeted run stops before
+   reaching it; do it explicitly with `/codeowl-generate system` at the end.
+
+So the normal workflow is just: `/codeowl-generate --all --budget=15`,
+review, commit, repeat — the tool picks the order. You'd see feature
+specs within the first batch or two. Target something directly only when
+you want to jump ahead:
 
 ```
-/codeowl-generate --all --budget=20     # everything, prioritized: system spec,
-                                        # then features, then files by import fan-in
-/codeowl-generate system                # everything, plain bottom-up sweep
-/codeowl-generate lib/utils.ts          # one file and its symbols
-/codeowl-generate lib                   # one directory: its files, then its rollup
-/codeowl-generate app/submit/page.tsx   # one feature entry point + its feature spec
+/codeowl-generate lib/supabase.ts       # one file and its symbols
+/codeowl-generate app/register/page.tsx # one feature + its entry file
+/codeowl-generate feature:register      # the same, by coverage id
+/codeowl-generate system                # the final capstone
 ```
 
-Start with `--all --budget=N` and run it again for the next batch; a small
-budget keeps each pass reviewable. `--budget` caps how many specs one
-invocation writes — it is not a token or dollar limit.
+**`--budget=N` counts specs written, nothing else** — not tokens, not
+dollars, not time. One symbol spec, one file spec, one feature spec, one
+directory rollup, or the system spec each count as 1; because generation
+is bottom-up, a file with three undocumented symbols costs 4 (the three
+symbols, then the file). The run stops the moment the next spec would
+exceed the budget — even partway through a file — and reports how many
+documents are still `missing`. Without `--budget`, it runs until the
+whole scope is covered.
+
+Start with `--all --budget=N` (N≈15 on a fresh repo), read what the agent
+wrote, commit, then run it again for the next batch — a small budget is
+what keeps each pass reviewable.
 
 ---
 

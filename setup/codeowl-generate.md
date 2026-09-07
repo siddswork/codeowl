@@ -21,11 +21,14 @@ already up to date, no server restart.
   (a page like `app/submit/page.tsx`, or an API route with no page
   referencing it, like a webhook), or a directory path (e.g. `lib`) with
   at least two spec-bearing files in it.
+- `feature:<slug>` or `rollup:<dir>` — the same ids `get_spec_coverage`
+  reports; equivalent to naming the feature's entry point / the directory.
 - `system` or `.` — the whole repo: every module directory, every
   feature, then the one system spec, all in one bottom-up sweep.
 - `--all`, optionally with `--budget=N` — a *prioritized* batch instead of
-  a plain sweep: system spec, then feature specs, then files by
-  descending import fan-in, then everything else. See "Batch mode" below.
+  a plain sweep: high-fan-in files first, then feature specs, then the
+  long tail of files, then rollups, then the system spec last. See "Batch
+  mode" below.
 
 You don't need to know in advance which single-target shape applies: the
 loop below walks bottom-up (a file's symbols, then the file, then — only
@@ -149,9 +152,13 @@ Use this when `$ARGUMENTS` starts with `--all`, instead of the single-
 target loop above:
 
 1. Call `get_spec_coverage` (no `scope`, unless the user named one) to
-   get `pending`: every non-current document, already in priority order
-   (system spec, then feature specs, then files by descending fan-in,
-   then everything else).
+   get `pending`: every non-current document, already in the order a
+   budgeted run should spend on — high-fan-in files first (their
+   summaries feed every dependent spec), then feature specs, then the
+   long tail of files, then rollups, then the system spec last. Each
+   entry's `id` is ready to use as-is: a file path, `feature:<slug>`,
+   `rollup:<dir>`, or `system` — `get_next_spec_task` accepts all of
+   them.
 2. If `--budget=N` was given, you have `N` **generations** to spend —
    count every `get_next_spec_task` call that returns a real task (not
    `null`) toward that budget, not every item in `pending` (a single file
@@ -159,14 +166,19 @@ target loop above:
    plus the file itself). Without `--budget`, spend as many as it takes
    to exhaust `pending` entirely.
 3. Walk `pending` in order. For each item's `id`, run the single-target
-   loop above (steps 1–5) against it — but stop the *whole* batch the
-   moment your generation count would exceed the budget, even mid-item;
-   don't finish an in-progress item "for free."
+   loop above (steps 1–5) against it — passing that `id` straight to
+   `get_next_spec_task` as `target`, no translation. Stop the *whole*
+   batch the moment your generation count would exceed the budget, even
+   mid-item; don't finish an in-progress item "for free." (The `system`
+   entry only becomes generable once everything above it is current, so
+   on a partial run you'll stop before reaching it — that's expected.)
 4. When you stop (budget exhausted or `pending` fully drained), report
-   concisely: how many generations you spent, on which documents, and —
-   if budget-capped — call `get_spec_coverage` once more and tell the
-   user how much is still pending so they know whether another budgeted
-   run is worth it.
+   concisely: how many generations you spent and on what, broken down by
+   kind — *N feature specs, M file specs, K rollups, system spec: yes/no*.
+   If budget-capped, call `get_spec_coverage` once more and tell the user
+   what's still pending (again by kind), so they know whether to run
+   another batch or target something specific. If the system spec is the
+   only thing left, say so and suggest `/codeowl-generate system`.
 
 ## Termination and reporting
 

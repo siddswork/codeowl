@@ -750,6 +750,22 @@ impl CodeOwlServer {
         if req.target == "system" || req.target == "." {
             return self.next_system_task_response(&graph);
         }
+        // Accept the same id vocabulary get_spec_coverage emits and
+        // get_spec/submit_spec take -- a budgeted --all walk hands these
+        // straight back here.
+        if let Some(slug) = req.target.strip_prefix("feature:") {
+            let route_literals = graph.route_literals();
+            let Some(entry) = crate::features::enumerate_entry_points(&graph, route_literals)
+                .into_iter()
+                .find(|e| e.slug == slug)
+            else {
+                return Ok(Json(None));
+            };
+            return self.next_task_for_target(&graph, &entry.file);
+        }
+        if let Some(dir) = req.target.strip_prefix("rollup:") {
+            return self.next_directory_task_response(&graph, dir);
+        }
         self.next_task_for_target(&graph, &req.target)
     }
 
@@ -888,7 +904,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: the system spec, then feature specs, then files by descending import fan-in, then everything else (rollups). Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -1743,6 +1759,62 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_next_spec_task_accepts_feature_and_rollup_ids() {
+        // These are the ids get_spec_coverage puts in `pending`; a budgeted
+        // --all walk hands them straight back to get_next_spec_task.
+        let server = rebuild_server(
+            std::env::temp_dir().join(format!("codeowl-idvocab-{}", std::process::id())),
+            &[
+                (
+                    "app/submit/page.tsx",
+                    "export default function Page() { return null; }\n",
+                ),
+                ("lib/one.ts", "export function one(): void {}\n"),
+                ("lib/two.ts", "export function two(): void {}\n"),
+            ],
+        );
+
+        let by_slug = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "feature:submit".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        let by_path = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/submit/page.tsx".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(by_slug.is_some(), "feature:<slug> must resolve to a task");
+        assert_eq!(by_slug, by_path, "feature:<slug> == its entry-point path");
+
+        let rollup_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "rollup:lib".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(
+            rollup_task.is_some(),
+            "rollup:<dir> must resolve to a task for a spec-bearing directory"
+        );
+
+        // An unknown feature slug is a clean no-op, not an error.
+        let missing = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "feature:does-not-exist".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(missing.is_none());
     }
 
     #[tokio::test]
