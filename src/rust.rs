@@ -388,6 +388,263 @@ fn node_lines(node: Node) -> [usize; 2] {
     [node.start_position().row + 1, node.end_position().row + 1]
 }
 
+// ---------------------------------------------------------------------------
+// Imports — `use` statements and their resolution against the module tree.
+// The Rust pack's counterpart to `imports.rs` + `resolve.rs`. Reference
+// edges only: a `use` names an *item* (type / fn / trait / const / module),
+// never a method, so every target is a top-level symbol like the extractor
+// produces. `mod foo;` is structural, not a symbol reference — skipped.
+// ---------------------------------------------------------------------------
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use crate::graph::{Graph, SymbolId};
+use crate::imports::{FileImports, ImportRef, ReExport};
+use crate::resolve::ResolvedImport;
+
+/// Parse a `.rs` file's `use` declarations. A `pub use` is a re-export
+/// (the barrel pattern — `lib.rs` is all of these); a plain `use` is an
+/// import. Glob (`use x::*`), `use x::{self, ..}`'s `self`, and nested
+/// lists (`use a::{b::C}`) are skipped — a glob names no single item, and
+/// the others are rare enough to defer.
+pub fn extract_imports(source: &str, _rel_path: &str) -> FileImports {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .expect("bundled tree-sitter-rust grammar should always load");
+    let Some(tree) = parser.parse(source, None) else {
+        return FileImports::default();
+    };
+
+    let mut fi = FileImports::default();
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    for node in root.children(&mut cursor) {
+        if node.kind() != "use_declaration" {
+            continue;
+        }
+        let mut dc = node.walk();
+        let kids: Vec<Node> = node.children(&mut dc).collect();
+        let is_reexport = kids.iter().any(|c| c.kind() == "visibility_modifier");
+        let Some(arg) = kids
+            .iter()
+            .find(|c| !matches!(c.kind(), "use" | "visibility_modifier" | ";"))
+        else {
+            continue;
+        };
+        let arg = *arg;
+        for (specifier, name) in use_targets(arg, source) {
+            if is_reexport {
+                fi.re_exports.push(ReExport {
+                    exported_as: name.clone(),
+                    specifier,
+                    source_name: name,
+                });
+            } else {
+                fi.imports.push(ImportRef {
+                    specifier,
+                    imported_name: name,
+                });
+            }
+        }
+    }
+    fi
+}
+
+/// `(module-path, item-name)` pairs for one `use` argument node.
+fn use_targets(arg: Node, source: &str) -> Vec<(String, String)> {
+    match arg.kind() {
+        // `use a::b::Item;`
+        "scoped_identifier" => split_last(text(arg, source)).into_iter().collect(),
+        // `use a::b::Item as Alias;` — the alias is a local rename, track
+        // the source name like `imports.rs` does for TS.
+        "use_as_clause" => arg
+            .child_by_field_name("path")
+            .or_else(|| arg.named_child(0))
+            .and_then(|p| split_last(text(p, source)))
+            .into_iter()
+            .collect(),
+        // `use a::b::{X, Y, Z};`
+        "scoped_use_list" => {
+            let mut cursor = arg.walk();
+            let kids: Vec<Node> = arg.children(&mut cursor).collect();
+            let prefix = kids
+                .first()
+                .map(|n| text(*n, source).to_string())
+                .unwrap_or_default();
+            let Some(list) = kids.iter().find(|c| c.kind() == "use_list") else {
+                return Vec::new();
+            };
+            let mut lc = list.walk();
+            list.children(&mut lc)
+                .filter(|c| c.kind() == "identifier")
+                .map(|c| (prefix.clone(), text(c, source).to_string()))
+                .collect()
+        }
+        _ => Vec::new(), // use_wildcard, bare identifier, etc.
+    }
+}
+
+/// `"crate::graph::Graph"` -> `("crate::graph", "Graph")`. `None` for a
+/// single-segment path (`use foo;` — a whole-module import, no item).
+fn split_last(path: &str) -> Option<(String, String)> {
+    path.rsplit_once("::")
+        .map(|(pre, name)| (pre.to_string(), name.to_string()))
+}
+
+/// Resolve every file's `use` imports (and `pub use` re-exports) against
+/// the module tree. A module path maps to a file by Rust's filesystem
+/// convention — `crate::a::b` -> `<src>/a/b.rs` or `<src>/a/b/mod.rs` —
+/// not by reading `mod` declarations; then the item is looked up as a
+/// top-level symbol in that file, following one hop of `pub use`.
+pub fn resolve_imports(
+    root: &Path,
+    file_imports: &HashMap<String, FileImports>,
+    graph: &Graph,
+) -> Vec<ResolvedImport> {
+    let src = crate_src_dir(file_imports);
+    let mut sorted: Vec<_> = file_imports.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut out = Vec::new();
+    for (from_file, fi) in sorted {
+        let each = fi
+            .imports
+            .iter()
+            .map(|i| (&i.specifier, &i.imported_name))
+            .chain(fi.re_exports.iter().map(|r| (&r.specifier, &r.source_name)));
+        for (specifier, name) in each {
+            out.push(ResolvedImport {
+                from_file: from_file.clone(),
+                specifier: specifier.clone(),
+                imported_name: name.clone(),
+                target: resolve_one(&src, from_file, specifier, name, file_imports, graph),
+            });
+        }
+    }
+    let _ = root; // resolution is off the walked file set, not the FS
+    out
+}
+
+fn resolve_one(
+    src: &str,
+    from_file: &str,
+    specifier: &str,
+    name: &str,
+    file_imports: &HashMap<String, FileImports>,
+    graph: &Graph,
+) -> Option<SymbolId> {
+    let target_file = module_path_to_file(src, from_file, specifier, file_imports)?;
+    if let Some(id) = graph.find(&format!("{target_file}::{name}")) {
+        return Some(id);
+    }
+    // One hop through a `pub use` in the target module.
+    let rx = file_imports
+        .get(&target_file)?
+        .re_exports
+        .iter()
+        .find(|r| r.exported_as == name)?;
+    let hop = module_path_to_file(src, &target_file, &rx.specifier, file_imports)?;
+    graph.find(&format!("{hop}::{}", rx.source_name))
+}
+
+/// The directory the crate root lives in — `"src"` for the usual layout,
+/// `""` for a crate rooted at the repo root. Taken from the walked file
+/// set so it needs no filesystem access.
+fn crate_src_dir(file_imports: &HashMap<String, FileImports>) -> String {
+    for f in file_imports.keys() {
+        if let Some(dir) = f
+            .strip_suffix("/lib.rs")
+            .or_else(|| f.strip_suffix("/main.rs"))
+        {
+            return dir.to_string();
+        }
+        if f == "lib.rs" || f == "main.rs" {
+            return String::new();
+        }
+    }
+    "src".to_string()
+}
+
+/// The module a file *is* — `src/graph.rs` is module `crate::graph`, and a
+/// `self::x` from it means `src/graph/x.rs`. `mod.rs` / crate roots are
+/// the module named by their directory.
+fn module_dir_of(file: &str) -> String {
+    if file.ends_with("/mod.rs")
+        || file.ends_with("/lib.rs")
+        || file.ends_with("/main.rs")
+        || file == "lib.rs"
+        || file == "main.rs"
+    {
+        return file
+            .rsplit_once('/')
+            .map_or(String::new(), |(d, _)| d.to_string());
+    }
+    file.strip_suffix(".rs").unwrap_or(file).to_string()
+}
+
+/// A `crate::` / `self::` / `super::` module path -> the repo-relative
+/// file that module's items live in, or `None` for an external crate or an
+/// unresolvable path.
+fn module_path_to_file(
+    src: &str,
+    from_file: &str,
+    specifier: &str,
+    file_imports: &HashMap<String, FileImports>,
+) -> Option<String> {
+    let segs: Vec<&str> = specifier.split("::").collect();
+    let exists = |p: &str| file_imports.contains_key(p);
+
+    let (base, rest): (String, &[&str]) = match *segs.first()? {
+        "crate" => (src.to_string(), &segs[1..]),
+        "self" => (module_dir_of(from_file), &segs[1..]),
+        "super" => {
+            let ups = segs.iter().take_while(|s| **s == "super").count();
+            let mut dir = module_dir_of(from_file);
+            for _ in 0..ups {
+                dir = dir
+                    .rsplit_once('/')
+                    .map_or(String::new(), |(d, _)| d.to_string());
+            }
+            (dir, &segs[ups..])
+        }
+        // An external crate (`anyhow`, `std`, `tree_sitter`) — or, in 2018
+        // style, a bare top-level module. Try the latter under `src`; if
+        // no such file was walked, it's external -> unresolved.
+        _ => (src.to_string(), &segs[..]),
+    };
+
+    let joined = if rest.is_empty() {
+        base.clone()
+    } else {
+        let mut p = base.clone();
+        for s in rest {
+            if !p.is_empty() {
+                p.push('/');
+            }
+            p.push_str(s);
+        }
+        p
+    };
+
+    let prefixed = |name: &str| {
+        if joined.is_empty() {
+            name.to_string()
+        } else {
+            format!("{joined}/{name}")
+        }
+    };
+    [
+        format!("{joined}.rs"),
+        prefixed("mod.rs"),
+        prefixed("lib.rs"),
+        prefixed("main.rs"),
+    ]
+    .into_iter()
+    .find(|cand| exists(cand))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,5 +840,147 @@ mod tests {\n\
         );
         // Every symbol carries a concrete keyword.
         assert!(syms.iter().all(|s| !s.raw.is_empty()));
+    }
+
+    // --- imports ---
+
+    #[test]
+    fn parses_plain_grouped_aliased_and_pub_use() {
+        let src = "\
+use crate::graph::Graph;\n\
+use crate::graph::{Node, SymbolId};\n\
+use crate::hash::hash_text as h;\n\
+use anyhow::Result;\n\
+use crate::features::*;\n\
+pub use crate::stack::RustStack;\n";
+        let fi = extract_imports(src, "src/x.rs");
+
+        let names: Vec<(&str, &str)> = fi
+            .imports
+            .iter()
+            .map(|i| (i.specifier.as_str(), i.imported_name.as_str()))
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                ("crate::graph", "Graph"),
+                ("crate::graph", "Node"),
+                ("crate::graph", "SymbolId"),
+                ("crate::hash", "hash_text"), // alias dropped, source name kept
+                ("anyhow", "Result"),
+                // the glob `use crate::features::*` is not tracked
+            ]
+        );
+        assert_eq!(fi.re_exports.len(), 1);
+        assert_eq!(fi.re_exports[0].source_name, "RustStack");
+        assert_eq!(fi.re_exports[0].specifier, "crate::stack");
+    }
+
+    /// A fixture module tree, resolved end to end.
+    fn resolved(files: &[(&str, &str)]) -> Vec<ResolvedImport> {
+        let extractions: Vec<crate::graph::FileExtraction> = files
+            .iter()
+            .map(|(p, src)| crate::graph::FileExtraction {
+                rel_path: (*p).to_string(),
+                source_hash: crate::hash::hash_text(src),
+                symbols: extract_file(src, p),
+            })
+            .collect();
+        let graph = Graph::build(extractions);
+        let file_imports: HashMap<String, FileImports> = files
+            .iter()
+            .map(|(p, src)| ((*p).to_string(), extract_imports(src, p)))
+            .collect();
+        resolve_imports(Path::new("/unused"), &file_imports, &graph)
+    }
+
+    #[test]
+    fn crate_relative_use_resolves_to_a_top_level_item() {
+        let edges = resolved(&[
+            ("src/lib.rs", "pub mod graph;\npub mod app;\n"),
+            ("src/graph.rs", "pub struct Graph;\n"),
+            (
+                "src/app.rs",
+                "use crate::graph::Graph;\npub fn run(_g: Graph) {}\n",
+            ),
+        ]);
+        let e = edges
+            .iter()
+            .find(|e| e.from_file == "src/app.rs" && e.imported_name == "Graph")
+            .unwrap();
+        assert!(e.target.is_some(), "crate::graph::Graph should resolve");
+    }
+
+    #[test]
+    fn external_crate_and_missing_item_stay_unresolved() {
+        let edges = resolved(&[(
+            "src/lib.rs",
+            "use anyhow::Result;\nuse crate::nope::Gone;\npub fn f() {}\n",
+        )]);
+        assert!(edges.iter().all(|e| e.target.is_none()));
+    }
+
+    #[test]
+    fn super_and_pub_use_hop_resolve() {
+        let edges = resolved(&[
+            (
+                "src/lib.rs",
+                "pub mod inner;\npub struct Root;\npub use inner::Leaf;\n",
+            ),
+            (
+                "src/inner.rs",
+                "use super::Root;\npub struct Leaf;\npub fn g(_r: Root) {}\n",
+            ),
+            ("src/other.rs", "use crate::Leaf;\npub fn h(_l: Leaf) {}\n"),
+        ]);
+        // `super::Root` from src/inner.rs -> src/lib.rs::Root
+        assert!(edges.iter().any(|e| e.from_file == "src/inner.rs"
+            && e.imported_name == "Root"
+            && e.target.is_some()));
+        // `use crate::Leaf` -> follows lib.rs's `pub use inner::Leaf`
+        assert!(edges.iter().any(|e| e.from_file == "src/other.rs"
+            && e.imported_name == "Leaf"
+            && e.target.is_some()));
+    }
+
+    #[test]
+    fn resolve_imports_on_this_repo_produces_real_edges() {
+        // The M14 dogfood: parse + resolve every src/*.rs, and expect the
+        // internal `use crate::…` graph to be substantially resolved.
+        let files: Vec<(String, String)> = std::fs::read_dir("src")
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("rs"))
+            .map(|p| {
+                let rel = format!("src/{}", p.file_name().unwrap().to_str().unwrap());
+                (rel, std::fs::read_to_string(&p).unwrap())
+            })
+            .collect();
+        let refs: Vec<(&str, &str)> = files
+            .iter()
+            .map(|(p, s)| (p.as_str(), s.as_str()))
+            .collect();
+        let edges = resolved(&refs);
+
+        let crate_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| e.specifier.starts_with("crate::"))
+            .collect();
+        let hit = crate_edges.iter().filter(|e| e.target.is_some()).count();
+        assert!(
+            crate_edges.len() >= 30,
+            "expected a lot of crate:: imports, got {}",
+            crate_edges.len()
+        );
+        assert!(
+            hit * 100 / crate_edges.len() >= 80,
+            "expected >=80% of crate:: imports resolved, got {hit}/{}",
+            crate_edges.len()
+        );
+        // A specific one we know exists.
+        assert!(edges.iter().any(|e| e.imported_name == "Graph"
+            && e.specifier == "crate::graph"
+            && e.target.is_some()));
     }
 }

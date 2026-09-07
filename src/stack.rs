@@ -182,10 +182,11 @@ pub fn typescript_next() -> Box<dyn StackPack> {
 /// exercised on CodeOwl's own repo. No feature layer (`feature_model()`
 /// takes the trait default `None` — CodeOwl has cross-cutting workflows
 /// but no mechanically enumerable entry surface; see
-/// `experiments/exp-02-feature-layer.md`). Import resolution (the `mod`
-/// tree walk) and any flow edges land in later M14 commits; for now
-/// `extract_imports` / `resolve_imports` / `extract_flow_edges` are empty,
-/// so the graph has symbols and containment but no reference edges yet.
+/// `experiments/exp-02-feature-layer.md`). `use` imports resolve against
+/// the module tree by Rust's filesystem convention (`rust::resolve_imports`).
+/// `extract_flow_edges` stays empty — a Rust service's cross-file reach is
+/// plain function calls, and call-graph analysis is deferred (same stance
+/// as M10).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct RustStack;
 
@@ -215,17 +216,17 @@ impl StackPack for RustStack {
         crate::rust::extract_file(source, rel_path)
     }
 
-    fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
-        FileImports::default()
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
+        crate::rust::extract_imports(source, rel_path)
     }
 
     fn resolve_imports(
         &self,
-        _root: &Path,
-        _file_imports: &HashMap<String, FileImports>,
-        _graph: &Graph,
+        root: &Path,
+        file_imports: &HashMap<String, FileImports>,
+        graph: &Graph,
     ) -> Vec<ResolvedImport> {
-        Vec::new()
+        crate::rust::resolve_imports(root, file_imports, graph)
     }
 
     fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
@@ -299,12 +300,11 @@ mod tests {
         assert_eq!(syms.len(), 2);
         assert_eq!(syms[0].raw, "fn");
         assert_eq!(syms[1].raw, "struct");
-        // Reference edges are a later M14 commit.
-        assert!(
-            pack.extract_imports("src/x.rs", "use crate::y;\n")
-                .imports
-                .is_empty()
-        );
+
+        let imports = pack.extract_imports("src/x.rs", "use crate::y::Thing;\n");
+        assert_eq!(imports.imports.len(), 1);
+        assert_eq!(imports.imports[0].imported_name, "Thing");
+        // Rust has no string-literal flow edges — call analysis is deferred.
         assert!(pack.extract_flow_edges("src/x.rs", "").is_empty());
     }
 
