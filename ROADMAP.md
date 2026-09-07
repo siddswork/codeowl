@@ -407,7 +407,15 @@ struct EntryPoint { kind: String, id: String, title: String, file: String }
 
 #### Validation
 
-The pilot's **spec files** and **`get_spec_coverage` output** are byte-identical to `origin/master` — that's the whole test: a refactor that changes what CodeOwl *writes* is a bug. The `.codeowl/graph` JSON on disk **is** expected to change (new `flow_edges` shape, new `format_version`). Every existing test passes. Reuse the M12 check: build the pre-M13 binary from `master`, diff `get_spec_coverage` old-vs-new against the pilot (`scratchpad/mcp_call.py` from the M12 session is a one-call MCP client).
+The pilot's **spec files** and **`get_spec_coverage` output** are byte-identical to `origin/master` — that's the whole test: a refactor that changes what CodeOwl *writes* is a bug. The `.codeowl/graph` JSON on disk **is** expected to change (new `flow_edges` shape, new `format_version`). Every existing test passes.
+
+`utility/structural_sweep.py` is the standard check for this (and every Phase 2 refactor milestone) — it builds two `codeowl` binaries and diffs `codeowl extract`, `get_spec_coverage`, `get_next_spec_task` for every feature/rollup/system/sample-file, and `get_callers`/`get_callees`/`get_symbol`, against a target repo, restoring its `.codeowl/` afterwards:
+
+```
+python3 utility/structural_sweep.py --repo ~/dev/startup/talentTrail
+```
+
+M13's own runs so far: the `route_literals`-parameter drop and the `flow_edges` collapse (`cb774df`) both came back fully byte-identical on the pilot.
 
 ---
 
