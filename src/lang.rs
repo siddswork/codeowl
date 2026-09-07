@@ -6,12 +6,14 @@
 //! extensions the module resolver tries — is centralized here.
 //!
 //! Free functions and constants, deliberately not a trait: the interface
-//! is shaped against two extractor kinds (TS symbols, SQL tables) and — via
-//! `features.rs` — two convention resolvers (route literals, `.from()`
-//! table refs), which is enough to see the seam but not enough to design a
-//! good abstraction. Phase 2 promotes this to a `LanguagePack` trait once a
-//! genuinely different language (Rust, C++) is there to check it against.
-//! See `ROADMAP.md`'s "Stack modularization".
+//! is shaped against two extractor kinds ([`SourceKind`]) and — via
+//! `features.rs` — a handful of convention resolvers (route literals,
+//! `.from()` table refs, rendered components), which is enough to see the
+//! seam but not enough to design a good abstraction. M13 promotes this to
+//! a `StackPack` trait (renamed from `LanguagePack` — the Phase 1 pack
+//! already spans TS + SQL + Next + Supabase, a *stack*, not a language)
+//! once a genuinely different stack (Rust) is there to check it against.
+//! See `ROADMAP.md`'s "Phase 2".
 
 use std::path::Path;
 
@@ -24,29 +26,43 @@ use crate::symbol::ExtractedSymbol;
 /// import specifier — Node/TypeScript resolution order.
 pub const RESOLVER_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".d.ts", ".js", ".jsx", ".json"];
 
-/// Whether CodeOwl extracts anything from this file: `.ts`/`.tsx` (never
-/// `.d.ts` — ambient declaration files use grammar shapes M1 doesn't
-/// handle, see `ROADMAP.md`'s M1 scope) and `.sql` (M10 schema files).
-/// The single definition `main.rs`, the catch-up pass, and the file
-/// watcher all share.
-pub fn is_extractable(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return false;
-    };
-    if name.ends_with(".d.ts") {
-        return false;
-    }
-    matches!(
-        path.extension().and_then(|e| e.to_str()),
-        Some("ts") | Some("tsx") | Some("sql")
-    )
+/// Which extractor a source file's *contents* go to. Derived from the
+/// extension for now; M13 folds this and `is_extractable` into a single
+/// `pack.is_source_file(path) -> Option<SourceKind>` the active stack
+/// owns. See `ROADMAP.md`'s "Phase 2".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceKind {
+    /// TypeScript / TSX — `ts_parser` + `extract.rs`.
+    Code,
+    /// A SQL schema file — `tree-sitter-sequel` + `schema.rs`.
+    Schema,
 }
 
-/// Whether a file goes to the SQL schema extractor rather than the
-/// TypeScript one. Kept as its own predicate (not an inline `.ends_with`)
-/// so the "SQL files are schema files" assumption has one name.
-pub fn is_schema_file(rel_path: &str) -> bool {
-    rel_path.ends_with(".sql")
+impl SourceKind {
+    /// The kind for a repo-relative path, or `None` when CodeOwl's Phase 1
+    /// extractor reads nothing from it. `.d.ts` is `None` on purpose —
+    /// ambient declaration files use grammar shapes M1 doesn't handle (see
+    /// `ROADMAP.md`'s M1 scope). The single source of truth behind both
+    /// `is_extractable` and the extract dispatch.
+    pub fn of(rel_path: &str) -> Option<SourceKind> {
+        if rel_path.ends_with(".d.ts") {
+            None
+        } else if rel_path.ends_with(".sql") {
+            Some(SourceKind::Schema)
+        } else if rel_path.ends_with(".ts") || rel_path.ends_with(".tsx") {
+            Some(SourceKind::Code)
+        } else {
+            None
+        }
+    }
+}
+
+/// Whether CodeOwl extracts anything from this file — `.ts`/`.tsx` (never
+/// `.d.ts`) and `.sql`. The single definition `main.rs`, the catch-up
+/// pass, and the file watcher all share. "What goes to which extractor"
+/// is [`SourceKind::of`].
+pub fn is_extractable(path: &Path) -> bool {
+    path.to_str().and_then(SourceKind::of).is_some()
 }
 
 /// A tree-sitter `Parser` loaded with the right grammar for `rel_path`:
@@ -68,12 +84,13 @@ pub fn ts_parser(rel_path: &str) -> Parser {
 
 /// Extract a file's symbols with the right extractor for its kind — SQL
 /// tables for a schema file, TypeScript declarations otherwise. The single
-/// dispatch point `graph.rs` and `index.rs` both call.
+/// dispatch point `graph.rs` and `index.rs` both call. A path with no
+/// [`SourceKind`] (never reached from the walk, which filters on
+/// `is_extractable` first) is parsed as `Code`.
 pub fn extract_symbols(rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
-    if is_schema_file(rel_path) {
-        crate::schema::extract_tables(source, rel_path)
-    } else {
-        crate::extract::extract_file(source, rel_path)
+    match SourceKind::of(rel_path) {
+        Some(SourceKind::Schema) => crate::schema::extract_tables(source, rel_path),
+        Some(SourceKind::Code) | None => crate::extract::extract_file(source, rel_path),
     }
 }
 
@@ -170,6 +187,17 @@ mod tests {
         assert!(!is_extractable(Path::new("a/b.d.ts")));
         assert!(!is_extractable(Path::new("a/b.js")));
         assert!(!is_extractable(Path::new("README.md")));
+    }
+
+    #[test]
+    fn source_kind_maps_extensions() {
+        // Purely on extension — the directory is never consulted.
+        assert_eq!(SourceKind::of("a/b.ts"), Some(SourceKind::Code));
+        assert_eq!(SourceKind::of("a/b.tsx"), Some(SourceKind::Code));
+        assert_eq!(SourceKind::of("a/b.sql"), Some(SourceKind::Schema));
+        assert_eq!(SourceKind::of("a/b.d.ts"), None);
+        assert_eq!(SourceKind::of("a/b.js"), None);
+        assert_eq!(SourceKind::of("README.md"), None);
     }
 
     #[test]

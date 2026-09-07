@@ -24,7 +24,7 @@ use crate::features::{RenderedComponent, RouteLiteral, TableRef, extract_route_l
 use crate::graph::{FileExtraction, Graph};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, extract_imports};
-use crate::lang::{is_extractable, is_schema_file};
+use crate::lang::{SourceKind, is_extractable};
 use crate::resolve::{build_resolver, resolve_imports};
 use crate::symbol::ExtractedSymbol;
 
@@ -44,28 +44,30 @@ pub struct FileInputs {
 
 impl FileInputs {
     /// Everything that depends on a file's contents, recomputed together
-    /// whenever that file changes. A `.sql` file is a schema file — only
-    /// `schema.rs`'s table pass applies; the TypeScript passes are skipped.
+    /// whenever that file changes. A schema file gets only `schema.rs`'s
+    /// table pass (folded into `extract_symbols`); the TypeScript
+    /// convention passes — imports, route literals, `.from()` refs,
+    /// rendered components — are skipped.
     fn extract(rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
         let symbols = crate::lang::extract_symbols(rel_path, source);
-        if is_schema_file(rel_path) {
-            return Self {
+        match SourceKind::of(rel_path) {
+            Some(SourceKind::Schema) => Self {
                 source_hash,
                 symbols,
                 imports: FileImports::default(),
                 route_literals: Vec::new(),
                 table_refs: Vec::new(),
                 rendered_components: Vec::new(),
-            };
-        }
-        Self {
-            source_hash,
-            symbols,
-            imports: extract_imports(source, rel_path),
-            route_literals: extract_route_literals(source, rel_path),
-            table_refs: crate::features::extract_table_refs(source, rel_path),
-            rendered_components: crate::features::extract_rendered_components(source, rel_path),
+            },
+            Some(SourceKind::Code) | None => Self {
+                source_hash,
+                symbols,
+                imports: extract_imports(source, rel_path),
+                route_literals: extract_route_literals(source, rel_path),
+                table_refs: crate::features::extract_table_refs(source, rel_path),
+                rendered_components: crate::features::extract_rendered_components(source, rel_path),
+            },
         }
     }
 }

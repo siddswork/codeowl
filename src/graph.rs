@@ -147,6 +147,17 @@ pub struct Graph {
     /// `set_resolved_imports` is called; resolving them needs a `Graph` to
     /// look symbols up in, so they can't be known at `build` time.
     imports: Vec<ResolvedImport>,
+
+    // ---- Pack-contributed derived edges ------------------------------------
+    // The four fields below are all *derived* edges — populated after `build`
+    // by a convention resolver in `features.rs` / `resolve.rs`, not by the
+    // structural walk — and every one is a convention of the active stack
+    // (Next.js routes, Supabase `.from()`, React JSX + default exports). On a
+    // repo the active pack doesn't cover they are simply empty. M13 collapses
+    // the group into one generic `flow_edges: Vec<FlowEdge>` resolved via
+    // `pack.resolve_flow_edge`; `imports` above stays separate (the traversal
+    // in `assemble_participants` walks flow edges *plus* one-hop imports).
+    // See ROADMAP.md's "Phase 2".
     /// Every `fetch("/api/...")` call site found across the repo — see
     /// `features.rs`. Stored here (rather than re-walked on every
     /// `get_next_spec_task` call) the same way `imports` is: computed once
@@ -169,6 +180,7 @@ pub struct Graph {
     /// `<Component/>`.
     #[serde(default)]
     resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
+    // ---- end pack-contributed edges ---------------------------------------
 }
 
 impl Graph {
