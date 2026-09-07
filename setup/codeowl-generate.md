@@ -58,12 +58,12 @@ real generated output:
 
 ## Loop
 
-Repeat the following until `get_next_spec_task` returns `null`:
+Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
 
 1. Call `get_next_spec_task` with `target` set to `$ARGUMENTS` (or, in
    batch mode, the current item's `id` — see "Batch mode" below).
-2. If the result is `null`, stop — everything on this target already has
-   a current spec. Report that and end the command.
+2. If the result's `kind` is `"done"`, stop — everything on this target
+   already has a current spec. Report that and end the command.
 3. Otherwise you'll get a task shaped one of five ways:
    - **`kind: "symbol"`** — write markdown containing exactly these two
      headings, in this order, each with real prose under it:
@@ -155,16 +155,16 @@ target loop above:
    get `pending`: every non-current document, already in the order a
    budgeted run should spend on — high-fan-in files first (their
    summaries feed every dependent spec), then feature specs, then the
-   long tail of files, then rollups, then the system spec last. Each
-   entry's `id` is ready to use as-is: a file path, `feature:<slug>`,
-   `rollup:<dir>`, or `system` — `get_next_spec_task` accepts all of
-   them.
+   long tail of files, then rollups, then test-code file specs, then the
+   system spec last. Each entry's `id` is ready to use as-is: a file
+   path, `feature:<slug>`, `rollup:<dir>`, or `system` —
+   `get_next_spec_task` accepts all of them.
 2. If `--budget=N` was given, you have `N` **generations** to spend —
-   count every `get_next_spec_task` call that returns a real task (not
-   `null`) toward that budget, not every item in `pending` (a single file
-   with three uncovered symbols costs four generations: three symbols
-   plus the file itself). Without `--budget`, spend as many as it takes
-   to exhaust `pending` entirely.
+   count every `get_next_spec_task` call that returns a real task (`kind`
+   is not `"done"`) toward that budget, not every item in `pending` (a
+   single file with three uncovered symbols costs four generations: three
+   symbols plus the file itself). Without `--budget`, spend as many as it
+   takes to exhaust `pending` entirely.
 3. Walk `pending` in order. For each item's `id`, run the single-target
    loop above (steps 1–5) against it — passing that `id` straight to
    `get_next_spec_task` as `target`, no translation. Stop the *whole*
@@ -193,9 +193,9 @@ system spec got a spec written or refreshed, and where it landed
 (`docs/specs/<path>.md` for a file, `docs/specs/_features/<slug>.md` for
 a feature, `docs/specs/<dir>/_index.md` for a directory rollup,
 `docs/specs/_index.md` for the system spec — see `ARCHITECTURE.md`'s
-"Spec document format"). If `get_next_spec_task` never returns anything
-at all on the first call, say why: either nothing changed since it was
-last generated, or the target doesn't qualify for a spec at all (a barrel
-file with no exported function/class and not a feature entry point
+"Spec document format"). If `get_next_spec_task` returns `{"kind":
+"done"}` on the very first call, say why: either nothing changed since it
+was last generated, or the target doesn't qualify for a spec at all (a
+barrel file with no exported function/class and not a feature entry point
 either, or a directory with fewer than two spec-bearing files — see the
 granularity rules in `ARCHITECTURE.md`).

@@ -343,13 +343,14 @@ spec_hash: <blake3>
 
 **Generation priority.** `get_spec_coverage` returns `pending` — and a budgeted `--all --budget=N` run walks it — in this order:
 
-1. **high-fan-in files** (`fan_in >= SHARED_CODE_FAN_IN`, a laptop-scale constant in `spec.rs`) — a file imported by many others is shared infrastructure; its real summary is what a dependent feature spec gets *instead of* a bare signature stub, so it must come first
+1. **high-fan-in files** (`fan_in >= SHARED_CODE_FAN_IN`, a laptop-scale constant in `spec.rs`; fan-in counts *non-test* importers only) — a file imported by many others is shared infrastructure; its real summary is what a dependent feature spec gets *instead of* a bare signature stub, so it must come first
 2. **feature specs** — the BA-facing payoff, now generated with real dependency summaries
 3. the **long tail** of lower-fan-in files
 4. **directory rollups** (compose over their files)
-5. the **system spec** — the capstone, only writable once every module and feature is current, so always last (and `get_next_spec_task("system")` still runs the full module-then-feature sweep of "Generation" above before offering the system task itself)
+5. **test code** (`is_test_path` — `e2e/`, `__tests__/`, `*.test.*`, `*.spec.*`, `cypress/`, `playwright/`) — file specs only, always after the product regardless of fan-in; test directories are never modules, so the system spec doesn't wait on them
+6. the **system spec** — the capstone, only writable once every module and feature is current, so always last (and `get_next_spec_task("system")` still runs the full module-then-feature sweep of "Generation" above before offering the system task itself)
 
-The `feature:<slug>`, `rollup:<dir>` and `system` ids `pending` carries are all accepted by `get_next_spec_task` directly — the batch walk hands each `id` straight back with no translation. This ordering has a useful brownfield property: the first budgeted runs against a legacy repo build the shared vocabulary and then exactly the feature documents a human would ask for, so the tool is demonstrably useful long before coverage approaches complete. (`/codeowl generate system` / `.` is still the separate plain bottom-up sweep — not fan-in-prioritized, not budget-capped.)
+The `feature:<slug>`, `rollup:<dir>` and `system` ids `pending` carries are all accepted by `get_next_spec_task` directly — the batch walk hands each `id` straight back with no translation, and `get_next_spec_task` returns `{"kind": "done"}` (a real object, never a bare `null` — some MCP clients reject `null` as an invalid `structuredContent`) when a target is exhausted. This ordering has a useful brownfield property: the first budgeted runs against a legacy repo build the shared vocabulary and then exactly the feature documents a human would ask for, so the tool is demonstrably useful long before coverage approaches complete. (`/codeowl generate system` / `.` is still the separate plain bottom-up sweep — not fan-in-prioritized, not budget-capped.)
 
 ### 7. MCP server
 

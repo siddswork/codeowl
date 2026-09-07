@@ -235,6 +235,11 @@ pub enum SpecTaskResponse {
         modules: Vec<ModuleSummary>,
         features: Vec<FeatureSummary>,
     },
+    /// Nothing left to generate for this target -- every document it
+    /// covers already has a current spec. Serialized as `{"kind":"done"}`
+    /// (a real object, unlike a bare `null`, which some MCP clients reject
+    /// as an invalid `structuredContent`). The loop stops here.
+    Done {},
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -740,20 +745,31 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns null when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
         Parameters(req): Parameters<GenerateTaskRequest>,
+    ) -> Result<Json<SpecTaskResponse>, String> {
+        let Json(task) = self.resolve_next_task(&req.target).await?;
+        Ok(Json(task.unwrap_or(SpecTaskResponse::Done {})))
+    }
+
+    /// The dispatch behind `get_next_spec_task` — kept returning `Option`
+    /// internally (the `next_*` helpers all speak it) and mapped to an
+    /// explicit `Done` at the tool boundary above.
+    async fn resolve_next_task(
+        &self,
+        target: &str,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         let graph = self.graph.load_full();
-        if req.target == "system" || req.target == "." {
+        if target == "system" || target == "." {
             return self.next_system_task_response(&graph);
         }
         // Accept the same id vocabulary get_spec_coverage emits and
         // get_spec/submit_spec take -- a budgeted --all walk hands these
         // straight back here.
-        if let Some(slug) = req.target.strip_prefix("feature:") {
+        if let Some(slug) = target.strip_prefix("feature:") {
             let route_literals = graph.route_literals();
             let Some(entry) = crate::features::enumerate_entry_points(&graph, route_literals)
                 .into_iter()
@@ -763,10 +779,10 @@ impl CodeOwlServer {
             };
             return self.next_task_for_target(&graph, &entry.file);
         }
-        if let Some(dir) = req.target.strip_prefix("rollup:") {
+        if let Some(dir) = target.strip_prefix("rollup:") {
             return self.next_directory_task_response(&graph, dir);
         }
-        self.next_task_for_target(&graph, &req.target)
+        self.next_task_for_target(&graph, target)
     }
 
     /// The bottom-up chase for a single file/symbol/directory target --
@@ -1262,16 +1278,16 @@ mod tests {
         let mut generations = 0;
         for item in coverage.0.pending.iter().take(2) {
             loop {
-                let Some(task) = server
+                let task = server
                     .get_next_spec_task(Parameters(GenerateTaskRequest {
                         target: item.id.clone(),
                     }))
                     .await
                     .unwrap()
-                    .0
-                else {
+                    .0;
+                if matches!(task, SpecTaskResponse::Done {}) {
                     break;
-                };
+                }
                 generations += 1;
                 let id = match &task {
                     SpecTaskResponse::Symbol { id, .. } => id.clone(),
@@ -1353,8 +1369,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("source changed, expected a reconciliation task");
+            .0;
         let SpecTaskResponse::Symbol {
             prior_summary,
             prior_behavior,
@@ -1430,7 +1445,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            done.0, None,
+            done.0,
+            SpecTaskResponse::Done {},
             "an implementation-only dependency edit must not stale the importer"
         );
         let sumthree = server_body_edit
@@ -1464,8 +1480,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("a dependency's signature change should stale the importer");
+            .0;
         assert!(
             matches!(task, SpecTaskResponse::Symbol { ref id, .. } if id == "user.ts::sumThree")
         );
@@ -1549,8 +1564,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected the rollup task");
+            .0;
         let SpecTaskResponse::Rollup { id: rollup_id, .. } = rollup_task else {
             panic!("expected a Rollup task, got {rollup_task:?}");
         };
@@ -1631,8 +1645,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("math.ts should need regeneration");
+            .0;
         assert!(
             matches!(next, SpecTaskResponse::Symbol { ref id, .. } if id == "lib/math.ts::add")
         );
@@ -1664,8 +1677,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected the page's own symbol task");
+            .0;
         assert!(matches!(symbol_task, SpecTaskResponse::Symbol { .. }));
         server
             .submit_spec(Parameters(SubmitSpecRequest {
@@ -1687,8 +1699,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected a feature task");
+            .0;
         let SpecTaskResponse::Feature { id: feature_id, .. } = feature_task else {
             panic!("expected a Feature task, got {feature_task:?}");
         };
@@ -1791,7 +1802,10 @@ mod tests {
             .await
             .unwrap()
             .0;
-        assert!(by_slug.is_some(), "feature:<slug> must resolve to a task");
+        assert!(
+            !matches!(by_slug, SpecTaskResponse::Done {}),
+            "feature:<slug> must resolve to a task"
+        );
         assert_eq!(by_slug, by_path, "feature:<slug> == its entry-point path");
 
         let rollup_task = server
@@ -1802,11 +1816,11 @@ mod tests {
             .unwrap()
             .0;
         assert!(
-            rollup_task.is_some(),
+            !matches!(rollup_task, SpecTaskResponse::Done {}),
             "rollup:<dir> must resolve to a task for a spec-bearing directory"
         );
 
-        // An unknown feature slug is a clean no-op, not an error.
+        // An unknown feature slug is a clean `done`, not an error.
         let missing = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:does-not-exist".to_string(),
@@ -1814,7 +1828,7 @@ mod tests {
             .await
             .unwrap()
             .0;
-        assert!(missing.is_none());
+        assert!(matches!(missing, SpecTaskResponse::Done {}));
     }
 
     #[tokio::test]
@@ -1830,7 +1844,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        let Some(SpecTaskResponse::Symbol { id, source, .. }) = task.0 else {
+        let SpecTaskResponse::Symbol { id, source, .. } = task.0 else {
             panic!("expected a symbol task, got {:?}", task.0);
         };
         assert_eq!(id, "a.ts::double");
@@ -1867,7 +1881,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        let Some(SpecTaskResponse::File { id: file_id, .. }) = task.0 else {
+        let SpecTaskResponse::File { id: file_id, .. } = task.0 else {
             panic!("expected a file task, got {:?}", task.0);
         };
         assert_eq!(file_id, "a.ts");
@@ -1886,7 +1900,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(done.0, None);
+        assert_eq!(done.0, SpecTaskResponse::Done {});
     }
 
     #[tokio::test]
@@ -1898,7 +1912,16 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(task.0, None);
+        assert_eq!(task.0, SpecTaskResponse::Done {});
+    }
+
+    #[test]
+    fn done_serializes_as_an_object_not_a_bare_null() {
+        // The bug this fixes: a bare `null` result fails some MCP clients'
+        // `structuredContent` schema check ("expected record").
+        let json = serde_json::to_value(SpecTaskResponse::Done {}).unwrap();
+        assert!(json.is_object(), "got {json}");
+        assert_eq!(json["kind"], "done");
     }
 
     #[tokio::test]
@@ -1930,8 +1953,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected the page's own symbol task");
+            .0;
         assert!(matches!(symbol_task, SpecTaskResponse::Symbol { .. }));
         server
             .submit_spec(Parameters(SubmitSpecRequest {
@@ -1946,8 +1968,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected the page's own file task");
+            .0;
         assert!(matches!(file_task, SpecTaskResponse::File { .. }));
         server
             .submit_spec(Parameters(SubmitSpecRequest {
@@ -1965,8 +1986,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected a feature task");
+            .0;
         let SpecTaskResponse::Feature {
             id,
             entry_point,
@@ -2017,7 +2037,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(done.0, None);
+        assert_eq!(done.0, SpecTaskResponse::Done {});
     }
 
     #[tokio::test]
@@ -2035,8 +2055,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("expected lib/one.ts's own symbol task");
+            .0;
         assert!(matches!(task, SpecTaskResponse::Symbol { .. }));
 
         for (sym_id, sym_content, file_id, file_content) in [
@@ -2075,8 +2094,7 @@ mod tests {
             }))
             .await
             .unwrap()
-            .0
-            .expect("both files current, expected the rollup task");
+            .0;
         let SpecTaskResponse::Rollup {
             id,
             dir_path,
@@ -2125,7 +2143,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(done.0, None);
+        assert_eq!(done.0, SpecTaskResponse::Done {});
     }
 
     #[tokio::test]
@@ -2155,8 +2173,7 @@ mod tests {
                 }))
                 .await
                 .unwrap()
-                .0
-                .expect("should eventually reach the system task, not run out early");
+                .0;
             match &task {
                 SpecTaskResponse::Symbol { id, .. } => {
                     seen_kinds.push("symbol");
@@ -2204,6 +2221,7 @@ mod tests {
                     seen_kinds.push("system");
                     break task;
                 }
+                SpecTaskResponse::Done {} => panic!("done before the system task"),
             }
         };
 
@@ -2264,7 +2282,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(done.0, None);
+        assert_eq!(done.0, SpecTaskResponse::Done {});
     }
 
     #[tokio::test]

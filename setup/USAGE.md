@@ -79,12 +79,17 @@ missing in this order, and a budgeted `--all` run spends down that list:
 
 1. **high-fan-in files** — code imported by many others (shared clients,
    auth, utils). Documented first because a feature spec that depends on
-   one gets its real summary instead of a bare signature.
+   one gets its real summary instead of a bare signature. Imports from
+   test files don't count toward fan-in.
 2. **feature specs** — the BA-facing narratives, now written with real
    dependency context.
 3. the **long tail** of lower-fan-in files.
-4. **directory rollups**, then
-5. the **system spec** — last; it composes over everything above, so it's
+4. **directory rollups**.
+5. **test code** — `e2e/`, `__tests__/`, `*.test.*`, `*.spec.*`. Gets
+   file specs, but always after the product code and never a rollup or a
+   line in the system spec. Documenting the test harness is rarely the
+   point; when it is, it's safe to leave for last.
+6. the **system spec** — last; it composes over everything above, so it's
    only writable once they're all current. A budgeted run stops before
    reaching it; do it explicitly with `/codeowl-generate system` at the end.
 

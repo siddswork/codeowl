@@ -90,10 +90,11 @@ whole scope is covered.
 
 **`--all` picks the order for you** — high-fan-in files first (so feature
 specs get real dependency summaries), then feature specs, then the long
-tail of files, then rollups, then the system spec last. You don't need to
-know the repo: run `/codeowl-generate --all --budget=15`, review the
-batch, commit, repeat. Target a file or feature directly only to jump
-ahead. See `setup/USAGE.md` for the full picture.
+tail of files, then rollups, then test code (`e2e/`, `*.test.*`, …), then
+the system spec last. You don't need to know the repo: run
+`/codeowl-generate --all --budget=15`, review the batch, commit, repeat.
+Target a file or feature directly only to jump ahead. See `setup/USAGE.md`
+for the full picture.
 
 Specs land in `docs/specs/` as Markdown, mirroring the source tree
 (`docs/specs/<path>.md` for a file, `docs/specs/_features/<slug>.md` for a

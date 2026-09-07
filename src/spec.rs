@@ -33,6 +33,30 @@ pub fn spec_path(root: &Path, source_path: &str) -> PathBuf {
         .join(format!("{source_path}.md"))
 }
 
+/// Whether a repo-relative path is test code — an `e2e/` tree, a
+/// `__tests__/` directory, a `cypress/`/`playwright/` tree, or a
+/// `.test.`/`.spec.` file. Test code stays in the graph (so `get_callers`
+/// still shows "used by these tests"), but its specs sort to the very
+/// bottom of a `--all` run and it's never treated as a product module —
+/// documenting the test harness is rarely the point of a spec corpus, and
+/// whenever it is, it's safe to leave for last. Also strips a
+/// `rollup:`/`feature:` id prefix so it can be asked of a coverage id.
+pub fn is_test_path(path: &str) -> bool {
+    let path = path
+        .strip_prefix("rollup:")
+        .or_else(|| path.strip_prefix("feature:"))
+        .unwrap_or(path);
+    path.starts_with("e2e/")
+        || path.contains("/e2e/")
+        || path.starts_with("cypress/")
+        || path.contains("/cypress/")
+        || path.starts_with("playwright/")
+        || path.contains("/playwright/")
+        || path.contains("__tests__/")
+        || path.contains(".test.")
+        || path.contains(".spec.")
+}
+
 /// A file is spec-bearing iff it declares at least one exported function or
 /// class among its top-level symbols — barrel files, const-only route
 /// config, and metadata-only boilerplate get no document (see
@@ -1520,7 +1544,9 @@ pub fn enumerate_modules(graph: &Graph) -> Vec<String> {
         .collect();
     dirs.sort();
     dirs.dedup();
-    dirs.retain(|d| !d.is_empty() && directory_is_spec_bearing(graph, d));
+    dirs.retain(|d| {
+        !d.is_empty() && !is_test_path(&format!("{d}/")) && directory_is_spec_bearing(graph, d)
+    });
     dirs
 }
 
@@ -1925,10 +1951,15 @@ pub fn body_smells(body: &str) -> Vec<String> {
     prose_smells(&summary)
 }
 
+/// How many *non-test* files import something from this file — the "shared
+/// infrastructure" signal `prioritize` tiers on. Imports from test code
+/// don't count: a `lib/` helper pulled in by ten e2e specs and two real
+/// callers is depended on by two things, not twelve.
 fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
     graph
         .imports()
         .iter()
+        .filter(|imp| !is_test_path(&imp.from_file))
         .filter(|imp| {
             imp.target
                 .is_some_and(|t| graph.parent_id(t) == Some(file_id))
@@ -2159,7 +2190,9 @@ const SHARED_CODE_FAN_IN: usize = 3;
 ///    dependency summaries rather than stubs
 /// 3. the long tail of lower-fan-in files
 /// 4. directory rollups (need their files first)
-/// 5. the system spec — the capstone, only writable once everything it
+/// 5. test code (`is_test_path`) — file specs only, always after the
+///    product, whatever its fan-in
+/// 6. the system spec — the capstone, only writable once everything it
 ///    composes from is current, so always last
 ///
 /// Within a tier, an honestly `"missing"` or `"stale"` document outranks a
@@ -2179,13 +2212,16 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
         .collect();
     pending.sort_by(|a, b| {
         fn tier(item: &CoverageItem) -> u8 {
+            if item.kind == "file" && is_test_path(&item.id) {
+                return 5;
+            }
             match item.kind.as_str() {
                 "file" if item.fan_in >= SHARED_CODE_FAN_IN => 0,
                 "feature" => 1,
                 "file" => 2,
                 "rollup" => 3,
-                "system" => 4,
-                _ => 5,
+                "system" => 6,
+                _ => 7,
             }
         }
         fn urgency(status: &str) -> u8 {
@@ -3462,5 +3498,47 @@ mod tests {
                 "system",           // the system spec is always last
             ]
         );
+    }
+
+    #[test]
+    fn prioritize_sinks_test_code_below_the_product_whatever_its_fan_in() {
+        fn item(id: &str, kind: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: "missing".into(),
+                fan_in,
+                smells: Vec::new(),
+            }
+        }
+        let items = vec![
+            item("e2e/helpers/api-client.ts", "file", 71), // huge fan-in, but test code
+            item("lib/db.ts", "file", 4),
+            item("feature:checkout", "feature", 0),
+            item("app/dashboard/card.test.tsx", "file", 0),
+            item("system", "system", 0),
+        ];
+        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "lib/db.ts",                   // real shared code
+                "feature:checkout",            // features
+                "e2e/helpers/api-client.ts",   // test code — after the product,
+                "app/dashboard/card.test.tsx", // fan-in only orders within the tier
+                "system",                      // system still dead last
+            ]
+        );
+    }
+
+    #[test]
+    fn is_test_path_examples() {
+        assert!(is_test_path("e2e/helpers/api-client.ts"));
+        assert!(is_test_path("src/components/__tests__/button.ts"));
+        assert!(is_test_path("lib/utils.test.ts"));
+        assert!(is_test_path("app/page.spec.tsx"));
+        assert!(is_test_path("rollup:e2e/helpers"));
+        assert!(!is_test_path("lib/utils.ts"));
+        assert!(!is_test_path("app/api/attest/route.ts")); // "test" substring, not a test file
     }
 }
