@@ -4,44 +4,55 @@ CodeOwl extracts a structural graph from a codebase and serves LLM-authored spec
 
 ## Last Session (2026-09-07)
 
-**M10 done + M11 started (codeowl-side prep).**
+**Goal:** close out Phase 1 (M10 + M11) and write a detailed, reviewed plan for Phase 2 — the polyglot core (`StackPack` trait + modularization), which the owner has prioritized ahead of the web viewer.
 
-M10 — SQL/schema boundary resolution — done, three commits: `1c6c603` (docs, milestone-plan fold) → `0c0b4ac` (prep: `src/parse.rs` grammar-pick dedup + TS+Next doc-marks) → `fe95f14` (main: `src/schema.rs` parses `CREATE TABLE` from `.sql` via `tree-sitter-sequel` + a header line-scan backstop → `SymbolKind::Table` nodes; `features.rs` `extract_table_refs`/`resolve_table_ref` for `.from("table")`; `get_callers` on a table lists the files that query it; instructions string notes table nodes). Pilot: 25/25 tables, 275/304 `.from()` refs resolve (misses are DB views, out of scope). Also `4970ce8` — `setup/USAGE.md` operator guide.
+### What was completed (all committed + pushed to `origin/master`)
 
-**M11 codeowl-side prep — done this session:**
-1. `2b11b25` — **`src/lang.rs`**, the stack-modularization item. Centralizes everything TS/SQL-specific that was spread across modules: `is_extractable`, `is_schema_file`, `ts_parser` (moved from the now-deleted `parse.rs`), `RESOLVER_EXTENSIONS` (was inline in `resolve.rs`), `extract_symbols` (the `.sql`-vs-TS dispatch), and `detect(root)` — startup fail-fast (`main.rs`) if a repo has no `.ts/.tsx/.sql`. Free functions, no trait (Phase 2).
-2. `e0982ac` — **data-touched participant wiring** (deferred from M10): `Participants` gains a `data` tier — SQL tables the core code `.from()`s. Hashed by `source_hash`, passed to the feature task as `FeatureTask.data` / `TableContext { id, columns }`. Feature "Data touched" now has graph backing + schema-change staleness.
-3. `bda59df` (docs), `121cf25` (USAGE "How generation works").
-4. `9fb0124` — **`--all` ordering fix**: `get_next_spec_task` accepts `feature:<slug>` / `rollup:<dir>` targets (the ids `get_spec_coverage` emits — previously silently `null`). `prioritize()` reordered to **high-fan-in files → features → long-tail files → rollups → system last** (`SHARED_CODE_FAN_IN = 3`) — was "system first", which defeated fan-in ordering. Skill batch mode simplified.
-5. `245998a` — **`null`-result bug + test-code deprioritization**: `get_next_spec_task` returned a bare `null` when exhausted, which Claude Code's client rejects as an invalid `structuredContent`. Now returns `SpecTaskResponse::Done {}` → `{"kind":"done"}`; skill checks `kind == "done"`. Separately, `spec.rs::is_test_path` (`e2e/`, `__tests__/`, `*.test.*`, `*.spec.*`, `cypress/`, `playwright/`) — test files → tier 5 (below rollups, before system), test dirs excluded from `enumerate_modules`, `file_fan_in` drops test importers. Found in a pilot run where `e2e/helpers/api-client.ts` (fan-in 71, all from tests) outranked every real `lib/` file.
-6. `45ddc92` — **rendered-component `core` expansion**: a feature's `core` was entry file + `fetch()`-reached routes only, missing the client-component subtree (`page.tsx` → `<EvaluationClient/>` → `<EvaluationForm/>` where the real flow lives). `features.rs::extract_rendered_components` collects uppercase JSX tags per file; `assemble_participants` resolves each `<Tag/>` to its file and pulls it into `core` if co-located with the entry OR does data work. `components/ui/*` primitives stay stubs. Once in `core`, a component's own fetches are followed.
-7. `dac7194` — **default-import resolution**: #6 was inert on the pilot — `imports.rs` tracked only *named* imports, React components are default-exported. Now `imports.rs::DefaultImport` + `resolve.rs::resolve_default_imports` (specifier → target file) on `Graph`; `resolve_rendered_component` checks those first. Validated: the evaluate page's `EvaluationFormClient` now joins `core`.
-8. `2dd2b90` — **tier-0 (shared-code) cap**: `SHARED_CODE_FAN_IN = 3` made the shared tier ~25 `lib/` files, so `--all` reached zero features. `prioritize()` now bounds it to the top `SHARED_CODE_MAX_FILES = 8` by fan-in, cutoff computed from the *full `items`* (not `pending`, which kept refilling the tier forever), and `components/ui/` primitives excluded via `is_ui_primitive`. Pilot shared tier = 8 real `lib/` files, cutoff 12.
-9. `ba3b69b` (docs) — the "model coupling" leak documented in `ROADMAP.md` (see below).
+**M10 — SQL/schema boundary resolution.** `1c6c603` (docs) → `0c0b4ac` (prep: grammar-pick dedup + doc-marks) → `fe95f14` (main): `src/schema.rs` parses `CREATE TABLE` from `.sql` via `tree-sitter-sequel` 0.3.11 + a header line-scan backstop → `SymbolKind::Table` nodes; `features.rs::extract_table_refs`/`resolve_table_ref` for Supabase `.from("table")`; `get_callers` on a table lists the files that query it. Pilot: 25/25 tables, 275/304 `.from()` refs resolve (misses are DB views, out of scope). Plus `4970ce8` — `setup/USAGE.md` operator guide.
 
-**Phase 1 is complete (2026-09-07).** M1–M10 shipped; **M11 marked "validated by sample"** — the project owner reviewed the pilot's feature specs and judged them clearly good (clincher: a spec correctly reporting a feature as dormant after a one-line flag flip, `b6d8965f` in the pilot). Full corpus generation stopped at ~15% coverage on purpose; the rest is mechanical volume. The pilot's `CLAUDE.md` gained a "Structural specs (CodeOwl MCP)" section (uncommitted in that repo — the user folds it into their partial-corpus PR).
+**M11 codeowl-side prep** (9 commits, `2b11b25`…`2dd2b90` + docs):
+- `2b11b25` — **`src/lang.rs`** (the stack-modularization seam): `is_extractable`, `is_schema_file`, `ts_parser` (from the now-deleted `parse.rs`), `RESOLVER_EXTENSIONS`, `extract_symbols` (`.sql`-vs-TS dispatch), `detect(root)` startup fail-fast. Free functions, no trait yet.
+- `e0982ac` — **data-touched participants**: `Participants` gains a `data` tier (SQL tables the core `.from()`s); `FeatureTask.data` / `TableContext`; schema-change staleness.
+- `9fb0124` — **`--all` ordering**: `get_next_spec_task` accepts `feature:<slug>` / `rollup:<dir>` ids; `prioritize()` reordered to shared-code files → features → long-tail → rollups → system last.
+- `245998a` — **`null`-result bug**: exhausted task returned bare `null` (rejected by Claude Code's `structuredContent` check) → now `SpecTaskResponse::Done {}` → `{"kind":"done"}`. Plus `is_test_path` → test files to tier 5, test importers dropped from fan-in.
+- `45ddc92` — **rendered-component `core` expansion**: `page.tsx` → `<EvaluationClient/>` → `<EvaluationForm/>` subtree now pulled into `core` when co-located or data-touching; `components/ui/*` stay stubs.
+- `dac7194` — **default-import resolution**: #45ddc92 was inert (React components are default-exported, `imports.rs` tracked only named). Added `DefaultImport` + `resolve_default_imports`.
+- `2dd2b90` — **tier-0 cap**: `SHARED_CODE_MAX_FILES = 8`, cutoff anchored to the full item set (not `pending`, which refilled forever), `is_ui_primitive` excluded. Pilot shared tier = 8 `lib/` files.
 
-**Next: Phase 2**, led by the `LanguagePack` trait + a second language (CodeOwl's own Rust, likely). Before that, an **interim de-coupling step** is on the table (ROADMAP "Stack modularization"): every milestone since M10 leaked TS+Next *model* coupling into the supposedly-generic core — `graph.rs` carries 4 pack-specific edge collections, `spec.rs::prioritize` has `is_test_path`/`is_ui_primitive`, the feature concept is routing-shaped. The interim step moves those behind a named seam + doc-marks the fields (no behavior change), making the Phase 2 extraction a rename.
+**Phase 1 complete** — `7661141` ("Mark M11 validated by sample; Phase 1 complete"). M1–M10 shipped; **M11 "validated by sample"** — owner reviewed the pilot feature specs and judged them clearly good. Clincher: a spec correctly reported a flow as *dormant* after it was disabled by a one-line flag flip (`b6d8965f` in the pilot). Full corpus generation deliberately stopped at ~15% — the rest is mechanical volume.
 
-## Prior Session (2026-09-06, cont.)
+### In progress — ONE uncommitted change
 
-**Completed this session, each its own commit, all pushed to `origin/master`:**
-1. `f865e81` — **M9, incremental indexing + in-session file watcher.** New `RepoIndex` (`src/index.rs`) caches per-file inputs at `.codeowl/index`; `RepoIndex::open` is the fresh-spawn catch-up, `apply_changes` the watcher's incremental update. `src/watch.rs` is the `notify` watcher (300ms debounce, per-directory watches over the gitignore-visible tree). MCP server graph went `Arc<Graph>` → `Arc<ArcSwap<Graph>>`; handlers snapshot once up front. 112 unit + 5 integration tests.
-2. `cb24dd1` — ROADMAP note: M9 live-validated against the pilot repo (~0.5s edit-to-visible, catch-up on respawn).
-3. `62ee71e` — replaced the MCP server's stale `get_info` instructions string (was M3-era, claimed generation didn't exist).
-4. `aefdc42` — **`setup/` folder**: the "wire CodeOwl into your repo" guide + example `.mcp.json`. The `/codeowl-generate` command moved here from `.claude/commands/` (does nothing in a Rust repo). Instructions string expanded (M9, smells, feature concept, points at `/codeowl-generate`).
-5. `ccda54c` — M9 note in `setup/codeowl-generate.md`; synced the user's global `~/.claude/commands/` copy.
-6. **Phase 1 reframe** (docs-only commit): the original exit criterion (does spec generation cut agent token use — a go/no-go gate) is retired. Value proposition is now taken as the premise: dual-audience (human + LLM) brownfield documentation. **M11 changed** from "run tasks, reach a verdict" to "generate a real spec corpus over the pilot + hold it to a dual-audience quality bar" (BA cut / dev cut / smell cut / optional `mine.py` data point). **M10's rationale shifted** ("lets the corpus describe the DB") and it's now load-bearing, not optional. Phase 2 reprioritized: web viewer + headless generation moved to the front. `REQUIREMENTS.md`, `ROADMAP.md`, `ARCHITECTURE.md` all updated.
+**`ROADMAP.md` + `CLAUDE.md` are modified on top of `7661141`, NOT committed** (`ROADMAP.md` staged; `CLAUDE.md` partly staged + this handoff rewrite unstaged — `git add -A` before committing). This is the detailed Phase 2 plan + 8 review fixes folded in. Content is final and reviewed; it just needs the owner's go-ahead to commit (per the workflow rule — only commit/push when a message says "commit" or "push").
 
-**Also, outside this repo:** the pilot repo's two junk specs (`app/submit/page.tsx.md`, `app/api/payments/webhook/route.ts.md`) were regenerated by driving the MCP loop manually over stdio (not via the skill — this session had no codeowl MCP connection). User committed them there as `6f9bae22`. The pilot repo still has only ~9 spec files total — building the rest is M11's job.
+Proposed commit message:
+> **Plan Phase 2's polyglot core (M12–M15) and fold in the review**
+>
+> LanguagePack→StackPack, cache versioning as M12's first task, optional feature layer + M13-pre spike, FlowEdge resolution as pack hooks, classify()→FileRole, honest "identical spec output" (not cache) and test-churn budget. Full M1–M11 coupling inventory + a "where the risk concentrates" note on the feature layer.
 
-**Open / not decided:**
-- Feature/rollup/system human-edit reconciliation is still file-specs-only (from M8).
-- Phase 2 promotes `src/lang.rs` (free functions) to a `LanguagePack` trait once a genuinely different language exists to check the seams against.
+The Phase 2 plan itself (now in `ROADMAP.md` "Phase 2 — the polyglot core first" — read the whole section before starting):
+- **M12** (S) — interim de-coupling. **First job: add a cache `format_version: u32`** to the persisted index/graph; mismatch/absence → full rebuild. This fixes a **latent M11 bug**: a `#[serde(default)]` field reads empty on an old `.codeowl/` cache with no rebuild, yielding wrong data. Then `is_test_path`/`is_ui_primitive` → a `classify(path) -> FileRole` seam (`Domain|Primitive|Test|Generated`); doc-mark `graph.rs`'s 4 pack-contributed fields; `SourceKind` enum for the `.sql` dispatch. No behavior change — pilot regenerates identical spec files.
+- **M13-pre** (XS) — paper spike: what would CodeOwl's own feature specs be? Drives making the feature layer *optional* in the trait.
+- **M13** (M–L) — `trait StackPack` (renamed from `LanguagePack` — the unit is a *stack*: TS + SQL + Next + Supabase, not one language); move `extract/imports/resolve/schema/features` behind `TypeScriptNextStack`. `graph.rs`'s 4 typed edge fields → one generic `flow_edges` resolved via `pack.resolve_flow_edge`; `assemble_participants` becomes generic traversal + `admits_to_core` hook. `feature_model() -> Option<&dyn FeatureModel>`. ~97 pack call sites = real test churn, absorbed via free-function shims. Spec files + `get_spec_coverage` stay byte-identical to M11; the `.codeowl/graph` JSON is *expected* to change.
+- **M14** (L) — `RustStack` on CodeOwl's own repo. The only milestone that actually validates the seams; validation is a human dev cut on ~10 self-specs, not a diff.
+- **M15** (M) — fold M14's findings into the trait; commit CodeOwl's self-spec corpus; make `setup/codeowl-generate.md` stack-neutral.
 
-**Exact next step:** M11 corpus generation — user drives `/codeowl-generate --all` from a session inside the pilot repo, then the four quality cuts. The codeowl-side M11 prep (`lang.rs`, data-touched wiring) is done. See `ROADMAP.md`'s M11 "Execution / sequencing".
+### Known issues / blockers
 
-**State:** `cargo test` 123 unit + 9 integration, `clippy -D warnings` / `fmt --check` clean; release binary rebuilt (M9 + M10 + M11 prep); `tree-sitter-sequel` 0.3.11 added (forced `cc` 1.4→1.2 in the lockfile). `origin/master` at `4970ce8` + the two uncommitted M11-prep commits pending approval.
+- **Latent M11 cache bug** (described above) — not yet fixed; it's M12's first task. Anyone regenerating on a pre-M10 `.codeowl/` cache should `rm -rf .codeowl/` first as a workaround.
+- **Test churn in M13 is real** (~97 call sites) — the plan budgets for it via shims; don't start M13 expecting it to be free.
+- **The feature layer is the risk concentration** for Phase 2 — it's the only part that models a *product*, not code. `core`-admission (`is_colocated || does_data_work`) has no mechanical ground truth (took 3 iterations against *one* repo this session). De-risked via M13-pre + optional `feature_model()` + M14's human read.
+- Outside this repo: the pilot's `CLAUDE.md` gained a "Structural specs (CodeOwl MCP)" section and holds a ~45-spec partial corpus — both uncommitted there; the owner folds them into their own PR.
+- Carried from M8, still open: human-edit reconciliation is file-specs-only — feature / rollup / system specs aren't reconciled against manual edits.
+
+### Exact next step to resume
+
+1. If the owner says "commit"/"push": `git add -A` (`CLAUDE.md` + `ROADMAP.md`), commit with the message above, push.
+2. Then **start M12**: TDD. Failing test first — an old persisted index/graph JSON with no `format_version` (or a wrong one) must trigger a full rebuild, not `#[serde(default)]`-silent partial reuse. Add `format_version: u32` to the persisted `RepoIndex` and `Graph`, bump on read-mismatch. `src/index.rs` + `src/graph.rs`. Keep it the smallest standalone commit; the `classify()`/doc-mark/`SourceKind` parts of M12 are separate commits after it.
+
+### State
+
+`cargo test`: **134 unit + 10 integration**, all green (`tests/`: extraction 2, feature_components 1, incremental 3, schema 4). `clippy -D warnings` / `fmt --check` were clean at the last code commit (`2dd2b90`); the only working-tree change is docs (`ROADMAP.md` + this `CLAUDE.md`). `origin/master` = `HEAD` = `7661141`, with the Phase 2-plan edits uncommitted on top, pending approval.
 
 ## Hard invariants
 

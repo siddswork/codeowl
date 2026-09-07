@@ -29,7 +29,7 @@ Sizing (S/M/L) is relative effort, not a time estimate — useful for sequencing
 
 ## Phase 1 milestones
 
-> **Status (2026-09-07): Phase 1 complete.** M1–M10 shipped and validated; M11 validated by sample (feature-spec quality demonstrated on the pilot, full corpus generation deliberately stopped — see M11's "Outcome"). Next is Phase 2, led by the `LanguagePack` trait + a second language, since every milestone since M10 added TS+Next-specific surface (see "Stack modularization").
+> **Status (2026-09-07): Phase 1 complete.** M1–M10 shipped and validated; M11 validated by sample (feature-spec quality demonstrated on the pilot, full corpus generation deliberately stopped — see M11's "Outcome"). Next is Phase 2, led by the `StackPack` trait + a second stack, since every milestone since M10 added TS+Next-specific surface (see "Phase 2 — the polyglot core first").
 
 ### M1 — Extraction walking skeleton
 **Size:** M · **Builds on:** nothing
@@ -193,7 +193,7 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 
 **Explicitly not in scope:** the other two polyglot sub-problems from that open question (general call/invocation boundaries, standalone "island" nodes) — genuinely lower-stakes for this pilot, can stay deferred past Phase 1. (M5's route-literal resolver is a deliberate, narrow exception: framework-convention mappings only, not call analysis.)
 
-**Stack-modularization prep (part of this milestone, done first):** before the SQL work, doc-mark the four TypeScript + Next.js–coupled files (`extract.rs`, `imports.rs`, `resolve.rs`, `features.rs`; plus the one line in `index.rs`) as "the TypeScript + Next pack — Phase 2 seam here", and dedup the `.tsx`/`.ts` grammar pick copy-pasted across three of them. Pure labeling and cleanup, no abstraction (~30 min). Then the SQL DDL extractor and Supabase `.from("table")` matcher land ad hoc against the current structure — a second framework-convention resolver alongside M5's route literals, and a second extractor kind. Centralizing all of it behind `src/lang.rs` is deferred to M11 (see its scope), and the `LanguagePack` trait to Phase 2.
+**Stack-modularization prep (part of this milestone, done first):** before the SQL work, doc-mark the four TypeScript + Next.js–coupled files (`extract.rs`, `imports.rs`, `resolve.rs`, `features.rs`; plus the one line in `index.rs`) as "the TypeScript + Next pack — Phase 2 seam here", and dedup the `.tsx`/`.ts` grammar pick copy-pasted across three of them. Pure labeling and cleanup, no abstraction (~30 min). Then the SQL DDL extractor and Supabase `.from("table")` matcher land ad hoc against the current structure — a second framework-convention resolver alongside M5's route literals, and a second extractor kind. Centralizing all of it behind `src/lang.rs` is deferred to M11 (see its scope), and the `StackPack` trait to Phase 2.
 
 **Validation:** point it at the pilot repo's actual migration files, confirm schema nodes are created for known tables, and confirm at least one known ORM/string-literal reference in application code resolves to the right schema node (fuzzy match, so "resolves to a plausible candidate" is the bar, not exact precision).
 
@@ -208,7 +208,7 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 
 **Scope:** Produce the thing the project exists to produce. Generate specs across a substantial, representative slice of the pilot repo — every feature, all of `lib/`, `app/api/`, and the load-bearing `app/` pages — via `/codeowl-generate --all --budget=N` in repeated passes, and commit the corpus as its own PR (per the spec-regeneration commit-hygiene convention). Add the `CLAUDE.md` line pointing agents at `get_spec`/`get_spec_coverage` before they explore.
 
-**Stack modularization (part of this milestone, separate work item):** land `src/lang.rs` — free functions, no trait — that centralizes the TypeScript + Next coupling flagged in M10: the grammar pick, `is_extractable`, the resolver extension list, and a `detect(root)` that fails fast on a repo it can't parse instead of silently serving an empty graph. Relocate M10's schema extractor / matcher into it. The interface is designed against two convention resolvers and two extractor kinds, not one. Promoting `lang.rs` to a `LanguagePack` trait with a real second-language implementation stays in Phase 2 — the only step that actually validates the seams, which a same-stack extension like M10 can't. Independent of the corpus deliverable, but sequenced first (see below) so the corpus isn't generated against a moving codebase.
+**Stack modularization (part of this milestone, separate work item):** land `src/lang.rs` — free functions, no trait — that centralizes the TypeScript + Next coupling flagged in M10: the grammar pick, `is_extractable`, the resolver extension list, and a `detect(root)` that fails fast on a repo it can't parse instead of silently serving an empty graph. Relocate M10's schema extractor / matcher into it. The interface is designed against two convention resolvers and two extractor kinds, not one. Promoting `lang.rs` to a `StackPack` trait with a real second-stack implementation stays in Phase 2 — the only step that actually validates the seams, which a same-stack extension like M10 can't. Independent of the corpus deliverable, but sequenced first (see below) so the corpus isn't generated against a moving codebase.
 
 **Execution / sequencing** (decided 2026-09-07). Two work streams, split by repo:
 
@@ -261,25 +261,160 @@ Making this pluggable, by increment:
 
 - **M10** — doc-mark the coupled files, dedup the grammar pick, land the SQL extractor / matcher ad hoc. *(done)*
 - **M11** — `src/lang.rs` centralizes the mechanical coupling and adds `detect(root)`; free functions, no trait. *(done)*
-- **Interim, before Phase 2 (small, low risk, do anytime):** move `is_test_path` / `is_ui_primitive` out of `spec.rs` behind a named seam (into `lang.rs` or a `conventions` module), and doc-mark the four `graph.rs` fields as "pack-contributed derived edges — empty on a repo the active pack doesn't cover." Turns the Phase 2 extraction into a rename, not archaeology. No behavior change.
-- **Phase 2** — promote `lang.rs` to a `LanguagePack` trait with a real second-language implementation. This is the only step that validates the seams — and it has to abstract *both* kinds of coupling, including "how do I enumerate a stack's user-facing entry points" without baking in routing conventions. A same-stack extension (M10) can't test that; it needs a genuinely different language.
+- **Phase 2** — the full breakdown (M12 interim de-coupling → M13-pre entry-point spike → M13 `StackPack` trait → M14 second stack → M15 iterate) is in "Phase 2 — the polyglot core first" below, including the complete M1–M11 coupling inventory and the M13 design decisions. It leads Phase 2 because it's the only step that validates the seams, and every milestone since M10 keeps adding to what it has to unwind.
 
 **Why this order:** M10 was on the critical path to M11's corpus; modularization is on none. Doing M10/M11 first also means the eventual trait is designed from a real sample (two extractor kinds, four convention resolvers, the feature model) rather than guessed at. Neither order buys the strong validation — that needs the second language.
 
 ---
 
-## Phase 2 — sketch only, revisit after M11
+## Phase 2 — the polyglot core first
 
-Deliberately coarse — detailed planning waits until the M11 corpus exists and its quality is known. Rough shape, in likely order (the first two moved up when Phase 1's framing shifted to "the specs are the product" — see the revision note at the end):
+Reprioritized 2026-09-07: the `StackPack` work leads. Everything after it (web viewer, headless generation, HTTP, search index, multi-repo) is deferred behind it and stays a sketch — committed `.md` specs are already browsable on GitHub, so the human-audience viewer isn't blocking anything, and every one of those later items is easier to build on a core that isn't secretly single-stack.
 
-1. **Web viewer** — a graph + spec browser for BAs/QA/SREs. The human half of the dual audience needs a browser, not an MCP client, so this is no longer a late nice-to-have.
-2. **`LanguagePack` trait + a second language** — promote `src/lang.rs` to a real trait, implemented for a genuinely different stack (Rust or C++ — CodeOwl's own repo is the obvious first target, see the test-repo list). Must abstract *both* the mechanical coupling (grammar, extensions, resolver) and the model coupling (the `graph.rs` derived-edge collections, `spec.rs`'s `is_test_path`/`is_ui_primitive` heuristics, and the routing-shaped feature-enumeration concept). This is the only step that actually validates the Phase 1 seams — see "Stack modularization" above. Sequenced high because every Phase 1 milestone since M10 has added TS+Next-specific surface that a polyglot CodeOwl has to unwind.
-3. **Headless / scheduled spec generation** — a non-interactive runner (Claude Code SDK or `--print` mode, triggered by CI or a git hook) that drives the `get_next_spec_task → submit_spec` loop so the corpus refreshes without a person running a slash command. CodeOwl still never calls an LLM itself — this is just the calling agent, unattended.
-4. **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio, repo-scoped tool calls.
-5. **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1 (see `ARCHITECTURE.md` "Storage"), now justified by multi-user load.
-6. **Multi-repo namespacing** — per-repo index/graph/spec-cache within one shared process (`REQUIREMENTS.md` "Hosting granularity").
-7. **Stub nodes + cross-team delegation** — the cross-repo dependency model (`REQUIREMENTS.md` "Multi-repo & team ownership").
-8. **Auth/roles** — reopens once multiple users share one hosted instance (`REQUIREMENTS.md` open question 2).
+The polyglot core is **M12 → M13-pre spike → M13 → M14 → M15**, in order (M12 first because the cache-version fix protects everything after it; the spike is on paper and slots in before M13 freezes the trait). M12/M13 are refactors that must regenerate the Phase 1 corpus **identically** — the *spec files* and `get_spec_coverage` output, not the `.codeowl/` cache (its format is expected to change, see M12). M14 is the first real second stack and the only thing that validates the seams; M15 folds M14's findings back into the trait.
+
+**Named `StackPack`, not `LanguagePack`, on purpose.** The Phase 1 pack already spans two languages (TypeScript + SQL) and two frameworks (Next.js App Router + Supabase). The unit of pluggability is a *stack*, not a language — calling it a language pack invites someone to write a separate SQL pack and then wonder why it can't see the TS side. One `StackPack` per repo.
+
+### The coupling being unwound
+
+From building all of it in M1–M11, the TS+Next coupling is:
+
+**Mechanical** (mostly already behind `lang.rs`): the grammar pick, `is_extractable` / `is_schema_file` extension lists, `RESOLVER_EXTENSIONS`, the `.sql`-vs-code extract dispatch, `detect(root)`.
+
+**Extraction** (`extract.rs`, `schema.rs`): every `node.kind()` string is a tree-sitter-typescript / tree-sitter-sequel grammar name; `SymbolKind::{Function,Class,Method,Const,Table}`; signature rendering; `/** */` JSDoc docstrings; the class→method Merkle rollup.
+
+**Reference resolution** (`imports.rs`, `resolve.rs`): ES `import`/`export`/default-import parsing; `oxc_resolver` with `tsconfig.json` alias discovery; named-re-export (barrel) chasing.
+
+**Framework conventions** (`features.rs` — the deepest): `enumerate_entry_points` (Next.js `app/**/page.tsx` + orphan `app/api/**/route.ts` file-routing); `feature_slug`; `extract_route_literals` + `resolve_route_literal` (`fetch("/api/…")` → route file by path convention); `extract_table_refs` + `resolve_table_ref` (Supabase `.from("table")`); `extract_rendered_components` + `resolve_rendered_component` (React `<Tag/>`); the `is_colocated` / `file_does_data_work` `core`-admission heuristics; the whole `assemble_participants` participant model. **Every flow edge is unresolved at extraction time** — `RouteLiteral` holds a path string, `TableRef` a table name, `RenderedComponent` a JSX tag — and resolved against the graph later by a pack-specific matcher. Resolution and the `core`-admission policy are both pack judgment, not just extraction.
+
+**Leaked into the generic core**: `graph.rs`'s four pack-specific derived-edge fields (`route_literals`, `table_refs`, `rendered_components`, `resolved_default_imports`); `spec.rs::prioritize`'s `is_test_path` (JS-ecosystem) and `is_ui_primitive` (`components/ui/`); `spec.rs` granularity keying on `SymbolKind::{Function,Class}` + `is_exported`.
+
+Genuinely generic, untouched by all of this: the arena (`graph.rs`), `hash.rs`, `index.rs`'s `RepoIndex` / catch-up / watcher, `watch.rs`, `mcp.rs` (tools, task shapes, `{"kind":"done"}`), `spec.rs`'s document format + staleness diffing + the `prioritize` *tiering* logic itself, `search.rs`.
+
+**Not in Phase 2:** grammars stay compile-time-linked crates (`tree-sitter-typescript`, `tree-sitter-sequel`, and M14's `tree-sitter-rust`). "Add a stack without recompiling" — the WASM-grammar story in `ARCHITECTURE.md`'s "Implementation stack" — is a later concern; a `StackPack` is a Rust `impl`, selected by `detect()`.
+
+### Where the risk concentrates
+
+Extraction, import resolution, `SymbolKind` mapping — tedious but well-understood; a bug there is caught by a failing test. **The feature layer is the hard part, because it's the only part of CodeOwl that models a *product*, not *code*.** Symbols/imports/containment/hashing are universal. *"A feature is an entry point plus what it reaches"* is a claim about how **web apps** are shaped — and it's exactly what makes the corpus valuable to a BA (the dormant-feature catch that validated M11 came out of a feature spec). Two nested unknowns:
+
+- **Does the concept survive a non-web stack?** (M13-pre). Pick wrong and the second pack's corpus is much less useful — and you only find out when a human reads it.
+- **The `core`-admission policy has no mechanical ground truth.** `is_colocated || does_data_work` was reverse-engineered from *one* repo over three iterations this session (the first two were wrong). Generalizing it is harder than generalizing extraction because "correct" means "the spec reads well," which needs a human per stack.
+
+De-risking is built into the plan: M13-pre before the trait freezes, `feature_model()` optional, and M14's validation is a human dev cut, not a diff.
+
+---
+
+### M12 — Interim de-coupling (no trait yet)
+**Size:** S · **Builds on:** M11
+
+**Scope:** Make every leaked seam *visible and named*, and version the cache, with no behavior change — so M13 is a mechanical lift rather than archaeology.
+- **Cache format version.** `RepoIndex` (and the persisted `Graph`) currently have no version field, so a `FileInputs`/`Graph` shape change is silently absorbed by `#[serde(default)]` and yields *wrong* data (empty `rendered_components`, etc.) until every file happens to change — M11 shipped this latently. Add a `format_version: u32` to the persisted index/graph; on read, a mismatch (or absence) triggers a full rebuild, not a partial reuse. **Do this first** — it's the smallest standalone fix and it protects everything M13+ does.
+- Move `is_test_path` and `is_ui_primitive` out of `spec.rs`, behind a named seam (`lang.rs` or a `conventions` module); `spec.rs::prioritize` calls through it. While there, reshape them: `is_ui_primitive` generalizes to nothing (a Rust stack returns constant `false` — a trait method one impl no-ops is a smell). Replace both with a single `classify(path) -> FileRole` returning `Domain | Primitive | Test | Generated` — `Primitive` covers `components/ui/`, `Test` covers `is_test_path`, and `Generated` (protobuf output, codegen) is something every stack has and `prioritize` should already be sinking.
+- Doc-mark `graph.rs`'s four derived-edge fields as "pack-contributed — empty on a repo the active pack doesn't cover," grouped and commented as a unit.
+- Fold `resolved_default_imports` into the import-resolution output path (it's just resolution) rather than a parallel field, if it's clean to do.
+- Introduce a `SourceKind` (`Code` | `Schema`) so the `.sql` dispatch in `lang::extract_symbols` is a named branch, not a string check.
+
+**Validation:** `cargo test` pass count unchanged; `codeowl extract` on the pilot produces identical symbol JSON (cache format aside); a fresh `--all` on the pilot regenerates the existing spec files byte-for-byte; `git diff` touches only `spec.rs`, `graph.rs`, `lang.rs`, `index.rs`, `imports.rs`/`resolve.rs`.
+
+---
+
+### M13-pre — Entry-point spike (on paper, before M13 finalizes the trait)
+**Size:** XS · **Builds on:** M12
+
+**Scope:** Answer, in a short written note (not code): *what would CodeOwl's own feature specs be?* Candidate answers — entry points are `main.rs`'s CLI subcommands + the `#[tool]` MCP handlers; or the crate's `pub` API surface; or a library/CLI stack legitimately has **no** feature layer and the system spec composes over module rollups alone. Each is defensible; the wrong pick makes the second pack's corpus much less valuable, and it's not checkable mechanically — a human has to read the resulting specs and judge. This spike is why M13 makes the feature layer an *optional* pack capability rather than a required trait method.
+
+**Validation:** a paragraph in `ARCHITECTURE.md` (or a scratch note) that M14 can execute against without re-litigating.
+
+---
+
+### M13 — The `StackPack` trait; extract the TS+Next pack behind it
+**Size:** M–L (see "test churn" below) · **Builds on:** M12, M13-pre
+
+**Scope:** Define `trait StackPack` and move all of `extract.rs` / `imports.rs` / `resolve.rs` / `schema.rs` / `features.rs` behind a single `struct TypeScriptNextStack: StackPack`. `lang::detect(root) -> Result<Box<dyn StackPack>>` returns it when the repo has `.ts`/`.tsx`, errors otherwise. **Still one pack** — this milestone's whole point is forcing every coupling point through an interface so M14 has something to implement against.
+
+The trait, first cut (exact shape is M13's design work — see "Design decisions" below):
+```
+trait StackPack {
+    fn name(&self) -> &str;
+    fn is_source_file(&self, path: &Path) -> Option<SourceKind>;   // was is_extractable + is_schema_file
+    fn classify(&self, path: &str) -> FileRole;                    // Domain | Primitive | Test | Generated
+
+    // extraction
+    fn extract_symbols(&self, rel_path: &str, source: &str, kind: SourceKind) -> Vec<ExtractedSymbol>;
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports;
+
+    // resolution (pack owns it end to end — oxc for TS, module-tree walk for Rust)
+    fn resolve_imports(&self, root: &Path, file_imports: &HashMap<String, FileImports>, graph: &Graph)
+        -> Vec<ResolvedImport>;
+
+    // flow edges — extraction AND resolution are both pack-specific
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> Option<FlowTarget>;
+
+    // feature layer — OPTIONAL (see M13-pre). None => this stack has no feature specs,
+    // and the system spec composes over module rollups alone.
+    fn feature_model(&self) -> Option<&dyn FeatureModel>;
+}
+
+trait FeatureModel {
+    fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint>;
+    // whether a flow-reachable or rendered file joins a feature's `core` is pack judgment
+    fn admits_to_core(&self, graph: &Graph, entry: &EntryPoint, candidate_file: &str) -> bool;
+}
+```
+
+`graph.rs` loses its four typed fields and gains **one** generic `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at graph-build time by calling `pack.resolve_flow_edge` on each `UnresolvedFlowEdge` the pack extracted. `assemble_participants` becomes a generic **traversal** over `flow_edges` + one-hop imports — but with two pack hooks it can't do without: `resolve_flow_edge` (which file/node does this edge point at) and `admits_to_core` (does that file belong in the feature's `core` or stay a stub dependency). The Next.js `is_page` / `is_api_route` / path-join logic, and the `is_colocated || does_data_work` policy, are `TypeScriptNextStack`-internal.
+
+**Test churn is real and not "zero."** There are ~97 direct call sites of pack functions across `src/` (23 in `features.rs`, 19 in `extract.rs`, 13 in `imports.rs`, 10 in `spec.rs`, …) and the `tests/` dir. Plan: keep thin free-function shims (`extract::extract_file` → `default_ts_stack().extract_symbols(...)`) through M13 so existing unit tests compile unchanged, then move tests onto the trait in a dedicated follow-up commit — or take one large, reviewed churn commit. Don't pretend it's free.
+
+**Validation:** the *spec files* and `get_spec_coverage` output for the pilot are byte-identical to `origin/master` at M11 (the `.codeowl/graph` JSON is *expected* to differ — new `flow_edges` shape, new `format_version`). Every existing test passes, via shims if needed.
+
+---
+
+### M14 — `RustStack` — the second stack
+**Size:** L · **Builds on:** M13, M13-pre
+
+**Scope:** A real `StackPack` for Rust, exercised on **CodeOwl's own repo** (the dogfood — see the test-repo list). This is the milestone that actually validates the trait; M12/M13 only rearrange TS+Next code.
+- `tree-sitter-rust`. Extract `fn`, `struct`, `enum`, `trait`, `impl` blocks, `mod`, `const`/`static`, `macro_rules!`. Map its grammar kinds onto whatever `SymbolKind` shape M13 settled on.
+- Module-tree reference resolution: `use crate::…` / `use super::…` / `pub use` re-exports resolved against the `mod` hierarchy — no `oxc_resolver`, no `tsconfig`, no barrel-chasing.
+- `///` / `//!` doc comments.
+- **`feature_model()`** — execute the M13-pre spike's answer. Likely `Some` returning CLI subcommands + `#[tool]` handlers as entry points, or `None` if the spike concluded a CLI/library has no coherent feature layer.
+- Flow edges: a Rust service's cross-file "reach" is plain function calls, not string literals — M14 decides how much call-graph to model (probably: `extract_flow_edges` returns nothing, matching M10's "call analysis stays deferred"; the feature spec, if any, is built from `core_sources` + imports alone).
+
+**Validation:** `codeowl extract` + `serve` on `~/dev/openSource/codeowl`; generate a spec corpus for CodeOwl describing itself; a dev cut on ~10 of those self-specs by the one person who knows the code line-for-line. Every place `TypeScriptNextStack` assumed something the trait shouldn't have is a finding for M15.
+
+---
+
+### M15 — Iterate the trait; ship the two-stack state
+**Size:** M · **Builds on:** M14
+
+**Scope:** Fold M14's findings back into `trait StackPack` — the leaks that only a genuinely different stack exposes. Commit CodeOwl's self-spec corpus. Rewrite `ARCHITECTURE.md`'s "Extractors" / "Feature specs" sections and make `setup/codeowl-generate.md` stack-neutral (it currently says "a page like `app/submit/page.tsx`" — pack-specific examples move behind "your stack's entry points"). At this point the seams are validated and the rest of Phase 2 can proceed on a core that's actually polyglot.
+
+**Validation:** both the pilot (TS+Next) and CodeOwl (Rust) generate current corpora from the same binary with no stack-specific branches outside the two `StackPack` impls.
+
+---
+
+### Design decisions to resolve during M13 (flagged, not yet decided)
+
+1. **`SymbolKind`** — Rust adds `Enum`/`Trait`/`Impl`/`Mod`/`Macro`; C++ adds `Namespace`/`Template`/`Union`. Options: (a) small generic set — `Container` / `Callable` / `Value` / `Schema` — plus a `raw: String` for display and the pack owns the mapping; (b) keep a large closed enum; (c) `SymbolKind(String)` open set + a `pack.spec_granularity(kind) -> Granularity`. Leaning (a): `spec.rs`'s granularity rule becomes "generate for `Container`/`Callable`" and stays pack-agnostic.
+2. **`Graph` derived edges** — leaning: one generic `flow_edges: Vec<FlowEdge>` (see M13), resolved at build time via `pack.resolve_flow_edge`; not four typed fields, not `Box<dyn Any>` pack data.
+3. **Feature layer optionality** — decided (M13-pre forces it): `StackPack::feature_model() -> Option<&dyn FeatureModel>`. A stack with no feature model still gets symbol/file/rollup/system specs. `spec.rs`'s system-spec composition already has to tolerate "zero features" — verify that path.
+4. **`core` admission** — the traversal is generic; `resolve_flow_edge` and `admits_to_core` are the two pack hooks it can't do without. Do not try to make admission a generic rule — it's a per-stack heuristic with no mechanical ground truth (the TS one took three iterations against one repo).
+5. **Resolution ownership** — pack owns imports *and* flow edges end to end. Output shapes (`ResolvedImport`, `FlowEdge`) are generic. No shared resolver infrastructure.
+6. **One pack per repo** — `detect()` picks exactly one `StackPack` and errors on ambiguity (a repo that's both a Next app and a Rust service). Multi-pack in one repo is deferred past Phase 2.
+7. **Cache invalidation on pack change** — `format_version` (M12) covers shape changes; also key the cache on the active pack's `name()`, so switching packs (or upgrading one) forces a rebuild rather than reusing edges the new pack wouldn't produce.
+
+---
+
+### Deferred behind the polyglot core — sketch only
+
+- **Web viewer** — a graph + spec browser for BAs/QA/SREs. Lower priority now that committed specs render on GitHub; still wanted for cross-cutting navigation and non-git-native readers.
+- **Headless / scheduled spec generation** — a non-interactive runner (Claude Code SDK or `--print`, CI/git-hook triggered) driving the `get_next_spec_task → submit_spec` loop. CodeOwl still never calls an LLM itself.
+- **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio.
+- **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1.
+- **Multi-repo namespacing** — per-repo index/graph/spec-cache in one shared process.
+- **Stub nodes + cross-team delegation** — the cross-repo dependency model.
+- **Auth/roles** — once multiple users share one hosted instance.
 
 ## Provisional decisions this ordering makes
 
@@ -299,6 +434,8 @@ Revised 2026-09-07: folded the stack-modularization increments into the mileston
 
 Revised again 2026-09-07, after M10 shipped: added an "Execution / sequencing" block to M11 — `src/lang.rs` and the data-touched participant wiring (deferred from M10) both land in the codeowl repo *before* corpus generation; the passes then run via `/codeowl-generate` from a session inside the pilot repo (not the manual stdio loop); the BA cut needs a human, the dev/smell cuts don't.
 
-Revised again 2026-09-07, mid-corpus generation: the "Stack modularization" section was rewritten to name **two** kinds of coupling, not one. M10/M11's feature work (rendered-component `core` expansion, default-import resolution, the `--all` prioritization heuristics) added TS+Next-specific *model* coupling on top of the mechanical coupling `lang.rs` covers: `graph.rs` now carries four pack-specific derived-edge collections, `spec.rs::prioritize` gained `is_test_path`/`is_ui_primitive`, and the feature-layer concept is routing-shaped. Added an **interim step** (move those heuristics behind a named seam + doc-mark the `graph.rs` fields — no behavior change, makes the Phase 2 extraction mechanical) and promoted the `LanguagePack` trait to Phase 2 item 2, explicitly scoped to abstract both kinds of coupling.
+Revised again 2026-09-07, mid-corpus generation: the "Stack modularization" section was rewritten to name **two** kinds of coupling, not one. M10/M11's feature work (rendered-component `core` expansion, default-import resolution, the `--all` prioritization heuristics) added TS+Next-specific *model* coupling on top of the mechanical coupling `lang.rs` covers: `graph.rs` now carries four pack-specific derived-edge collections, `spec.rs::prioritize` gained `is_test_path`/`is_ui_primitive`, and the feature-layer concept is routing-shaped. Added an **interim step** (move those heuristics behind a named seam + doc-mark the `graph.rs` fields — no behavior change, makes the Phase 2 extraction mechanical) and promoted the `StackPack` trait to Phase 2 item 2, explicitly scoped to abstract both kinds of coupling.
 
 Revised again 2026-09-07: **M11 marked validated by sample; Phase 1 complete.** The project owner reviewed the pilot's feature specs and judged them to clearly meet the BA and dev bars — the clinching example being a spec that correctly reports a feature as dormant after it was disabled by a one-line variable flip (`b6d8965f` in the pilot). Full corpus generation was stopped at ~15% coverage: the highest-value, highest-risk layer is proven, and the rest is mechanical volume. See M11's "Outcome" for the done/not-done split. Phase 2 is next, led by the `LanguagePack` trait.
+
+Revised again 2026-09-07: **Phase 2 reprioritized and the polyglot core planned in detail**, then reviewed. The stack-pluggability work now leads Phase 2 — the web viewer drops behind it since committed `.md` specs already render on GitHub. The opening is M12 (interim de-coupling, incl. a **cache `format_version`** — M11 shipped a latent bug where a `#[serde(default)]` field silently reads empty on an old cache) → M13-pre (a paper spike on what CodeOwl's own feature specs would be) → M13 (`StackPack` trait — renamed from `LanguagePack`, since the Phase 1 pack already spans TS + SQL + Next + Supabase; a *stack*, not a language) → M14 (`RustStack` on CodeOwl's own repo, the real validation) → M15 (iterate the trait). Review pass added: the feature layer is an **optional** `feature_model()` (a CLI/library may have none); flow edges need `resolve_flow_edge` + `admits_to_core` pack hooks, not a "generic BFS"; `is_ui_primitive` → a `classify(path) -> FileRole` with `Domain/Primitive/Test/Generated`; the "zero behavior change" claim is scoped to *spec files + coverage output*, not the cache JSON; ~97 pack-function call sites mean real test churn, budgeted via shims. The feature layer is flagged as where the risk concentrates — it's the only part that models a product, not code, and its `core`-admission heuristic has no mechanical ground truth.
