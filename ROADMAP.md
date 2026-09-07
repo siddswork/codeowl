@@ -206,7 +206,21 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 
 **Scope:** Produce the thing the project exists to produce. Generate specs across a substantial, representative slice of the pilot repo — every feature, all of `lib/`, `app/api/`, and the load-bearing `app/` pages — via `/codeowl-generate --all --budget=N` in repeated passes, and commit the corpus as its own PR (per the spec-regeneration commit-hygiene convention). Add the `CLAUDE.md` line pointing agents at `get_spec`/`get_spec_coverage` before they explore.
 
-**Stack modularization (part of this milestone, separate work item):** land `src/lang.rs` — free functions, no trait — that centralizes the TypeScript + Next coupling flagged in M10: the grammar pick, `is_extractable`, the resolver extension list, and a `detect(root)` that fails fast on a repo it can't parse instead of silently serving an empty graph. Relocate M10's schema extractor / matcher into it. The interface is designed against two convention resolvers and two extractor kinds, not one. Promoting `lang.rs` to a `LanguagePack` trait with a real second-language implementation stays in Phase 2 — the only step that actually validates the seams, which a same-stack extension like M10 can't. This item is independent of the corpus deliverable below and can land before or after it.
+**Stack modularization (part of this milestone, separate work item):** land `src/lang.rs` — free functions, no trait — that centralizes the TypeScript + Next coupling flagged in M10: the grammar pick, `is_extractable`, the resolver extension list, and a `detect(root)` that fails fast on a repo it can't parse instead of silently serving an empty graph. Relocate M10's schema extractor / matcher into it. The interface is designed against two convention resolvers and two extractor kinds, not one. Promoting `lang.rs` to a `LanguagePack` trait with a real second-language implementation stays in Phase 2 — the only step that actually validates the seams, which a same-stack extension like M10 can't. Independent of the corpus deliverable, but sequenced first (see below) so the corpus isn't generated against a moving codebase.
+
+**Execution / sequencing** (decided 2026-09-07). Two work streams, split by repo:
+
+*In the codeowl repo, before any generation:*
+1. `src/lang.rs` + `detect(root)` — the stack-modularization item above. TDD, its own commit.
+2. **Data-touched participant wiring** — the piece M10 deferred: wire resolved `.from("table")` refs into `assemble_participants` as a `data` participant, hashed in `current_participant_hashes`, and pass the table's column list to the feature task. This is what gives a feature spec's "Data touched" section graph backing and schema-change staleness — do it *before* generation so the corpus is written with it, not regenerated after. TDD, its own commit.
+3. Rebuild the release binary.
+
+*In the pilot repo:*
+4. Point the pilot's `.mcp.json` at the fresh binary; restart the MCP client there.
+5. `/codeowl-generate --all --budget=N` in repeated passes from a Claude Code session **inside the pilot repo** — the real command, not the manual stdio loop, since exercising `/codeowl-generate` end-to-end is part of what M11 validates. Review each batch for accuracy. Extractor/resolver gaps found mid-run get fixed back in the codeowl repo, rebuilt, resumed. Stop when `get_spec_coverage` reports nothing `missing`.
+6. Commit the corpus as its own PR in the pilot repo; add the `CLAUDE.md` line.
+
+*The four cuts:* dev cut and smell cut can be run by an agent from the pilot session; the **BA cut needs a human** answering feature questions from specs alone; the `mine.py` data point is optional.
 
 **Validation:** the deliverable is the corpus plus a short quality writeup, assessed four ways:
 - **BA cut** — a human answers 3–4 feature-shaped questions ("how does artwork submission work?", "how does payment reconciliation work?", "what happens when a judge is reassigned?") from the feature and system specs alone, without opening any source file. Pass = each spec was sufficient *and* accurate.
@@ -223,7 +237,7 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 The extractor / resolver / framework-convention layers are coupled to TypeScript + Next.js App Router (`extract.rs`, `imports.rs`, `resolve.rs`, `features.rs`, one line in `index.rs`); everything above them (`graph.rs`, `spec.rs`, `mcp.rs`, `index.rs`, `watch.rs`) is language-agnostic. Making the coupled layers pluggable is committed work, but it isn't its own milestone — each increment lives in the milestone it belongs to:
 
 - **M10** — doc-mark the coupled files and dedup the grammar pick (prep, done first), then land the SQL extractor / matcher ad hoc against the current structure.
-- **M11** — `src/lang.rs` centralizes the coupling and adds `detect(root)`; free functions, no trait yet. Separate work item from the corpus deliverable.
+- **M11** — `src/lang.rs` centralizes the coupling and adds `detect(root)`; free functions, no trait yet. Separate from the corpus deliverable but sequenced ahead of it (see M11's "Execution / sequencing"), alongside the data-touched participant wiring M10 deferred.
 - **Phase 2** — promote `lang.rs` to a `LanguagePack` trait with a real second-language implementation. The only step that actually validates the seams — a same-stack extension like M10 can't.
 
 **Why this order:** M10 is on the critical path to M11's corpus (the pilot's domain is largely its database); modularization is on none. Doing M10 first also means the `lang.rs` boundaries are designed from a two-example sample. Neither order buys the strong validation — that needs a genuinely different language.
@@ -257,3 +271,5 @@ Revised again 2026-09-06, after M9: Phase 1's framing shifted. The original exit
 Revised again 2026-09-06: added CodeOwl's own repo to the test-repo list as the Rust case (Phase 2 grammar target), and added the "Stack modularization" section above — the TS+Next coupling gets made pluggable in three increments bracketing M10 (label + dedup now, `lang.rs` + `detect()` after M10, the `LanguagePack` trait + a second language in Phase 2). Order settled as M10-before-modularization: M10 is critical-path for M11's corpus and gives the eventual `lang.rs` boundaries a two-example sample to design against, and building M10 through the seams would only weakly test them anyway (it's a same-stack extension, not a second language).
 
 Revised 2026-09-07: folded the stack-modularization increments into the milestone bodies so every actionable step lives in an Mn plan — the label + dedup prep is now explicitly part of M10's scope, and `src/lang.rs` + `detect(root)` is a named work item in M11's scope (independent of the corpus deliverable). The "Stack modularization" section is now a short cross-milestone overview, not a plan of its own. Phase 2's `LanguagePack` trait step is unchanged.
+
+Revised again 2026-09-07, after M10 shipped: added an "Execution / sequencing" block to M11 — `src/lang.rs` and the data-touched participant wiring (deferred from M10) both land in the codeowl repo *before* corpus generation; the passes then run via `/codeowl-generate` from a session inside the pilot repo (not the manual stdio loop); the BA cut needs a human, the dev/smell cuts don't.
