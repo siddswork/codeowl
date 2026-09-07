@@ -95,6 +95,61 @@ pub fn resolve_imports(
     out
 }
 
+/// One default import resolved to the file it points at — `import
+/// <local_name> from '<specifier>'` where `<specifier>` lands on
+/// `target_file` inside the repo. File-level only: which file, not which
+/// symbol (the M11 rendered-component resolver only needs the file). Not
+/// produced for a specifier that resolves to an external package.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedDefaultImport {
+    pub from_file: String,
+    pub local_name: String,
+    pub target_file: String,
+}
+
+/// Resolve every file's default imports to the repo-relative file each
+/// points at — the input `assemble_participants` uses to follow a
+/// `<Component/>` (a default-exported React component) into a feature's
+/// `core`.
+pub fn resolve_default_imports(
+    repo_root: &Path,
+    resolver: &Resolver,
+    file_imports: &HashMap<String, FileImports>,
+) -> Vec<ResolvedDefaultImport> {
+    let mut out = Vec::new();
+    for (from_file, fi) in file_imports {
+        for di in &fi.default_imports {
+            let Some(target_file) =
+                specifier_to_rel_path(repo_root, resolver, from_file, &di.specifier)
+            else {
+                continue;
+            };
+            out.push(ResolvedDefaultImport {
+                from_file: from_file.clone(),
+                local_name: di.local_name.clone(),
+                target_file,
+            });
+        }
+    }
+    out
+}
+
+/// Resolve `specifier`, written inside `from_file` (repo-relative), to a
+/// repo-relative path — forward-slash normalized, the scheme
+/// `Symbol::file` uses. `None` if it resolves outside `repo_root` (an
+/// external package) or doesn't resolve at all.
+fn specifier_to_rel_path(
+    repo_root: &Path,
+    resolver: &Resolver,
+    from_file: &str,
+    specifier: &str,
+) -> Option<String> {
+    let abs_from = repo_root.join(from_file);
+    let resolution = resolver.resolve_file(&abs_from, specifier).ok()?;
+    let rel = resolution.path().strip_prefix(repo_root).ok()?;
+    Some(rel.to_string_lossy().replace('\\', "/"))
+}
+
 /// The read-only context every resolution step needs — bundled into one
 /// struct (rather than four parameters threaded through each recursive
 /// call) at clippy's `too_many_arguments` prompting.
@@ -113,7 +168,8 @@ impl ResolveCtx<'_> {
         name: &str,
         hops_left: u8,
     ) -> Option<SymbolId> {
-        let target_file = self.resolve_specifier_to_rel_path(from_file, specifier)?;
+        let target_file =
+            specifier_to_rel_path(self.repo_root, self.resolver, from_file, specifier)?;
 
         if let Some(id) = self.graph.find(&format!("{target_file}::{name}")) {
             return Some(id);
@@ -135,17 +191,6 @@ impl ResolveCtx<'_> {
             &re_export.source_name,
             hops_left,
         )
-    }
-
-    /// Resolve `specifier`, written inside `from_file`, to a repo-relative
-    /// path using the same `<forward-slash-normalized>` scheme `main.rs`
-    /// builds `Symbol::file` with. `None` if it resolves outside
-    /// `repo_root` (external packages) or doesn't resolve at all.
-    fn resolve_specifier_to_rel_path(&self, from_file: &str, specifier: &str) -> Option<String> {
-        let abs_from = self.repo_root.join(from_file);
-        let resolution = self.resolver.resolve_file(&abs_from, specifier).ok()?;
-        let rel = resolution.path().strip_prefix(self.repo_root).ok()?;
-        Some(rel.to_string_lossy().replace('\\', "/"))
     }
 }
 
@@ -238,5 +283,39 @@ mod tests {
             resolve_fixture(&[("a.ts", "import { z } from 'some-external-package';\n")]);
         let edge = &resolved[0];
         assert_eq!(edge.target, None);
+    }
+
+    #[test]
+    fn default_imports_resolve_to_the_target_file_and_skip_externals() {
+        let dir = std::env::temp_dir().join(format!("codeowl-di-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("app")).unwrap();
+        std::fs::write(
+            dir.join("app/page.tsx"),
+            "import Form from './form';\nimport Link from 'next/link';\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("app/form.tsx"),
+            "export default function Form() { return null; }\n",
+        )
+        .unwrap();
+
+        let mut file_imports = HashMap::new();
+        for rel in ["app/page.tsx", "app/form.tsx"] {
+            let content = std::fs::read_to_string(dir.join(rel)).unwrap();
+            file_imports.insert(rel.to_string(), extract_imports(&content, rel));
+        }
+        let resolved = resolve_default_imports(&dir, &build_resolver(), &file_imports);
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(
+            resolved,
+            vec![ResolvedDefaultImport {
+                from_file: "app/page.tsx".into(),
+                local_name: "Form".into(),
+                target_file: "app/form.tsx".into(),
+            }],
+            "the local `./form` resolves; `next/link` is external and dropped"
+        );
     }
 }

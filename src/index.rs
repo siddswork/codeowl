@@ -284,6 +284,11 @@ impl RepoIndex {
             .collect();
         let resolved = resolve_imports(&self.root, &resolver, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
+        graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
+            &self.root,
+            &resolver,
+            &file_imports,
+        ));
         graph.set_route_literals(
             self.files
                 .values()

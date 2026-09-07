@@ -298,10 +298,19 @@ fn walk_for_jsx(node: Node, source: &str, out: &mut BTreeSet<String>) {
     }
 }
 
-/// The repo-relative file a `<Name/>` rendered in `from_file` resolves to,
-/// via the same M2 import edges. `None` when the component's import
-/// resolved outside the repo (an external UI library) or not at all.
+/// The repo-relative file a `<Name/>` rendered in `from_file` resolves to.
+/// `None` when the component's import resolved outside the repo (an
+/// external UI library) or not at all. Checks default imports first
+/// (`import Name from './x'` — how React components are almost always
+/// imported), then falls back to a named import.
 fn resolve_rendered_component(graph: &Graph, from_file: &str, name: &str) -> Option<String> {
+    if let Some(di) = graph
+        .resolved_default_imports()
+        .iter()
+        .find(|di| di.from_file == from_file && di.local_name == name)
+    {
+        return Some(di.target_file.clone());
+    }
     let target = graph
         .imports()
         .iter()

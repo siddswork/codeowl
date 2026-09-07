@@ -22,23 +22,25 @@ fn tempdir(tag: &str) -> std::path::PathBuf {
 // A thin server wrapper — renders a co-located client component, no fetch
 // of its own.
 const PAGE: &str = r#"
-import { EvaluationClient } from "./evaluation-client";
+// Default imports and default exports — the shape React actually uses.
+import EvaluationClient from "./evaluation-client";
+import Button from "../../../components/ui/button";
 export default function Page() {
-  return <EvaluationClient />;
+  return <><EvaluationClient /><Button /></>;
 }
 "#;
 
 // Co-located with the page. Renders the real form, which lives elsewhere.
 const CLIENT: &str = r#"
-import { EvaluationForm } from "../../../components/judge/evaluation-form";
-export function EvaluationClient() {
+import EvaluationForm from "../../../components/judge/evaluation-form";
+export default function EvaluationClient() {
   return <EvaluationForm />;
 }
 "#;
 
 // NOT co-located with the page, but it does the data work.
 const FORM: &str = r#"
-export function EvaluationForm() {
+export default function EvaluationForm() {
   async function submit() {
     await fetch("/api/judge/evaluations/submit");
   }
@@ -48,9 +50,9 @@ export function EvaluationForm() {
 
 const ROUTE: &str = "export async function POST(): Promise<void> {}\n";
 
-// A plain presentational component the form also renders — no data work,
+// A plain presentational component the page also renders — no data work,
 // not co-located. Must stay out of `core`.
-const BUTTON: &str = "export function Button() { return null; }\n";
+const BUTTON: &str = "export default function Button() { return null; }\n";
 
 fn build(dir: &std::path::Path) -> codeowl::Graph {
     for (rel, src) in [

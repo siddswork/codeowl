@@ -1038,6 +1038,11 @@ mod tests {
         let resolver = build_resolver();
         let resolved = resolve_imports(&dir, &resolver, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
+        graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
+            &dir,
+            &resolver,
+            &file_imports,
+        ));
         graph.set_route_literals(route_literals);
         graph.set_table_refs(table_refs);
         graph.set_rendered_components(rendered_components);

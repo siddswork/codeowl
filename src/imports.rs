@@ -4,13 +4,15 @@
 //! of a small file is negligible cost at laptop-repo scale, and keeping
 //! this independent of `extract.rs` keeps each pass single-purpose.
 //!
-//! Scope is deliberately narrow: only NAMED imports/re-exports are
-//! resolved. `import Foo from './x'` (default) and `import * as ns from
-//! './x'` (namespace) don't target one named declaration the way a named
-//! import does, and `export * from './x'` (wildcard re-export) would need
-//! enumerating the source file's whole export list to chase through — all
-//! three are left untracked here rather than guessed at. See `CLAUDE.md`'s
-//! pending decisions.
+//! Scope: NAMED imports/re-exports resolve to a target *symbol* (M2).
+//! DEFAULT imports (`import Foo from './x'`) are tracked too but resolve
+//! only to a target *file*, not a symbol — enough for M11's
+//! rendered-component `core` expansion, which is why they're tracked at
+//! all. `import * as ns from './x'` (namespace) and `export * from './x'`
+//! (wildcard re-export) are still untracked — a namespace import targets
+//! no single declaration, and a wildcard re-export would need the source
+//! file's whole export list enumerated. See `CLAUDE.md`'s pending
+//! decisions.
 //!
 //! **TypeScript + Next.js pack — Phase 2 seam here.** The grammar and the
 //! `import_statement`/`export_statement` node handling are TypeScript's; a
@@ -40,10 +42,24 @@ pub struct ReExport {
     pub source_name: String,
 }
 
+/// One default import: `import <local_name> from '<specifier>'` (or the
+/// default half of `import <local_name>, { ... } from '<specifier>'`).
+/// Tracked for the M11 rendered-component resolver — React components are
+/// almost always default exports, so the named-import list alone can't
+/// resolve `<Component/>` to a file. Resolution is file-level only (the
+/// target file, not a specific symbol); see `resolve::resolve_default_imports`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DefaultImport {
+    pub local_name: String,
+    pub specifier: String,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileImports {
     pub imports: Vec<ImportRef>,
     pub re_exports: Vec<ReExport>,
+    #[serde(default)]
+    pub default_imports: Vec<DefaultImport>,
 }
 
 /// Parse `source` (the contents of `rel_path`) and extract its named
@@ -75,8 +91,23 @@ fn visit_import(node: Node, source: &str, out: &mut FileImports) {
     let Some(clause) = child_of_kind(node, "import_clause") else {
         return; // side-effect-only import: `import './polyfill'`
     };
+
+    // The default binding is an `identifier` directly under `import_clause`
+    // (`import Foo from …`, or the `Foo` in `import Foo, { Bar } from …`).
+    // `import * as ns` is a `namespace_import` child, deliberately skipped.
+    let mut cursor = clause.walk();
+    if let Some(default_id) = clause
+        .children(&mut cursor)
+        .find(|c| c.kind() == "identifier")
+    {
+        out.default_imports.push(DefaultImport {
+            local_name: text(default_id, source).to_string(),
+            specifier: specifier.clone(),
+        });
+    }
+
     let Some(named) = child_of_kind(clause, "named_imports") else {
-        return; // default/namespace import — not resolved, see module docs
+        return;
     };
 
     let mut cursor = named.walk();
@@ -123,6 +154,10 @@ fn child_of_kind<'a>(node: Node<'a>, kind: &str) -> Option<Node<'a>> {
     node.children(&mut cursor).find(|c| c.kind() == kind)
 }
 
+fn text<'a>(node: Node, source: &'a str) -> &'a str {
+    node.utf8_text(source.as_bytes()).unwrap_or_default()
+}
+
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
     node.child_by_field_name(field)
         .map(|n| n.utf8_text(source.as_bytes()).unwrap_or_default())
@@ -166,15 +201,23 @@ mod tests {
     }
 
     #[test]
-    fn default_import_is_not_tracked() {
+    fn default_import_is_tracked_separately_from_named() {
         let out = extract_imports("import Foo from './foo';\n", "a.ts");
         assert!(out.imports.is_empty());
+        assert_eq!(
+            out.default_imports,
+            vec![DefaultImport {
+                local_name: "Foo".into(),
+                specifier: "./foo".into(),
+            }]
+        );
     }
 
     #[test]
     fn namespace_import_is_not_tracked() {
         let out = extract_imports("import * as ns from './foo';\n", "a.ts");
         assert!(out.imports.is_empty());
+        assert!(out.default_imports.is_empty());
     }
 
     #[test]
@@ -184,10 +227,11 @@ mod tests {
     }
 
     #[test]
-    fn default_plus_named_import_tracks_only_the_named_part() {
+    fn default_plus_named_import_splits_the_two_halves() {
         let out = extract_imports("import Foo, { Bar } from './x';\n", "a.ts");
         assert_eq!(out.imports.len(), 1);
         assert_eq!(out.imports[0].imported_name, "Bar");
+        assert_eq!(out.default_imports[0].local_name, "Foo");
     }
 
     #[test]

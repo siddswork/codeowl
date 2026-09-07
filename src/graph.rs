@@ -149,6 +149,12 @@ pub struct Graph {
     /// an imported utility.
     #[serde(default)]
     rendered_components: Vec<crate::features::RenderedComponent>,
+    /// Every `import Name from './x'` resolved to the file it points at
+    /// (M11) — file-level only. Needed because React components are
+    /// default-exported, so the named-import list can't resolve
+    /// `<Component/>`.
+    #[serde(default)]
+    resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
 }
 
 impl Graph {
@@ -221,6 +227,7 @@ impl Graph {
             route_literals: Vec::new(),
             table_refs: Vec::new(),
             rendered_components: Vec::new(),
+            resolved_default_imports: Vec::new(),
         }
     }
 
@@ -323,6 +330,17 @@ impl Graph {
         rendered_components: Vec<crate::features::RenderedComponent>,
     ) {
         self.rendered_components = rendered_components;
+    }
+
+    pub fn resolved_default_imports(&self) -> &[crate::resolve::ResolvedDefaultImport] {
+        &self.resolved_default_imports
+    }
+
+    pub fn set_resolved_default_imports(
+        &mut self,
+        resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
+    ) {
+        self.resolved_default_imports = resolved_default_imports;
     }
 
     /// Every file with a `.from("<table>")` call that resolves to `table_id`
