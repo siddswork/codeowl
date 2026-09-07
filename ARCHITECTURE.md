@@ -266,16 +266,17 @@ participants:                      # hash observed at generation time
   app/submit/page.tsx: <source_hash>
   app/api/submit-artwork/route.ts: <source_hash>
   lib/supabase.ts::getSupabase: <interface_hash>
+  supabase/schema.sql::artwork_submissions: <source_hash>   # a `data` participant (M10/M11)
 spec_hash: <blake3>
 ---
 # Artwork submission
 ## Summary                ← what the capability is, who uses it
 ## How it works           ← numbered flow; BA-followable, file refs inline for devs
-## Data touched           ← tables, storage, external services
+## Data touched           ← tables (from `data` participants, with columns), storage, external services
 ## Rules & failure modes  ← business rules, edge cases, what breaks and how
 ```
 
-The `participants` map is what makes staleness work (section 5's "Caching and invalidation" extended): a feature spec is stale when any participant's hash moved, or when the participant set itself changes — a new `fetch()` literal appearing is a real change to the feature even though no existing participant moved. Crucially, feature generation **consumes** participants' summaries or deterministic stubs and never triggers their generation, so the containment-only recursion invariant is untouched: this is the same reference-edge read path section 5 already defines, just assembled from a different starting set.
+The `participants` map is what makes staleness work (section 5's "Caching and invalidation" extended): a feature spec is stale when any participant's hash moved, or when the participant set itself changes — a new `fetch()` literal appearing is a real change to the feature even though no existing participant moved. Participants come in three tiers: `core` (the entry point plus route-literal-reached files, keyed on `source_hash`), `dependencies` (one-hop imported symbols, keyed on `interface_hash`), and `data` (M10's SQL tables the core code queries via a resolved `.from("table")`, keyed on `source_hash` — a schema change to a table the feature touches makes its spec stale, and the feature task hands the agent each table's column list so "Data touched" names real columns instead of inferring them). Crucially, feature generation **consumes** participants' summaries, stubs, or column lists and never triggers their generation, so the containment-only recursion invariant is untouched: this is the same reference-edge read path section 5 already defines, just assembled from a different starting set.
 
 **Directory rollup shape** (M6). One document, one `spec_hash` — like a feature spec, not sectioned per-entry the way a file spec is, because a directory has no source of its own to section, only containment children (its spec-bearing files) to compose from. Frontmatter keys each file on its own current **`spec_hash`**, not `source_hash`: containment children contribute the hash of their own *spec* (see "Caching and invalidation" above), so the rollup only goes stale once a file's spec is actually rewritten, not merely because its source changed but hasn't been regenerated yet.
 

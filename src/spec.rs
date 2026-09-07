@@ -1057,6 +1057,19 @@ pub fn current_participant_hashes(
             .unwrap_or_else(|| sym.source_hash.clone());
         out.push((dep.clone(), hash));
     }
+    for table in &participants.data {
+        let id = graph
+            .find(table)
+            .with_context(|| format!("data participant {table:?} not in graph"))?;
+        let sym = graph
+            .get_symbol(id)
+            .with_context(|| format!("data participant {table:?} is not a symbol"))?;
+        // A table has no interface_hash -- its whole definition is its
+        // "shape", so source_hash (over the CREATE TABLE span) is the right
+        // staleness key: add/drop/rename a column the feature touches and
+        // the feature spec goes stale.
+        out.push((table.clone(), sym.source_hash.clone()));
+    }
     Ok(out)
 }
 
@@ -1106,6 +1119,11 @@ pub struct FeatureTask {
     pub core_sources: Vec<(String, String)>,
     /// (symbol id, summary-or-stub) for what that code depends on.
     pub dependencies: Vec<(String, String)>,
+    /// (table symbol id, `table(col, col, ...)`) for each SQL table the
+    /// core code queries via a resolved `.from("table")` -- so the "Data
+    /// touched" section names real columns instead of guessing from
+    /// scattered `.select()` calls (M10/M11).
+    pub data: Vec<(String, String)>,
 }
 
 /// The feature task for `entry`, or `None` if its spec is already current
@@ -1146,11 +1164,22 @@ pub fn next_feature_task(
         dependencies.push((dep.clone(), dependency_context(graph, root, dep)?));
     }
 
+    let mut data = Vec::new();
+    for table in &participants.data {
+        let signature = graph
+            .find(table)
+            .and_then(|id| graph.get_symbol(id))
+            .map(|s| s.signature.clone())
+            .unwrap_or_default();
+        data.push((table.clone(), signature));
+    }
+
     Ok(Some(FeatureTask {
         slug: entry.slug.clone(),
         entry_point: entry.file.clone(),
         core_sources,
         dependencies,
+        data,
     }))
 }
 

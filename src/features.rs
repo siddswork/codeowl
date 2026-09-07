@@ -314,14 +314,18 @@ pub fn feature_slug(entry_file: &str) -> String {
 /// since a body change is a real change to the feature), `dependencies`
 /// are the symbols that code imports directly (tracked by `interface_hash`
 /// — only a public-surface change matters, same as any other reference
-/// edge). Dependencies are one hop only, never expanded further: a feature
-/// spec consumes what it depends on, it doesn't recursively pull in the
-/// rest of the graph (see "Recursive spec generation"'s containment-only
-/// invariant, which this mirrors for reference edges).
+/// edge), and `data` are the SQL tables the core code queries via a
+/// resolved `.from("table")` (M10 — tracked by `source_hash`, so a schema
+/// change to a table the feature touches makes the feature spec stale).
+/// Dependencies and data are one hop only, never expanded further: a
+/// feature spec consumes what it depends on, it doesn't recursively pull
+/// in the rest of the graph (see "Recursive spec generation"'s
+/// containment-only invariant, which this mirrors for reference edges).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Participants {
     pub core: Vec<String>,
     pub dependencies: Vec<String>,
+    pub data: Vec<String>,
 }
 
 pub fn assemble_participants(
@@ -360,7 +364,25 @@ pub fn assemble_participants(
         }
     }
 
-    Participants { core, dependencies }
+    let mut data = Vec::new();
+    let mut seen_data = HashSet::new();
+    for file in &core {
+        for r in graph.table_refs().iter().filter(|r| &r.from_file == file) {
+            if let Some(target) = resolve_table_ref(graph, &r.table) {
+                let id = graph.string_id(target).to_string();
+                if seen_data.insert(id.clone()) {
+                    data.push(id);
+                }
+            }
+        }
+    }
+    data.sort();
+
+    Participants {
+        core,
+        dependencies,
+        data,
+    }
 }
 
 #[cfg(test)]

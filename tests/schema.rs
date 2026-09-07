@@ -125,3 +125,40 @@ fn get_callers_on_a_table_lists_the_app_code_that_touches_it() {
 
     assert_eq!(callers, vec!["app/api/pay/route.ts".to_string()]);
 }
+
+#[test]
+fn a_features_data_participants_are_the_tables_its_core_code_queries() {
+    let dir = tempdir("participants");
+    let graph = build(&dir);
+
+    // The pay route is an orphan API route -> its own feature entry point.
+    let participants = codeowl::features::assemble_participants(
+        &graph,
+        graph.route_literals(),
+        "app/api/pay/route.ts",
+    );
+
+    assert_eq!(
+        participants.data,
+        vec![
+            "supabase/schema.sql::payments".to_string(),
+            "supabase/schema.sql::registrations".to_string(),
+        ],
+        "both .from() targets should be data participants"
+    );
+
+    // And the feature task hands the agent each table's column list.
+    let entry = codeowl::features::enumerate_entry_points(&graph, graph.route_literals())
+        .into_iter()
+        .find(|e| e.file == "app/api/pay/route.ts")
+        .unwrap();
+    let task = codeowl::spec::next_feature_task(&graph, &dir, &entry, graph.route_literals())
+        .unwrap()
+        .expect("payments feature needs a spec");
+    let payments = task
+        .data
+        .iter()
+        .find(|(id, _)| id == "supabase/schema.sql::payments")
+        .unwrap();
+    assert!(payments.1.contains("amount"), "got {:?}", payments.1);
+}

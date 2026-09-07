@@ -154,6 +154,14 @@ pub struct DependencyContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct TableContext {
+    /// The table's schema node id, e.g. `"supabase/schema.sql::payments"`.
+    pub id: String,
+    /// `table(col, col, ...)` — the columns `schema.rs` parsed.
+    pub columns: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct RollupFile {
     pub file: String,
     /// That file's own current `## Summary` prose — never its raw source
@@ -196,6 +204,11 @@ pub enum SpecTaskResponse {
         entry_point: String,
         core_sources: Vec<CoreSource>,
         dependencies: Vec<DependencyContext>,
+        /// SQL tables the core code queries via a resolved `.from("table")`
+        /// (M10) — `id` is the table's schema node, `columns` its
+        /// `table(col, col, ...)` shape. Ground the "Data touched" section
+        /// in these instead of inferring column names from `.select()`.
+        data: Vec<TableContext>,
     },
     /// Generated in one shot, like a feature spec: composed purely from
     /// its files' own already-generated summaries, never their raw source.
@@ -329,6 +342,11 @@ impl CodeOwlServer {
                 .dependencies
                 .into_iter()
                 .map(|(id, summary)| DependencyContext { id, summary })
+                .collect(),
+            data: task
+                .data
+                .into_iter()
+                .map(|(id, columns)| TableContext { id, columns })
                 .collect(),
         })))
     }
@@ -1882,6 +1900,7 @@ mod tests {
             entry_point,
             core_sources,
             dependencies,
+            data,
         } = task
         else {
             panic!("expected a Feature task");
@@ -1897,6 +1916,7 @@ mod tests {
         );
         assert_eq!(dependencies.len(), 1);
         assert_eq!(dependencies[0].id, "lib/supabase.ts::getSupabase");
+        assert!(data.is_empty(), "no .sql fixture, so no data participants");
 
         server
             .submit_spec(Parameters(SubmitSpecRequest {

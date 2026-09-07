@@ -97,8 +97,11 @@ Repeat the following until `get_next_spec_task` returns `null`:
      ```
      Base this on `entry_point`, every file in `core_sources` (the
      feature's own code — read all of them before writing anything: the
-     narrative usually spans more than one), and `dependencies` (each
-     already has a summary-or-stub — read, don't re-derive). This is the
+     narrative usually spans more than one), `dependencies` (each already
+     has a summary-or-stub — read, don't re-derive), and `data` — the SQL
+     tables this feature's code queries, each with its real column list
+     (`table(col, col, …)`). Name those tables and columns in **## Data
+     touched** rather than guessing from `.select()` calls. This is the
      one document a BA should be able to read start to finish and
      understand the capability without opening any source file — write
      for that reader, with file references as an aside for devs, not the
