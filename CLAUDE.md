@@ -2,51 +2,62 @@
 
 CodeOwl extracts a structural graph from a codebase and serves LLM-authored specs (the semantic layer) over MCP. Design lives in `ARCHITECTURE.md` (how it's built) and `REQUIREMENTS.md` (what and for whom); `ROADMAP.md` has the build sequence and test repos. Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
 
-## Last Session (2026-09-07)
+## Last Session (2026-09-07, part 2 — Phase 2: M12 + M13-pre)
 
-**Goal:** close out Phase 1 (M10 + M11) and write a detailed, reviewed plan for Phase 2 — the polyglot core (`StackPack` trait + modularization), which the owner has prioritized ahead of the web viewer.
+**Goal:** open-source the repo + protect `master`, then execute **M12** (interim de-coupling) and **M13-pre** (feature-layer spike), and re-plan Phase 2 to add a **Java track** ahead of the deferred items — a JVM service corpus is the owner's highest-value second target.
 
-### What was completed (all committed + pushed to `origin/master`)
+### What was completed — all merged to `origin/master` (`HEAD` = `a225a38`)
 
-**M10 — SQL/schema boundary resolution.** `1c6c603` (docs) → `0c0b4ac` (prep: grammar-pick dedup + doc-marks) → `fe95f14` (main): `src/schema.rs` parses `CREATE TABLE` from `.sql` via `tree-sitter-sequel` 0.3.11 + a header line-scan backstop → `SymbolKind::Table` nodes; `features.rs::extract_table_refs`/`resolve_table_ref` for Supabase `.from("table")`; `get_callers` on a table lists the files that query it. Pilot: 25/25 tables, 275/304 `.from()` refs resolve (misses are DB views, out of scope). Plus `4970ce8` — `setup/USAGE.md` operator guide.
+**Open-source + branch protection** (PRs #1, #3):
+- MIT `LICENSE` (© 2026 Siddhartha Baidya), `license`/`repository`/`description` in `Cargo.toml`, README License section, `.github/CODEOWNERS` (`* @siddswork`).
+- GitHub ruleset **"Protect master"** (id 22437397): PR required, 1 **code-owner** approval, require-last-push-approval, block force-push + deletion, **bypass: repo admin (Sidd) → always**. Net effect: nobody self-merges; Sidd lands PRs via the **"Merge without waiting for requirements (bypass rules)"** checkbox (he's the last pusher so the code-owner gate can't be satisfied otherwise — this is the intended path, not a workaround). **Claude cannot merge PRs** (permission classifier blocks `gh pr merge`).
 
-**M11 codeowl-side prep** (9 commits, `2b11b25`…`2dd2b90` + docs):
-- `2b11b25` — **`src/lang.rs`** (the stack-modularization seam): `is_extractable`, `is_schema_file`, `ts_parser` (from the now-deleted `parse.rs`), `RESOLVER_EXTENSIONS`, `extract_symbols` (`.sql`-vs-TS dispatch), `detect(root)` startup fail-fast. Free functions, no trait yet.
-- `e0982ac` — **data-touched participants**: `Participants` gains a `data` tier (SQL tables the core `.from()`s); `FeatureTask.data` / `TableContext`; schema-change staleness.
-- `9fb0124` — **`--all` ordering**: `get_next_spec_task` accepts `feature:<slug>` / `rollup:<dir>` ids; `prioritize()` reordered to shared-code files → features → long-tail → rollups → system last.
-- `245998a` — **`null`-result bug**: exhausted task returned bare `null` (rejected by Claude Code's `structuredContent` check) → now `SpecTaskResponse::Done {}` → `{"kind":"done"}`. Plus `is_test_path` → test files to tier 5, test importers dropped from fan-in.
-- `45ddc92` — **rendered-component `core` expansion**: `page.tsx` → `<EvaluationClient/>` → `<EvaluationForm/>` subtree now pulled into `core` when co-located or data-touching; `components/ui/*` stay stubs.
-- `dac7194` — **default-import resolution**: #45ddc92 was inert (React components are default-exported, `imports.rs` tracked only named). Added `DefaultImport` + `resolve_default_imports`.
-- `2dd2b90` — **tier-0 cap**: `SHARED_CODE_MAX_FILES = 8`, cutoff anchored to the full item set (not `pending`, which refilled forever), `is_ui_primitive` excluded. Pilot shared tier = 8 `lib/` files.
+**Test-repo swap** (PRs #2, #3): `memolink` → **`quarkus-super-heroes`** in `ROADMAP.md`'s test-repo table. Cloned shallow to `~/dev/openSource/test-repos/quarkus-super-heroes` (7-module Maven reactor, ~120 Java files, Panache `@Entity` persistence, zero `.ts`/`.tsx`). `commons-lang` and `leveldb` also present under `~/dev/openSource/test-repos/`.
 
-**Phase 1 complete** — `7661141` ("Mark M11 validated by sample; Phase 1 complete"). M1–M10 shipped; **M11 "validated by sample"** — owner reviewed the pilot feature specs and judged them clearly good. Clincher: a spec correctly reported a flow as *dormant* after it was disabled by a one-line flag flip (`b6d8965f` in the pilot). Full corpus generation deliberately stopped at ~15% — the rest is mechanical volume.
+**M12 — interim de-coupling — COMPLETE** (PR #4, 4 commits `494d62c`…`f2c1241`):
+- `494d62c` — **cache `format_version`** (TDD, failing test first). `graph::FORMAT_VERSION = 1`; `#[serde(default)] format_version` on `Graph` + `RepoIndex`, set in their real constructors; `RepoIndex::load` returns `None` on any mismatch (0/absent included) → full `build`; `Graph::load` bails. Fixes the latent M11 `#[serde(default)]`-reads-empty bug.
+- `805eec3` — **`lang::classify(path) -> FileRole { Domain | Primitive | Test | Generated }`**. `spec::is_test_path`/`is_ui_primitive` are now one-line delegations; `prioritize`'s tiering is one exhaustive match. `Generated` reserved (no Phase 1 rule produces it; sorted like `Primitive`).
+- `1b2c6cf` — **`lang::SourceKind { Code | Schema }`** + `SourceKind::of(path)`. `.sql`-vs-TS dispatch in `extract_symbols` + `FileInputs::extract` is a named match; `is_schema_file` deleted. `graph.rs`'s 4 derived-edge fields (`route_literals`, `table_refs`, `rendered_components`, `resolved_default_imports`) grouped under a `// ---- Pack-contributed derived edges` comment block. Module doc `LanguagePack` → `StackPack`.
+- `f2c1241` — **determinism fix** (found during verification): `resolve_imports`/`resolve_default_imports` now iterate `file_imports` sorted by path (`sorted_by_key()` helper); `Graph.by_id` `HashMap` → `BTreeMap`. `.codeowl/graph` is now byte-identical across runs.
+- **Verified inert on the pilot** (pre-M12 binary `8078518` vs HEAD): `codeowl extract` symbol JSON byte-identical; `get_spec_coverage` byte-identical incl. the full 274-item `pending` order; same 4 pre-existing stale specs; the `format_version` guard correctly rejects the pilot's real pre-M12 cache and does a clean full rebuild. Pilot `.codeowl/` was restored to pristine pre-M12 after testing.
+- **Skipped** ROADMAP M12 bullet 4 (fold `resolved_default_imports` into the import-resolution path) — not clean (`resolve_default_imports` is file-level, different shape); M13 collapses that field into `flow_edges` anyway.
+
+**M13-pre — feature-layer spike — COMPLETE** (PR #5, 3 commits `319d974`…`babc0d4`):
+- `319d974` — **Java track added to Phase 2.** Rust-on-self stays **M14** (validates the seams for near-zero cost). New **M16** (`JavaStack` on commons-lang — a third stack, exercises `feature_model() -> None` on a real 627-file corpus), **M17** (Quarkus on quarkus-super-heroes — the feature layer for a Java service), **M18** (fold Java findings, generalize the schema layer off `.sql`, ship). Test-repo table reordered to milestone order; `leveldb` marked not-scheduled.
+- `eab50c5` — the spike doc **`experiments/exp-02-feature-layer.md`**. Q1 (CodeOwl's own feature specs): recommend **`feature_model() -> None`** — CodeOwl has workflows but no way to enumerate them mechanically; M14's self-corpus puts the 4 cross-cutting flow narratives (extraction / spec generation / query / reindex) in the **system spec**. Q2 (Java entry points): commons-lang → clean `None`; a Quarkus service → `Some` with **heterogeneous entry-point kinds** (verified against the checkout: `@Path`×9, `@Channel`×6, `@Incoming`/`@Outgoing`, `@RegisterRestClient`×2, Panache `@Entity` classes not `.sql`).
+- `babc0d4` — **review pass**. **New M13 design decision 8**: keep `trait FeatureModel` minimal — M14 + M16 both return `None`, so it has ONE impl until M17; don't let it accrete TS+Next assumptions. **New M13 design decision 9**: `ExtractedSymbol` needs a pack-owned **`markers: Vec<String>`** — the entire Java feature/schema model keys on annotations (`@Path`, `@Entity`, `@ApplicationScoped`, `@RegisterRestClient`) and there is nowhere to record them; add it in M13 while the symbol shape is already open (cheap now, expensive at M17). Plus 5 factual fixes (`ui-super-heroes` is a Maven module / one repo = one graph / `EntryPoint.file` not `SymbolId` / CDI admission is type-reference not dataflow / `exp-01` isn't in git).
 
 ### Where we stopped
 
-Phase 2 is planned and committed (`2b43810` — Phase 2 detailed plan + 8 review fixes). **No Phase 2 code has been written yet.** Next work is M12.
-
-The Phase 2 plan (now in `ROADMAP.md` "Phase 2 — the polyglot core first" — read the whole section before starting):
-- **M12** (S) — interim de-coupling. **First job: add a cache `format_version: u32`** to the persisted index/graph; mismatch/absence → full rebuild. This fixes a **latent M11 bug**: a `#[serde(default)]` field reads empty on an old `.codeowl/` cache with no rebuild, yielding wrong data. Then `is_test_path`/`is_ui_primitive` → a `classify(path) -> FileRole` seam (`Domain|Primitive|Test|Generated`); doc-mark `graph.rs`'s 4 pack-contributed fields; `SourceKind` enum for the `.sql` dispatch. No behavior change — pilot regenerates identical spec files.
-- **M13-pre** (XS) — paper spike: what would CodeOwl's own feature specs be? Drives making the feature layer *optional* in the trait.
-- **M13** (M–L) — `trait StackPack` (renamed from `LanguagePack` — the unit is a *stack*: TS + SQL + Next + Supabase, not one language); move `extract/imports/resolve/schema/features` behind `TypeScriptNextStack`. `graph.rs`'s 4 typed edge fields → one generic `flow_edges` resolved via `pack.resolve_flow_edge`; `assemble_participants` becomes generic traversal + `admits_to_core` hook. `feature_model() -> Option<&dyn FeatureModel>`. ~97 pack call sites = real test churn, absorbed via free-function shims. Spec files + `get_spec_coverage` stay byte-identical to M11; the `.codeowl/graph` JSON is *expected* to change.
-- **M14** (L) — `RustStack` on CodeOwl's own repo. The only milestone that actually validates the seams; validation is a human dev cut on ~10 self-specs, not a diff.
-- **M15** (M) — fold M14's findings into the trait; commit CodeOwl's self-spec corpus; make `setup/codeowl-generate.md` stack-neutral.
+**M12 and M13-pre are both fully merged. Nothing is mid-flight.** Next work is **M13** — not started. No M13 branch exists.
 
 ### Known issues / blockers
 
-- **Latent M11 cache bug** (described above) — not yet fixed; it's M12's first task. Anyone regenerating on a pre-M10 `.codeowl/` cache should `rm -rf .codeowl/` first as a workaround.
-- **Test churn in M13 is real** (~97 call sites) — the plan budgets for it via shims; don't start M13 expecting it to be free.
-- **The feature layer is the risk concentration** for Phase 2 — it's the only part that models a *product*, not code. `core`-admission (`is_colocated || does_data_work`) has no mechanical ground truth (took 3 iterations against *one* repo this session). De-risked via M13-pre + optional `feature_model()` + M14's human read.
-- Outside this repo: the pilot's `CLAUDE.md` gained a "Structural specs (CodeOwl MCP)" section and holds a ~45-spec partial corpus — both uncommitted there; the owner folds them into their own PR.
+- **`ExtractedSymbol.markers` MUST land in M13** (design decision 9) while the symbol shape is open — reopening `ExtractedSymbol` at M17 ripples through extraction, hashing, and the cache format.
+- **`FeatureModel` has no second implementation until M17** (design decision 8) — M14 and M16 both `None`. M13 keeps it to its two methods; anything M17 needs is an M18 addition. If this gap feels too risky, the alternative is pulling M17's Quarkus feature work ahead of M16.
+- **Test churn in M13 is real** (~97 pack-function call sites across `src/` + `tests/`) — plan budgets free-function shims (`extract::extract_file` → `default_ts_stack().extract_symbols(...)`) so existing tests compile unchanged, then a dedicated churn commit. Don't start M13 expecting it free.
+- **M17 breaks M10's schema model.** `SourceKind::Schema` dispatches on file extension; Quarkus persistence is a `@Entity` annotation on a Java class (no schema *file*). M13 shouldn't deepen the file assumption; M18 generalizes to a symbol-level `is_schema_symbol` hook (which `markers` makes cheap).
+- Pilot repo (`~/dev/startup/talentTrail`): its `.codeowl/` is a **pre-M12 cache** (no `format_version`) — the first `serve`/`extract` with a post-M12 binary will full-rebuild it once (correct behavior). Its `CLAUDE.md` "Structural specs" section + ~45-spec partial corpus are still uncommitted there; owner folds into their own PR.
 - Carried from M8, still open: human-edit reconciliation is file-specs-only — feature / rollup / system specs aren't reconciled against manual edits.
 
 ### Exact next step to resume
 
-**Start M12**: TDD. Failing test first — an old persisted index/graph JSON with no `format_version` (or a wrong one) must trigger a full rebuild, not `#[serde(default)]`-silent partial reuse. Add `format_version: u32` to the persisted `RepoIndex` and `Graph`, bump on read-mismatch. `src/index.rs` + `src/graph.rs`. Keep it the smallest standalone commit; the `classify()`/doc-mark/`SourceKind` parts of M12 are separate commits after it.
+**Start M13.** Read `ROADMAP.md` → "Phase 2 — the polyglot core first" → the **M13 section** *and* "Design decisions to resolve during M13" (now **9** items; 8 and 9 are new this session and are load-bearing). Then:
+1. New branch off `master` (`m13-stackpack-trait` or similar). Every change lands via PR — Sidd merges via bypass checkbox.
+2. Define `trait StackPack` + `struct TypeScriptNextStack` wrapping today's `extract`/`imports`/`resolve`/`schema`/`features`. Keep thin free-function shims so the ~97 call sites + tests compile unchanged.
+3. `graph.rs`'s 4 derived-edge fields → one generic `flow_edges: Vec<FlowEdge { from_file, target: FlowTarget, kind: String }>`, resolved at build time via `pack.resolve_flow_edge`.
+4. Add `ExtractedSymbol.markers: Vec<String>` (decision 9). `EntryPoint { kind: String, id, title, file: String }` — **not `SymbolId`** (decision 9 / spike). `feature_model() -> Option<&dyn FeatureModel>`, kept minimal (decision 8).
+5. **Validation** (M13's stated test — write it as a runnable check): the pilot's *spec files* and `get_spec_coverage` output are byte-identical to `origin/master`; the `.codeowl/graph` JSON is *expected* to change (new `flow_edges` shape). Reuse the M12 verification approach: build the pre-M13 binary from `master`, diff `get_spec_coverage` old vs new against the pilot (there is a driver at `scratchpad/mcp_call.py` from this session's verification — an MCP stdio client for one `tools/call`).
 
 ### State
 
-`cargo test`: **134 unit + 10 integration**, all green (`tests/`: extraction 2, feature_components 1, incremental 3, schema 4). `clippy -D warnings` / `fmt --check` were clean at the last code commit (`2dd2b90`); no code has changed since. `origin/master` = `HEAD` = `2b43810` (Phase 2 plan). Working tree clean apart from this handoff touch-up.
+`cargo test`: **139 unit + 10 integration**, all green (`tests/`: extraction 2, feature_components 1, incremental 3, schema 4). `clippy --all-targets -D warnings` + `fmt --check` clean at `f2c1241`; docs-only since. `origin/master` = `HEAD` = `a225a38`. Working tree clean apart from this handoff.
+
+### Git workflow this session established
+
+- **`master` is protected.** Every change → branch → PR → Sidd merges via the bypass checkbox. Claude opens PRs (`gh pr create`) but cannot merge.
+- Commit trailer drifted mid-session as the model was switched (Fable / Opus / Sonnet) — follow the current `<system-reminder>` attribution block, whatever it says now.
+- Keep commits milestone-scoped (`M13: …`), small, atomic; `Authored by: Sidd & Claude <model>` line in the body per the Workflow section below.
 
 ## Hard invariants
 
