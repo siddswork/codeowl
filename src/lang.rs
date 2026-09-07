@@ -77,6 +77,67 @@ pub fn extract_symbols(rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
     }
 }
 
+/// What kind of code a file holds, for the purpose of deciding how its
+/// spec is prioritised (`spec::prioritize`) and whether it counts as
+/// shared infrastructure. A single classification replacing the scattered
+/// `is_test_path` / `is_ui_primitive` predicates — the seam a `StackPack`
+/// eventually owns, since "what's a UI primitive" and "what's generated"
+/// are stack conventions, not universal truths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRole {
+    /// Product code — the default. Eligible for the shared-code tier,
+    /// counted in import fan-in, documented in normal priority order.
+    Domain,
+    /// A UI primitive (`components/ui/*`): imported nearly everywhere, so
+    /// it dominates a fan-in ranking, but its summary tells a dependent
+    /// feature spec nothing it couldn't guess — kept out of the
+    /// shared-code tier. Still gets its own file spec, in the long tail.
+    Primitive,
+    /// Test code — an `e2e/`/`cypress/`/`playwright/` tree, a `__tests__/`
+    /// directory, or a `.test.`/`.spec.` file. Stays in the graph so
+    /// `get_callers` still shows "used by these tests", but its specs sort
+    /// last and it's never treated as a product module.
+    Test,
+    /// Machine-generated code. Reserved: no Phase 1 path convention
+    /// produces this yet — a `StackPack` supplies the rule (Supabase's
+    /// `database.types.ts`, protobuf `*_pb.ts`, GraphQL codegen, …).
+    /// Treated like [`FileRole::Primitive`] until then.
+    Generated,
+}
+
+/// Classify a repo-relative path into its [`FileRole`]. Accepts a
+/// `rollup:`/`feature:` coverage id too — the prefix is stripped first, so
+/// a directory-rollup id classifies by its directory path.
+pub fn classify(path: &str) -> FileRole {
+    let path = path
+        .strip_prefix("rollup:")
+        .or_else(|| path.strip_prefix("feature:"))
+        .unwrap_or(path);
+    if is_test_path(path) {
+        FileRole::Test
+    } else if is_ui_primitive(path) {
+        FileRole::Primitive
+    } else {
+        FileRole::Domain
+    }
+}
+
+fn is_test_path(path: &str) -> bool {
+    path.starts_with("e2e/")
+        || path.contains("/e2e/")
+        || path.starts_with("cypress/")
+        || path.contains("/cypress/")
+        || path.starts_with("playwright/")
+        || path.contains("/playwright/")
+        || path.contains("__tests__/")
+        || path.contains(".test.")
+        || path.contains(".spec.")
+}
+
+fn is_ui_primitive(path: &str) -> bool {
+    path.starts_with("components/ui/") || path.contains("/components/ui/")
+}
+
 /// Fail fast if `root` has no files the Phase 1 extractor can read, rather
 /// than silently building — and serving — an empty graph. Called once at
 /// startup (`main.rs`), before the full walk.
@@ -118,6 +179,28 @@ mod tests {
 
         let sql = extract_symbols("s.sql", "CREATE TABLE public.t (id integer);\n");
         assert_eq!(sql[0].id, "s.sql::t");
+    }
+
+    #[test]
+    fn classify_partitions_paths_by_role() {
+        use FileRole::*;
+        assert_eq!(classify("lib/utils.ts"), Domain);
+        assert_eq!(classify("app/submit/page.tsx"), Domain);
+
+        assert_eq!(classify("components/ui/button.tsx"), Primitive);
+        assert_eq!(classify("src/components/ui/dialog.tsx"), Primitive);
+
+        assert_eq!(classify("e2e/helpers/api-client.ts"), Test);
+        assert_eq!(classify("src/components/__tests__/button.ts"), Test);
+        assert_eq!(classify("lib/utils.test.ts"), Test);
+        assert_eq!(classify("app/page.spec.tsx"), Test);
+
+        // Coverage-id prefixes are stripped before matching.
+        assert_eq!(classify("rollup:e2e/helpers"), Test);
+        assert_eq!(classify("feature:app/submit"), Domain);
+
+        // A "test" substring that isn't a test-file convention stays Domain.
+        assert_eq!(classify("app/api/attest/route.ts"), Domain);
     }
 
     #[test]
