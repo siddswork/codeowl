@@ -76,7 +76,12 @@ pub fn resolve_imports(
         graph,
     };
     let mut out = Vec::new();
-    for (from_file, fi) in file_imports {
+    // Iterate files in sorted order, not `HashMap` order: the output is
+    // persisted to `.codeowl/graph`, and a run-to-run-stable array is what
+    // lets that cache be diffed (and lets M13's "the graph JSON changed —
+    // here's how" story mean anything). Each file's own `imports` list is
+    // already in source order.
+    for (from_file, fi) in sorted_by_key(file_imports) {
         for imp in &fi.imports {
             let target = ctx.resolve_named(
                 from_file,
@@ -93,6 +98,14 @@ pub fn resolve_imports(
         }
     }
     out
+}
+
+/// `file_imports` entries in ascending path order — the deterministic
+/// iteration both resolvers need (see `resolve_imports`).
+fn sorted_by_key(file_imports: &HashMap<String, FileImports>) -> Vec<(&String, &FileImports)> {
+    let mut entries: Vec<_> = file_imports.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    entries
 }
 
 /// One default import resolved to the file it points at — `import
@@ -117,7 +130,7 @@ pub fn resolve_default_imports(
     file_imports: &HashMap<String, FileImports>,
 ) -> Vec<ResolvedDefaultImport> {
     let mut out = Vec::new();
-    for (from_file, fi) in file_imports {
+    for (from_file, fi) in sorted_by_key(file_imports) {
         for di in &fi.default_imports {
             let Some(target_file) =
                 specifier_to_rel_path(repo_root, resolver, from_file, &di.specifier)
@@ -283,6 +296,27 @@ mod tests {
             resolve_fixture(&[("a.ts", "import { z } from 'some-external-package';\n")]);
         let edge = &resolved[0];
         assert_eq!(edge.target, None);
+    }
+
+    #[test]
+    fn resolved_edges_are_ordered_by_from_file_not_hashmap_order() {
+        // Fixtures deliberately out of order; `helpers.ts` is imported by
+        // every other file, so without a sort the edge list would follow
+        // `HashMap` iteration (randomised per process) and the persisted
+        // `.codeowl/graph` would differ run to run.
+        let (resolved, _graph) = resolve_fixture(&[
+            ("z.ts", "import { h } from './helpers';\n"),
+            ("m.ts", "import { h } from './helpers';\n"),
+            ("a.ts", "import { h } from './helpers';\n"),
+            ("helpers.ts", "export function h(): void {}\n"),
+        ]);
+
+        let order: Vec<&str> = resolved.iter().map(|r| r.from_file.as_str()).collect();
+        assert_eq!(order, ["a.ts", "m.ts", "z.ts"]);
+
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        assert_eq!(order, sorted, "edges must be sorted by from_file");
     }
 
     #[test]

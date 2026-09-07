@@ -14,7 +14,7 @@
 //! re-deriving or comparing id strings, and never leaks a `SymbolId`
 //! outside the process that produced it (see `SymbolId`'s own doc comment).
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -125,14 +125,43 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
     }
 }
 
+/// On-disk format stamp for the persisted `.codeowl/graph` (and, in
+/// `index.rs`, `.codeowl/index`). Bump it whenever the serialized shape
+/// changes in a way a `#[serde(default)]` on a new field would silently
+/// paper over — a new input that feeds graph edges, a changed hash scheme,
+/// a field whose absence yields wrong answers rather than merely fewer.
+/// A cache stamped with any other value is discarded and rebuilt from
+/// source, never partially reused (the latent M11 bug this closes).
+pub const FORMAT_VERSION: u32 = 1;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Graph {
+    /// See [`FORMAT_VERSION`]. `#[serde(default)]` so a pre-stamp cache
+    /// deserializes to 0 — which never equals the current version, so
+    /// `load` rejects it.
+    #[serde(default)]
+    format_version: u32,
     nodes: Vec<Node>,
-    by_id: HashMap<String, SymbolId>,
+    /// String id → arena slot. A `BTreeMap`, not a `HashMap`: it's
+    /// serialized into `.codeowl/graph`, and a `HashMap` would write its
+    /// entries in a per-process-random order, making the cache differ
+    /// byte-for-byte between otherwise-identical runs.
+    by_id: BTreeMap<String, SymbolId>,
     /// File-to-file reference edges — see `resolve.rs`. Empty until
     /// `set_resolved_imports` is called; resolving them needs a `Graph` to
     /// look symbols up in, so they can't be known at `build` time.
     imports: Vec<ResolvedImport>,
+
+    // ---- Pack-contributed derived edges ------------------------------------
+    // The four fields below are all *derived* edges — populated after `build`
+    // by a convention resolver in `features.rs` / `resolve.rs`, not by the
+    // structural walk — and every one is a convention of the active stack
+    // (Next.js routes, Supabase `.from()`, React JSX + default exports). On a
+    // repo the active pack doesn't cover they are simply empty. M13 collapses
+    // the group into one generic `flow_edges: Vec<FlowEdge>` resolved via
+    // `pack.resolve_flow_edge`; `imports` above stays separate (the traversal
+    // in `assemble_participants` walks flow edges *plus* one-hop imports).
+    // See ROADMAP.md's "Phase 2".
     /// Every `fetch("/api/...")` call site found across the repo — see
     /// `features.rs`. Stored here (rather than re-walked on every
     /// `get_next_spec_task` call) the same way `imports` is: computed once
@@ -155,6 +184,7 @@ pub struct Graph {
     /// `<Component/>`.
     #[serde(default)]
     resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
+    // ---- end pack-contributed edges ---------------------------------------
 }
 
 impl Graph {
@@ -167,7 +197,7 @@ impl Graph {
     /// `SymbolId` to resolve to; then build the actual nodes now that any
     /// node may need to reference any other by id.
     pub fn build(files: Vec<FileExtraction>) -> Self {
-        let mut by_id = HashMap::new();
+        let mut by_id = BTreeMap::new();
         let mut next = 0u32;
         for file in &files {
             by_id.insert(file.rel_path.clone(), SymbolId::new(next));
@@ -221,6 +251,7 @@ impl Graph {
         }
 
         Self {
+            format_version: FORMAT_VERSION,
             nodes,
             by_id,
             imports: Vec::new(),
@@ -383,7 +414,16 @@ impl Graph {
     pub fn load(path: &Path) -> Result<Self> {
         let file =
             std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
-        serde_json::from_reader(file).with_context(|| format!("parsing {}", path.display()))
+        let graph: Self =
+            serde_json::from_reader(file).with_context(|| format!("parsing {}", path.display()))?;
+        if graph.format_version != FORMAT_VERSION {
+            anyhow::bail!(
+                "{} is format v{}, expected v{FORMAT_VERSION} — rebuild from source",
+                path.display(),
+                graph.format_version,
+            );
+        }
+        Ok(graph)
     }
 }
 
@@ -436,6 +476,28 @@ mod tests {
         assert_eq!(graph.parent_id(method_id), Some(class_id));
         // The class itself is top-level -- its parent is the file, not None.
         assert_eq!(graph.parent_id(class_id), Some(file_id));
+    }
+
+    #[test]
+    fn serializing_the_same_graph_twice_is_byte_identical() {
+        // The persisted `.codeowl/graph` has to be diffable run to run.
+        // Every collection in it — `nodes`, `by_id`, the resolved-edge
+        // vecs — must serialize in a deterministic order, not a
+        // `HashMap`'s per-process-random one.
+        let sources: &[(&str, &str)] = &[
+            (
+                "z.ts",
+                "import { h } from './helpers';\nexport const z = 1;\n",
+            ),
+            (
+                "a.ts",
+                "import { h } from './helpers';\nexport function a() {}\n",
+            ),
+            ("helpers.ts", "export function h() {}\n"),
+        ];
+        let one = serde_json::to_string(&build_graph_from_sources(sources)).unwrap();
+        let two = serde_json::to_string(&build_graph_from_sources(sources)).unwrap();
+        assert_eq!(one, two);
     }
 
     #[test]

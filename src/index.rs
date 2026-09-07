@@ -24,7 +24,7 @@ use crate::features::{RenderedComponent, RouteLiteral, TableRef, extract_route_l
 use crate::graph::{FileExtraction, Graph};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, extract_imports};
-use crate::lang::{is_extractable, is_schema_file};
+use crate::lang::{SourceKind, is_extractable};
 use crate::resolve::{build_resolver, resolve_imports};
 use crate::symbol::ExtractedSymbol;
 
@@ -44,28 +44,30 @@ pub struct FileInputs {
 
 impl FileInputs {
     /// Everything that depends on a file's contents, recomputed together
-    /// whenever that file changes. A `.sql` file is a schema file — only
-    /// `schema.rs`'s table pass applies; the TypeScript passes are skipped.
+    /// whenever that file changes. A schema file gets only `schema.rs`'s
+    /// table pass (folded into `extract_symbols`); the TypeScript
+    /// convention passes — imports, route literals, `.from()` refs,
+    /// rendered components — are skipped.
     fn extract(rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
         let symbols = crate::lang::extract_symbols(rel_path, source);
-        if is_schema_file(rel_path) {
-            return Self {
+        match SourceKind::of(rel_path) {
+            Some(SourceKind::Schema) => Self {
                 source_hash,
                 symbols,
                 imports: FileImports::default(),
                 route_literals: Vec::new(),
                 table_refs: Vec::new(),
                 rendered_components: Vec::new(),
-            };
-        }
-        Self {
-            source_hash,
-            symbols,
-            imports: extract_imports(source, rel_path),
-            route_literals: extract_route_literals(source, rel_path),
-            table_refs: crate::features::extract_table_refs(source, rel_path),
-            rendered_components: crate::features::extract_rendered_components(source, rel_path),
+            },
+            Some(SourceKind::Code) | None => Self {
+                source_hash,
+                symbols,
+                imports: extract_imports(source, rel_path),
+                route_literals: extract_route_literals(source, rel_path),
+                table_refs: crate::features::extract_table_refs(source, rel_path),
+                rendered_components: crate::features::extract_rendered_components(source, rel_path),
+            },
         }
     }
 }
@@ -98,6 +100,13 @@ impl CatchUp {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RepoIndex {
+    /// On-disk format stamp, shared with `.codeowl/graph` — see
+    /// [`crate::graph::FORMAT_VERSION`]. `#[serde(default)]` so a cache
+    /// written before the stamp existed deserializes to 0; `load` then sees
+    /// the mismatch and forces a full rebuild rather than trusting inputs
+    /// that a newer `#[serde(default)]` field would read empty from.
+    #[serde(default)]
+    format_version: u32,
     /// Repo-relative path → its cached inputs. A `BTreeMap` so a rebuilt
     /// graph's node order is deterministic regardless of walk or
     /// filesystem-event order.
@@ -137,6 +146,7 @@ impl RepoIndex {
             files.insert(rel.clone(), FileInputs::extract(&rel, &source));
         }
         Ok(Self {
+            format_version: crate::graph::FORMAT_VERSION,
             files,
             root: root.to_path_buf(),
         })
@@ -167,6 +177,15 @@ impl RepoIndex {
     fn load(root: &Path) -> Option<Self> {
         let file = std::fs::File::open(Self::index_path(root)).ok()?;
         let mut index: Self = serde_json::from_reader(std::io::BufReader::new(file)).ok()?;
+        // A cache from a different on-disk format — including one written
+        // before the stamp existed, which deserializes to 0 — is not
+        // partially reusable: its `FileInputs` may be missing a field a
+        // newer graph build now depends on, and every hash would still
+        // match, so `rescan` would re-extract nothing. Discard it; `open`
+        // then does a full `build`.
+        if index.format_version != crate::graph::FORMAT_VERSION {
+            return None;
+        }
         index.root = root.to_path_buf();
         Some(index)
     }
@@ -391,6 +410,46 @@ mod tests {
         assert!(
             RepoIndex::index_path(&dir).exists(),
             "cache persisted for next spawn"
+        );
+    }
+
+    #[test]
+    fn open_rebuilds_when_the_cache_predates_the_current_format_version() {
+        // The latent M11 bug: when a field is added to a persisted struct
+        // behind `#[serde(default)]`, an older `.codeowl/` cache still
+        // deserializes cleanly — the new field just reads empty — and
+        // `rescan` sees every file's hash unchanged, so nothing is
+        // re-extracted. The graph is then rebuilt from inputs that are
+        // missing whatever the new field feeds. A `format_version` stamp is
+        // the fix: a cache without the current version is not reused at all.
+        let dir = tempdir("stale-format");
+        let source = "export function real() {}\n";
+        write(&dir, "a.ts", source);
+
+        // A hand-written `.codeowl/index` in the *old* on-disk shape: valid
+        // JSON, `source_hash` matches what's on disk (so `rescan` treats
+        // a.ts as unchanged and skips re-extraction), but `symbols` is stale
+        // and empty and there is no `format_version` key.
+        let stale = serde_json::json!({
+            "files": {
+                "a.ts": {
+                    "source_hash": hash_text(source),
+                    "symbols": [],
+                    "imports": { "imports": [], "re_exports": [] },
+                    "route_literals": []
+                }
+            }
+        });
+        let index_path = RepoIndex::index_path(&dir);
+        std::fs::create_dir_all(index_path.parent().unwrap()).unwrap();
+        std::fs::write(&index_path, serde_json::to_string_pretty(&stale).unwrap()).unwrap();
+
+        let (_index, graph, _caught) = RepoIndex::open(&dir).unwrap();
+
+        assert!(
+            graph.find("a.ts::real").is_some(),
+            "a cache with no format_version must force a full rebuild, not \
+             silent reuse of its stale inputs"
         );
     }
 

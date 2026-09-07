@@ -23,6 +23,7 @@ use crate::features::{
 };
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
+use crate::lang::{FileRole, classify};
 use crate::symbol::{Symbol, SymbolKind};
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
@@ -42,19 +43,7 @@ pub fn spec_path(root: &Path, source_path: &str) -> PathBuf {
 /// whenever it is, it's safe to leave for last. Also strips a
 /// `rollup:`/`feature:` id prefix so it can be asked of a coverage id.
 pub fn is_test_path(path: &str) -> bool {
-    let path = path
-        .strip_prefix("rollup:")
-        .or_else(|| path.strip_prefix("feature:"))
-        .unwrap_or(path);
-    path.starts_with("e2e/")
-        || path.contains("/e2e/")
-        || path.starts_with("cypress/")
-        || path.contains("/cypress/")
-        || path.starts_with("playwright/")
-        || path.contains("/playwright/")
-        || path.contains("__tests__/")
-        || path.contains(".test.")
-        || path.contains(".spec.")
+    matches!(classify(path), FileRole::Test)
 }
 
 /// A file is spec-bearing iff it declares at least one exported function or
@@ -2176,21 +2165,14 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
 /// The "shared infrastructure" tier that gets documented before features
 /// is the `SHARED_CODE_MAX_FILES` files with the highest import fan-in
 /// across the whole repo (only counting those imported at least
-/// `SHARED_CODE_FAN_IN` times, and never a UI primitive — see
-/// `is_ui_primitive`). It's an *absolute* set anchored to the whole repo,
-/// not the top-N of whatever's left to generate — otherwise a budgeted
-/// `--all` run keeps promoting the next batch into tier 0 and never
-/// reaches a feature. Laptop-scale heuristics, not tuned values.
+/// `SHARED_CODE_FAN_IN` times, and only [`FileRole::Domain`] files — a UI
+/// primitive or generated file is excluded however high its fan-in). It's
+/// an *absolute* set anchored to the whole repo, not the top-N of
+/// whatever's left to generate — otherwise a budgeted `--all` run keeps
+/// promoting the next batch into tier 0 and never reaches a feature.
+/// Laptop-scale heuristics, not tuned values.
 const SHARED_CODE_FAN_IN: usize = 3;
 const SHARED_CODE_MAX_FILES: usize = 8;
-
-/// A `components/ui/` primitive (Button, Card, Dialog…). Imported almost
-/// everywhere, so it dominates a fan-in ranking — but its summary tells a
-/// dependent feature spec nothing it couldn't guess, so it's kept out of
-/// the shared-code tier. Still gets a file spec, in the long tail.
-fn is_ui_primitive(path: &str) -> bool {
-    path.starts_with("components/ui/") || path.contains("/components/ui/")
-}
 
 /// `coverage`'s items that still need attention, ordered the way
 /// `/codeowl generate --all`/`--budget=N` should spend a limited budget
@@ -2230,7 +2212,7 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
     let shared_cutoff = {
         let mut fan_ins: Vec<usize> = items
             .iter()
-            .filter(|i| i.kind == "file" && !is_test_path(&i.id) && !is_ui_primitive(&i.id))
+            .filter(|i| i.kind == "file" && classify(&i.id) == FileRole::Domain)
             .map(|i| i.fan_in)
             .filter(|&f| f >= SHARED_CODE_FAN_IN)
             .collect();
@@ -2249,13 +2231,17 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
 
     pending.sort_by(|a, b| {
         let tier = |item: &CoverageItem| -> u8 {
-            if item.kind == "file" && is_test_path(&item.id) {
-                return 5;
+            if item.kind == "file" {
+                return match classify(&item.id) {
+                    FileRole::Test => 5,
+                    FileRole::Domain if item.fan_in >= shared_cutoff => 0,
+                    // Below the fan-in cutoff, or a primitive/generated
+                    // file at any fan-in: the long tail, after features.
+                    FileRole::Domain | FileRole::Primitive | FileRole::Generated => 2,
+                };
             }
             match item.kind.as_str() {
-                "file" if item.fan_in >= shared_cutoff && !is_ui_primitive(&item.id) => 0,
                 "feature" => 1,
-                "file" => 2,
                 "rollup" => 3,
                 "system" => 6,
                 _ => 7,
