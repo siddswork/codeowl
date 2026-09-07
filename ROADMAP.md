@@ -29,6 +29,8 @@ Sizing (S/M/L) is relative effort, not a time estimate — useful for sequencing
 
 ## Phase 1 milestones
 
+> **Status (2026-09-07): Phase 1 complete.** M1–M10 shipped and validated; M11 validated by sample (feature-spec quality demonstrated on the pilot, full corpus generation deliberately stopped — see M11's "Outcome"). Next is Phase 2, led by the `LanguagePack` trait + a second language, since every milestone since M10 added TS+Next-specific surface (see "Stack modularization").
+
 ### M1 — Extraction walking skeleton
 **Size:** M · **Builds on:** nothing
 
@@ -202,7 +204,7 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 ---
 
 ### M11 — Spec corpus + dual-audience quality bar
-**Size:** M · **Builds on:** M8 and M10
+**Size:** M · **Builds on:** M8 and M10 · **Status: validated by sample (2026-09-07)** — codeowl-side prep complete; feature-spec quality demonstrated on the pilot; full generation deliberately stopped. Details at the end of this section.
 
 **Scope:** Produce the thing the project exists to produce. Generate specs across a substantial, representative slice of the pilot repo — every feature, all of `lib/`, `app/api/`, and the load-bearing `app/` pages — via `/codeowl-generate --all --budget=N` in repeated passes, and commit the corpus as its own PR (per the spec-regeneration commit-hygiene convention). Add the `CLAUDE.md` line pointing agents at `get_spec`/`get_spec_coverage` before they explore.
 
@@ -229,6 +231,19 @@ Live against the pilot repo (~290 TS/TSX files): with `serve` running, an edit i
 - **Agent data point (optional, informational)** — one `utility/mine.py` run comparing 2–3 real tasks with and without specs available. Not a gate.
 
 **MVP value:** this is Phase 1's actual output — a real, committed, dual-audience spec corpus over a real repo, plus evidence it holds up when a human reads it cold. Not a verdict on whether to continue: the brownfield-documentation value proposition is the premise, not the hypothesis under test.
+
+**Outcome — validated by sample, full generation stopped (2026-09-07).**
+
+*Done:*
+- All codeowl-side prep (`f865e81`…`ba3b69b`): `src/lang.rs` + `detect()`, data-touched participants, `--all` prioritization (fan-in tiering, `{"kind":"done"}`, test-code tier, shared-code cap), rendered-component `core` expansion, default-import resolution. 134 unit + 10 integration tests.
+- Partial corpus on the pilot: ~45 current specs — 7 feature specs, ~35 `lib/` file specs, 2 rollups (~15% of the granularity-rule inventory).
+- The pilot's `CLAUDE.md` gained the "Structural specs (CodeOwl MCP)" section.
+
+*Not done, deliberately:* the remaining ~85 feature specs, the `lib/`/`app/` file-spec tail, the rollups, the system spec, and the formal four-cut writeup. These are mechanical volume, not risk.
+
+*Why stopped:* the feature-spec layer — the highest-value, highest-risk output — was reviewed by the project owner and judged to clearly meet the BA and dev bars. The clinching example: `_features/api-judge-evaluations-[evaluationId]-reeval.md` correctly leads with "this flow is dormant" — the re-eval feature was switched off by flipping one variable to `false` (commit `b6d8965f` in the pilot), exactly the kind of runtime-state fact a hand-maintained doc rots on and a regenerated spec catches. `get_spec` staleness, smell detection, `.from()`-table "Data touched", and rendered-component `core` all confirmed working end to end. The dual-audience value proposition (already the Phase 1 *premise*, not a hypothesis) is demonstrated; grinding out the full corpus adds coverage, not confidence.
+
+*If resumed later:* `/codeowl-generate --all --budget=N` in the pilot picks up exactly where it left off — nothing is lost by stopping.
 
 ---
 
@@ -285,3 +300,5 @@ Revised 2026-09-07: folded the stack-modularization increments into the mileston
 Revised again 2026-09-07, after M10 shipped: added an "Execution / sequencing" block to M11 — `src/lang.rs` and the data-touched participant wiring (deferred from M10) both land in the codeowl repo *before* corpus generation; the passes then run via `/codeowl-generate` from a session inside the pilot repo (not the manual stdio loop); the BA cut needs a human, the dev/smell cuts don't.
 
 Revised again 2026-09-07, mid-corpus generation: the "Stack modularization" section was rewritten to name **two** kinds of coupling, not one. M10/M11's feature work (rendered-component `core` expansion, default-import resolution, the `--all` prioritization heuristics) added TS+Next-specific *model* coupling on top of the mechanical coupling `lang.rs` covers: `graph.rs` now carries four pack-specific derived-edge collections, `spec.rs::prioritize` gained `is_test_path`/`is_ui_primitive`, and the feature-layer concept is routing-shaped. Added an **interim step** (move those heuristics behind a named seam + doc-mark the `graph.rs` fields — no behavior change, makes the Phase 2 extraction mechanical) and promoted the `LanguagePack` trait to Phase 2 item 2, explicitly scoped to abstract both kinds of coupling.
+
+Revised again 2026-09-07: **M11 marked validated by sample; Phase 1 complete.** The project owner reviewed the pilot's feature specs and judged them to clearly meet the BA and dev bars — the clinching example being a spec that correctly reports a feature as dormant after it was disabled by a one-line variable flip (`b6d8965f` in the pilot). Full corpus generation was stopped at ~15% coverage: the highest-value, highest-risk layer is proven, and the rest is mechanical volume. See M11's "Outcome" for the done/not-done split. Phase 2 is next, led by the `LanguagePack` trait.
