@@ -482,11 +482,22 @@ M13's own runs so far: every commit through the feature-layer split (commit 5) c
 
 ---
 
-### Design decisions to resolve during M13 (flagged, not yet decided)
+### Design decisions to resolve during M13
 
-These are the "how exactly" questions M13 has to answer as it builds the socket. Each one is a place where a wrong early guess is expensive to undo once a second stack depends on it. "Leaning X" = the current best answer, to be confirmed (or overturned) while implementing.
+These are the "how exactly" questions M13 has to answer as it builds the socket. Each one is a place where a wrong early guess is expensive to undo once a second stack depends on it. "Leaning X" = the current best answer, to be confirmed (or overturned) while implementing; items now marked **decided** were settled during M13 (M13-pre for 3/8/9, the feature-layer commit for 1/2/4).
 
-1. **`SymbolKind`** — Rust adds `Enum`/`Trait`/`Impl`/`Mod`/`Macro`; Java adds `Enum`/`Record`/`AnnotationType`/`Interface`; C++ adds `Namespace`/`Template`/`Union`. Options: (a) small generic set — `Container` / `Callable` / `Value` / `Schema` — plus a `raw: String` for display and the pack owns the mapping; (b) keep a large closed enum; (c) `SymbolKind(String)` open set + a `pack.spec_granularity(kind) -> Granularity`. Leaning (a): `spec.rs`'s granularity rule becomes "generate for `Container`/`Callable`" and stays pack-agnostic. A Java `record` is the test — is it a `Container` (has members) or a `Value` (data-carrier, no spec of its own)? The pack decides.
+1. **`SymbolKind`** — **decided in M13 (option a); implemented in M14.** The enum becomes a small stack-neutral set the generic core reasons about, plus a pack-owned `raw: String` (e.g. `"record"`, `"macro_rules"`, `"@interface"`) carried on the symbol for display and pack-internal logic:
+
+   ```
+   enum SymbolKind { Container, Callable, Value, Schema }
+   ```
+
+   - `Container` — has members that get their own specs: TS `class`, Rust `struct`/`enum`/`trait`/`impl`/`mod`, Java `class`/`interface`/`enum`.
+   - `Callable` — TS `function`/`method`, Rust `fn`, Java method/constructor.
+   - `Value` — a data-carrier with no spec of its own: TS `const`, Rust `const`/`static`, a plain-data Java `record`. Rolls up into its file spec.
+   - `Schema` — today's `Table`; M18 widens it off the `.sql` assumption.
+
+   `spec.rs`'s granularity rule becomes "generate a symbol spec for `Container` and `Callable`, fold `Value`/`Schema` into the file" — no pack branch. The mapping from grammar node kind → `SymbolKind` is the pack's (`extract_symbols` already returns `ExtractedSymbol.kind`); M14 does the actual enum reshape + remap of the TS mapping when it has `tree-sitter-rust` output to check the generic set against. **Open sub-question for the owner:** a Java `record` with methods — `Container` or `Value`? Leaning: `Value` unless it declares non-accessor methods, decided for real in M16 against commons-lang's records.
 2. **`Graph` derived edges** — leaning: one generic `flow_edges: Vec<FlowEdge>` (see M13), resolved at build time via `pack.resolve_flow_edge`; not four typed fields, not `Box<dyn Any>` pack data.
 3. **Feature layer optionality** — decided (M13-pre forces it): `StackPack::feature_model() -> Option<&dyn FeatureModel>`. A stack with no feature model still gets symbol/file/rollup/system specs. `spec.rs`'s system-spec composition already has to tolerate "zero features" — verify that path. M16 (commons-lang) is the milestone that exercises `None` on a real corpus; the M14 Rust spike may or may not conclude `None`, but a pure utility library certainly does.
 4. **`core` admission** — the traversal is generic; `resolve_flow_edge` and `admits_to_core` are the two pack hooks it can't do without. Do not try to make admission a generic rule — it's a per-stack heuristic with no mechanical ground truth (the TS one took three iterations against one repo).
