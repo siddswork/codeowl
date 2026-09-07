@@ -23,9 +23,9 @@ use serde::{Deserialize, Serialize};
 use crate::features::{RenderedComponent, RouteLiteral, TableRef, extract_route_literals};
 use crate::graph::{FileExtraction, Graph};
 use crate::hash::hash_text;
-use crate::imports::{FileImports, extract_imports};
-use crate::lang::{SourceKind, is_extractable};
-use crate::resolve::{build_resolver, resolve_imports};
+use crate::imports::FileImports;
+use crate::lang::SourceKind;
+use crate::stack::StackPack;
 use crate::symbol::ExtractedSymbol;
 
 /// Everything `Graph::build` plus import resolution needs from one file,
@@ -48,10 +48,10 @@ impl FileInputs {
     /// table pass (folded into `extract_symbols`); the TypeScript
     /// convention passes — imports, route literals, `.from()` refs,
     /// rendered components — are skipped.
-    fn extract(rel_path: &str, source: &str) -> Self {
+    fn extract(pack: &dyn StackPack, rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
-        let symbols = crate::lang::extract_symbols(rel_path, source);
-        match SourceKind::of(rel_path) {
+        let symbols = pack.extract_symbols(rel_path, source);
+        match pack.source_kind(Path::new(rel_path)) {
             Some(SourceKind::Schema) => Self {
                 source_hash,
                 symbols,
@@ -63,7 +63,7 @@ impl FileInputs {
             Some(SourceKind::Code) | None => Self {
                 source_hash,
                 symbols,
-                imports: extract_imports(source, rel_path),
+                imports: pack.extract_imports(rel_path, source),
                 route_literals: extract_route_literals(source, rel_path),
                 table_refs: crate::features::extract_table_refs(source, rel_path),
                 rendered_components: crate::features::extract_rendered_components(source, rel_path),
@@ -98,7 +98,7 @@ impl CatchUp {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct RepoIndex {
     /// On-disk format stamp, shared with `.codeowl/graph` — see
     /// [`crate::graph::FORMAT_VERSION`]. `#[serde(default)]` so a cache
@@ -115,6 +115,13 @@ pub struct RepoIndex {
     /// `load` sets it from the path it read the cache from.
     #[serde(skip)]
     root: PathBuf,
+    /// The stack pack for this repo — chosen by `lang::detect` at
+    /// `build`/`open`, never serialized (it's derived from the repo, and
+    /// M13 design decision 7 keys the cache on `pack.name()` so a pack
+    /// change forces a rebuild anyway). `Box`ed rather than a generic
+    /// param so `RepoIndex` and `watch.rs` stay concrete types.
+    #[serde(skip, default = "crate::stack::typescript_next")]
+    pack: Box<dyn StackPack>,
 }
 
 impl RepoIndex {
@@ -128,8 +135,10 @@ impl RepoIndex {
 
     /// Full walk and parse of every extractable file under `root` — the
     /// cold-start path, and the fallback whenever `.codeowl/index` is
-    /// absent or unreadable.
+    /// absent or unreadable. Picks the repo's `StackPack` here (fail-fast
+    /// if none recognises it).
     pub fn build(root: &Path) -> Result<Self> {
+        let pack = crate::lang::detect(root)?;
         let mut files = BTreeMap::new();
         for entry in ignore::WalkBuilder::new(root).build() {
             let entry = entry.context("walking repo")?;
@@ -137,18 +146,22 @@ impl RepoIndex {
                 continue;
             }
             let path = entry.path();
-            if !is_extractable(path) {
+            if pack.source_kind(path).is_none() {
                 continue;
             }
             let source = std::fs::read_to_string(path)
                 .with_context(|| format!("reading {}", path.display()))?;
             let rel = rel_path(root, path);
-            files.insert(rel.clone(), FileInputs::extract(&rel, &source));
+            files.insert(
+                rel.clone(),
+                FileInputs::extract(pack.as_ref(), &rel, &source),
+            );
         }
         Ok(Self {
             format_version: crate::graph::FORMAT_VERSION,
             files,
             root: root.to_path_buf(),
+            pack,
         })
     }
 
@@ -186,6 +199,10 @@ impl RepoIndex {
         if index.format_version != crate::graph::FORMAT_VERSION {
             return None;
         }
+        // `pack` and `root` are `#[serde(skip)]` — re-derive them from the
+        // repo. `detect` also fail-fasts if the repo lost all its source
+        // while nothing was running.
+        index.pack = crate::lang::detect(root).ok()?;
         index.root = root.to_path_buf();
         Some(index)
     }
@@ -201,7 +218,7 @@ impl RepoIndex {
                 continue;
             }
             let path = entry.path();
-            if !is_extractable(path) {
+            if self.pack.source_kind(path).is_none() {
                 continue;
             }
             let rel = rel_path(&self.root, path);
@@ -211,13 +228,17 @@ impl RepoIndex {
             match self.files.get(&rel) {
                 Some(existing) if existing.source_hash == hash_text(&source) => {}
                 Some(_) => {
-                    self.files
-                        .insert(rel.clone(), FileInputs::extract(&rel, &source));
+                    self.files.insert(
+                        rel.clone(),
+                        FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                    );
                     caught.modified.push(rel);
                 }
                 None => {
-                    self.files
-                        .insert(rel.clone(), FileInputs::extract(&rel, &source));
+                    self.files.insert(
+                        rel.clone(),
+                        FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                    );
                     caught.added.push(rel);
                 }
             }
@@ -243,7 +264,7 @@ impl RepoIndex {
     pub fn apply_changes(&mut self, paths: &[PathBuf]) -> Result<Option<(Graph, CatchUp)>> {
         let mut caught = CatchUp::default();
         for abs in paths {
-            if !is_extractable(abs) {
+            if self.pack.source_kind(abs).is_none() {
                 continue;
             }
             let Ok(rel) = abs.strip_prefix(&self.root) else {
@@ -254,13 +275,17 @@ impl RepoIndex {
                 Ok(source) => match self.files.get(&rel) {
                     Some(existing) if existing.source_hash == hash_text(&source) => {}
                     Some(_) => {
-                        self.files
-                            .insert(rel.clone(), FileInputs::extract(&rel, &source));
+                        self.files.insert(
+                            rel.clone(),
+                            FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                        );
                         caught.modified.push(rel);
                     }
                     None => {
-                        self.files
-                            .insert(rel.clone(), FileInputs::extract(&rel, &source));
+                        self.files.insert(
+                            rel.clone(),
+                            FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                        );
                         caught.added.push(rel);
                     }
                 },
@@ -295,17 +320,18 @@ impl RepoIndex {
             .collect();
 
         let mut graph = Graph::build(extractions);
-        let resolver = build_resolver();
         let file_imports: HashMap<String, FileImports> = self
             .files
             .iter()
             .map(|(rel, f)| (rel.clone(), f.imports.clone()))
             .collect();
-        let resolved = resolve_imports(&self.root, &resolver, &file_imports, &graph);
+        let resolved = self.pack.resolve_imports(&self.root, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
+        // `resolve_default_imports` folds into `pack.extract_flow_edges` in
+        // the next M13 commit; still a free-function call for now.
         graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
             &self.root,
-            &resolver,
+            &crate::resolve::build_resolver(),
             &file_imports,
         ));
         graph.set_route_literals(

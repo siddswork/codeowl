@@ -20,6 +20,7 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use tree_sitter::Parser;
 
+use crate::stack::StackPack;
 use crate::symbol::ExtractedSymbol;
 
 /// Extensions the module resolver (`resolve.rs`) tries when following an
@@ -155,15 +156,19 @@ fn is_ui_primitive(path: &str) -> bool {
     path.starts_with("components/ui/") || path.contains("/components/ui/")
 }
 
-/// Fail fast if `root` has no files the Phase 1 extractor can read, rather
-/// than silently building — and serving — an empty graph. Called once at
-/// startup (`main.rs`), before the full walk.
-pub fn detect(root: &Path) -> Result<()> {
+/// Pick the `StackPack` for `root`, or fail fast if no pack recognises it
+/// — rather than silently building and serving an empty graph. Called once
+/// at startup, from `RepoIndex::build`/`open`. Phase 1 has one pack
+/// (`TypeScriptNextStack`); the walk here becomes a per-pack `recognises`
+/// probe when there's a second one (M14).
+pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
+    let pack = crate::stack::TypeScriptNextStack;
     let has_source = ignore::WalkBuilder::new(root)
         .build()
         .filter_map(|entry| entry.ok())
         .any(|entry| {
-            entry.file_type().is_some_and(|t| t.is_file()) && is_extractable(entry.path())
+            entry.file_type().is_some_and(|t| t.is_file())
+                && StackPack::source_kind(&pack, entry.path()).is_some()
         });
     if !has_source {
         bail!(
@@ -172,7 +177,7 @@ pub fn detect(root: &Path) -> Result<()> {
             root.display()
         );
     }
-    Ok(())
+    Ok(Box::new(pack))
 }
 
 #[cfg(test)]
