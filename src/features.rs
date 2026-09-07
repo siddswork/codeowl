@@ -1,10 +1,12 @@
-//! The feature layer — M5. Entry-point enumeration, the route-literal
-//! resolver, and participant-set assembly, per `ARCHITECTURE.md`'s
-//! "Feature specs". This is the one place CodeOwl looks past declarations
-//! and import statements into arbitrary call expressions — deliberately
-//! narrow (only `fetch(...)` calls, only `/api/...` literals, only a
-//! Next.js path-convention join), not general call-graph analysis, which
-//! stays deferred past Phase 1 (see `ARCHITECTURE.md`'s open question 3).
+//! The feature layer — M5, extended in M10 (`.from("table")`) and M11
+//! (rendered-component `core` expansion). Entry-point enumeration, the
+//! route-literal resolver, and participant-set assembly, per
+//! `ARCHITECTURE.md`'s "Feature specs". This is where CodeOwl looks past
+//! declarations and import statements into call expressions and JSX —
+//! deliberately narrow (`fetch("/api/...")` literals, `.from("table")`
+//! calls, and `<Component/>` tags matched to imports), not general
+//! call-graph analysis, which stays deferred past Phase 1 (see
+//! `ARCHITECTURE.md`'s open question 3).
 //!
 //! **TypeScript + Next.js pack — Phase 2 seam here.** This layer is the
 //! most framework-coupled of all: the `fetch("/api/...")` convention and
@@ -12,7 +14,7 @@
 //! different framework needs a different entry-point + route resolver. See
 //! `ROADMAP.md`'s "Stack modularization".
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
@@ -242,6 +244,90 @@ fn table_name_of(symbol_id: &str) -> &str {
     symbol_id.rsplit("::").next().unwrap_or(symbol_id)
 }
 
+/// One `<Component/>` an entry point (or another core file) renders — a
+/// containment edge the import graph can't distinguish from importing a
+/// utility. `assemble_participants` follows these into `core` so a feature
+/// spec is written from the code that does the work, not the thin server
+/// wrapper that renders it (M11).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct RenderedComponent {
+    pub from_file: String,
+    /// The JSX tag as written — an uppercase-initial identifier
+    /// (`<Foo/>`), matched against `from_file`'s imports at assemble time.
+    pub name: String,
+}
+
+/// Every distinct `<Component/>` rendered anywhere in `source` — an
+/// uppercase-initial JSX tag (lowercase tags are DOM elements). `<Foo.Bar/>`
+/// namespaced tags are skipped for now.
+pub fn extract_rendered_components(source: &str, rel_path: &str) -> Vec<RenderedComponent> {
+    let mut parser = ts_parser(rel_path);
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    walk_for_jsx(tree.root_node(), source, &mut names);
+    names
+        .into_iter()
+        .map(|name| RenderedComponent {
+            from_file: rel_path.to_string(),
+            name,
+        })
+        .collect()
+}
+
+fn walk_for_jsx(node: Node, source: &str, out: &mut BTreeSet<String>) {
+    if matches!(
+        node.kind(),
+        "jsx_opening_element" | "jsx_self_closing_element"
+    ) {
+        let mut cursor = node.walk();
+        if let Some(tag) = node
+            .children(&mut cursor)
+            .find(|c| c.kind() == "identifier")
+        {
+            let name = text(tag, source);
+            if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                out.insert(name.to_string());
+            }
+        }
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        walk_for_jsx(child, source, out);
+    }
+}
+
+/// The repo-relative file a `<Name/>` rendered in `from_file` resolves to,
+/// via the same M2 import edges. `None` when the component's import
+/// resolved outside the repo (an external UI library) or not at all.
+fn resolve_rendered_component(graph: &Graph, from_file: &str, name: &str) -> Option<String> {
+    let target = graph
+        .imports()
+        .iter()
+        .find(|imp| imp.from_file == from_file && imp.imported_name == name)?
+        .target?;
+    let file_id = graph.parent_id(target)?;
+    Some(graph.string_id(file_id).to_string())
+}
+
+/// A rendered component joins a feature's `core` iff it does data work
+/// (contains a resolved `fetch("/api/...")` or `.from("table")`) — i.e.
+/// it's part of the feature's behavior, not just its chrome.
+fn file_does_data_work(graph: &Graph, file: &str) -> bool {
+    graph.route_literals().iter().any(|r| r.from_file == file)
+        || graph.table_refs().iter().any(|r| r.from_file == file)
+}
+
+/// ...or it's co-located with the entry point — in the entry's own
+/// directory or a subdirectory of it (`app/submit/artwork-uploader.tsx`
+/// for `app/submit/page.tsx`). Shared primitives under `components/ui/`
+/// are neither, so they stay one-hop stub dependencies.
+fn is_colocated(component_file: &str, entry_file: &str) -> bool {
+    let entry_dir = entry_file.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+    !entry_dir.is_empty() && component_file.starts_with(&format!("{entry_dir}/"))
+}
+
 /// One framework-enumerated entry point — a page, or an API route no page
 /// reaches via a resolved `fetch()` literal (a webhook, a cron target).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -348,6 +434,21 @@ pub fn assemble_participants(
                 if !seen.contains(&target_file) {
                     queue.push_back(target_file);
                 }
+            }
+        }
+        for rc in graph
+            .rendered_components()
+            .iter()
+            .filter(|r| r.from_file == file)
+        {
+            let Some(component_file) = resolve_rendered_component(graph, &file, &rc.name) else {
+                continue;
+            };
+            if !seen.contains(&component_file)
+                && (is_colocated(&component_file, entry_file)
+                    || file_does_data_work(graph, &component_file))
+            {
+                queue.push_back(component_file);
             }
         }
     }
@@ -593,5 +694,24 @@ mod tests {
             Some("supabase/schema.sql::payments".to_string())
         );
         assert_eq!(resolve_table_ref(&graph, "nonexistent"), None);
+    }
+
+    #[test]
+    fn rendered_components_are_the_uppercase_jsx_tags_deduped() {
+        let src = "export default function Page() {\n  return <div><Header/><Card><Card>x</Card></Card><footer/></div>;\n}\n";
+        let names: Vec<String> = extract_rendered_components(src, "app/page.tsx")
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        assert_eq!(names, vec!["Card".to_string(), "Header".to_string()]);
+    }
+
+    #[test]
+    fn is_colocated_is_the_entry_dir_or_a_subdir() {
+        let entry = "app/submit/page.tsx";
+        assert!(is_colocated("app/submit/uploader.tsx", entry));
+        assert!(is_colocated("app/submit/_parts/field.tsx", entry));
+        assert!(!is_colocated("components/ui/button.tsx", entry));
+        assert!(!is_colocated("app/submitother/x.tsx", entry));
     }
 }

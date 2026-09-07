@@ -1022,6 +1022,7 @@ mod tests {
         let mut file_imports = HashMap::new();
         let mut route_literals = Vec::new();
         let mut table_refs = Vec::new();
+        let mut rendered_components = Vec::new();
         for (rel, content) in files {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -1030,6 +1031,7 @@ mod tests {
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
             route_literals.extend(crate::features::extract_route_literals(content, rel));
             table_refs.extend(crate::features::extract_table_refs(content, rel));
+            rendered_components.extend(crate::features::extract_rendered_components(content, rel));
         }
 
         let mut graph = Graph::build(extractions);
@@ -1038,6 +1040,7 @@ mod tests {
         graph.set_resolved_imports(resolved);
         graph.set_route_literals(route_literals);
         graph.set_table_refs(table_refs);
+        graph.set_rendered_components(rendered_components);
 
         CodeOwlServer::new(dir, graph)
     }

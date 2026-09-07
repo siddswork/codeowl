@@ -104,11 +104,18 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      has a summary-or-stub — read, don't re-derive), and `data` — the SQL
      tables this feature's code queries, each with its real column list
      (`table(col, col, …)`). Name those tables and columns in **## Data
-     touched** rather than guessing from `.select()` calls. This is the
-     one document a BA should be able to read start to finish and
-     understand the capability without opening any source file — write
-     for that reader, with file references as an aside for devs, not the
-     other way around.
+     touched** rather than guessing from `.select()` calls. **If a
+     `core_sources` file renders an imported component that isn't itself
+     in `core_sources` (a `<Form/>` from a shared components directory,
+     say) and that component carries real feature logic — form state, the
+     submit/save handlers, validation — open and read its source before
+     writing the flow.** CodeOwl pulls co-located and data-touching
+     components into `core` automatically, but a component rendered
+     indirectly (via a variable, a `.map()`, `React.createElement`) can
+     still be missed. This is the one document a BA should be able to read
+     start to finish and understand the capability without opening any
+     source file — write for that reader, with file references as an aside
+     for devs, not the other way around.
    - **`kind: "rollup"`** — write one short paragraph of plain prose (no
      headings needed) synthesizing what the directory as a whole is for,
      based on `files` (each entry is that file's own already-generated

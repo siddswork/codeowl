@@ -143,6 +143,12 @@ pub struct Graph {
     /// `SymbolKind::Table` nodes `schema.rs` extracts.
     #[serde(default)]
     table_refs: Vec<crate::features::TableRef>,
+    /// Every `<Component/>` rendered in each file (M11) — the JSX
+    /// containment edges `assemble_participants` follows into a feature's
+    /// `core`, since the import graph can't tell a rendered component from
+    /// an imported utility.
+    #[serde(default)]
+    rendered_components: Vec<crate::features::RenderedComponent>,
 }
 
 impl Graph {
@@ -214,6 +220,7 @@ impl Graph {
             imports: Vec::new(),
             route_literals: Vec::new(),
             table_refs: Vec::new(),
+            rendered_components: Vec::new(),
         }
     }
 
@@ -305,6 +312,17 @@ impl Graph {
 
     pub fn set_table_refs(&mut self, table_refs: Vec<crate::features::TableRef>) {
         self.table_refs = table_refs;
+    }
+
+    pub fn rendered_components(&self) -> &[crate::features::RenderedComponent] {
+        &self.rendered_components
+    }
+
+    pub fn set_rendered_components(
+        &mut self,
+        rendered_components: Vec<crate::features::RenderedComponent>,
+    ) {
+        self.rendered_components = rendered_components;
     }
 
     /// Every file with a `.from("<table>")` call that resolves to `table_id`

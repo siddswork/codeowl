@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::features::{RouteLiteral, TableRef, extract_route_literals};
+use crate::features::{RenderedComponent, RouteLiteral, TableRef, extract_route_literals};
 use crate::graph::{FileExtraction, Graph};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, extract_imports};
@@ -38,6 +38,8 @@ pub struct FileInputs {
     pub route_literals: Vec<RouteLiteral>,
     #[serde(default)]
     pub table_refs: Vec<TableRef>,
+    #[serde(default)]
+    pub rendered_components: Vec<RenderedComponent>,
 }
 
 impl FileInputs {
@@ -54,6 +56,7 @@ impl FileInputs {
                 imports: FileImports::default(),
                 route_literals: Vec::new(),
                 table_refs: Vec::new(),
+                rendered_components: Vec::new(),
             };
         }
         Self {
@@ -62,6 +65,7 @@ impl FileInputs {
             imports: extract_imports(source, rel_path),
             route_literals: extract_route_literals(source, rel_path),
             table_refs: crate::features::extract_table_refs(source, rel_path),
+            rendered_components: crate::features::extract_rendered_components(source, rel_path),
         }
     }
 }
@@ -290,6 +294,12 @@ impl RepoIndex {
             self.files
                 .values()
                 .flat_map(|f| f.table_refs.iter().cloned())
+                .collect(),
+        );
+        graph.set_rendered_components(
+            self.files
+                .values()
+                .flat_map(|f| f.rendered_components.iter().cloned())
                 .collect(),
         );
 
