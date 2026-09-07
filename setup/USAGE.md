@@ -36,19 +36,62 @@ reading source — CodeOwl never blocks it, it just doesn't help as much.
 You can also query it directly in chat: *"ask codeowl for the spec of
 `lib/utils.ts`"*, *"call get_spec_coverage"*.
 
+The *"how does X work?"* questions above are **reading** questions, asked
+of specs that already exist. They are not how you generate — see below.
+
 ---
 
-## Generating and refreshing — you run `/codeowl-generate`
+## How generation works
 
-This is the only command you drive. It walks the
-`get_next_spec_task → submit_spec` loop, writing specs into `docs/specs/`.
+You choose a **scope**, not a list of things to document. CodeOwl
+enumerates the targets inside that scope itself and hands your agent one
+task at a time; the agent reads the source CodeOwl pre-assembled for that
+task, writes the prose, and submits it. The loop repeats until there's
+nothing left uncovered in scope. Your job is to run the command and
+review what the agent writes — you never name a feature or topic in
+prose.
+
+What CodeOwl enumerates:
+
+- **Features** — discovered from Next.js routing, not from you. Every
+  `app/**/page.tsx`, plus every `app/api/**/route.ts` that no
+  `fetch("/api/...")` call reaches (webhooks, cron targets). Each gets a
+  mechanical slug (`app/submit/page.tsx` → `submit`); the human-readable
+  title is written by the agent during generation.
+- **Files** — every extractable file, ordered by how many other files
+  import it (the most-depended-on code gets documented first).
+- **Directories** — a rollup per directory with ≥2 spec-bearing files.
+- **System** — one whole-repo spec, written last, composed from the
+  feature and directory specs.
+
+A CodeOwl "feature" is **route-shaped** — one entry point plus whatever it
+reaches through a `fetch()` literal. A capability you'd name in
+conversation ("artwork evaluation") may span several pages and routes, so
+it can end up as several feature specs, tied together by the directory
+rollups and the system spec.
+
+Scope options:
 
 ```
-/codeowl-generate --all --budget=20     # prioritized batch across the repo
+/codeowl-generate --all --budget=20     # everything, prioritized: system spec,
+                                        # then features, then files by import fan-in
+/codeowl-generate system                # everything, plain bottom-up sweep
 /codeowl-generate lib/utils.ts          # one file and its symbols
-/codeowl-generate app/submit/page.tsx   # a feature entry point + its feature spec
-/codeowl-generate system                # the whole repo, bottom-up
+/codeowl-generate lib                   # one directory: its files, then its rollup
+/codeowl-generate app/submit/page.tsx   # one feature entry point + its feature spec
 ```
+
+Start with `--all --budget=N` and run it again for the next batch; a small
+budget keeps each pass reviewable. `--budget` caps how many specs one
+invocation writes — it is not a token or dollar limit.
+
+---
+
+## When to (re)generate — you run `/codeowl-generate`
+
+CodeOwl never calls an LLM; the command is the client-side half of the
+loop, and your agent writes every word. It writes specs into
+`docs/specs/`.
 
 **When to run it:**
 
