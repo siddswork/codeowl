@@ -21,6 +21,7 @@ use anyhow::{Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
 use crate::hash::hash_text;
 use crate::resolve::ResolvedImport;
 pub use crate::symbol::SymbolId;
@@ -120,9 +121,12 @@ pub struct FileExtraction {
 }
 
 /// Extract `source` (already read from `rel_path`) and hash it in one
-/// step — the shape every multi-file test fixture in this codebase wants,
-/// so it's a real (non-test-only) helper rather than duplicated per call
-/// site. `crate::lang::extract_symbols` picks the extractor by extension.
+/// step — the shape every multi-file test fixture in this codebase wants.
+/// Test-only: it routes through `crate::lang::extract_symbols` (the
+/// TypeScript + SQL dispatch), not the repo's detected `StackPack`, so it
+/// only produces symbols for TS/SQL fixtures. Production extraction goes
+/// through `RepoIndex::build` → `pack.extract_symbols`.
+#[cfg(test)]
 pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
     FileExtraction {
         rel_path: rel_path.to_string(),
@@ -142,7 +146,10 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// History: 1 = M12 (introduced). 2 = M13 (`ExtractedSymbol` / `Symbol`
 /// gain `markers`). 3 = M13 (the three typed edge fields — route literals,
 /// table refs, rendered components — collapse into one generic
-/// `flow_edges`).
+/// `flow_edges`). 4 = M14 (`SymbolKind` reshaped to
+/// `Container | Callable | Value | Schema` + a pack-owned `raw`). 5 = M14
+/// (`Graph` / `RepoIndex` gain `pack_name`, so a cache built by a
+/// different `StackPack` is rejected).
 pub const FORMAT_VERSION: u32 = 5;
 
 /// One "this file reaches that thing" edge the structural import graph
@@ -464,8 +471,10 @@ impl Graph {
 }
 
 /// Build a `Graph` straight from `(rel_path, source)` pairs — the shape
-/// every test fixture in this codebase (and `main.rs`'s repo walk) starts
-/// from. Not `#[cfg(test)]`: `main.rs` uses it too.
+/// every test fixture in this codebase starts from. Test-only, and TS/SQL
+/// only (see `extract_and_hash`); `pub` because tests in other modules
+/// use it.
+#[cfg(test)]
 pub fn build_graph_from_sources(files: &[(&str, &str)]) -> Graph {
     let extractions = files
         .iter()
