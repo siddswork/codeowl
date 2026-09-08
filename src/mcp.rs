@@ -63,6 +63,12 @@ pub struct CoverageItemResponse {
     /// moved, never that the prose was ever meaningful. Empty for a
     /// genuinely clean document.
     pub smells: Vec<String>,
+    /// How many `get_next_spec_task` → `submit_spec` cycles this one
+    /// document still costs — one unit of `--budget=N`. For a file: its
+    /// uncovered/stale/smelly top-level symbols plus 1 for the file's own
+    /// `## Summary` if that needs writing (so a single `pending` row can
+    /// be worth 20+). For a rollup/feature/`system`: 1.
+    pub generations: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -73,6 +79,12 @@ pub struct CoverageResponse {
     /// Count of documents (of any status) carrying at least one quality
     /// smell — not exclusive with `current`.
     pub smelly: usize,
+    /// Total `get_next_spec_task` → `submit_spec` cycles a full
+    /// `/codeowl generate --all` run over this scope would spend — the
+    /// `--budget=N` a complete generation needs. Sums every pending
+    /// document's `generations`, so it counts uncovered symbols, not just
+    /// files (`missing: 15` files can be 240+ generations).
+    pub generations_remaining: usize,
     /// Every document still needing attention — non-current, or
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
     /// "Generation priority" and "Quality smells".
@@ -897,7 +909,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry carries its own `generations` share. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -915,6 +927,7 @@ impl CodeOwlServer {
                 status: i.status,
                 fan_in: i.fan_in,
                 smells: i.smells,
+                generations: i.generations,
             })
             .collect();
         Ok(Json(CoverageResponse {
@@ -922,6 +935,7 @@ impl CodeOwlServer {
             stale: summary.stale,
             missing: summary.missing,
             smelly: summary.smelly,
+            generations_remaining: summary.generations_remaining,
             pending,
         }))
     }
@@ -1224,6 +1238,20 @@ mod tests {
         assert_eq!(coverage.0.missing, 3);
         assert_eq!(coverage.0.current, 0);
         assert_eq!(coverage.0.stale, 0);
+        // Three missing files, one exported symbol each -> 3 symbol + 3
+        // file generations. `generations_remaining` counts cycles, not
+        // documents, and equals the sum of the per-item shares.
+        assert_eq!(coverage.0.generations_remaining, 6);
+        assert_eq!(
+            coverage.0.generations_remaining,
+            coverage
+                .0
+                .pending
+                .iter()
+                .map(|i| i.generations)
+                .sum::<usize>()
+        );
+        assert!(coverage.0.pending.iter().all(|i| i.generations == 2));
         let ids: Vec<&str> = coverage.0.pending.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,

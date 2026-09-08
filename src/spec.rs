@@ -1947,6 +1947,15 @@ pub struct CoverageItem {
     /// *inputs* haven't moved, never that its prose was ever meaningful.
     /// See `prose_smells`/`ARCHITECTURE.md`'s "Quality smells".
     pub smells: Vec<String>,
+    /// How many `get_next_spec_task` → `submit_spec` cycles this document
+    /// still costs — i.e. what one unit of `/codeowl generate --budget=N`
+    /// buys. For a file: its uncovered/stale/smelly top-level symbols,
+    /// plus 1 for the file's own `## Summary` if that needs (re)writing.
+    /// For a rollup/feature/the system spec: 1 while non-current, else 0.
+    /// `0` for a genuinely clean, current document. Summed across the
+    /// report this is the total budget a full run needs (see
+    /// `CoverageSummary::generations_remaining`).
+    pub generations: usize,
 }
 
 /// A deterministic, non-LLM check for prose that looks like a stub or a
@@ -2071,6 +2080,53 @@ fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
 /// so it never contradicts `smells` being reported as a *separate* signal
 /// on a document that's otherwise fully current. See "Quality smells" in
 /// `ARCHITECTURE.md`.
+/// How many generation cycles `next_task` would still yield for `file_id`
+/// if drained — a read-only mirror of `next_task`'s per-symbol decision
+/// (never generated / source moved / smelly → a task; source unchanged +
+/// human-edited → a silent reconcile, no task). No side effects: unlike
+/// `next_task` it doesn't reconcile, it just counts.
+fn file_pending_generations(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<usize> {
+    let file = graph.get_file(file_id).context("not a file id")?;
+    let existing = read_existing(root, &file.id)?;
+    let mut n = 0;
+
+    for sym_id in spec_bearing_children(graph, file_id) {
+        let sym = graph.get_symbol(sym_id).expect("filtered to symbol ids");
+        match existing.as_ref().and_then(|spec| spec.symbol_hash(&sym.id)) {
+            None => n += 1, // never generated
+            Some(hash) => {
+                let source_changed = !symbol_changes(graph, root, file_id, sym, hash).is_empty();
+                let prose = existing
+                    .as_ref()
+                    .and_then(|spec| spec.section(&sym.id).cloned())
+                    .unwrap_or_default();
+                let smelly = !prose_smells(&prose.summary).is_empty()
+                    || !prose_smells(&prose.behavior).is_empty();
+                // source unchanged + human-edited reconciles silently
+                // (no task); everything else offered is a real generation.
+                if source_changed || smelly {
+                    n += 1;
+                }
+            }
+        }
+    }
+
+    let file_needs_writing = match existing
+        .as_ref()
+        .filter(|spec| !spec.file.spec_hash.is_empty())
+    {
+        None => true, // the file's own `## Summary` was never generated
+        Some(spec) => {
+            !file_changes(graph, file_id, &spec.file).is_empty()
+                || !prose_smells(&spec.file_summary).is_empty()
+        }
+    };
+    if file_needs_writing {
+        n += 1;
+    }
+    Ok(n)
+}
+
 fn file_status(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<(String, Vec<String>)> {
     let file = graph.get_file(file_id).context("not a file id")?;
     let Some(spec) = read_file_spec(root, &file.id)? else {
@@ -2184,6 +2240,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
             status,
             fan_in: file_fan_in(graph, id),
             smells,
+            generations: file_pending_generations(graph, root, id)?,
             id: path,
             kind: "file".to_string(),
         });
@@ -2195,6 +2252,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
         }
         let (status, smells) = rollup_status(graph, root, &dir)?;
         items.push(CoverageItem {
+            generations: usize::from(status != "current"),
             status,
             fan_in: 0,
             smells,
@@ -2207,6 +2265,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
         for entry in enumerate_entry_points(graph) {
             let (status, smells) = feature_status(graph, root, &entry)?;
             items.push(CoverageItem {
+                generations: usize::from(status != "current"),
                 status,
                 fan_in: 0,
                 smells,
@@ -2216,6 +2275,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
         }
         let (status, smells) = system_status(graph, root)?;
         items.push(CoverageItem {
+            generations: usize::from(status != "current"),
             status,
             fan_in: 0,
             smells,
@@ -2237,6 +2297,12 @@ pub struct CoverageSummary {
     /// hash-current and still carry a smell, which is exactly the case
     /// this field exists to surface (see `CoverageItem.smells`).
     pub smelly: usize,
+    /// Total `get_next_spec_task` → `submit_spec` cycles a full
+    /// `/codeowl generate --all` run against this scope would spend — the
+    /// sum of every item's [`CoverageItem::generations`]. This is the
+    /// `--budget=N` a complete generation needs (a file with 20 uncovered
+    /// symbols is 21, not 1).
+    pub generations_remaining: usize,
 }
 
 pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
@@ -2251,6 +2317,7 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
         if !item.smells.is_empty() {
             summary.smelly += 1;
         }
+        summary.generations_remaining += item.generations;
     }
     summary
 }
@@ -3435,7 +3502,67 @@ impl Counter {\n\
         assert_eq!(summary.current, 8);
         assert_eq!(summary.stale, 0);
         assert_eq!(summary.missing, 0);
+        assert_eq!(summary.generations_remaining, 0);
         assert!(prioritize(items, &graph).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coverage_counts_generations_not_just_documents() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-gens", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = "export function one(): void {}\n\
+                   export function two(): void {}\n\
+                   export function three(): void {}\n";
+        std::fs::write(dir.join("a.ts"), src).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", src)]);
+
+        // Nothing generated: one `pending` document (a.ts), but four
+        // generations — three symbols + the file's own summary.
+        let a = |items: &[CoverageItem]| items.iter().find(|i| i.id == "a.ts").unwrap().generations;
+        assert_eq!(a(&coverage(&graph, &dir, None).unwrap()), 4);
+
+        // Each symbol spec drops the count by one.
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nDoes the first job.\n### Behavior\nRuns with no side effects.\n",
+        )
+        .unwrap();
+        assert_eq!(a(&coverage(&graph, &dir, None).unwrap()), 3);
+
+        for id in ["a.ts::two", "a.ts::three"] {
+            submit(
+                &graph,
+                &dir,
+                id,
+                "### Summary\nDoes a second deliberate thing.\n### Behavior\nRuns with no side effects.\n",
+            )
+            .unwrap();
+        }
+        // Symbols done, only the file summary left.
+        assert_eq!(a(&coverage(&graph, &dir, None).unwrap()), 1);
+
+        submit(
+            &graph,
+            &dir,
+            "a.ts",
+            "Three small deliberate no-op helpers.",
+        )
+        .unwrap();
+        let items = coverage(&graph, &dir, None).unwrap();
+        assert_eq!(a(&items), 0);
+        // The system spec is still missing, so the repo-wide total is 1,
+        // and it equals the sum of every item's own share.
+        let summary = summarize(&items);
+        assert_eq!(summary.generations_remaining, 1);
+        assert_eq!(
+            summary.generations_remaining,
+            items.iter().map(|i| i.generations).sum::<usize>()
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3702,6 +3829,7 @@ impl Counter {\n\
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         let items = vec![
@@ -3737,6 +3865,7 @@ impl Counter {\n\
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         let items = vec![
@@ -3772,6 +3901,7 @@ impl Counter {\n\
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         // 12 files, fan-in 20 down to 9 — all well over SHARED_CODE_FAN_IN.
@@ -3803,6 +3933,7 @@ impl Counter {\n\
                 status: status.into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         // The repo's 8 highest-fan-in files are already current. What's
@@ -3836,6 +3967,7 @@ impl Counter {\n\
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         let items = vec![
@@ -3847,6 +3979,7 @@ impl Counter {\n\
                 status: "missing".into(),
                 fan_in: 0,
                 smells: Vec::new(),
+                generations: 0,
             },
         ];
         let graph = crate::graph::build_graph_from_sources(&[]);
