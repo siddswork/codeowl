@@ -5,9 +5,11 @@ Setup (build, `.mcp.json`, installing `/codeowl-generate`) is in
 
 CodeOwl gives you two things about the repo it serves:
 
-1. **A structural map** — every symbol, file, import edge, route literal
-   (`fetch("/api/...")`), and SQL table, kept in step with your working
-   tree as you edit (re-parsed within ~1s, no restart).
+1. **A structural map** — every symbol, file, and import edge, kept in
+   step with your working tree as you edit (re-parsed within ~1s, no
+   restart). Plus, for the stacks that have them, string-carried edges the
+   import graph can't see (a Next.js `fetch("/api/...")`, a Supabase
+   `.from("table")`) and SQL `CREATE TABLE` nodes.
 2. **Prose specs** — LLM-authored descriptions of how the code works, at
    symbol / file / feature / directory / system level, committed to
    `docs/specs/` and content-hashed so they show as `stale` when the code
@@ -15,6 +17,12 @@ CodeOwl gives you two things about the repo it serves:
 
 CodeOwl never calls an LLM. It assembles context and stores results; your
 agent writes the spec prose.
+
+**One stack per repo, auto-detected.** The extractor picks a `StackPack`
+from what it walks — TypeScript + Next.js + SQL, or Rust. A CLI or library
+stack (no routes, no framework entry points) gets symbols, file specs, and
+rollups but no feature layer; its system spec leads with a `## Key flows`
+section instead.
 
 ---
 
@@ -33,11 +41,43 @@ If a spec exists and is current, the agent gets an accurate answer without
 opening a file. If it's `missing` or `stale`, the agent falls back to
 reading source — CodeOwl never blocks it, it just doesn't help as much.
 
-You can also query it directly in chat: *"ask codeowl for the spec of
-`lib/utils.ts`"*, *"call get_spec_coverage"*.
+You can also **drive the tools yourself in chat** — this is a normal
+workflow, not just something the agent does invisibly: *"ask codeowl who
+calls `SymbolKind`"*, *"get_callees for `src/spec.rs`"*, *"call
+get_spec_coverage"*, *"search_code for `TODO`"*.
 
 The *"how does X work?"* questions above are **reading** questions, asked
 of specs that already exist. They are not how you generate — see below.
+
+### How the structural tools actually behave
+
+The four read tools are a thin layer over the resolved graph — precise,
+but Phase-1 literal. Worth knowing before you rely on an answer:
+
+- **`get_symbol(id)`** — one symbol's record: signature, line range,
+  docstring, `kind`/`raw`, and (for a type/class) every method it
+  contains. The fast "where is this, what's its shape" lookup.
+- **`get_callers(id)`** — the files that reference `id` through a
+  **resolved `import` / `use` edge**, plus (for a SQL table) the files
+  with a `.from("table")` that resolves to it. It is *not* a call graph.
+  Two consequences: query the **type or the free function**, not a method
+  (`Graph`, not `Graph::build` — a method is never imported by name, so
+  it always comes back empty); and a name that's shadowed by a local of
+  the same name is still counted (whole-word match, not scope analysis).
+- **`get_callees(id)`** — what the **file containing `id`** imports.
+  File-level, not per-symbol: naming any symbol in `spec.rs` returns
+  `spec.rs`'s whole import list. `resolved_id` is set for intra-repo
+  targets, null for external packages.
+- **`search_code(query)`** — plain regex over every tracked file
+  (`.gitignore`-respecting, capped, no index). The same as running `rg`
+  yourself.
+
+The tools give you the **edges** cheaply and reliably — things grep can't
+see (a resolved re-export, an import vs. a same-named local) or can't
+distinguish. The **narrative** ("this enum is load-bearing, these files
+move together") is always the agent's synthesis on top; where a current
+spec exists, `get_spec` on each result feeds that synthesis a paragraph
+instead of a file.
 
 ---
 
@@ -58,14 +98,16 @@ What CodeOwl enumerates:
 - **Files** — every extractable file, once its symbols are done.
 - **Directories** — a rollup per directory with ≥2 spec-bearing files,
   once its files are done.
-- **Features** — discovered from Next.js routing, not from you. Every
-  `app/**/page.tsx`, plus every `app/api/**/route.ts` that no
-  `fetch("/api/...")` call reaches (webhooks, cron targets). Each gets a
-  mechanical slug (`app/submit/page.tsx` → `submit`); the human-readable
-  title is written by the agent. A feature is written once its entry
-  point's file spec is done.
+- **Features** — discovered from your stack's entry-point convention, not
+  from you. For the Next.js pack: every `app/**/page.tsx`, plus every
+  `app/api/**/route.ts` that no `fetch("/api/...")` call reaches (webhooks,
+  cron targets). Each gets a mechanical slug (`app/submit/page.tsx` →
+  `submit`); the human-readable title is written by the agent. A feature
+  is written once its entry point's file spec is done. **A CLI/library
+  stack has no feature layer** — this list is empty and that's expected.
 - **System** — one whole-repo spec, written last, composed from every
-  feature and directory spec.
+  feature and directory spec (or, with no feature layer, from the
+  directory rollups plus a `## Key flows` section the agent writes).
 
 A CodeOwl "feature" is **route-shaped** — one entry point plus whatever it
 reaches through a `fetch()` literal. A capability you'd name in
@@ -116,6 +158,12 @@ exceed the budget — even partway through a file — and reports how many
 documents are still `missing`. Without `--budget`, it runs until the
 whole scope is covered.
 
+`get_spec_coverage` reports **`generations_remaining`** — the exact
+`--budget=N` a complete run over that scope would need, counting uncovered
+symbols, not just documents (so "15 missing files" might be 240
+generations). Each `pending` entry carries its own `generations` share, so
+you can see which files are the expensive ones before you start.
+
 Start with `--all --budget=N` (N≈15 on a fresh repo), read what the agent
 wrote, commit, then run it again for the next batch — a small budget is
 what keeps each pass reviewable.
@@ -148,8 +196,15 @@ and `smelly` at once; both are reasons to regenerate.
 
 ## What Phase 1 does *not* do
 
-- **TypeScript / TSX only.** Other languages get no symbols. The feature
-  layer assumes Next.js App Router (`app/**/page.tsx`, `app/**/route.ts`).
+- **Two stacks so far** — TypeScript + Next.js + SQL, or Rust. One per
+  repo, auto-detected; a repo that looks like both is rejected rather than
+  guessed. Other languages get no symbols. Java (plain, then Quarkus) is
+  the next stack in.
+- **The feature layer is stack-specific.** For the Next.js pack it assumes
+  App Router (`app/**/page.tsx`, `app/**/route.ts`). The Rust pack has no
+  feature layer at all.
+- **`get_callers` is import-edge, not call-graph** — see "How the
+  structural tools actually behave" above.
 - **`search_code` is plain regex** — no semantic / embedding search.
 - **SQL is `CREATE TABLE` only** — no views, column types, or foreign-key
   edges (a `.from("view_name")` won't resolve).
