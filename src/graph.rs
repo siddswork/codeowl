@@ -149,8 +149,10 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// `flow_edges`). 4 = M14 (`SymbolKind` reshaped to
 /// `Container | Callable | Value | Schema` + a pack-owned `raw`). 5 = M14
 /// (`Graph` / `RepoIndex` gain `pack_name`, so a cache built by a
-/// different `StackPack` is rejected).
-pub const FORMAT_VERSION: u32 = 5;
+/// different `StackPack` is rejected). 6 = M15 (the Rust pack folds an
+/// inherent `impl Foo` block into the `Foo` symbol — symbol ids and the
+/// containment tree change for every Rust type with methods).
+pub const FORMAT_VERSION: u32 = 6;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
