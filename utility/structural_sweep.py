@@ -137,6 +137,19 @@ def canon(x):
     return json.dumps(x, sort_keys=True)
 
 
+def as_list(x):
+    """`get_callers`/`get_callees`/`search_code` returned a bare JSON array
+    before M15 and a one-key object (`{"callers": [...]}` etc.) after --
+    MCP requires `structuredContent` to be an object. Unwrap either form
+    to the underlying list so the sweep compares the data, not the
+    envelope."""
+    if isinstance(x, dict):
+        for k in ("callers", "callees", "matches"):
+            if k in x:
+                return x[k]
+    return x
+
+
 def normalize_coverage(cov):
     """Drop fields that are *additive* to `get_spec_coverage` -- present in
     a newer binary, absent in an older one, and invisible to a caller that
@@ -277,13 +290,14 @@ def sweep(base_bin, head_bin, repo):
 
     call_diff = [lbl for lbl in res_b
                  if lbl.startswith("callers:")
-                 and sorted(map(canon, res_b[lbl])) != sorted(map(canon, res_h[lbl]))]
+                 and sorted(map(canon, as_list(res_b[lbl])))
+                 != sorted(map(canon, as_list(res_h[lbl])))]
     record(f"get_callers ({n_tables} tables)", not call_diff,
            ", ".join(t[8:] for t in call_diff))
 
     ee_diff = [lbl for lbl in res_b
                if lbl.startswith("callees:")
-               and canon(res_b[lbl]) != canon(res_h[lbl])]
+               and canon(as_list(res_b[lbl])) != canon(as_list(res_h[lbl]))]
     record("get_callees (sample)", not ee_diff, ", ".join(t[8:] for t in ee_diff))
 
     sym_diff = []

@@ -97,6 +97,14 @@ pub struct CallerInfo {
     pub imported_name: String,
 }
 
+/// `get_callers` result. Wrapped in a struct rather than returned as a
+/// bare array: MCP requires a tool's `structuredContent` to be a JSON
+/// object, and a spec-compliant client rejects a top-level array.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CallersResponse {
+    pub callers: Vec<CallerInfo>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct CalleeInfo {
     pub specifier: String,
@@ -106,6 +114,18 @@ pub struct CalleeInfo {
     /// M1 doesn't extract as symbols yet (a `type`/`interface`, a
     /// destructured const) — see M2's real-repo validation notes.
     pub resolved_id: Option<String>,
+}
+
+/// `get_callees` result — wrapped for the same reason as [`CallersResponse`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CalleesResponse {
+    pub callees: Vec<CalleeInfo>,
+}
+
+/// `search_code` result — wrapped for the same reason as [`CallersResponse`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SearchResponse {
+    pub matches: Vec<SearchMatch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -490,7 +510,7 @@ impl CodeOwlServer {
     async fn get_callers(
         &self,
         Parameters(req): Parameters<IdRequest>,
-    ) -> Result<Json<Vec<CallerInfo>>, String> {
+    ) -> Result<Json<CallersResponse>, String> {
         let graph = self.graph.load_full();
         let id = graph
             .find(&req.id)
@@ -508,7 +528,7 @@ impl CodeOwlServer {
                     imported_name: table,
                 })
                 .collect();
-            return Ok(Json(callers));
+            return Ok(Json(CallersResponse { callers }));
         }
 
         let callers = graph
@@ -520,7 +540,7 @@ impl CodeOwlServer {
                 imported_name: imp.imported_name.clone(),
             })
             .collect();
-        Ok(Json(callers))
+        Ok(Json(CallersResponse { callers }))
     }
 
     #[tool(
@@ -529,7 +549,7 @@ impl CodeOwlServer {
     async fn get_callees(
         &self,
         Parameters(req): Parameters<IdRequest>,
-    ) -> Result<Json<Vec<CalleeInfo>>, String> {
+    ) -> Result<Json<CalleesResponse>, String> {
         let graph = self.graph.load_full();
         let id = graph
             .find(&req.id)
@@ -549,7 +569,7 @@ impl CodeOwlServer {
                 resolved_id: imp.target.map(|t| graph.string_id(t).to_string()),
             })
             .collect();
-        Ok(Json(callees))
+        Ok(Json(CalleesResponse { callees }))
     }
 
     #[tool(
@@ -902,9 +922,9 @@ impl CodeOwlServer {
     async fn search(
         &self,
         Parameters(req): Parameters<SearchRequest>,
-    ) -> Result<Json<Vec<SearchMatch>>, String> {
+    ) -> Result<Json<SearchResponse>, String> {
         crate::search::search_code(&self.root, &req.query)
-            .map(Json)
+            .map(|matches| Json(SearchResponse { matches }))
             .map_err(|e| e.to_string())
     }
 
@@ -1095,7 +1115,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            result.0,
+            result.0.callers,
             vec![CallerInfo {
                 from_file: "a.ts".to_string(),
                 imported_name: "helper".to_string(),
@@ -1121,9 +1141,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.0.len(), 2);
+        assert_eq!(result.0.callees.len(), 2);
         let helper = result
             .0
+            .callees
             .iter()
             .find(|c| c.imported_name == "helper")
             .unwrap();
@@ -1131,7 +1152,12 @@ mod tests {
             helper.resolved_id.is_some(),
             "internal import should resolve"
         );
-        let external = result.0.iter().find(|c| c.imported_name == "z").unwrap();
+        let external = result
+            .0
+            .callees
+            .iter()
+            .find(|c| c.imported_name == "z")
+            .unwrap();
         assert_eq!(
             external.resolved_id, None,
             "external package should not resolve"
@@ -2282,7 +2308,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].file, "a.ts");
+        assert_eq!(result.0.matches.len(), 1);
+        assert_eq!(result.0.matches[0].file, "a.ts");
     }
 }
