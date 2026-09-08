@@ -417,15 +417,19 @@ impl CodeOwlServer {
                     .get_file(file_id)
                     .ok_or_else(|| Self::not_found(&id))?;
                 let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
-                let dependencies = graph
-                    .imports()
+                // Scoped to what this symbol's own text names, and with
+                // externals folded to one line — the same treatment the
+                // rendered `### Depends on` section gets, so a Rust symbol
+                // isn't handed a wall of `Vec`/`Result`/`BTreeMap`.
+                let scoped = crate::spec::scoped_symbol_deps(graph, &file.id, source.as_str());
+                let mut dependencies: Vec<String> = scoped
+                    .resolved
                     .iter()
-                    .filter(|imp| imp.from_file == file.id)
-                    .map(|imp| match imp.target {
-                        Some(t) => format!("{} ({})", graph.string_id(t), imp.specifier),
-                        None => format!("{} ({}, unresolved)", imp.imported_name, imp.specifier),
-                    })
+                    .map(|(target, specifier)| format!("{target} ({specifier})"))
                     .collect();
+                if !scoped.externals.is_empty() {
+                    dependencies.push(format!("externals: {}", scoped.externals.join(", ")));
+                }
                 SpecTaskResponse::Symbol {
                     id,
                     signature,

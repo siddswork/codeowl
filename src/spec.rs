@@ -265,6 +265,14 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
 /// symbol's own source span instead — a heuristic, not semantic analysis,
 /// but far closer to the truth than file-wide attribution, and needs no
 /// new resolution machinery.
+///
+/// Resolved intra-repo dependencies get one line each; unresolved
+/// imports (a stdlib type, a third-party crate, an npm package) are
+/// collapsed into a single trailing `externals: …` line by package name.
+/// Rust code names `Vec` / `BTreeMap` / `Result` constantly and every one
+/// is an unresolved external, so a line apiece would bury the signal
+/// that this section exists for — what *else in this repo* the symbol
+/// leans on (M14).
 fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> Vec<String> {
     let Node::File(file) = graph.get(file_id) else {
         return Vec::new();
@@ -272,20 +280,63 @@ fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol)
     let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
         return Vec::new();
     };
-    graph
-        .imports()
+    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text);
+
+    let mut lines: Vec<String> = scoped
+        .resolved
         .iter()
-        .filter(|imp| {
-            imp.from_file == file.id && contains_identifier(&symbol_text, &imp.imported_name)
-        })
-        .map(|imp| match imp.target {
-            Some(target) => format!("`{}` — {}", graph.string_id(target), imp.specifier),
-            None => format!(
-                "{} — {} (external or unresolved)",
-                imp.imported_name, imp.specifier
-            ),
-        })
-        .collect()
+        .map(|(target, specifier)| format!("`{target}` — {specifier}"))
+        .collect();
+    if !scoped.externals.is_empty() {
+        lines.push(format!("externals: {}", scoped.externals.join(", ")));
+    }
+    lines
+}
+
+/// One symbol's imports, scoped by whole-word text search over its own
+/// source span (see `dependency_lines`): the resolved intra-repo ones as
+/// `(target string-id, specifier)` pairs, and the unresolved ones folded
+/// to a sorted, de-duplicated list of package names (`std::collections`
+/// -> `std`, `next/navigation` -> `next`; a relative specifier that
+/// resolved to nothing is kept verbatim — a broken import is a real
+/// signal). Shared by the rendered `### Depends on` section and the
+/// generation-task context `mcp.rs` hands the agent.
+pub(crate) struct ScopedDeps {
+    pub resolved: Vec<(String, String)>,
+    pub externals: Vec<String>,
+}
+
+pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &str) -> ScopedDeps {
+    let mut resolved = Vec::new();
+    let mut externals: Vec<String> = Vec::new();
+    for imp in graph.imports().iter().filter(|imp| {
+        imp.from_file == from_file && contains_identifier(symbol_text, &imp.imported_name)
+    }) {
+        match imp.target {
+            Some(target) => {
+                resolved.push((graph.string_id(target).to_string(), imp.specifier.clone()));
+            }
+            None => {
+                let pkg = if imp.specifier.starts_with('.') {
+                    imp.specifier.clone()
+                } else {
+                    imp.specifier
+                        .split(['/', ':'])
+                        .next()
+                        .unwrap_or(&imp.specifier)
+                        .to_string()
+                };
+                if !externals.contains(&pkg) {
+                    externals.push(pkg);
+                }
+            }
+        }
+    }
+    externals.sort();
+    ScopedDeps {
+        resolved,
+        externals,
+    }
 }
 
 /// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
@@ -1923,13 +1974,21 @@ pub fn file_spec_smells(
         smells.extend(prose_smells(&prose.behavior));
     }
     if spec.symbols.len() >= 2 {
+        // Compare only the *resolved* intra-repo lines — a shared
+        // `externals: …` line (every symbol in a small module returning
+        // `anyhow::Result`, say) is normal, not a scoping failure.
         let dep_lists: Vec<Vec<String>> = spec
             .symbols
             .iter()
             .filter_map(|(id, _)| {
                 let sym_id = graph.find(id)?;
                 let sym = graph.get_symbol(sym_id)?;
-                Some(dependency_lines(graph, root, file_id, sym))
+                Some(
+                    dependency_lines(graph, root, file_id, sym)
+                        .into_iter()
+                        .filter(|line| !line.starts_with("externals:"))
+                        .collect(),
+                )
             })
             .collect();
         if dep_lists.len() == spec.symbols.len()
@@ -2436,6 +2495,66 @@ mod tests {
 
         let neither_deps = dependency_lines(&graph, &dir, file_id, uses_neither);
         assert!(neither_deps.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn depends_on_collapses_unresolved_externals_into_one_line() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-externals",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two unresolved externals (`react`, `next/navigation`) plus one
+        // resolved sibling — the external ones must fold into a single
+        // `externals: next, react` line, not a line each.
+        let a = "import { useState } from 'react';\nimport { redirect } from 'next/navigation';\nimport { helper } from './helper';\n\nexport function widget() {\n  useState();\n  redirect('/x');\n  return helper();\n}\n";
+        std::fs::write(dir.join("a.ts"), a).unwrap();
+        std::fs::write(
+            dir.join("helper.ts"),
+            "export function helper(): number { return 1; }\n",
+        )
+        .unwrap();
+
+        let mut graph = Graph::build(vec![
+            crate::graph::extract_and_hash("a.ts", a),
+            crate::graph::extract_and_hash(
+                "helper.ts",
+                "export function helper(): number { return 1; }\n",
+            ),
+        ]);
+        graph.set_resolved_imports(
+            crate::imports::extract_imports(a, "a.ts")
+                .imports
+                .iter()
+                .map(|imp| crate::resolve::ResolvedImport {
+                    from_file: "a.ts".to_string(),
+                    specifier: imp.specifier.clone(),
+                    imported_name: imp.imported_name.clone(),
+                    target: graph.find(&format!(
+                        "{}.ts::{}",
+                        imp.specifier.trim_start_matches("./"),
+                        imp.imported_name
+                    )),
+                })
+                .collect(),
+        );
+
+        let file_id = graph.find("a.ts").unwrap();
+        let widget = graph
+            .get_symbol(graph.find("a.ts::widget").unwrap())
+            .unwrap();
+        let deps = dependency_lines(&graph, &dir, file_id, widget);
+
+        assert_eq!(
+            deps.len(),
+            2,
+            "one resolved line + one externals line, got {deps:?}"
+        );
+        assert!(deps[0].contains("helper.ts::helper"));
+        assert_eq!(deps[1], "externals: next, react");
 
         std::fs::remove_dir_all(&dir).ok();
     }
