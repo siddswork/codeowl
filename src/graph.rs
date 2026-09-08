@@ -21,6 +21,7 @@ use anyhow::{Context, Result};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
 use crate::hash::hash_text;
 use crate::resolve::ResolvedImport;
 pub use crate::symbol::SymbolId;
@@ -38,6 +39,8 @@ use crate::symbol::{ExtractedSymbol, Symbol, SymbolKind};
 pub struct SymbolView {
     pub id: String,
     pub kind: SymbolKind,
+    #[serde(default)]
+    pub raw: String,
     pub file: String,
     pub lines: [usize; 2],
     pub signature: String,
@@ -57,6 +60,7 @@ impl SymbolView {
         Some(Self {
             id: s.id.clone(),
             kind: s.kind,
+            raw: s.raw.clone(),
             file: s.file.clone(),
             lines: s.lines,
             signature: s.signature.clone(),
@@ -117,9 +121,12 @@ pub struct FileExtraction {
 }
 
 /// Extract `source` (already read from `rel_path`) and hash it in one
-/// step — the shape every multi-file test fixture in this codebase wants,
-/// so it's a real (non-test-only) helper rather than duplicated per call
-/// site. `crate::lang::extract_symbols` picks the extractor by extension.
+/// step — the shape every multi-file test fixture in this codebase wants.
+/// Test-only: it routes through `crate::lang::extract_symbols` (the
+/// TypeScript + SQL dispatch), not the repo's detected `StackPack`, so it
+/// only produces symbols for TS/SQL fixtures. Production extraction goes
+/// through `RepoIndex::build` → `pack.extract_symbols`.
+#[cfg(test)]
 pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
     FileExtraction {
         rel_path: rel_path.to_string(),
@@ -139,8 +146,11 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// History: 1 = M12 (introduced). 2 = M13 (`ExtractedSymbol` / `Symbol`
 /// gain `markers`). 3 = M13 (the three typed edge fields — route literals,
 /// table refs, rendered components — collapse into one generic
-/// `flow_edges`).
-pub const FORMAT_VERSION: u32 = 3;
+/// `flow_edges`). 4 = M14 (`SymbolKind` reshaped to
+/// `Container | Callable | Value | Schema` + a pack-owned `raw`). 5 = M14
+/// (`Graph` / `RepoIndex` gain `pack_name`, so a cache built by a
+/// different `StackPack` is rejected).
+pub const FORMAT_VERSION: u32 = 5;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
@@ -189,6 +199,15 @@ pub struct Graph {
     /// `load` rejects it.
     #[serde(default)]
     format_version: u32,
+    /// The `StackPack::name()` of the pack that built this graph
+    /// (`"typescript-next"` / `"rust"`). Lets a pure-read caller
+    /// (`spec.rs`, `mcp.rs`) recover the pack — for `classify` and the
+    /// feature model — without threading it down, and lets `RepoIndex`
+    /// reject a cache built by a different pack (M13 design decision 7).
+    /// Empty on a graph built by a test helper or a pre-M14 cache → the
+    /// pack lookup falls back to the TypeScript pack.
+    #[serde(default)]
+    pack_name: String,
     nodes: Vec<Node>,
     /// String id → arena slot. A `BTreeMap`, not a `HashMap`: it's
     /// serialized into `.codeowl/graph`, and a `HashMap` would write its
@@ -258,6 +277,7 @@ impl Graph {
                 symbol_nodes.push(Node::Symbol(Symbol {
                     id: sym.id,
                     kind: sym.kind,
+                    raw: sym.raw,
                     file: sym.file,
                     lines: sym.lines,
                     signature: sym.signature,
@@ -284,12 +304,23 @@ impl Graph {
 
         Self {
             format_version: FORMAT_VERSION,
+            pack_name: String::new(),
             nodes,
             by_id,
             imports: Vec::new(),
             flow_edges: Vec::new(),
             resolved_default_imports: Vec::new(),
         }
+    }
+
+    /// Stamp the pack that built this graph (`RepoIndex::rebuild`). Empty
+    /// until set — [`crate::stack::for_name`] treats empty as the TS pack.
+    pub fn set_pack_name(&mut self, name: &str) {
+        self.pack_name = name.to_string();
+    }
+
+    pub fn pack_name(&self) -> &str {
+        &self.pack_name
     }
 
     pub fn get(&self, id: SymbolId) -> &Node {
@@ -386,7 +417,7 @@ impl Graph {
     }
 
     /// Every `(file, table-name)` for a `.from("<table>")` flow edge that
-    /// resolved to `table_id` (a `SymbolKind::Table` node) — the
+    /// resolved to `table_id` (a `SymbolKind::Schema` node) — the
     /// schema-side answer to "what app code touches this table", surfaced
     /// through `get_callers` (M10).
     pub fn table_callers(&self, table_id: &str) -> Vec<(String, String)> {
@@ -440,8 +471,10 @@ impl Graph {
 }
 
 /// Build a `Graph` straight from `(rel_path, source)` pairs — the shape
-/// every test fixture in this codebase (and `main.rs`'s repo walk) starts
-/// from. Not `#[cfg(test)]`: `main.rs` uses it too.
+/// every test fixture in this codebase starts from. Test-only, and TS/SQL
+/// only (see `extract_and_hash`); `pub` because tests in other modules
+/// use it.
+#[cfg(test)]
 pub fn build_graph_from_sources(files: &[(&str, &str)]) -> Graph {
     let extractions = files
         .iter()
@@ -519,7 +552,8 @@ mod tests {
         // `@Path`/`@Entity`) will rely on — extraction -> arena -> cache.
         let sym = ExtractedSymbol {
             id: "a.ts::handler".into(),
-            kind: SymbolKind::Function,
+            kind: SymbolKind::Callable,
+            raw: "function".into(),
             file: "a.ts".into(),
             lines: [1, 1],
             signature: "function handler()".into(),

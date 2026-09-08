@@ -417,15 +417,19 @@ impl CodeOwlServer {
                     .get_file(file_id)
                     .ok_or_else(|| Self::not_found(&id))?;
                 let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
-                let dependencies = graph
-                    .imports()
+                // Scoped to what this symbol's own text names, and with
+                // externals folded to one line — the same treatment the
+                // rendered `### Depends on` section gets, so a Rust symbol
+                // isn't handed a wall of `Vec`/`Result`/`BTreeMap`.
+                let scoped = crate::spec::scoped_symbol_deps(graph, &file.id, source.as_str());
+                let mut dependencies: Vec<String> = scoped
+                    .resolved
                     .iter()
-                    .filter(|imp| imp.from_file == file.id)
-                    .map(|imp| match imp.target {
-                        Some(t) => format!("{} ({})", graph.string_id(t), imp.specifier),
-                        None => format!("{} ({}, unresolved)", imp.imported_name, imp.specifier),
-                    })
+                    .map(|(target, specifier)| format!("{target} ({specifier})"))
                     .collect();
+                if !scoped.externals.is_empty() {
+                    dependencies.push(format!("externals: {}", scoped.externals.join(", ")));
+                }
                 SpecTaskResponse::Symbol {
                     id,
                     signature,
@@ -495,7 +499,7 @@ impl CodeOwlServer {
 
         if graph
             .get_symbol(id)
-            .is_some_and(|s| s.kind == SymbolKind::Table)
+            .is_some_and(|s| s.kind == SymbolKind::Schema)
         {
             let callers = graph
                 .table_callers(&req.id)
@@ -633,16 +637,14 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let entry_points = crate::features::enumerate_entry_points(&graph);
+            let fm = crate::features::feature_model_for(&graph)
+                .ok_or_else(|| Self::not_found(&req.id))?;
+            let entry_points = fm.enumerate_entry_points(&graph);
             let entry = entry_points
                 .iter()
                 .find(|e| e.id == slug)
                 .ok_or_else(|| Self::not_found(&req.id))?;
-            let participants = crate::features::assemble_participants(
-                &graph,
-                crate::features::default_feature_model(),
-                entry,
-            );
+            let participants = crate::features::assemble_participants(&graph, fm, entry);
             let current = crate::spec::current_participant_hashes(&graph, &participants)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.participants);
@@ -918,7 +920,7 @@ impl CodeOwlServer {
         let items = crate::spec::coverage(&graph, &self.root, req.scope.as_deref())
             .map_err(|e| e.to_string())?;
         let summary = crate::spec::summarize(&items);
-        let pending = crate::spec::prioritize(items)
+        let pending = crate::spec::prioritize(items, &graph)
             .into_iter()
             .map(|i| CoverageItemResponse {
                 id: i.id,

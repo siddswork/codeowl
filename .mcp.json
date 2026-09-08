@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "codeowl": {
+      "command": "./target/debug/codeowl",
+      "args": ["serve", "."]
+    }
+  }
+}

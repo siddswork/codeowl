@@ -7,6 +7,7 @@ pub mod index;
 pub mod lang;
 pub mod mcp;
 pub mod resolve;
+pub mod rust;
 pub mod schema;
 pub mod search;
 pub mod spec;

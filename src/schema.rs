@@ -30,8 +30,8 @@ struct Table {
 }
 
 /// Turn a `.sql` file's `CREATE TABLE`s into arena-ready symbols: one
-/// `SymbolKind::Table` per table, id `<rel_path>::<table>`, signature the
-/// table name plus its column list.
+/// `SymbolKind::Schema` (raw `"table"`) per table, id `<rel_path>::<table>`,
+/// signature the table name plus its column list.
 pub fn extract_tables(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
     let mut tables = parse_tables(source);
     backstop_from_headers(source, &mut tables);
@@ -48,7 +48,8 @@ pub fn extract_tables(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
                 .join("\n");
             ExtractedSymbol {
                 id: format!("{rel_path}::{}", t.name),
-                kind: SymbolKind::Table,
+                kind: SymbolKind::Schema,
+                raw: "table".to_string(),
                 file: rel_path.to_string(),
                 lines: t.lines,
                 source_hash: hash_text(&span),
@@ -199,7 +200,10 @@ CREATE TABLE public.registrations (
         let names: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
         assert!(names.contains(&"supabase/schema.sql::payments"));
         assert!(names.contains(&"supabase/schema.sql::registrations"));
-        assert!(syms.iter().all(|s| s.kind == SymbolKind::Table));
+        assert!(
+            syms.iter()
+                .all(|s| s.kind == SymbolKind::Schema && s.raw == "table")
+        );
     }
 
     #[test]

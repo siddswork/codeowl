@@ -18,13 +18,21 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::features::{
-    EntryPoint, Participants, assemble_participants, default_feature_model, enumerate_entry_points,
+    EntryPoint, Participants, assemble_participants, enumerate_entry_points, feature_model_for,
     feature_slug,
 };
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
-use crate::lang::{FileRole, classify};
+use crate::lang::FileRole;
 use crate::symbol::{Symbol, SymbolKind};
+
+/// A repo-relative path's [`FileRole`] under the stack that built `graph`
+/// — `RustStack` calls `tests/` a test root, `TypeScriptNextStack` uses
+/// the JS conventions. Replaces the direct `lang::classify` call so
+/// prioritisation isn't hard-wired to one stack.
+fn classify_in(graph: &Graph, path: &str) -> FileRole {
+    crate::stack::for_name(graph.pack_name()).classify(path)
+}
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
 /// the source extension: `lib/utils.ts` -> `docs/specs/lib/utils.ts.md`.
@@ -42,28 +50,28 @@ pub fn spec_path(root: &Path, source_path: &str) -> PathBuf {
 /// documenting the test harness is rarely the point of a spec corpus, and
 /// whenever it is, it's safe to leave for last. Also strips a
 /// `rollup:`/`feature:` id prefix so it can be asked of a coverage id.
-pub fn is_test_path(path: &str) -> bool {
-    matches!(classify(path), FileRole::Test)
+pub fn is_test_path(graph: &Graph, path: &str) -> bool {
+    matches!(classify_in(graph, path), FileRole::Test)
 }
 
-/// A file is spec-bearing iff it declares at least one exported function or
-/// class among its top-level symbols — barrel files, const-only route
-/// config, and metadata-only boilerplate get no document (see
+/// A file is spec-bearing iff it declares at least one exported `Callable`
+/// or `Container` among its top-level symbols — barrel files, const-only
+/// route config, and metadata-only boilerplate get no document (see
 /// `ARCHITECTURE.md`'s granularity rules).
 pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool {
     graph.children_ids(file_id).iter().any(|&id| {
         graph.get_symbol(id).is_some_and(|s| {
-            s.is_exported && matches!(s.kind, SymbolKind::Function | SymbolKind::Class)
+            s.is_exported && matches!(s.kind, SymbolKind::Callable | SymbolKind::Container)
         })
     })
 }
 
 /// The top-level symbols a file spec gives their own section — both
-/// exported and unexported functions/classes (the point is describing how
-/// the file works, not only its public API). Top-level `const`s get no
-/// subsection of their own; a class's methods are covered inside the
-/// class's own section, not separately, matching how M2 already treats a
-/// class as one containment unit.
+/// exported and unexported `Callable`s/`Container`s (the point is
+/// describing how the file works, not only its public API). Top-level
+/// `Value`s (a `const`) get no subsection of their own; a container's
+/// members are covered inside the container's own section, not separately,
+/// matching how M2 already treats a class as one containment unit.
 fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
     graph
         .children_ids(file_id)
@@ -72,7 +80,7 @@ fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
         .filter(|&id| {
             graph
                 .get_symbol(id)
-                .is_some_and(|s| matches!(s.kind, SymbolKind::Function | SymbolKind::Class))
+                .is_some_and(|s| matches!(s.kind, SymbolKind::Callable | SymbolKind::Container))
         })
         .collect()
 }
@@ -150,7 +158,7 @@ pub struct SymbolProse {
 pub struct FileSpec {
     pub source_path: String,
     pub file: HashPair,
-    /// Per top-level function/class symbol, in declaration order.
+    /// Per top-level `Callable`/`Container` symbol, in declaration order.
     pub symbols: Vec<(String, HashPair)>,
     /// The file's own `## Summary` prose (LLM-written).
     pub file_summary: String,
@@ -257,6 +265,14 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
 /// symbol's own source span instead — a heuristic, not semantic analysis,
 /// but far closer to the truth than file-wide attribution, and needs no
 /// new resolution machinery.
+///
+/// Resolved intra-repo dependencies get one line each; unresolved
+/// imports (a stdlib type, a third-party crate, an npm package) are
+/// collapsed into a single trailing `externals: …` line by package name.
+/// Rust code names `Vec` / `BTreeMap` / `Result` constantly and every one
+/// is an unresolved external, so a line apiece would bury the signal
+/// that this section exists for — what *else in this repo* the symbol
+/// leans on (M14).
 fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> Vec<String> {
     let Node::File(file) = graph.get(file_id) else {
         return Vec::new();
@@ -264,20 +280,63 @@ fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol)
     let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
         return Vec::new();
     };
-    graph
-        .imports()
+    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text);
+
+    let mut lines: Vec<String> = scoped
+        .resolved
         .iter()
-        .filter(|imp| {
-            imp.from_file == file.id && contains_identifier(&symbol_text, &imp.imported_name)
-        })
-        .map(|imp| match imp.target {
-            Some(target) => format!("`{}` — {}", graph.string_id(target), imp.specifier),
-            None => format!(
-                "{} — {} (external or unresolved)",
-                imp.imported_name, imp.specifier
-            ),
-        })
-        .collect()
+        .map(|(target, specifier)| format!("`{target}` — {specifier}"))
+        .collect();
+    if !scoped.externals.is_empty() {
+        lines.push(format!("externals: {}", scoped.externals.join(", ")));
+    }
+    lines
+}
+
+/// One symbol's imports, scoped by whole-word text search over its own
+/// source span (see `dependency_lines`): the resolved intra-repo ones as
+/// `(target string-id, specifier)` pairs, and the unresolved ones folded
+/// to a sorted, de-duplicated list of package names (`std::collections`
+/// -> `std`, `next/navigation` -> `next`; a relative specifier that
+/// resolved to nothing is kept verbatim — a broken import is a real
+/// signal). Shared by the rendered `### Depends on` section and the
+/// generation-task context `mcp.rs` hands the agent.
+pub(crate) struct ScopedDeps {
+    pub resolved: Vec<(String, String)>,
+    pub externals: Vec<String>,
+}
+
+pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &str) -> ScopedDeps {
+    let mut resolved = Vec::new();
+    let mut externals: Vec<String> = Vec::new();
+    for imp in graph.imports().iter().filter(|imp| {
+        imp.from_file == from_file && contains_identifier(symbol_text, &imp.imported_name)
+    }) {
+        match imp.target {
+            Some(target) => {
+                resolved.push((graph.string_id(target).to_string(), imp.specifier.clone()));
+            }
+            None => {
+                let pkg = if imp.specifier.starts_with('.') {
+                    imp.specifier.clone()
+                } else {
+                    imp.specifier
+                        .split(['/', ':'])
+                        .next()
+                        .unwrap_or(&imp.specifier)
+                        .to_string()
+                };
+                if !externals.contains(&pkg) {
+                    externals.push(pkg);
+                }
+            }
+        }
+    }
+    externals.sort();
+    ScopedDeps {
+        resolved,
+        externals,
+    }
 }
 
 /// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
@@ -1148,7 +1207,10 @@ pub fn next_feature_task(
     root: &Path,
     entry: &EntryPoint,
 ) -> Result<Option<FeatureTask>> {
-    let participants = assemble_participants(graph, default_feature_model(), entry);
+    let Some(fm) = feature_model_for(graph) else {
+        return Ok(None);
+    };
+    let participants = assemble_participants(graph, fm, entry);
     let current = current_participant_hashes(graph, &participants)?;
 
     let existing = read_feature_spec(root, &entry.id)?;
@@ -1211,7 +1273,9 @@ pub fn submit_feature(
         bail!("submitted feature content must start with a `# Title` heading");
     }
 
-    let fm = default_feature_model();
+    let Some(fm) = feature_model_for(graph) else {
+        bail!("this stack has no feature layer — nothing to submit a feature spec against");
+    };
     let entry = fm
         .enumerate_entry_points(graph)
         .into_iter()
@@ -1543,7 +1607,9 @@ pub fn enumerate_modules(graph: &Graph) -> Vec<String> {
     dirs.sort();
     dirs.dedup();
     dirs.retain(|d| {
-        !d.is_empty() && !is_test_path(&format!("{d}/")) && directory_is_spec_bearing(graph, d)
+        !d.is_empty()
+            && !is_test_path(graph, &format!("{d}/"))
+            && directory_is_spec_bearing(graph, d)
     });
     dirs
 }
@@ -1570,7 +1636,9 @@ pub fn current_module_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, 
 /// system spec's per-feature half of its staleness key.
 pub fn current_feature_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
-    let fm = default_feature_model();
+    let Some(fm) = feature_model_for(graph) else {
+        return Ok(out); // a stack with no feature layer has no feature half
+    };
     for entry in fm.enumerate_entry_points(graph) {
         let participants = assemble_participants(graph, fm, &entry);
         let current = current_participant_hashes(graph, &participants)?;
@@ -1906,13 +1974,21 @@ pub fn file_spec_smells(
         smells.extend(prose_smells(&prose.behavior));
     }
     if spec.symbols.len() >= 2 {
+        // Compare only the *resolved* intra-repo lines — a shared
+        // `externals: …` line (every symbol in a small module returning
+        // `anyhow::Result`, say) is normal, not a scoping failure.
         let dep_lists: Vec<Vec<String>> = spec
             .symbols
             .iter()
             .filter_map(|(id, _)| {
                 let sym_id = graph.find(id)?;
                 let sym = graph.get_symbol(sym_id)?;
-                Some(dependency_lines(graph, root, file_id, sym))
+                Some(
+                    dependency_lines(graph, root, file_id, sym)
+                        .into_iter()
+                        .filter(|line| !line.starts_with("externals:"))
+                        .collect(),
+                )
             })
             .collect();
         if dep_lists.len() == spec.symbols.len()
@@ -1945,7 +2021,7 @@ fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
     graph
         .imports()
         .iter()
-        .filter(|imp| !is_test_path(&imp.from_file))
+        .filter(|imp| !is_test_path(graph, &imp.from_file))
         .filter(|imp| {
             imp.target
                 .is_some_and(|t| graph.parent_id(t) == Some(file_id))
@@ -2010,7 +2086,10 @@ fn feature_status(graph: &Graph, root: &Path, entry: &EntryPoint) -> Result<(Str
     let Some(spec) = read_feature_spec(root, &entry.id)? else {
         return Ok(("missing".to_string(), Vec::new()));
     };
-    let participants = assemble_participants(graph, default_feature_model(), entry);
+    let Some(fm) = feature_model_for(graph) else {
+        return Ok(("missing".to_string(), Vec::new()));
+    };
+    let participants = assemble_participants(graph, fm, entry);
     let current = current_participant_hashes(graph, &participants)?;
     let status = if diff_hash_lists(&current, &spec.participants).is_empty() {
         "current"
@@ -2183,7 +2262,7 @@ const SHARED_CODE_MAX_FILES: usize = 8;
 /// stays hash-`"current"` forever unless something else flags it). Never
 /// filtering on smells too would mean a `--all --budget=N` run could run
 /// to completion while silently leaving known-bad content in place.
-pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
+pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> {
     // The fan-in floor for the shared-code tier: the higher of
     // SHARED_CODE_FAN_IN and the Nth-highest fan-in among *all* candidate
     // files in the repo — computed from `items` before the `pending`
@@ -2195,7 +2274,7 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
     let shared_cutoff = {
         let mut fan_ins: Vec<usize> = items
             .iter()
-            .filter(|i| i.kind == "file" && classify(&i.id) == FileRole::Domain)
+            .filter(|i| i.kind == "file" && classify_in(graph, &i.id) == FileRole::Domain)
             .map(|i| i.fan_in)
             .filter(|&f| f >= SHARED_CODE_FAN_IN)
             .collect();
@@ -2215,7 +2294,7 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
     pending.sort_by(|a, b| {
         let tier = |item: &CoverageItem| -> u8 {
             if item.kind == "file" {
-                return match classify(&item.id) {
+                return match classify_in(graph, &item.id) {
                     FileRole::Test => 5,
                     FileRole::Domain if item.fan_in >= shared_cutoff => 0,
                     // Below the fan-in cutoff, or a primitive/generated
@@ -2416,6 +2495,66 @@ mod tests {
 
         let neither_deps = dependency_lines(&graph, &dir, file_id, uses_neither);
         assert!(neither_deps.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn depends_on_collapses_unresolved_externals_into_one_line() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-externals",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two unresolved externals (`react`, `next/navigation`) plus one
+        // resolved sibling — the external ones must fold into a single
+        // `externals: next, react` line, not a line each.
+        let a = "import { useState } from 'react';\nimport { redirect } from 'next/navigation';\nimport { helper } from './helper';\n\nexport function widget() {\n  useState();\n  redirect('/x');\n  return helper();\n}\n";
+        std::fs::write(dir.join("a.ts"), a).unwrap();
+        std::fs::write(
+            dir.join("helper.ts"),
+            "export function helper(): number { return 1; }\n",
+        )
+        .unwrap();
+
+        let mut graph = Graph::build(vec![
+            crate::graph::extract_and_hash("a.ts", a),
+            crate::graph::extract_and_hash(
+                "helper.ts",
+                "export function helper(): number { return 1; }\n",
+            ),
+        ]);
+        graph.set_resolved_imports(
+            crate::imports::extract_imports(a, "a.ts")
+                .imports
+                .iter()
+                .map(|imp| crate::resolve::ResolvedImport {
+                    from_file: "a.ts".to_string(),
+                    specifier: imp.specifier.clone(),
+                    imported_name: imp.imported_name.clone(),
+                    target: graph.find(&format!(
+                        "{}.ts::{}",
+                        imp.specifier.trim_start_matches("./"),
+                        imp.imported_name
+                    )),
+                })
+                .collect(),
+        );
+
+        let file_id = graph.find("a.ts").unwrap();
+        let widget = graph
+            .get_symbol(graph.find("a.ts::widget").unwrap())
+            .unwrap();
+        let deps = dependency_lines(&graph, &dir, file_id, widget);
+
+        assert_eq!(
+            deps.len(),
+            2,
+            "one resolved line + one externals line, got {deps:?}"
+        );
+        assert!(deps[0].contains("helper.ts::helper"));
+        assert_eq!(deps[1], "externals: next, react");
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3134,7 +3273,7 @@ mod tests {
         assert_eq!(summary.current, 0);
         assert_eq!(summary.stale, 0);
 
-        let pending = prioritize(items);
+        let pending = prioritize(items, &graph);
         let ids: Vec<&str> = pending.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -3232,7 +3371,47 @@ mod tests {
         assert_eq!(summary.current, 8);
         assert_eq!(summary.stale, 0);
         assert_eq!(summary.missing, 0);
-        assert!(prioritize(items).is_empty());
+        assert!(prioritize(items, &graph).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_stack_with_no_feature_model_composes_a_system_spec_from_modules_alone() {
+        // M14 / design decision 3: `RustStack` has no feature layer, so
+        // `coverage` must report zero features and the system-spec
+        // composition must not panic or emit an empty `## Features`.
+        let (graph, dir) = build_feature_fixture(
+            &[
+                ("src/lib.rs", "pub mod parse;\npub mod store;\n"),
+                (
+                    "src/parse.rs",
+                    "//! Parsing.\npub fn tokenize(_s: &str) -> Vec<String> { Vec::new() }\npub fn lex() {}\n",
+                ),
+                (
+                    "src/store.rs",
+                    "//! Storage.\nuse crate::parse::tokenize;\npub fn save(_s: &str) { tokenize(_s); }\npub fn load() {}\n",
+                ),
+            ],
+            "rust-nofeat",
+        );
+        assert_eq!(graph.pack_name(), "rust");
+        assert!(feature_model_for(&graph).is_none());
+        assert!(current_feature_hashes(&graph, &dir).unwrap().is_empty());
+
+        let items = coverage(&graph, &dir, None).unwrap();
+        assert!(
+            !items.iter().any(|i| i.kind == "feature"),
+            "a no-feature stack must produce no feature coverage items"
+        );
+        assert!(items.iter().any(|i| i.id == "system"));
+
+        // The system task is generable and its `features` list is empty.
+        // (Modules/rollups come first; drain them, then ask for system.)
+        let sys = next_system_task(&graph, &dir).unwrap();
+        if let Some(task) = sys {
+            assert!(task.features.is_empty(), "no features to compose over");
+        }
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3439,7 +3618,7 @@ mod tests {
         assert_eq!(summary.current, 1);
         assert_eq!(summary.smelly, 1);
 
-        let pending = prioritize(items);
+        let pending = prioritize(items, &graph);
         assert_eq!(
             pending.len(),
             1,
@@ -3468,7 +3647,11 @@ mod tests {
             item("app/page.tsx", "file", 0), // a leaf
             item("rollup:lib", "rollup", 0),
         ];
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec![
@@ -3499,7 +3682,11 @@ mod tests {
             item("app/dashboard/card.test.tsx", "file", 0),
             item("system", "system", 0),
         ];
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec![
@@ -3528,7 +3715,11 @@ mod tests {
         for fan in (9..=20).rev() {
             items.push(item(&format!("lib/f{fan:02}.ts"), "file", fan));
         }
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
 
         // Only the top SHARED_CODE_MAX_FILES (fan-in 20..13) come before
         // the feature; the rest (12..9) fall to the long tail after it.
@@ -3560,7 +3751,11 @@ mod tests {
         for fan in (12..=19).rev() {
             items.push(item(&format!("lib/hot{fan}.ts"), "file", "current", fan));
         }
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec!["feature:x", "lib/mid.ts"],
@@ -3590,7 +3785,11 @@ mod tests {
                 smells: Vec::new(),
             },
         ];
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec!["lib/db.ts", "feature:x", "components/ui/button.tsx"]
@@ -3599,12 +3798,14 @@ mod tests {
 
     #[test]
     fn is_test_path_examples() {
-        assert!(is_test_path("e2e/helpers/api-client.ts"));
-        assert!(is_test_path("src/components/__tests__/button.ts"));
-        assert!(is_test_path("lib/utils.test.ts"));
-        assert!(is_test_path("app/page.spec.tsx"));
-        assert!(is_test_path("rollup:e2e/helpers"));
-        assert!(!is_test_path("lib/utils.ts"));
-        assert!(!is_test_path("app/api/attest/route.ts")); // "test" substring, not a test file
+        // An empty graph -> pack_name "" -> the TypeScript pack's classify.
+        let g = crate::graph::build_graph_from_sources(&[]);
+        assert!(is_test_path(&g, "e2e/helpers/api-client.ts"));
+        assert!(is_test_path(&g, "src/components/__tests__/button.ts"));
+        assert!(is_test_path(&g, "lib/utils.test.ts"));
+        assert!(is_test_path(&g, "app/page.spec.tsx"));
+        assert!(is_test_path(&g, "rollup:e2e/helpers"));
+        assert!(!is_test_path(&g, "lib/utils.ts"));
+        assert!(!is_test_path(&g, "app/api/attest/route.ts")); // "test" substring, not a test file
     }
 }

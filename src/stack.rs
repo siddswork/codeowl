@@ -15,9 +15,11 @@
 //! reaches" concept — `None` for a stack with no runtime entry surface).
 //! See `ROADMAP.md`'s "Phase 2" and `experiments/exp-02-feature-layer.md`.
 //!
-//! **Still one pack.** `TypeScriptNextStack` here just delegates to the
-//! existing free functions, which stay `pub` as shims so the ~90 test call
-//! sites compile unchanged. The point is the seam, not new behaviour.
+//! `TypeScriptNextStack` delegates to the existing free functions, which
+//! stay `pub` as shims. M14 adds `RustStack` (`tree-sitter-rust` over
+//! `.rs`, no feature layer) as the second implementation — the one that
+//! actually exercises the seams. `lang::detect` still hands back the TS
+//! pack unconditionally until M14's `detect()`-branching commit.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -82,7 +84,11 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// `ROADMAP.md` M13 piece 3, design decision 3). M14 (`RustStack`) and
     /// M16 (commons-lang) both return `None`; M17 (Quarkus) is where this
     /// gets its second implementation.
-    fn feature_model(&self) -> Option<&dyn crate::features::FeatureModel> {
+    ///
+    /// `'static`: a feature model is a stateless ZST, so this can be
+    /// recovered from just a pack name (via [`for_name`]) with no lifetime
+    /// tied to the transient `Box<dyn StackPack>`.
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
         None
     }
 }
@@ -164,16 +170,88 @@ impl StackPack for TypeScriptNextStack {
         resolved.map_or(FlowTarget::Unresolved, FlowTarget::Node)
     }
 
-    fn feature_model(&self) -> Option<&dyn crate::features::FeatureModel> {
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
         Some(crate::features::default_feature_model())
     }
 }
 
 /// The default pack as a trait object — the shape `RepoIndex` and the test
-/// fixtures want. Phase 1 has exactly one pack, so this is unconditional;
-/// M13's `detect()` is where the real choice will live.
+/// fixtures want. `detect()` is where the real choice for a real repo
+/// lives; this is the fallback a `RepoIndex` deserializes into before
+/// `load` re-runs `detect`.
 pub fn typescript_next() -> Box<dyn StackPack> {
     Box::new(TypeScriptNextStack)
+}
+
+/// The pack for a persisted `StackPack::name()` — how a pure-read caller
+/// (`spec.rs`, `mcp.rs`) recovers the pack from `Graph::pack_name()`
+/// without it being threaded down. Unknown / empty (a test-built graph, a
+/// pre-M14 cache) falls back to the TypeScript pack.
+pub fn for_name(name: &str) -> Box<dyn StackPack> {
+    match name {
+        "rust" => Box::new(RustStack),
+        _ => Box::new(TypeScriptNextStack),
+    }
+}
+
+/// The Rust stack (M14): `tree-sitter-rust` extraction over `.rs` files,
+/// exercised on CodeOwl's own repo. No feature layer (`feature_model()`
+/// takes the trait default `None` — CodeOwl has cross-cutting workflows
+/// but no mechanically enumerable entry surface; see
+/// `experiments/exp-02-feature-layer.md`). `use` imports resolve against
+/// the module tree by Rust's filesystem convention (`rust::resolve_imports`).
+/// `extract_flow_edges` stays empty — a Rust service's cross-file reach is
+/// plain function calls, and call-graph analysis is deferred (same stance
+/// as M10).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RustStack;
+
+impl StackPack for RustStack {
+    fn name(&self) -> &str {
+        "rust"
+    }
+
+    fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+        (path.extension().and_then(|e| e.to_str()) == Some("rs")).then_some(SourceKind::Code)
+    }
+
+    fn classify(&self, rel_path: &str) -> FileRole {
+        if rel_path.starts_with("tests/")
+            || rel_path.starts_with("benches/")
+            || rel_path.contains("/tests/")
+        {
+            FileRole::Test
+        } else {
+            // Rust has no `components/ui`-style primitive tier, and
+            // `target/` is gitignored so a walk never reaches it.
+            FileRole::Domain
+        }
+    }
+
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+        crate::rust::extract_file(source, rel_path)
+    }
+
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
+        crate::rust::extract_imports(source, rel_path)
+    }
+
+    fn resolve_imports(
+        &self,
+        root: &Path,
+        file_imports: &HashMap<String, FileImports>,
+        graph: &Graph,
+    ) -> Vec<ResolvedImport> {
+        crate::rust::resolve_imports(root, file_imports, graph)
+    }
+
+    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
+        Vec::new()
+    }
+
+    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
+        FlowTarget::Unresolved
+    }
 }
 
 #[cfg(test)]
@@ -218,16 +296,66 @@ mod tests {
     }
 
     #[test]
-    fn detect_returns_the_ts_pack_for_a_repo_with_source() {
+    fn rust_pack_reads_rs_and_has_no_feature_model() {
+        let pack = RustStack;
+        assert_eq!(pack.name(), "rust");
+        assert_eq!(
+            pack.source_kind(Path::new("src/graph.rs")),
+            Some(SourceKind::Code)
+        );
+        assert_eq!(pack.source_kind(Path::new("src/graph.ts")), None);
+        assert_eq!(pack.source_kind(Path::new("Cargo.toml")), None);
+        assert_eq!(pack.classify("src/lib.rs"), FileRole::Domain);
+        assert_eq!(pack.classify("tests/schema.rs"), FileRole::Test);
+        assert_eq!(pack.classify("benches/bench.rs"), FileRole::Test);
+        // M14 Rust is a library/CLI — no runtime entry surface, so the
+        // trait's `None` default stands (exp-02).
+        assert!(pack.feature_model().is_none());
+
+        let syms = pack.extract_symbols("src/x.rs", "pub fn go() {}\npub struct S;\n");
+        assert_eq!(syms.len(), 2);
+        assert_eq!(syms[0].raw, "fn");
+        assert_eq!(syms[1].raw, "struct");
+
+        let imports = pack.extract_imports("src/x.rs", "use crate::y::Thing;\n");
+        assert_eq!(imports.imports.len(), 1);
+        assert_eq!(imports.imports[0].imported_name, "Thing");
+        // Rust has no string-literal flow edges — call analysis is deferred.
+        assert!(pack.extract_flow_edges("src/x.rs", "").is_empty());
+    }
+
+    #[test]
+    fn detect_picks_the_pack_that_matches_and_errors_on_ambiguity() {
         let dir = std::env::temp_dir().join(format!("codeowl-detect-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+
+        // TS repo (a lone .sql wouldn't be enough — Schema, not Code).
         std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(dir.join("schema.sql"), "CREATE TABLE t (id int);\n").unwrap();
         assert_eq!(crate::lang::detect(&dir).unwrap().name(), "typescript-next");
 
+        // Rust repo.
         std::fs::remove_file(dir.join("a.ts")).unwrap();
+        std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
+        assert_eq!(crate::lang::detect(&dir).unwrap().name(), "rust");
+
+        // Both -> one-stack-per-repo error (design decision 6).
+        std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
+        assert!(crate::lang::detect(&dir).is_err());
+
+        // Neither.
+        std::fs::remove_file(dir.join("a.ts")).unwrap();
+        std::fs::remove_file(dir.join("lib.rs")).unwrap();
         std::fs::write(dir.join("notes.md"), "hi\n").unwrap();
         assert!(crate::lang::detect(&dir).is_err());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detect_recognises_this_crate_as_rust() {
+        // The M14 dogfood: CodeOwl's own repo root.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        assert_eq!(crate::lang::detect(root).unwrap().name(), "rust");
     }
 }

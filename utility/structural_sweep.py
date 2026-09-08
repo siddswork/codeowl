@@ -134,13 +134,23 @@ def canon(x):
     return json.dumps(x, sort_keys=True)
 
 
+def normalize_symbol(s):
+    """Fold post-M14 fields back to their pre-M14 form so a refactor that
+    only *relabels* (M14 commit 1: SymbolKind -> Container/Callable/Value/
+    Schema + a `raw` grammar tag) still compares equal. `raw` is exactly
+    the old snake_case `kind` for every TS/SQL symbol, so restoring it is
+    the whole normalization."""
+    s.pop("markers", None)
+    raw = s.pop("raw", None)
+    if raw:
+        s["kind"] = raw
+    return s
+
+
 def run_extract(binary, repo):
     out = subprocess.run([binary, "extract", repo], capture_output=True,
                          text=True, check=True).stdout
-    syms = json.loads(out)
-    for s in syms:
-        s.pop("markers", None)
-    return syms
+    return [normalize_symbol(s) for s in json.loads(out)]
 
 
 def query_all(session, plan):
@@ -168,7 +178,9 @@ def build_plan(coverage, graph):
         plan.append((f"task:{t}", "get_next_spec_task", {"target": t}))
 
     tables = [n["Symbol"]["id"] for n in graph.get("nodes", [])
-              if "Symbol" in n and n["Symbol"].get("kind") == "table"]
+              if "Symbol" in n
+              and (n["Symbol"].get("kind") in ("table", "schema")
+                   or n["Symbol"].get("raw") == "table")]
     for tid in tables:
         plan.append((f"callers:{tid}", "get_callers", {"id": tid}))
 
@@ -258,12 +270,11 @@ def sweep(base_bin, head_bin, repo):
     for lbl in res_b:
         if not lbl.startswith("symbol:"):
             continue
-        b, h = dict(res_b[lbl]), dict(res_h[lbl])
-        b.pop("markers", None)
-        h.pop("markers", None)
+        b = normalize_symbol(dict(res_b[lbl]))
+        h = normalize_symbol(dict(res_h[lbl]))
         if canon(b) != canon(h):
             sym_diff.append(lbl[7:])
-    record("get_symbol (sample, markers ignored)", not sym_diff, ", ".join(sym_diff))
+    record("get_symbol (sample, markers + raw folded)", not sym_diff, ", ".join(sym_diff))
 
     return results
 
