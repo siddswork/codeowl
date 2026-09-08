@@ -81,6 +81,7 @@ Phase 2.
 
 - **What & why:** [`REQUIREMENTS.md`](REQUIREMENTS.md)
 - **How it's built:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Vocabulary:** [`GLOSSARY.md`](GLOSSARY.md)
 - **Build sequence:** [`ROADMAP.md`](ROADMAP.md)
 - **Wire it into your own repo:** [`setup/README.md`](setup/README.md)
 - **Use it day to day:** [`setup/USAGE.md`](setup/USAGE.md)
