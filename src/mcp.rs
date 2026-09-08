@@ -63,6 +63,12 @@ pub struct CoverageItemResponse {
     /// moved, never that the prose was ever meaningful. Empty for a
     /// genuinely clean document.
     pub smells: Vec<String>,
+    /// How many `get_next_spec_task` → `submit_spec` cycles this one
+    /// document still costs — one unit of `--budget=N`. For a file: its
+    /// uncovered/stale/smelly top-level symbols plus 1 for the file's own
+    /// `## Summary` if that needs writing (so a single `pending` row can
+    /// be worth 20+). For a rollup/feature/`system`: 1.
+    pub generations: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -73,6 +79,12 @@ pub struct CoverageResponse {
     /// Count of documents (of any status) carrying at least one quality
     /// smell — not exclusive with `current`.
     pub smelly: usize,
+    /// Total `get_next_spec_task` → `submit_spec` cycles a full
+    /// `/codeowl generate --all` run over this scope would spend — the
+    /// `--budget=N` a complete generation needs. Sums every pending
+    /// document's `generations`, so it counts uncovered symbols, not just
+    /// files (`missing: 15` files can be 240+ generations).
+    pub generations_remaining: usize,
     /// Every document still needing attention — non-current, or
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
     /// "Generation priority" and "Quality smells".
@@ -85,6 +97,14 @@ pub struct CallerInfo {
     pub imported_name: String,
 }
 
+/// `get_callers` result. Wrapped in a struct rather than returned as a
+/// bare array: MCP requires a tool's `structuredContent` to be a JSON
+/// object, and a spec-compliant client rejects a top-level array.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CallersResponse {
+    pub callers: Vec<CallerInfo>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct CalleeInfo {
     pub specifier: String,
@@ -94,6 +114,18 @@ pub struct CalleeInfo {
     /// M1 doesn't extract as symbols yet (a `type`/`interface`, a
     /// destructured const) — see M2's real-repo validation notes.
     pub resolved_id: Option<String>,
+}
+
+/// `get_callees` result — wrapped for the same reason as [`CallersResponse`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CalleesResponse {
+    pub callees: Vec<CalleeInfo>,
+}
+
+/// `search_code` result — wrapped for the same reason as [`CallersResponse`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct SearchResponse {
+    pub matches: Vec<SearchMatch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -406,17 +438,22 @@ impl CodeOwlServer {
                 id,
                 signature,
                 docstring,
-                lines,
                 prior,
             } => {
                 let sym_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
+                let sym = graph
+                    .get_symbol(sym_id)
+                    .ok_or_else(|| Self::not_found(&id))?;
                 let file_id = graph
                     .parent_id(sym_id)
                     .ok_or_else(|| Self::not_found(&id))?;
                 let file = graph
                     .get_file(file_id)
                     .ok_or_else(|| Self::not_found(&id))?;
-                let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
+                // The symbol's own span plus any folded-in `impl` method
+                // spans (M15) — see `spec::symbol_span_text`.
+                let source = crate::spec::symbol_span_text(&self.root, graph, &file.id, sym)
+                    .map_err(|e| e.to_string())?;
                 // Scoped to what this symbol's own text names, and with
                 // externals folded to one line — the same treatment the
                 // rendered `### Depends on` section gets, so a Rust symbol
@@ -449,24 +486,6 @@ impl CodeOwlServer {
     }
 }
 
-/// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
-/// what `get_next_spec_task` hands the agent as a symbol task's own
-/// source, per `ARCHITECTURE.md`'s "Bottom-up composition".
-fn read_lines(
-    root: &std::path::Path,
-    rel_path: &str,
-    lines: [usize; 2],
-) -> std::io::Result<String> {
-    let content = std::fs::read_to_string(root.join(rel_path))?;
-    let [start, end] = lines;
-    Ok(content
-        .lines()
-        .skip(start.saturating_sub(1))
-        .take(end + 1 - start)
-        .collect::<Vec<_>>()
-        .join("\n"))
-}
-
 #[tool_router]
 impl CodeOwlServer {
     #[tool(
@@ -491,7 +510,7 @@ impl CodeOwlServer {
     async fn get_callers(
         &self,
         Parameters(req): Parameters<IdRequest>,
-    ) -> Result<Json<Vec<CallerInfo>>, String> {
+    ) -> Result<Json<CallersResponse>, String> {
         let graph = self.graph.load_full();
         let id = graph
             .find(&req.id)
@@ -509,7 +528,7 @@ impl CodeOwlServer {
                     imported_name: table,
                 })
                 .collect();
-            return Ok(Json(callers));
+            return Ok(Json(CallersResponse { callers }));
         }
 
         let callers = graph
@@ -521,7 +540,7 @@ impl CodeOwlServer {
                 imported_name: imp.imported_name.clone(),
             })
             .collect();
-        Ok(Json(callers))
+        Ok(Json(CallersResponse { callers }))
     }
 
     #[tool(
@@ -530,7 +549,7 @@ impl CodeOwlServer {
     async fn get_callees(
         &self,
         Parameters(req): Parameters<IdRequest>,
-    ) -> Result<Json<Vec<CalleeInfo>>, String> {
+    ) -> Result<Json<CalleesResponse>, String> {
         let graph = self.graph.load_full();
         let id = graph
             .find(&req.id)
@@ -550,7 +569,7 @@ impl CodeOwlServer {
                 resolved_id: imp.target.map(|t| graph.string_id(t).to_string()),
             })
             .collect();
-        Ok(Json(callees))
+        Ok(Json(CalleesResponse { callees }))
     }
 
     #[tool(
@@ -903,14 +922,14 @@ impl CodeOwlServer {
     async fn search(
         &self,
         Parameters(req): Parameters<SearchRequest>,
-    ) -> Result<Json<Vec<SearchMatch>>, String> {
+    ) -> Result<Json<SearchResponse>, String> {
         crate::search::search_code(&self.root, &req.query)
-            .map(Json)
+            .map(|matches| Json(SearchResponse { matches }))
             .map_err(|e| e.to_string())
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry carries its own `generations` share. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -928,6 +947,7 @@ impl CodeOwlServer {
                 status: i.status,
                 fan_in: i.fan_in,
                 smells: i.smells,
+                generations: i.generations,
             })
             .collect();
         Ok(Json(CoverageResponse {
@@ -935,6 +955,7 @@ impl CodeOwlServer {
             stale: summary.stale,
             missing: summary.missing,
             smelly: summary.smelly,
+            generations_remaining: summary.generations_remaining,
             pending,
         }))
     }
@@ -1094,7 +1115,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            result.0,
+            result.0.callers,
             vec![CallerInfo {
                 from_file: "a.ts".to_string(),
                 imported_name: "helper".to_string(),
@@ -1120,9 +1141,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.0.len(), 2);
+        assert_eq!(result.0.callees.len(), 2);
         let helper = result
             .0
+            .callees
             .iter()
             .find(|c| c.imported_name == "helper")
             .unwrap();
@@ -1130,7 +1152,12 @@ mod tests {
             helper.resolved_id.is_some(),
             "internal import should resolve"
         );
-        let external = result.0.iter().find(|c| c.imported_name == "z").unwrap();
+        let external = result
+            .0
+            .callees
+            .iter()
+            .find(|c| c.imported_name == "z")
+            .unwrap();
         assert_eq!(
             external.resolved_id, None,
             "external package should not resolve"
@@ -1237,6 +1264,20 @@ mod tests {
         assert_eq!(coverage.0.missing, 3);
         assert_eq!(coverage.0.current, 0);
         assert_eq!(coverage.0.stale, 0);
+        // Three missing files, one exported symbol each -> 3 symbol + 3
+        // file generations. `generations_remaining` counts cycles, not
+        // documents, and equals the sum of the per-item shares.
+        assert_eq!(coverage.0.generations_remaining, 6);
+        assert_eq!(
+            coverage.0.generations_remaining,
+            coverage
+                .0
+                .pending
+                .iter()
+                .map(|i| i.generations)
+                .sum::<usize>()
+        );
+        assert!(coverage.0.pending.iter().all(|i| i.generations == 2));
         let ids: Vec<&str> = coverage.0.pending.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -2267,7 +2308,7 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert_eq!(result.0.len(), 1);
-        assert_eq!(result.0[0].file, "a.ts");
+        assert_eq!(result.0.matches.len(), 1);
+        assert_eq!(result.0.matches[0].file, "a.ts");
     }
 }

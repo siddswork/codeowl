@@ -277,7 +277,7 @@ fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol)
     let Node::File(file) = graph.get(file_id) else {
         return Vec::new();
     };
-    let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
+    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
         return Vec::new();
     };
     let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text);
@@ -339,19 +339,55 @@ pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &s
     }
 }
 
-/// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
-/// the same scheme `mcp.rs`'s `read_lines` uses for a symbol task's own
-/// source.
-fn read_symbol_text(root: &Path, rel_path: &str, lines: [usize; 2]) -> Result<String> {
+/// The raw source text that scopes a symbol's dependencies and feeds its
+/// generation task: `sym`'s own line span, plus the span of any direct
+/// child that lies *outside* it. For a TS class every method already sits
+/// inside the class braces, so this is just the class body; for a Rust
+/// type whose inherent `impl` blocks were folded in (M15,
+/// `rust::merge_inherent_impls`), the method spans live elsewhere in the
+/// file and are appended. Adjacent/overlapping spans are merged so the
+/// common case (a `struct` immediately followed by its `impl`) still reads
+/// as one contiguous block.
+pub(crate) fn symbol_span_text(
+    root: &Path,
+    graph: &Graph,
+    rel_path: &str,
+    sym: &Symbol,
+) -> Result<String> {
+    let mut spans: Vec<[usize; 2]> = vec![sym.lines];
+    let [own_start, own_end] = sym.lines;
+    for &child in &sym.children {
+        if let Some(c) = graph
+            .get_symbol(child)
+            .filter(|c| c.lines[0] < own_start || c.lines[1] > own_end)
+        {
+            spans.push(c.lines);
+        }
+    }
+    spans.sort_by_key(|s| s[0]);
+    // Merge spans that touch or overlap (a blank line or two between a
+    // `struct` and its `impl` shouldn't split the block).
+    let mut merged: Vec<[usize; 2]> = Vec::new();
+    for s in spans {
+        match merged.last_mut() {
+            Some(last) if s[0] <= last[1] + 2 => last[1] = last[1].max(s[1]),
+            _ => merged.push(s),
+        }
+    }
+
     let content = std::fs::read_to_string(root.join(rel_path))
         .with_context(|| format!("reading {rel_path}"))?;
-    let [start, end] = lines;
-    Ok(content
-        .lines()
-        .skip(start.saturating_sub(1))
-        .take(end + 1 - start)
-        .collect::<Vec<_>>()
-        .join("\n"))
+    let all: Vec<&str> = content.lines().collect();
+    let mut out = String::new();
+    for (i, [start, end]) in merged.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        let lo = start.saturating_sub(1).min(all.len());
+        let hi = (*end).min(all.len());
+        out.push_str(&all[lo..hi].join("\n"));
+    }
+    Ok(out)
 }
 
 /// Whole-word substring search: `name` must not be immediately preceded
@@ -429,7 +465,7 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
     let Node::File(file) = graph.get(file_id) else {
         return String::new();
     };
-    let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
+    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
         return String::new();
     };
     let targets = graph
@@ -691,7 +727,6 @@ pub enum SpecTask {
         id: String,
         signature: String,
         docstring: Option<String>,
-        lines: [usize; 2],
         /// `Some` only for a reconciliation regeneration (M8's "Human
         /// corrections" case 4: source moved *and* a human had edited this
         /// symbol's prose) — the human's prior text, to preserve whatever
@@ -783,7 +818,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 id: sym.id.clone(),
                 signature: sym.signature.clone(),
                 docstring: sym.docstring.clone(),
-                lines: sym.lines,
                 prior: None,
             }));
         };
@@ -808,7 +842,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                         id: sym.id.clone(),
                         signature: sym.signature.clone(),
                         docstring: sym.docstring.clone(),
-                        lines: sym.lines,
                         prior: None,
                     }));
                 }
@@ -820,7 +853,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                     id: sym.id.clone(),
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
-                    lines: sym.lines,
                     prior: None,
                 }));
             }
@@ -834,7 +866,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                     id: sym.id.clone(),
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
-                    lines: sym.lines,
                     prior: Some(prose),
                 }));
             }
@@ -1916,6 +1947,15 @@ pub struct CoverageItem {
     /// *inputs* haven't moved, never that its prose was ever meaningful.
     /// See `prose_smells`/`ARCHITECTURE.md`'s "Quality smells".
     pub smells: Vec<String>,
+    /// How many `get_next_spec_task` → `submit_spec` cycles this document
+    /// still costs — i.e. what one unit of `/codeowl generate --budget=N`
+    /// buys. For a file: its uncovered/stale/smelly top-level symbols,
+    /// plus 1 for the file's own `## Summary` if that needs (re)writing.
+    /// For a rollup/feature/the system spec: 1 while non-current, else 0.
+    /// `0` for a genuinely clean, current document. Summed across the
+    /// report this is the total budget a full run needs (see
+    /// `CoverageSummary::generations_remaining`).
+    pub generations: usize,
 }
 
 /// A deterministic, non-LLM check for prose that looks like a stub or a
@@ -2040,6 +2080,53 @@ fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
 /// so it never contradicts `smells` being reported as a *separate* signal
 /// on a document that's otherwise fully current. See "Quality smells" in
 /// `ARCHITECTURE.md`.
+/// How many generation cycles `next_task` would still yield for `file_id`
+/// if drained — a read-only mirror of `next_task`'s per-symbol decision
+/// (never generated / source moved / smelly → a task; source unchanged +
+/// human-edited → a silent reconcile, no task). No side effects: unlike
+/// `next_task` it doesn't reconcile, it just counts.
+fn file_pending_generations(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<usize> {
+    let file = graph.get_file(file_id).context("not a file id")?;
+    let existing = read_existing(root, &file.id)?;
+    let mut n = 0;
+
+    for sym_id in spec_bearing_children(graph, file_id) {
+        let sym = graph.get_symbol(sym_id).expect("filtered to symbol ids");
+        match existing.as_ref().and_then(|spec| spec.symbol_hash(&sym.id)) {
+            None => n += 1, // never generated
+            Some(hash) => {
+                let source_changed = !symbol_changes(graph, root, file_id, sym, hash).is_empty();
+                let prose = existing
+                    .as_ref()
+                    .and_then(|spec| spec.section(&sym.id).cloned())
+                    .unwrap_or_default();
+                let smelly = !prose_smells(&prose.summary).is_empty()
+                    || !prose_smells(&prose.behavior).is_empty();
+                // source unchanged + human-edited reconciles silently
+                // (no task); everything else offered is a real generation.
+                if source_changed || smelly {
+                    n += 1;
+                }
+            }
+        }
+    }
+
+    let file_needs_writing = match existing
+        .as_ref()
+        .filter(|spec| !spec.file.spec_hash.is_empty())
+    {
+        None => true, // the file's own `## Summary` was never generated
+        Some(spec) => {
+            !file_changes(graph, file_id, &spec.file).is_empty()
+                || !prose_smells(&spec.file_summary).is_empty()
+        }
+    };
+    if file_needs_writing {
+        n += 1;
+    }
+    Ok(n)
+}
+
 fn file_status(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<(String, Vec<String>)> {
     let file = graph.get_file(file_id).context("not a file id")?;
     let Some(spec) = read_file_spec(root, &file.id)? else {
@@ -2153,6 +2240,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
             status,
             fan_in: file_fan_in(graph, id),
             smells,
+            generations: file_pending_generations(graph, root, id)?,
             id: path,
             kind: "file".to_string(),
         });
@@ -2164,6 +2252,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
         }
         let (status, smells) = rollup_status(graph, root, &dir)?;
         items.push(CoverageItem {
+            generations: usize::from(status != "current"),
             status,
             fan_in: 0,
             smells,
@@ -2176,6 +2265,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
         for entry in enumerate_entry_points(graph) {
             let (status, smells) = feature_status(graph, root, &entry)?;
             items.push(CoverageItem {
+                generations: usize::from(status != "current"),
                 status,
                 fan_in: 0,
                 smells,
@@ -2185,6 +2275,7 @@ pub fn coverage(graph: &Graph, root: &Path, scope: Option<&str>) -> Result<Vec<C
         }
         let (status, smells) = system_status(graph, root)?;
         items.push(CoverageItem {
+            generations: usize::from(status != "current"),
             status,
             fan_in: 0,
             smells,
@@ -2206,6 +2297,12 @@ pub struct CoverageSummary {
     /// hash-current and still carry a smell, which is exactly the case
     /// this field exists to surface (see `CoverageItem.smells`).
     pub smelly: usize,
+    /// Total `get_next_spec_task` → `submit_spec` cycles a full
+    /// `/codeowl generate --all` run against this scope would spend — the
+    /// sum of every item's [`CoverageItem::generations`]. This is the
+    /// `--budget=N` a complete generation needs (a file with 20 uncovered
+    /// symbols is 21, not 1).
+    pub generations_remaining: usize,
 }
 
 pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
@@ -2220,6 +2317,7 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
         if !item.smells.is_empty() {
             summary.smelly += 1;
         }
+        summary.generations_remaining += item.generations;
     }
     summary
 }
@@ -2560,6 +2658,44 @@ mod tests {
     }
 
     #[test]
+    fn symbol_span_text_includes_a_folded_impl_s_method_bodies() {
+        // M15: a Rust type's inherent `impl` is folded into the type
+        // symbol, but the method bodies sit outside the `struct`'s own line
+        // span. `symbol_span_text` must still surface them — otherwise a
+        // dep in a method (here `anyhow::Context`) is invisible to
+        // `### Depends on` and the generation task never sees the method.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-span", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let src = "\
+use anyhow::Context;\n\n\
+pub struct Counter {\n    n: u64,\n}\n\n\
+impl Counter {\n\
+    pub fn bump(&mut self) -> anyhow::Result<()> {\n\
+        self.n += 1;\n        Ok(()).context(\"never\")\n    }\n\
+}\n";
+        std::fs::write(dir.join("src/counter.rs"), src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/counter.rs".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::rust::extract_file(src, "src/counter.rs"),
+        }]);
+        let counter = graph
+            .get_symbol(graph.find("src/counter.rs::Counter").unwrap())
+            .unwrap();
+
+        let text = symbol_span_text(&dir, &graph, "src/counter.rs", counter).unwrap();
+        assert!(
+            text.contains("self.n += 1"),
+            "folded method body missing from span text:\n{text}"
+        );
+        assert!(text.contains("pub struct Counter"), "struct decl missing");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn next_task_returns_first_uncovered_symbol_then_the_file() {
         let dir = std::env::temp_dir().join(format!("codeowl-spec-test-{}-1", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2577,7 +2713,6 @@ mod tests {
                 id: "a.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 1],
                 prior: None,
             }
         );
@@ -2596,7 +2731,6 @@ mod tests {
                 id: "a.ts::two".to_string(),
                 signature: "function two(): void".to_string(),
                 docstring: None,
-                lines: [2, 2],
                 prior: None,
             }
         );
@@ -2763,7 +2897,6 @@ mod tests {
                 id: "a.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 3],
                 prior: Some(SymbolProse {
                     summary: "A human-corrected summary.".to_string(),
                     behavior: "Original behavior.".to_string(),
@@ -2804,7 +2937,6 @@ mod tests {
                 id: "a.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 1],
                 prior: None,
             })
         );
@@ -2972,7 +3104,6 @@ mod tests {
                 id: "lib/one.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 1],
                 prior: None,
             }
         );
@@ -3371,7 +3502,67 @@ mod tests {
         assert_eq!(summary.current, 8);
         assert_eq!(summary.stale, 0);
         assert_eq!(summary.missing, 0);
+        assert_eq!(summary.generations_remaining, 0);
         assert!(prioritize(items, &graph).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coverage_counts_generations_not_just_documents() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-gens", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = "export function one(): void {}\n\
+                   export function two(): void {}\n\
+                   export function three(): void {}\n";
+        std::fs::write(dir.join("a.ts"), src).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", src)]);
+
+        // Nothing generated: one `pending` document (a.ts), but four
+        // generations — three symbols + the file's own summary.
+        let a = |items: &[CoverageItem]| items.iter().find(|i| i.id == "a.ts").unwrap().generations;
+        assert_eq!(a(&coverage(&graph, &dir, None).unwrap()), 4);
+
+        // Each symbol spec drops the count by one.
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nDoes the first job.\n### Behavior\nRuns with no side effects.\n",
+        )
+        .unwrap();
+        assert_eq!(a(&coverage(&graph, &dir, None).unwrap()), 3);
+
+        for id in ["a.ts::two", "a.ts::three"] {
+            submit(
+                &graph,
+                &dir,
+                id,
+                "### Summary\nDoes a second deliberate thing.\n### Behavior\nRuns with no side effects.\n",
+            )
+            .unwrap();
+        }
+        // Symbols done, only the file summary left.
+        assert_eq!(a(&coverage(&graph, &dir, None).unwrap()), 1);
+
+        submit(
+            &graph,
+            &dir,
+            "a.ts",
+            "Three small deliberate no-op helpers.",
+        )
+        .unwrap();
+        let items = coverage(&graph, &dir, None).unwrap();
+        assert_eq!(a(&items), 0);
+        // The system spec is still missing, so the repo-wide total is 1,
+        // and it equals the sum of every item's own share.
+        let summary = summarize(&items);
+        assert_eq!(summary.generations_remaining, 1);
+        assert_eq!(
+            summary.generations_remaining,
+            items.iter().map(|i| i.generations).sum::<usize>()
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3638,6 +3829,7 @@ mod tests {
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         let items = vec![
@@ -3673,6 +3865,7 @@ mod tests {
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         let items = vec![
@@ -3708,6 +3901,7 @@ mod tests {
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         // 12 files, fan-in 20 down to 9 — all well over SHARED_CODE_FAN_IN.
@@ -3739,6 +3933,7 @@ mod tests {
                 status: status.into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         // The repo's 8 highest-fan-in files are already current. What's
@@ -3772,6 +3967,7 @@ mod tests {
                 status: "missing".into(),
                 fan_in,
                 smells: Vec::new(),
+                generations: 0,
             }
         }
         let items = vec![
@@ -3783,6 +3979,7 @@ mod tests {
                 status: "missing".into(),
                 fan_in: 0,
                 smells: Vec::new(),
+                generations: 0,
             },
         ];
         let graph = crate::graph::build_graph_from_sources(&[]);

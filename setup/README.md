@@ -5,10 +5,13 @@ other MCP clients) queries for accurate structural facts and generated
 specs about a target repository, instead of re-exploring it on every task.
 This folder has everything needed to set that up against your own repo.
 
-**Phase 1 scope:** the extractor handles TypeScript / TSX, and feature
-detection assumes Next.js **App Router** conventions (`app/**/page.tsx`,
-`app/**/route.ts`, `fetch("/api/...")`). Other stacks degrade to
-"symbols + file specs, no feature layer" — see `REQUIREMENTS.md`.
+**Current scope:** one `StackPack` per repo, auto-detected — TypeScript +
+Next.js + SQL, or Rust. The Next.js pack's feature detection assumes
+**App Router** conventions (`app/**/page.tsx`, `app/**/route.ts`,
+`fetch("/api/...")`); a CLI/library stack (Rust here) gets symbols, file
+specs, and rollups but no feature layer. A repo that looks like two stacks
+at once is rejected rather than guessed. See `REQUIREMENTS.md` /
+`ROADMAP.md`.
 
 ---
 

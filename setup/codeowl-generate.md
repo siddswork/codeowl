@@ -17,10 +17,12 @@ command straight away — the `source`/`dependencies` you get back are
 already up to date, no server restart.
 
 `$ARGUMENTS` is one of:
-- A repo-relative file path (e.g. `lib/utils.ts`), a feature entry point
-  (a page like `app/submit/page.tsx`, or an API route with no page
-  referencing it, like a webhook), or a directory path (e.g. `lib`) with
-  at least two spec-bearing files in it.
+- A repo-relative file path (e.g. `src/util.rs`, `lib/utils.ts`), a
+  feature entry point — one of your stack's entry points, whatever form
+  they take (a Next.js page, an orphan API route / webhook with no page
+  referencing it, and so on) — or a directory path (e.g. `src`, `lib`)
+  with at least two spec-bearing files in it. A CLI or library stack has
+  no feature entry points at all; that's expected, not a misconfiguration.
 - `feature:<slug>` or `rollup:<dir>` — the same ids `get_spec_coverage`
   reports; equivalent to naming the feature's entry point / the directory.
 - `system` or `.` — the whole repo: every module directory, every
