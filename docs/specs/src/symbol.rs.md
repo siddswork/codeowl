@@ -3,8 +3,7 @@ kind: file
 source_paths: [src/symbol.rs]
 file: { source_hash: de25bd0e2225ae1bd8aa539ad35d10320f2cfff71c214ed2acd067ea53c13356, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 14d0ad65af303877f03964f52020458875c7a8edb1bc331e1431e02b810d1585 }
 symbols:
-  src/symbol.rs::SymbolId: { source_hash: 6d849c4b7a60c9b830e63065c97c39a1fed4b0abab6f6c551f3d9865410ff2e8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9b23ca7398a2845b002527fefb004ecadc2a6413346c98b993ef61160236afd6 }
-  src/symbol.rs::impl SymbolId: { source_hash: ca802553610fb4a445d88ce4902531bd92f6278cbac6082e6fd788e40fb6da36, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 77ab7abc5a6d525727cc015c5886b6ce858b4f670b2054f376dfb461e0432e63 }
+  src/symbol.rs::SymbolId: { source_hash: d18f54b79071c19e0e51299d4a93165109e9fcf01e1b7cd89e9415875223690c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 7427243474274f480d2fb47f7f974dee8b9dde773902d0cdd3c623020249605c }
   src/symbol.rs::SymbolKind: { source_hash: 705c2902ac4016a078c0207dc562b429c21c755363ceab9dfc3608825ebc7fab, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3aaa3a5c23a61c4d6c074cf71da5ce649410d1c66e26997bbfd1dc21f4248cdb }
   src/symbol.rs::Symbol: { source_hash: dc8ed31a654d14bd2417d298b4fdbf254b507c31c2d274577bf2db4100fbb013, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c1c98e9cc2b15d5fb12fc977520c2ce41224e064eeb31e475bc1710dd8acc9d5 }
   src/symbol.rs::ExtractedSymbol: { source_hash: def12a5c5c4a289f6fd6a7153c542a4cc6ae1ddd0b2127a1d4fba832d13e092d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c851597f4fe4e0fed5d2f9e3d630cf85dd7a8b9929d01481f72be5178c15319a }
@@ -16,18 +15,9 @@ Defines the graph's node vocabulary. `SymbolId` is the arena-index newtype every
 ## `SymbolId`
 `pub struct SymbolId`
 ### Summary
-A newtype wrapper over a `u32` index into a `Graph`'s node arena. It's the internal handle every containment reference (`Symbol::parent`, `Symbol::children`, `FileNode::children`) uses to point at another node without a Rust reference or `Rc`, which is what keeps the graph a flat, cheaply-serializable structure.
+A newtype wrapper over a `u32` index into a `Graph`'s node arena, together with its two `pub(crate)` accessors. It's the internal handle every containment reference (`Symbol::parent`, `Symbol::children`, `FileNode::children`) uses to point at another node without a Rust reference or `Rc`, which is what keeps the graph a flat, cheaply-serializable structure.
 ### Behavior
-Holds a single private `u32`. It is only valid for the exact `Graph` that produced it: re-extracting the repo can assign a different index to the same declaration, so a `SymbolId` must never be persisted or handed to an MCP caller — the node's stable string id serves that purpose instead. Defined in `symbol.rs` rather than `graph.rs` because `Symbol` needs to name the type for its `parent`/`children` fields; `graph.rs` re-exports it so callers don't depend on that placement.
-### Depends on
-- (none)
-
-## `impl SymbolId`
-`impl SymbolId`
-### Summary
-The two internal constructors/accessors for `SymbolId`, both `pub(crate)`: `new` wraps a raw arena index and `index` unwraps it back to a `usize` for slicing into `Graph`'s node vector.
-### Behavior
-`new(index: u32)` is called only by `Graph::build` as it reserves one arena slot per node. `index(self)` takes `self` by value (`SymbolId` is `Copy`) and widens the stored `u32` to `usize`. Neither is part of the public API — outside the crate a `SymbolId` is opaque, obtained from and passed back to `Graph` methods without ever being constructed or inspected directly.
+Holds a single private `u32`. It is only valid for the exact `Graph` that produced it: re-extracting the repo can assign a different index to the same declaration, so a `SymbolId` must never be persisted or handed to an MCP caller — the node's stable string id serves that purpose instead. The two accessors are both `pub(crate)`: `new(index: u32)` wraps a raw arena index and is called only by `Graph::build` as it reserves one slot per node; `index(self)` takes `self` by value (`SymbolId` is `Copy`) and widens the stored `u32` to a `usize` for indexing into `Graph`'s node vector. Outside the crate a `SymbolId` is opaque — obtained from and passed back to `Graph` methods, never constructed or inspected directly. Defined in `symbol.rs` rather than `graph.rs` because `Symbol` needs to name the type for its `parent`/`children` fields; `graph.rs` re-exports it so callers don't depend on that placement.
 ### Depends on
 - (none)
 
