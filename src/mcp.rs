@@ -406,17 +406,22 @@ impl CodeOwlServer {
                 id,
                 signature,
                 docstring,
-                lines,
                 prior,
             } => {
                 let sym_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
+                let sym = graph
+                    .get_symbol(sym_id)
+                    .ok_or_else(|| Self::not_found(&id))?;
                 let file_id = graph
                     .parent_id(sym_id)
                     .ok_or_else(|| Self::not_found(&id))?;
                 let file = graph
                     .get_file(file_id)
                     .ok_or_else(|| Self::not_found(&id))?;
-                let source = read_lines(&self.root, &file.id, lines).map_err(|e| e.to_string())?;
+                // The symbol's own span plus any folded-in `impl` method
+                // spans (M15) — see `spec::symbol_span_text`.
+                let source = crate::spec::symbol_span_text(&self.root, graph, &file.id, sym)
+                    .map_err(|e| e.to_string())?;
                 // Scoped to what this symbol's own text names, and with
                 // externals folded to one line — the same treatment the
                 // rendered `### Depends on` section gets, so a Rust symbol
@@ -447,24 +452,6 @@ impl CodeOwlServer {
             }
         })
     }
-}
-
-/// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
-/// what `get_next_spec_task` hands the agent as a symbol task's own
-/// source, per `ARCHITECTURE.md`'s "Bottom-up composition".
-fn read_lines(
-    root: &std::path::Path,
-    rel_path: &str,
-    lines: [usize; 2],
-) -> std::io::Result<String> {
-    let content = std::fs::read_to_string(root.join(rel_path))?;
-    let [start, end] = lines;
-    Ok(content
-        .lines()
-        .skip(start.saturating_sub(1))
-        .take(end + 1 - start)
-        .collect::<Vec<_>>()
-        .join("\n"))
 }
 
 #[tool_router]

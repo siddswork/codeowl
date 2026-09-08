@@ -277,7 +277,7 @@ fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol)
     let Node::File(file) = graph.get(file_id) else {
         return Vec::new();
     };
-    let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
+    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
         return Vec::new();
     };
     let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text);
@@ -339,19 +339,55 @@ pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &s
     }
 }
 
-/// Slice `rel_path`'s raw text down to `lines` (1-indexed, inclusive) —
-/// the same scheme `mcp.rs`'s `read_lines` uses for a symbol task's own
-/// source.
-fn read_symbol_text(root: &Path, rel_path: &str, lines: [usize; 2]) -> Result<String> {
+/// The raw source text that scopes a symbol's dependencies and feeds its
+/// generation task: `sym`'s own line span, plus the span of any direct
+/// child that lies *outside* it. For a TS class every method already sits
+/// inside the class braces, so this is just the class body; for a Rust
+/// type whose inherent `impl` blocks were folded in (M15,
+/// `rust::merge_inherent_impls`), the method spans live elsewhere in the
+/// file and are appended. Adjacent/overlapping spans are merged so the
+/// common case (a `struct` immediately followed by its `impl`) still reads
+/// as one contiguous block.
+pub(crate) fn symbol_span_text(
+    root: &Path,
+    graph: &Graph,
+    rel_path: &str,
+    sym: &Symbol,
+) -> Result<String> {
+    let mut spans: Vec<[usize; 2]> = vec![sym.lines];
+    let [own_start, own_end] = sym.lines;
+    for &child in &sym.children {
+        if let Some(c) = graph
+            .get_symbol(child)
+            .filter(|c| c.lines[0] < own_start || c.lines[1] > own_end)
+        {
+            spans.push(c.lines);
+        }
+    }
+    spans.sort_by_key(|s| s[0]);
+    // Merge spans that touch or overlap (a blank line or two between a
+    // `struct` and its `impl` shouldn't split the block).
+    let mut merged: Vec<[usize; 2]> = Vec::new();
+    for s in spans {
+        match merged.last_mut() {
+            Some(last) if s[0] <= last[1] + 2 => last[1] = last[1].max(s[1]),
+            _ => merged.push(s),
+        }
+    }
+
     let content = std::fs::read_to_string(root.join(rel_path))
         .with_context(|| format!("reading {rel_path}"))?;
-    let [start, end] = lines;
-    Ok(content
-        .lines()
-        .skip(start.saturating_sub(1))
-        .take(end + 1 - start)
-        .collect::<Vec<_>>()
-        .join("\n"))
+    let all: Vec<&str> = content.lines().collect();
+    let mut out = String::new();
+    for (i, [start, end]) in merged.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n");
+        }
+        let lo = start.saturating_sub(1).min(all.len());
+        let hi = (*end).min(all.len());
+        out.push_str(&all[lo..hi].join("\n"));
+    }
+    Ok(out)
 }
 
 /// Whole-word substring search: `name` must not be immediately preceded
@@ -429,7 +465,7 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
     let Node::File(file) = graph.get(file_id) else {
         return String::new();
     };
-    let Ok(symbol_text) = read_symbol_text(root, &file.id, sym.lines) else {
+    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
         return String::new();
     };
     let targets = graph
@@ -691,7 +727,6 @@ pub enum SpecTask {
         id: String,
         signature: String,
         docstring: Option<String>,
-        lines: [usize; 2],
         /// `Some` only for a reconciliation regeneration (M8's "Human
         /// corrections" case 4: source moved *and* a human had edited this
         /// symbol's prose) — the human's prior text, to preserve whatever
@@ -783,7 +818,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 id: sym.id.clone(),
                 signature: sym.signature.clone(),
                 docstring: sym.docstring.clone(),
-                lines: sym.lines,
                 prior: None,
             }));
         };
@@ -808,7 +842,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                         id: sym.id.clone(),
                         signature: sym.signature.clone(),
                         docstring: sym.docstring.clone(),
-                        lines: sym.lines,
                         prior: None,
                     }));
                 }
@@ -820,7 +853,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                     id: sym.id.clone(),
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
-                    lines: sym.lines,
                     prior: None,
                 }));
             }
@@ -834,7 +866,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                     id: sym.id.clone(),
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
-                    lines: sym.lines,
                     prior: Some(prose),
                 }));
             }
@@ -2560,6 +2591,44 @@ mod tests {
     }
 
     #[test]
+    fn symbol_span_text_includes_a_folded_impl_s_method_bodies() {
+        // M15: a Rust type's inherent `impl` is folded into the type
+        // symbol, but the method bodies sit outside the `struct`'s own line
+        // span. `symbol_span_text` must still surface them — otherwise a
+        // dep in a method (here `anyhow::Context`) is invisible to
+        // `### Depends on` and the generation task never sees the method.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-span", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let src = "\
+use anyhow::Context;\n\n\
+pub struct Counter {\n    n: u64,\n}\n\n\
+impl Counter {\n\
+    pub fn bump(&mut self) -> anyhow::Result<()> {\n\
+        self.n += 1;\n        Ok(()).context(\"never\")\n    }\n\
+}\n";
+        std::fs::write(dir.join("src/counter.rs"), src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/counter.rs".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::rust::extract_file(src, "src/counter.rs"),
+        }]);
+        let counter = graph
+            .get_symbol(graph.find("src/counter.rs::Counter").unwrap())
+            .unwrap();
+
+        let text = symbol_span_text(&dir, &graph, "src/counter.rs", counter).unwrap();
+        assert!(
+            text.contains("self.n += 1"),
+            "folded method body missing from span text:\n{text}"
+        );
+        assert!(text.contains("pub struct Counter"), "struct decl missing");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn next_task_returns_first_uncovered_symbol_then_the_file() {
         let dir = std::env::temp_dir().join(format!("codeowl-spec-test-{}-1", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2577,7 +2646,6 @@ mod tests {
                 id: "a.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 1],
                 prior: None,
             }
         );
@@ -2596,7 +2664,6 @@ mod tests {
                 id: "a.ts::two".to_string(),
                 signature: "function two(): void".to_string(),
                 docstring: None,
-                lines: [2, 2],
                 prior: None,
             }
         );
@@ -2763,7 +2830,6 @@ mod tests {
                 id: "a.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 3],
                 prior: Some(SymbolProse {
                     summary: "A human-corrected summary.".to_string(),
                     behavior: "Original behavior.".to_string(),
@@ -2804,7 +2870,6 @@ mod tests {
                 id: "a.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 1],
                 prior: None,
             })
         );
@@ -2972,7 +3037,6 @@ mod tests {
                 id: "lib/one.ts::one".to_string(),
                 signature: "function one(): void".to_string(),
                 docstring: None,
-                lines: [1, 1],
                 prior: None,
             }
         );
