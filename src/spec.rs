@@ -2008,7 +2008,16 @@ pub fn file_spec_smells(
     file_id: SymbolId,
     spec: &FileSpec,
 ) -> Vec<String> {
-    let mut smells = prose_smells(&spec.file_summary);
+    // Only smell-check the file summary once it's actually been written.
+    // `submit_spec` on a symbol lazily creates a `FileSpec` with a blank
+    // summary (`FileSpec::blank`); an empty `spec_hash` is that "never
+    // generated" signal (the same one `next_task` reads), and an empty
+    // summary in that state is a mid-generation gap, not a short cop-out.
+    let mut smells = if spec.file.spec_hash.is_empty() {
+        Vec::new()
+    } else {
+        prose_smells(&spec.file_summary)
+    };
     for (_, prose) in &spec.sections {
         smells.extend(prose_smells(&prose.summary));
         smells.extend(prose_smells(&prose.behavior));
@@ -3769,6 +3778,48 @@ impl Counter {\n\
             ],
         };
         assert!(file_spec_smells(&graph, Path::new("/nonexistent"), file_id, &spec).is_empty());
+    }
+
+    #[test]
+    fn a_file_whose_summary_was_never_written_is_not_smelly_for_being_short() {
+        // Mid-generation state: `submit_spec` on a symbol lazily creates a
+        // `FileSpec` with a blank summary (via `FileSpec::blank`). An empty
+        // summary that was never generated must not read as a
+        // `suspiciously_short` cop-out — nothing was written to smell.
+        let graph = build_graph_from_sources(&[(
+            "a.ts",
+            "export function one(): void {}\nexport function two(): void {}\n",
+        )]);
+        let file_id = graph.find("a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair::default(), // spec_hash empty -> file summary never written
+            symbols: vec![("a.ts::one".to_string(), HashPair::default())],
+            file_summary: String::new(),
+            sections: vec![(
+                "a.ts::one".to_string(),
+                SymbolProse {
+                    summary: "Does the first specific thing this file needs.".to_string(),
+                    behavior: "Runs synchronously with no side effects at all.".to_string(),
+                },
+            )],
+        };
+        assert!(file_spec_smells(&graph, Path::new("/nonexistent"), file_id, &spec).is_empty());
+
+        // But once the summary *has* been written (spec_hash set), a short
+        // one is still flagged.
+        let written = FileSpec {
+            file: HashPair {
+                spec_hash: hash_text(""),
+                ..HashPair::default()
+            },
+            file_summary: "Two helpers.".to_string(),
+            ..spec
+        };
+        assert_eq!(
+            file_spec_smells(&graph, Path::new("/nonexistent"), file_id, &written),
+            vec!["suspiciously_short"]
+        );
     }
 
     #[test]
