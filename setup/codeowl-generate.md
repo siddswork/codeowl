@@ -133,6 +133,18 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      re-read any of the underlying files. This is the top-level document
      a BA (or anyone new to the repo) should read first.
 
+     **If `features` is empty** — the stack has no feature layer (a CLI, a
+     library: no routes, no enumerable entry points) — a single paragraph
+     rarely does the codebase justice, because the thing a reader most
+     wants to know is how its major flows work end to end and no feature
+     spec covers that. After the `# Title` line and the summary paragraph,
+     add a `## Key flows` section: name the codebase's principal
+     end-to-end flows (3–6 of them) and, for each, a short paragraph
+     tracing which modules it crosses in order. You identify these
+     yourself from the module summaries — CodeOwl can't enumerate them —
+     so this section is closer to a `feature` narrative in spirit than to
+     the usual one-paragraph system spec.
+
    **Reconciliation (`prior`/`prior_summary`/`prior_behavior`, when
    present and non-null):** the source changed *and* a human had hand-
    edited this exact spec since it was last machine-written — the value

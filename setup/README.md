@@ -25,6 +25,12 @@ cargo build --release
 
 The binary is self-contained; note its absolute path for the next step.
 
+> **Hacking on CodeOwl itself?** Point `.mcp.json` at `target/debug/codeowl`
+> instead — `cargo build` / `cargo test` keep it current, so the server
+> always serves your latest code. A `target/release/` path silently serves
+> whatever you last built with `--release`. CodeOwl's own repo ships a
+> `.mcp.json` doing this.
+
 ## 2. Point an MCP server at your repo
 
 Copy `setup/mcp.json` to `.mcp.json` at the root of the repo you want
