@@ -100,6 +100,13 @@ pub struct RepoIndex {
     /// that a newer `#[serde(default)]` field would read empty from.
     #[serde(default)]
     format_version: u32,
+    /// The `StackPack::name()` this cache was built with. If `detect`
+    /// picks a different pack now — the repo's stack changed — the cached
+    /// `FileInputs` were parsed by the wrong grammar, so `load` discards
+    /// them (M13 design decision 7). `#[serde(default)]` empty on a
+    /// pre-M14 cache, which `format_version` already rejects.
+    #[serde(default)]
+    pack_name: String,
     /// Repo-relative path → its cached inputs. A `BTreeMap` so a rebuilt
     /// graph's node order is deterministic regardless of walk or
     /// filesystem-event order.
@@ -152,6 +159,7 @@ impl RepoIndex {
         }
         Ok(Self {
             format_version: crate::graph::FORMAT_VERSION,
+            pack_name: pack.name().to_string(),
             files,
             root: root.to_path_buf(),
             pack,
@@ -195,7 +203,13 @@ impl RepoIndex {
         // `pack` and `root` are `#[serde(skip)]` — re-derive them from the
         // repo. `detect` also fail-fasts if the repo lost all its source
         // while nothing was running.
-        index.pack = crate::lang::detect(root).ok()?;
+        let pack = crate::lang::detect(root).ok()?;
+        // The repo's stack changed since this cache was written — its
+        // `FileInputs` were parsed by the wrong grammar (design decision 7).
+        if index.pack_name != pack.name() {
+            return None;
+        }
+        index.pack = pack;
         index.root = root.to_path_buf();
         Some(index)
     }
@@ -313,6 +327,7 @@ impl RepoIndex {
             .collect();
 
         let mut graph = Graph::build(extractions);
+        graph.set_pack_name(self.pack.name());
         let file_imports: HashMap<String, FileImports> = self
             .files
             .iter()

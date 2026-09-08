@@ -143,7 +143,7 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// gain `markers`). 3 = M13 (the three typed edge fields — route literals,
 /// table refs, rendered components — collapse into one generic
 /// `flow_edges`).
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
@@ -192,6 +192,15 @@ pub struct Graph {
     /// `load` rejects it.
     #[serde(default)]
     format_version: u32,
+    /// The `StackPack::name()` of the pack that built this graph
+    /// (`"typescript-next"` / `"rust"`). Lets a pure-read caller
+    /// (`spec.rs`, `mcp.rs`) recover the pack — for `classify` and the
+    /// feature model — without threading it down, and lets `RepoIndex`
+    /// reject a cache built by a different pack (M13 design decision 7).
+    /// Empty on a graph built by a test helper or a pre-M14 cache → the
+    /// pack lookup falls back to the TypeScript pack.
+    #[serde(default)]
+    pack_name: String,
     nodes: Vec<Node>,
     /// String id → arena slot. A `BTreeMap`, not a `HashMap`: it's
     /// serialized into `.codeowl/graph`, and a `HashMap` would write its
@@ -288,12 +297,23 @@ impl Graph {
 
         Self {
             format_version: FORMAT_VERSION,
+            pack_name: String::new(),
             nodes,
             by_id,
             imports: Vec::new(),
             flow_edges: Vec::new(),
             resolved_default_imports: Vec::new(),
         }
+    }
+
+    /// Stamp the pack that built this graph (`RepoIndex::rebuild`). Empty
+    /// until set — [`crate::stack::for_name`] treats empty as the TS pack.
+    pub fn set_pack_name(&mut self, name: &str) {
+        self.pack_name = name.to_string();
+    }
+
+    pub fn pack_name(&self) -> &str {
+        &self.pack_name
     }
 
     pub fn get(&self, id: SymbolId) -> &Node {

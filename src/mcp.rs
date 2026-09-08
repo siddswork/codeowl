@@ -633,16 +633,14 @@ impl CodeOwlServer {
                 return Ok(Json(missing(req.id, String::new(), None)));
             };
             let smells = crate::spec::body_smells(&spec.body);
-            let entry_points = crate::features::enumerate_entry_points(&graph);
+            let fm = crate::features::feature_model_for(&graph)
+                .ok_or_else(|| Self::not_found(&req.id))?;
+            let entry_points = fm.enumerate_entry_points(&graph);
             let entry = entry_points
                 .iter()
                 .find(|e| e.id == slug)
                 .ok_or_else(|| Self::not_found(&req.id))?;
-            let participants = crate::features::assemble_participants(
-                &graph,
-                crate::features::default_feature_model(),
-                entry,
-            );
+            let participants = crate::features::assemble_participants(&graph, fm, entry);
             let current = crate::spec::current_participant_hashes(&graph, &participants)
                 .map_err(|e| e.to_string())?;
             let changed = crate::spec::diff_hash_lists(&current, &spec.participants);
@@ -918,7 +916,7 @@ impl CodeOwlServer {
         let items = crate::spec::coverage(&graph, &self.root, req.scope.as_deref())
             .map_err(|e| e.to_string())?;
         let summary = crate::spec::summarize(&items);
-        let pending = crate::spec::prioritize(items)
+        let pending = crate::spec::prioritize(items, &graph)
             .into_iter()
             .map(|i| CoverageItemResponse {
                 id: i.id,

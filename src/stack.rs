@@ -84,7 +84,11 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// `ROADMAP.md` M13 piece 3, design decision 3). M14 (`RustStack`) and
     /// M16 (commons-lang) both return `None`; M17 (Quarkus) is where this
     /// gets its second implementation.
-    fn feature_model(&self) -> Option<&dyn crate::features::FeatureModel> {
+    ///
+    /// `'static`: a feature model is a stateless ZST, so this can be
+    /// recovered from just a pack name (via [`for_name`]) with no lifetime
+    /// tied to the transient `Box<dyn StackPack>`.
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
         None
     }
 }
@@ -166,16 +170,28 @@ impl StackPack for TypeScriptNextStack {
         resolved.map_or(FlowTarget::Unresolved, FlowTarget::Node)
     }
 
-    fn feature_model(&self) -> Option<&dyn crate::features::FeatureModel> {
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
         Some(crate::features::default_feature_model())
     }
 }
 
 /// The default pack as a trait object — the shape `RepoIndex` and the test
-/// fixtures want. Phase 1 has exactly one pack, so this is unconditional;
-/// M13's `detect()` is where the real choice will live.
+/// fixtures want. `detect()` is where the real choice for a real repo
+/// lives; this is the fallback a `RepoIndex` deserializes into before
+/// `load` re-runs `detect`.
 pub fn typescript_next() -> Box<dyn StackPack> {
     Box::new(TypeScriptNextStack)
+}
+
+/// The pack for a persisted `StackPack::name()` — how a pure-read caller
+/// (`spec.rs`, `mcp.rs`) recovers the pack from `Graph::pack_name()`
+/// without it being threaded down. Unknown / empty (a test-built graph, a
+/// pre-M14 cache) falls back to the TypeScript pack.
+pub fn for_name(name: &str) -> Box<dyn StackPack> {
+    match name {
+        "rust" => Box::new(RustStack),
+        _ => Box::new(TypeScriptNextStack),
+    }
 }
 
 /// The Rust stack (M14): `tree-sitter-rust` extraction over `.rs` files,

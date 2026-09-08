@@ -454,21 +454,25 @@ impl FeatureModel for TypeScriptNextFeatureModel {
     }
 }
 
-/// The feature model for the one stack M13 ships. M14+ replaces these
-/// call sites with [`crate::stack::StackPack::feature_model`] routing once
-/// a second stack disagrees; deferring it is safe because a Rust or Java
-/// repo has no `app/**/page.tsx`, so this model simply enumerates nothing
-/// there (ROADMAP M13 piece 1 — the core stops naming pack functions
-/// "later").
+/// The TypeScript + Next feature model — the value behind
+/// `TypeScriptNextStack::feature_model()`.
 pub fn default_feature_model() -> &'static dyn FeatureModel {
     &TypeScriptNextFeatureModel
 }
 
-/// Back-compat free-function shim — [`default_feature_model`] plus
-/// [`FeatureModel::enumerate_entry_points`]. Callers that already hold a
-/// `&dyn FeatureModel` should prefer the method.
+/// The feature model for the stack that built `graph`, or `None` if that
+/// stack has none (M14 `RustStack`, M16 commons-lang). Recovered from
+/// `graph.pack_name()` via [`crate::stack::for_name`] so a pure-read
+/// caller doesn't need the pack threaded down. This is the M14 completion
+/// of what M13 stubbed as `default_feature_model()`.
+pub fn feature_model_for(graph: &Graph) -> Option<&'static dyn FeatureModel> {
+    crate::stack::for_name(graph.pack_name()).feature_model()
+}
+
+/// The entry points for `graph`'s stack — empty for a stack with no
+/// feature model.
 pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint> {
-    default_feature_model().enumerate_entry_points(graph)
+    feature_model_for(graph).map_or_else(Vec::new, |fm| fm.enumerate_entry_points(graph))
 }
 
 fn is_page(file_id: &str) -> bool {

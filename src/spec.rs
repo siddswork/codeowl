@@ -18,13 +18,21 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use crate::features::{
-    EntryPoint, Participants, assemble_participants, default_feature_model, enumerate_entry_points,
+    EntryPoint, Participants, assemble_participants, enumerate_entry_points, feature_model_for,
     feature_slug,
 };
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
-use crate::lang::{FileRole, classify};
+use crate::lang::FileRole;
 use crate::symbol::{Symbol, SymbolKind};
+
+/// A repo-relative path's [`FileRole`] under the stack that built `graph`
+/// — `RustStack` calls `tests/` a test root, `TypeScriptNextStack` uses
+/// the JS conventions. Replaces the direct `lang::classify` call so
+/// prioritisation isn't hard-wired to one stack.
+fn classify_in(graph: &Graph, path: &str) -> FileRole {
+    crate::stack::for_name(graph.pack_name()).classify(path)
+}
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
 /// the source extension: `lib/utils.ts` -> `docs/specs/lib/utils.ts.md`.
@@ -42,8 +50,8 @@ pub fn spec_path(root: &Path, source_path: &str) -> PathBuf {
 /// documenting the test harness is rarely the point of a spec corpus, and
 /// whenever it is, it's safe to leave for last. Also strips a
 /// `rollup:`/`feature:` id prefix so it can be asked of a coverage id.
-pub fn is_test_path(path: &str) -> bool {
-    matches!(classify(path), FileRole::Test)
+pub fn is_test_path(graph: &Graph, path: &str) -> bool {
+    matches!(classify_in(graph, path), FileRole::Test)
 }
 
 /// A file is spec-bearing iff it declares at least one exported `Callable`
@@ -1148,7 +1156,10 @@ pub fn next_feature_task(
     root: &Path,
     entry: &EntryPoint,
 ) -> Result<Option<FeatureTask>> {
-    let participants = assemble_participants(graph, default_feature_model(), entry);
+    let Some(fm) = feature_model_for(graph) else {
+        return Ok(None);
+    };
+    let participants = assemble_participants(graph, fm, entry);
     let current = current_participant_hashes(graph, &participants)?;
 
     let existing = read_feature_spec(root, &entry.id)?;
@@ -1211,7 +1222,9 @@ pub fn submit_feature(
         bail!("submitted feature content must start with a `# Title` heading");
     }
 
-    let fm = default_feature_model();
+    let Some(fm) = feature_model_for(graph) else {
+        bail!("this stack has no feature layer — nothing to submit a feature spec against");
+    };
     let entry = fm
         .enumerate_entry_points(graph)
         .into_iter()
@@ -1543,7 +1556,9 @@ pub fn enumerate_modules(graph: &Graph) -> Vec<String> {
     dirs.sort();
     dirs.dedup();
     dirs.retain(|d| {
-        !d.is_empty() && !is_test_path(&format!("{d}/")) && directory_is_spec_bearing(graph, d)
+        !d.is_empty()
+            && !is_test_path(graph, &format!("{d}/"))
+            && directory_is_spec_bearing(graph, d)
     });
     dirs
 }
@@ -1570,7 +1585,9 @@ pub fn current_module_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, 
 /// system spec's per-feature half of its staleness key.
 pub fn current_feature_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
-    let fm = default_feature_model();
+    let Some(fm) = feature_model_for(graph) else {
+        return Ok(out); // a stack with no feature layer has no feature half
+    };
     for entry in fm.enumerate_entry_points(graph) {
         let participants = assemble_participants(graph, fm, &entry);
         let current = current_participant_hashes(graph, &participants)?;
@@ -1945,7 +1962,7 @@ fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize {
     graph
         .imports()
         .iter()
-        .filter(|imp| !is_test_path(&imp.from_file))
+        .filter(|imp| !is_test_path(graph, &imp.from_file))
         .filter(|imp| {
             imp.target
                 .is_some_and(|t| graph.parent_id(t) == Some(file_id))
@@ -2010,7 +2027,10 @@ fn feature_status(graph: &Graph, root: &Path, entry: &EntryPoint) -> Result<(Str
     let Some(spec) = read_feature_spec(root, &entry.id)? else {
         return Ok(("missing".to_string(), Vec::new()));
     };
-    let participants = assemble_participants(graph, default_feature_model(), entry);
+    let Some(fm) = feature_model_for(graph) else {
+        return Ok(("missing".to_string(), Vec::new()));
+    };
+    let participants = assemble_participants(graph, fm, entry);
     let current = current_participant_hashes(graph, &participants)?;
     let status = if diff_hash_lists(&current, &spec.participants).is_empty() {
         "current"
@@ -2183,7 +2203,7 @@ const SHARED_CODE_MAX_FILES: usize = 8;
 /// stays hash-`"current"` forever unless something else flags it). Never
 /// filtering on smells too would mean a `--all --budget=N` run could run
 /// to completion while silently leaving known-bad content in place.
-pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
+pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> {
     // The fan-in floor for the shared-code tier: the higher of
     // SHARED_CODE_FAN_IN and the Nth-highest fan-in among *all* candidate
     // files in the repo — computed from `items` before the `pending`
@@ -2195,7 +2215,7 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
     let shared_cutoff = {
         let mut fan_ins: Vec<usize> = items
             .iter()
-            .filter(|i| i.kind == "file" && classify(&i.id) == FileRole::Domain)
+            .filter(|i| i.kind == "file" && classify_in(graph, &i.id) == FileRole::Domain)
             .map(|i| i.fan_in)
             .filter(|&f| f >= SHARED_CODE_FAN_IN)
             .collect();
@@ -2215,7 +2235,7 @@ pub fn prioritize(items: Vec<CoverageItem>) -> Vec<CoverageItem> {
     pending.sort_by(|a, b| {
         let tier = |item: &CoverageItem| -> u8 {
             if item.kind == "file" {
-                return match classify(&item.id) {
+                return match classify_in(graph, &item.id) {
                     FileRole::Test => 5,
                     FileRole::Domain if item.fan_in >= shared_cutoff => 0,
                     // Below the fan-in cutoff, or a primitive/generated
@@ -3134,7 +3154,7 @@ mod tests {
         assert_eq!(summary.current, 0);
         assert_eq!(summary.stale, 0);
 
-        let pending = prioritize(items);
+        let pending = prioritize(items, &graph);
         let ids: Vec<&str> = pending.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
@@ -3232,7 +3252,47 @@ mod tests {
         assert_eq!(summary.current, 8);
         assert_eq!(summary.stale, 0);
         assert_eq!(summary.missing, 0);
-        assert!(prioritize(items).is_empty());
+        assert!(prioritize(items, &graph).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_stack_with_no_feature_model_composes_a_system_spec_from_modules_alone() {
+        // M14 / design decision 3: `RustStack` has no feature layer, so
+        // `coverage` must report zero features and the system-spec
+        // composition must not panic or emit an empty `## Features`.
+        let (graph, dir) = build_feature_fixture(
+            &[
+                ("src/lib.rs", "pub mod parse;\npub mod store;\n"),
+                (
+                    "src/parse.rs",
+                    "//! Parsing.\npub fn tokenize(_s: &str) -> Vec<String> { Vec::new() }\npub fn lex() {}\n",
+                ),
+                (
+                    "src/store.rs",
+                    "//! Storage.\nuse crate::parse::tokenize;\npub fn save(_s: &str) { tokenize(_s); }\npub fn load() {}\n",
+                ),
+            ],
+            "rust-nofeat",
+        );
+        assert_eq!(graph.pack_name(), "rust");
+        assert!(feature_model_for(&graph).is_none());
+        assert!(current_feature_hashes(&graph, &dir).unwrap().is_empty());
+
+        let items = coverage(&graph, &dir, None).unwrap();
+        assert!(
+            !items.iter().any(|i| i.kind == "feature"),
+            "a no-feature stack must produce no feature coverage items"
+        );
+        assert!(items.iter().any(|i| i.id == "system"));
+
+        // The system task is generable and its `features` list is empty.
+        // (Modules/rollups come first; drain them, then ask for system.)
+        let sys = next_system_task(&graph, &dir).unwrap();
+        if let Some(task) = sys {
+            assert!(task.features.is_empty(), "no features to compose over");
+        }
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3439,7 +3499,7 @@ mod tests {
         assert_eq!(summary.current, 1);
         assert_eq!(summary.smelly, 1);
 
-        let pending = prioritize(items);
+        let pending = prioritize(items, &graph);
         assert_eq!(
             pending.len(),
             1,
@@ -3468,7 +3528,11 @@ mod tests {
             item("app/page.tsx", "file", 0), // a leaf
             item("rollup:lib", "rollup", 0),
         ];
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec![
@@ -3499,7 +3563,11 @@ mod tests {
             item("app/dashboard/card.test.tsx", "file", 0),
             item("system", "system", 0),
         ];
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec![
@@ -3528,7 +3596,11 @@ mod tests {
         for fan in (9..=20).rev() {
             items.push(item(&format!("lib/f{fan:02}.ts"), "file", fan));
         }
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
 
         // Only the top SHARED_CODE_MAX_FILES (fan-in 20..13) come before
         // the feature; the rest (12..9) fall to the long tail after it.
@@ -3560,7 +3632,11 @@ mod tests {
         for fan in (12..=19).rev() {
             items.push(item(&format!("lib/hot{fan}.ts"), "file", "current", fan));
         }
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec!["feature:x", "lib/mid.ts"],
@@ -3590,7 +3666,11 @@ mod tests {
                 smells: Vec::new(),
             },
         ];
-        let ids: Vec<String> = prioritize(items).into_iter().map(|i| i.id).collect();
+        let graph = crate::graph::build_graph_from_sources(&[]);
+        let ids: Vec<String> = prioritize(items, &graph)
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
         assert_eq!(
             ids,
             vec!["lib/db.ts", "feature:x", "components/ui/button.tsx"]
@@ -3599,12 +3679,14 @@ mod tests {
 
     #[test]
     fn is_test_path_examples() {
-        assert!(is_test_path("e2e/helpers/api-client.ts"));
-        assert!(is_test_path("src/components/__tests__/button.ts"));
-        assert!(is_test_path("lib/utils.test.ts"));
-        assert!(is_test_path("app/page.spec.tsx"));
-        assert!(is_test_path("rollup:e2e/helpers"));
-        assert!(!is_test_path("lib/utils.ts"));
-        assert!(!is_test_path("app/api/attest/route.ts")); // "test" substring, not a test file
+        // An empty graph -> pack_name "" -> the TypeScript pack's classify.
+        let g = crate::graph::build_graph_from_sources(&[]);
+        assert!(is_test_path(&g, "e2e/helpers/api-client.ts"));
+        assert!(is_test_path(&g, "src/components/__tests__/button.ts"));
+        assert!(is_test_path(&g, "lib/utils.test.ts"));
+        assert!(is_test_path(&g, "app/page.spec.tsx"));
+        assert!(is_test_path(&g, "rollup:e2e/helpers"));
+        assert!(!is_test_path(&g, "lib/utils.ts"));
+        assert!(!is_test_path(&g, "app/api/attest/route.ts")); // "test" substring, not a test file
     }
 }
