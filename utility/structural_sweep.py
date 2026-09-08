@@ -13,6 +13,9 @@ repo and diffs:
                                    it's expected to be empty pre-M14 and is
                                    additive)
   - get_spec_coverage              summary + the full ordered `pending` list
+                                   (the additive M15 `generations` /
+                                   `generations_remaining` planning fields
+                                   are ignored, like `markers`)
   - get_next_spec_task             for every feature, every rollup, `system`,
                                    and a sample of file targets
   - get_callers / get_callees      for every schema table and a fan-in sample
@@ -134,6 +137,21 @@ def canon(x):
     return json.dumps(x, sort_keys=True)
 
 
+def normalize_coverage(cov):
+    """Drop fields that are *additive* to `get_spec_coverage` -- present in
+    a newer binary, absent in an older one, and invisible to a caller that
+    doesn't ask for them. `generations` / `generations_remaining` (M15) are
+    a planning aid derived from the same walk, not a change to what
+    current/stale/missing/pending mean."""
+    cov = dict(cov)
+    cov.pop("generations_remaining", None)
+    cov["pending"] = [
+        {k: v for k, v in item.items() if k != "generations"}
+        for item in cov.get("pending", [])
+    ]
+    return cov
+
+
 def normalize_symbol(s):
     """Fold post-M14 fields back to their pre-M14 form so a refactor that
     only *relabels* (M14 commit 1: SymbolKind -> Container/Callable/Value/
@@ -247,7 +265,9 @@ def sweep(base_bin, head_bin, repo):
     restore()
 
     # --- diff ---
-    record("get_spec_coverage", canon(res_b["coverage"]) == canon(res_h["coverage"]))
+    record("get_spec_coverage",
+           canon(normalize_coverage(res_b["coverage"]))
+           == canon(normalize_coverage(res_h["coverage"])))
 
     task_diff = [lbl for lbl in res_b
                  if lbl.startswith("task:")
