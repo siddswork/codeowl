@@ -1,9 +1,14 @@
 # Wiring CodeOwl into a repository
 
-CodeOwl runs as an MCP server that a coding agent (Claude Code, and later
-other MCP clients) queries for accurate structural facts and generated
-specs about a target repository, instead of re-exploring it on every task.
-This folder has everything needed to set that up against your own repo.
+CodeOwl runs as an MCP server that a coding agent queries for accurate
+structural facts and generated specs about a target repository, instead of
+re-exploring it on every task. This folder has everything needed to set
+that up against your own repo.
+
+**This page covers [Claude Code](https://claude.com/claude-code).** For
+**VS Code + GitHub Copilot (Agent mode)**, see [`COPILOT.md`](COPILOT.md)
+— the CodeOwl side is identical; only the three wiring files (MCP config,
+generation prompt, instructions file) differ.
 
 **Current scope:** one `StackPack` per repo, auto-detected — TypeScript +
 Next.js + SQL, or Rust. The Next.js pack's feature detection assumes
@@ -64,7 +69,9 @@ count of files, most of them `missing`.
 `setup/codeowl-generate.md` is a Claude Code slash command that drives the
 spec-writing loop. CodeOwl never calls an LLM itself — it assembles
 context and persists whatever the agent writes; this command is the
-client-side half.
+client-side half. (The Copilot equivalent is
+`setup/codeowl-generate.prompt.md` — see [`COPILOT.md`](COPILOT.md). Keep
+the two in sync.)
 
 Copy it to whichever scope you want:
 
@@ -132,3 +139,4 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
 
 Once it's wired in, see [`USAGE.md`](USAGE.md) for day-to-day use — what
 the agent queries on its own, and when to run `/codeowl-generate`.
+Using VS Code + Copilot instead? [`COPILOT.md`](COPILOT.md).

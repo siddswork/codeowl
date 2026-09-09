@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "codeowl": {
+      "type": "stdio",
+      "command": "/absolute/path/to/codeowl/target/release/codeowl",
+      "args": ["serve", "${workspaceFolder}"]
+    }
+  }
+}
