@@ -50,6 +50,11 @@ pub struct RepoWatcher {
 /// change. `index` is the already-warm index from the catch-up pass — the
 /// watcher takes ownership and mutates it in place on every change.
 pub fn spawn(root: PathBuf, graph: Arc<ArcSwap<Graph>>, index: RepoIndex) -> Result<RepoWatcher> {
+    // Watch the same canonical form `RepoIndex` strips off event paths in
+    // `apply_changes` (see `index::canonical_root`) — so `watchable_dirs`
+    // registers watches under the path `notify` will actually report events
+    // for, and the two never drift when a caller passes a symlinked root.
+    let root = root.canonicalize().unwrap_or(root);
     let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
     let mut watcher: RecommendedWatcher = notify::recommended_watcher(move |res| {
         // A send failure just means the loop has exited — nothing to do.
