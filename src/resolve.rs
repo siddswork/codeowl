@@ -69,6 +69,14 @@ pub fn resolve_imports(
     file_imports: &HashMap<String, FileImports>,
     graph: &Graph,
 ) -> Vec<ResolvedImport> {
+    // `oxc_resolver` (with the default `symlinks: true`) hands back
+    // symlink-resolved paths, so `specifier_to_rel_path`'s
+    // `strip_prefix(repo_root)` only works if `repo_root` is in that same
+    // form. Canonicalize once here — otherwise a repo under a symlinked
+    // directory (macOS `/var` -> `/private/var`, `/tmp`, a symlinked
+    // clone) resolves every import to `None`.
+    let canonical = repo_root.canonicalize().ok();
+    let repo_root = canonical.as_deref().unwrap_or(repo_root);
     let ctx = ResolveCtx {
         repo_root,
         resolver,
@@ -129,6 +137,9 @@ pub fn resolve_default_imports(
     resolver: &Resolver,
     file_imports: &HashMap<String, FileImports>,
 ) -> Vec<ResolvedDefaultImport> {
+    // Canonicalize for the same reason as `resolve_imports`.
+    let canonical = repo_root.canonicalize().ok();
+    let repo_root = canonical.as_deref().unwrap_or(repo_root);
     let mut out = Vec::new();
     for (from_file, fi) in sorted_by_key(file_imports) {
         for di in &fi.default_imports {
@@ -255,6 +266,52 @@ mod tests {
             .unwrap();
         assert_eq!(edge.target, graph.find("b.ts::helper"));
         assert!(edge.target.is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolution_survives_a_symlinked_repo_root() {
+        // macOS's `std::env::temp_dir()` lives under `/var` -> `/private/var`,
+        // a symlink; oxc_resolver (`symlinks: true`) returns the
+        // symlink-resolved path, so `specifier_to_rel_path` stripping an
+        // un-canonicalized `repo_root` fails and every import comes back
+        // `None`. Reproduce on any OS with an explicit symlinked root.
+        use std::os::unix::fs::symlink;
+
+        let real = std::env::temp_dir().join(format!("codeowl-canon-real-{}", std::process::id()));
+        let link = std::env::temp_dir().join(format!("codeowl-canon-link-{}", std::process::id()));
+        std::fs::create_dir_all(&real).unwrap();
+        let _ = std::fs::remove_file(&link);
+        symlink(&real, &link).unwrap();
+
+        let files = [
+            ("a.ts", "import { helper } from './b';\n"),
+            ("b.ts", "export function helper(): void {}\n"),
+        ];
+        let mut extractions = Vec::new();
+        let mut file_imports = HashMap::new();
+        for (rel, content) in files {
+            std::fs::write(real.join(rel), content).unwrap();
+            extractions.push(crate::graph::extract_and_hash(rel, content));
+            file_imports.insert(rel.to_string(), extract_imports(content, rel));
+        }
+        let graph = Graph::build(extractions);
+
+        // repo_root passed as the SYMLINK, not the canonical path.
+        let resolved = resolve_imports(&link, &build_resolver(), &file_imports, &graph);
+
+        std::fs::remove_file(&link).ok();
+        std::fs::remove_dir_all(&real).ok();
+
+        let edge = resolved
+            .iter()
+            .find(|r| r.imported_name == "helper")
+            .expect("the import edge exists");
+        assert_eq!(edge.target, graph.find("b.ts::helper"));
+        assert!(
+            edge.target.is_some(),
+            "a symlinked repo root must not break resolution"
+        );
     }
 
     #[test]
