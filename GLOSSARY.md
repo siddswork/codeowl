@@ -398,44 +398,103 @@ each document:
 
 ## Stacks and the pluggability work (Phase 2)
 
+CodeOwl started out hard-wired to one toolchain: TypeScript + Next.js +
+SQL + Supabase, with those assumptions spread through the codebase.
+**Phase 2 is the work of pulling every one of those assumptions behind a
+single interface**, so a new language is added by writing an adapter, not
+by editing the core. The terms below are the vocabulary that came out of
+that.
+
+The mental model is a wall socket. There's a **generic pipeline** (the
+socket) — build the graph, apply the granularity rules, compute the four
+hashes, serve the MCP tools — that never changes and never names a
+language. Plugged into it is exactly one **pack** (the adapter) that knows
+one toolchain. Adding Rust, then Java, was building new adapters and
+checking that the socket didn't have to change shape to fit them.
+
 **Stack**
 : The whole toolchain shape of a repo — its language, its framework, its
   database/schema convention, and its import-resolution rules, taken
   together. Not just "the language."
 
   "TypeScript + Next.js + SQL + Supabase" is one stack. "Rust" is another.
-  "Java + Maven" is another. CodeOwl serves **exactly one stack per repo**,
-  and it figures out which one automatically by looking at the files.
+  "Java + Maven" is another. CodeOwl serves **exactly one stack per repo**.
 
 **`StackPack`**
-: The plug-in interface that every stack implements: how to extract
-  symbols, how to resolve imports, how to classify a file (source? test?
-  generated?), and — optionally — a feature model.
+: The Rust trait (interface) that defines what a stack has to provide. One
+  `impl` per stack — `TypeScriptNextStack`, `RustStack`, `JavaStack`.
 
-  The point of the trait is that the generic machinery around it
-  (`spec.rs`, `mcp.rs`, `graph.rs`, `index.rs`) never mentions a
-  stack-specific convention. Adding support for a new language is writing a
-  new `StackPack`, not editing the core. (`src/stack.rs`)
+  Its ~9 methods cover: which files this stack reads (`source_kind`), how
+  to classify a path (source / test / generated — `classify`), how to
+  parse a file into symbols (`extract_symbols`), how to parse its imports
+  (`extract_imports`), how to resolve those imports to real targets
+  (`resolve_imports`), the flow-edge hooks (`extract_flow_edges` /
+  `resolve_flow_edge`), and — optionally — a `feature_model`.
+
+  The whole point: the generic files (`spec.rs`, `mcp.rs`, `graph.rs`,
+  `index.rs`) call these methods and never contain a stack-specific `if`.
+  (`src/stack.rs`)
+
+**Pack**
+: Informal shorthand for a concrete `StackPack` implementation. "The Rust
+  pack," "the TS pack," "the Java pack." When a doc says "the pack owns
+  resolution," it means that decision lives inside a `StackPack` impl, not
+  in the shared pipeline.
+
+**`detect` (stack detection)**
+: The startup step that picks the one pack for a repo, by walking the file
+  tree and counting how many *primary source files* each pack claims
+  (`.ts`/`.tsx` for TS, `.rs` for Rust, `.java` for Java — a lone `.sql`
+  file doesn't make a repo "TypeScript"). Test directories are excluded
+  from the count.
+
+  Exactly one pack may win. Zero → CodeOwl errors, naming the stacks it
+  supports. More than one (a repo that's genuinely a Next app *and* a Rust
+  service) → CodeOwl errors rather than guessing. One stack per repo is a
+  deliberate Phase-2 limit. (`src/lang.rs::detect`)
+
+**Pack hook (also: seam)**
+: One of the specific methods the generic pipeline calls out to the pack
+  for. Naming a "seam" is a way of saying "this is the exact point where
+  stack-specific knowledge is allowed in, and nowhere else."
+
+  The feature-layer seams are the subtle ones: `resolve_flow_edge` (given
+  a raw string like `"/api/submit"`, which symbol does it point at?) and
+  `admits_to_core` (given a file reached from a feature's entry point,
+  does it belong *in* the feature or is it just a one-line dependency?).
+  The Next pack answers `admits_to_core` with "is it co-located with the
+  page, or does it do data work?"; a Java service would answer it with
+  something CDI-shaped. Same hook, different rule.
 
 **`FeatureModel`**
 : The *optional* part of a `StackPack` — the part that models "what counts
-  as a feature here." It knows how to list a stack's entry points and how
-  to decide which nearby files belong to a feature's core.
+  as a feature here." Two responsibilities: enumerate the stack's entry
+  points, and provide the `admits_to_core` rule.
 
-  A framework-shaped stack (Next.js, Quarkus) has one. A library or a plain
-  CLI (a pure Rust crate, Apache commons-lang) returns `None` — it still
-  gets symbol / file / rollup / system specs, just no feature layer.
-  (`src/features.rs::FeatureModel`)
+  A framework-shaped stack (Next.js, Quarkus) has one. A library or a
+  plain CLI (a pure Rust crate, Apache commons-lang) returns `None` — it
+  still gets symbol / file / rollup / system specs, just no feature layer,
+  and its system spec is composed from module rollups instead of from
+  feature narratives. (`src/features.rs::FeatureModel`)
+
+**The generic pipeline (also: the stack-neutral core)**
+: Everything that *isn't* a pack: `graph.rs` (the arena and edge types),
+  `spec.rs` (granularity rules, the four hashes, rendering), `index.rs`
+  (incremental re-indexing), `mcp.rs` (the tool surface). This code is
+  fixed across all stacks — it only ever reasons about the generic
+  `SymbolKind`, the two edge types, and the pack hooks. If a change to
+  support a new stack has to touch this layer, something is wrong (see
+  "the socket held").
 
 **"The socket held" / "no trait leak"**
 : Shorthand for "the abstraction actually held up."
 
   When a genuinely different stack was added (Rust after TypeScript, then
-  Java), the real test was: did any of the generic files — `spec.rs`,
-  `mcp.rs` — need a stack-specific `if` added to them? Or did everything
-  new fit behind the `StackPack` trait? Each time it fit, so: "the socket
-  held," "no trait shape leaks." A leak would mean the trait was drawn in
-  the wrong place.
+  Java), the test was: did any generic file — `spec.rs`, `mcp.rs` — need a
+  stack-specific `if` added to it? Or did everything new fit behind the
+  `StackPack` trait? Each time it fit: "the socket held," "no trait shape
+  leaks." A leak would mean the trait was drawn in the wrong place, and
+  the fix is to move the seam — not to special-case the core.
 
 **Stack-neutral / doc neutralization**
 : Code or documentation that doesn't quietly assume one particular stack.
@@ -443,7 +502,9 @@ each document:
   "Doc neutralization" is the ongoing job of rewriting `ARCHITECTURE.md`
   and friends so that Next.js-specific ideas (routes, pages, `fetch`) are
   presented as *one pack's* choices rather than as universal truths about
-  how CodeOwl works.
+  how CodeOwl works. A half-finished sentence like "a feature is a page
+  plus what it reaches" is a neutralization target — it's a Next-ism
+  stated as a fact.
 
 **`FORMAT_VERSION`**
 : A single integer stamped into the `.codeowl/` cache on disk. It's bumped
