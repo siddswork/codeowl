@@ -273,6 +273,13 @@ impl RepoIndex {
     pub fn apply_changes(&mut self, paths: &[PathBuf]) -> Result<Option<(Graph, CatchUp)>> {
         let mut caught = CatchUp::default();
         for abs in paths {
+            // Normalize each event path to the same canonical, symlink-free
+            // form `self.root` is in — watcher backends differ (macOS
+            // FSEvents resolves symlinks, Linux inotify echoes the path it
+            // was handed) and a caller may build one straight off a repo
+            // path. Without this the `strip_prefix` below silently drops
+            // the event and nothing rebuilds.
+            let abs = &canonicalize_event_path(abs);
             if self.pack.source_kind(abs).is_none() {
                 continue;
             }
@@ -407,6 +414,23 @@ impl RepoIndex {
 /// message).
 fn canonical_root(root: &Path) -> PathBuf {
     root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+}
+
+/// A filesystem-event path in the same canonical form as [`canonical_root`].
+/// `canonicalize` needs the target to exist, so for a just-deleted file
+/// fall back to canonicalizing the (still-present) parent directory and
+/// re-attaching the file name; if even that fails, use the path as given.
+fn canonicalize_event_path(p: &Path) -> PathBuf {
+    if let Ok(c) = p.canonicalize() {
+        return c;
+    }
+    match (p.parent(), p.file_name()) {
+        (Some(dir), Some(name)) => match dir.canonicalize() {
+            Ok(d) => d.join(name),
+            Err(_) => p.to_path_buf(),
+        },
+        _ => p.to_path_buf(),
+    }
 }
 
 fn rel_path(root: &Path, path: &Path) -> String {
@@ -556,14 +580,14 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn apply_changes_recognises_a_canonical_event_path_under_a_symlinked_root() {
-        // macOS's watcher case: FSEvents delivers symlink-resolved absolute
-        // paths, but the root a direct caller passes (a temp dir under
-        // `/var` → `/private/var`) is symlinked — so `apply_changes`'s
-        // `strip_prefix(self.root)` dropped every event and the served
-        // graph never republished. `RepoIndex` canonicalizes `root` on
-        // construction so the two forms always match; reproduce with an
-        // explicit symlink.
+    fn apply_changes_matches_an_event_path_whatever_its_symlink_form() {
+        // `self.root` is canonicalized on construction. An event path can
+        // still arrive in either form — macOS FSEvents resolves symlinks,
+        // Linux inotify (and a direct caller building the path off a repo
+        // dir) does not — and `apply_changes` must match both or a watched
+        // edit is silently dropped and the graph never republishes. Both
+        // directions were seen failing on a Mac (its temp dir sits under
+        // `/var` → `/private/var`).
         use std::os::unix::fs::symlink;
 
         let real = tempdir("symroot-real");
@@ -571,18 +595,39 @@ mod tests {
             std::env::temp_dir().join(format!("codeowl-index-symroot-link-{}", std::process::id()));
         let _ = std::fs::remove_file(&link);
         symlink(&real, &link).unwrap();
+        let canonical = real.canonicalize().unwrap();
 
         write(&real, "a.ts", "export function f() { return 1; }\n");
-        let mut index = RepoIndex::build(&link).unwrap(); // root given as the symlink
+        // Root given as the symlink; `RepoIndex` canonicalizes it internally.
+        let mut index = RepoIndex::build(&link).unwrap();
 
+        // (1) a canonical event path — what FSEvents delivers.
         write(&real, "a.ts", "export function f() { return 2; }\n");
-        // What FSEvents hands the watcher — the canonical path, not `link/…`.
-        let event_path = real.canonicalize().unwrap().join("a.ts");
-        let (_graph, caught) = index
-            .apply_changes(&[event_path])
+        let caught = index
+            .apply_changes(&[canonical.join("a.ts")])
             .unwrap()
-            .expect("a canonical event path under a symlinked root must still rebuild");
+            .expect("a canonical event path must rebuild")
+            .1;
         assert_eq!(caught.modified, vec!["a.ts"]);
+
+        // (2) a symlinked event path — what inotify / a direct caller passes.
+        write(&real, "a.ts", "export function f() { return 3; }\n");
+        let caught = index
+            .apply_changes(&[link.join("a.ts")])
+            .unwrap()
+            .expect("a symlinked event path must rebuild too")
+            .1;
+        assert_eq!(caught.modified, vec!["a.ts"]);
+
+        // (3) a delete via a symlinked path — the file is gone, so
+        // `canonicalize` falls back to the parent directory.
+        std::fs::remove_file(real.join("a.ts")).unwrap();
+        let caught = index
+            .apply_changes(&[link.join("a.ts")])
+            .unwrap()
+            .expect("a delete under a symlinked path must be recognized")
+            .1;
+        assert_eq!(caught.removed, vec!["a.ts"]);
 
         std::fs::remove_file(&link).ok();
         std::fs::remove_dir_all(&real).ok();
