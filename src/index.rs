@@ -138,6 +138,7 @@ impl RepoIndex {
     /// absent or unreadable. Picks the repo's `StackPack` here (fail-fast
     /// if none recognises it).
     pub fn build(root: &Path) -> Result<Self> {
+        let root = &canonical_root(root);
         let pack = crate::lang::detect(root)?;
         let mut files = BTreeMap::new();
         for entry in ignore::WalkBuilder::new(root).build() {
@@ -174,6 +175,7 @@ impl RepoIndex {
     /// changed since last run" is the honest answer when there was no last
     /// run to diff against.
     pub fn open(root: &Path) -> Result<(Self, Graph, CatchUp)> {
+        let root = &canonical_root(root);
         match Self::load(root) {
             Some(mut index) => {
                 let caught = index.rescan()?;
@@ -393,6 +395,20 @@ impl RepoIndex {
     }
 }
 
+/// The canonical, symlink-free form of `root`. Every path the index later
+/// strips this prefix off — walk entries, and the file-watcher's event
+/// paths — must be in the same form, and on macOS a repo under
+/// `std::env::temp_dir()` (`/var/folders/…`, with `/var` → `/private/var`)
+/// or `/tmp` comes back symlink-resolved. `main.rs` already canonicalizes
+/// before `serve`; doing it here too means a direct library caller (a
+/// test, an embedder) can't hand `RepoIndex` a valid path that silently
+/// breaks resolution and the watcher. Falls back to the input if it can't
+/// be resolved (a missing dir — `build`/`detect` then errors with its own
+/// message).
+fn canonical_root(root: &Path) -> PathBuf {
+    root.canonicalize().unwrap_or_else(|_| root.to_path_buf())
+}
+
 fn rel_path(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -536,6 +552,40 @@ mod tests {
         write(&dir, "a.ts", "export const a = 1;\n");
         let result = index.apply_changes(&[dir.join("a.ts")]).unwrap();
         assert!(result.is_none(), "identical content must not rebuild");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn apply_changes_recognises_a_canonical_event_path_under_a_symlinked_root() {
+        // macOS's watcher case: FSEvents delivers symlink-resolved absolute
+        // paths, but the root a direct caller passes (a temp dir under
+        // `/var` → `/private/var`) is symlinked — so `apply_changes`'s
+        // `strip_prefix(self.root)` dropped every event and the served
+        // graph never republished. `RepoIndex` canonicalizes `root` on
+        // construction so the two forms always match; reproduce with an
+        // explicit symlink.
+        use std::os::unix::fs::symlink;
+
+        let real = tempdir("symroot-real");
+        let link =
+            std::env::temp_dir().join(format!("codeowl-index-symroot-link-{}", std::process::id()));
+        let _ = std::fs::remove_file(&link);
+        symlink(&real, &link).unwrap();
+
+        write(&real, "a.ts", "export function f() { return 1; }\n");
+        let mut index = RepoIndex::build(&link).unwrap(); // root given as the symlink
+
+        write(&real, "a.ts", "export function f() { return 2; }\n");
+        // What FSEvents hands the watcher — the canonical path, not `link/…`.
+        let event_path = real.canonicalize().unwrap().join("a.ts");
+        let (_graph, caught) = index
+            .apply_changes(&[event_path])
+            .unwrap()
+            .expect("a canonical event path under a symlinked root must still rebuild");
+        assert_eq!(caught.modified, vec!["a.ts"]);
+
+        std::fs::remove_file(&link).ok();
+        std::fs::remove_dir_all(&real).ok();
     }
 
     #[test]
