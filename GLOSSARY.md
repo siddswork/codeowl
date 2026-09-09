@@ -64,7 +64,12 @@ why CodeOwl cares.
   structures painful. Storing everything in one flat list and linking by
   index sidesteps that entirely — it's the standard Rust answer for this
   shape of data. Bonus: saving the graph to disk is then just serializing
-  one list. (`ARCHITECTURE.md` "The graph is arena-indexed")
+  one list.
+
+  Background: Niko Matsakis, ["Modeling graphs in Rust using vector
+  indices"](https://smallcultfollowing.com/babysteps/blog/2015/04/06/modeling-graphs-in-rust-using-vector-indices/)
+  — the canonical write-up of exactly this technique. (`ARCHITECTURE.md`
+  "The graph is arena-indexed")
 
 **`kind` vs `raw`**
 : Two labels on every symbol, at two levels of abstraction.
