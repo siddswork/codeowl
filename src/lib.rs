@@ -4,6 +4,7 @@ pub mod graph;
 pub mod hash;
 pub mod imports;
 pub mod index;
+pub mod java;
 pub mod lang;
 pub mod mcp;
 pub mod resolve;

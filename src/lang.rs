@@ -158,9 +158,10 @@ fn is_ui_primitive(path: &str) -> bool {
 ///
 /// A pack "recognises" a repo by the count of files whose `source_kind`
 /// is [`SourceKind::Code`] — its *primary* language (`.ts`/`.tsx` for TS,
-/// `.rs` for Rust). A `.sql` schema file is `SourceKind::Schema`, not
-/// `Code`, so it never makes a repo "TypeScript" on its own (a Rust repo
-/// with migrations is still a Rust repo — its schema story is M18's).
+/// `.rs` for Rust, `.java` for Java). A `.sql` schema file is
+/// `SourceKind::Schema`, not `Code`, so it never makes a repo "TypeScript"
+/// on its own (a Rust repo with migrations is still a Rust repo — its
+/// schema story is M18's).
 ///
 /// Exactly one pack may claim the repo (M13 design decision 6 — a repo
 /// that's genuinely two stacks is out of scope for Phase 2; multi-pack
@@ -173,7 +174,9 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
     // walked and extracted once a pack is chosen).
     fn is_test_tree(rel: &str) -> bool {
         let seg = |d: &str| rel == d || rel.starts_with(&format!("{d}/"));
-        seg("tests") || seg("test") || seg("benches")
+        // JS/Rust keep tests in a top-level `tests` / `test` / `benches`;
+        // Maven/Gradle keep them under `src/test/...`.
+        seg("tests") || seg("test") || seg("benches") || rel.contains("src/test/")
     }
 
     fn primary_count(root: &Path, pack: &dyn StackPack) -> usize {
@@ -193,23 +196,41 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
             .count()
     }
 
-    let ts = primary_count(root, &crate::stack::TypeScriptNextStack);
-    let rs = primary_count(root, &crate::stack::RustStack);
+    type Ctor = fn() -> Box<dyn crate::stack::StackPack>;
+    let candidates: [(&str, Ctor); 3] = [
+        ("TypeScript/TSX", || {
+            Box::new(crate::stack::TypeScriptNextStack)
+        }),
+        ("Rust", || Box::new(crate::stack::RustStack)),
+        ("Java", || Box::new(crate::stack::JavaStack)),
+    ];
 
-    match (ts, rs) {
-        (0, 0) => bail!(
+    let hits: Vec<(&str, usize, Ctor)> = candidates
+        .iter()
+        .map(|(label, ctor)| (*label, primary_count(root, ctor().as_ref()), *ctor))
+        .filter(|(_, n, _)| *n > 0)
+        .collect();
+
+    match hits.as_slice() {
+        [] => bail!(
             "no source files CodeOwl can extract were found under {} — it handles \
-             TypeScript/TSX (+ SQL schema) and Rust (see ROADMAP.md)",
+             TypeScript/TSX (+ SQL schema), Rust, and Java (see ROADMAP.md)",
             root.display()
         ),
-        (_, 0) => Ok(Box::new(crate::stack::TypeScriptNextStack)),
-        (0, _) => Ok(Box::new(crate::stack::RustStack)),
-        (ts, rs) => bail!(
-            "{} contains both TypeScript ({ts} files) and Rust ({rs} files) source — \
-             CodeOwl serves one stack per repo (ROADMAP.md design decision 6). Point it \
-             at a subdirectory that's a single stack.",
-            root.display()
-        ),
+        [(_, _, ctor)] => Ok(ctor()),
+        multiple => {
+            let listed = multiple
+                .iter()
+                .map(|(label, n, _)| format!("{label} ({n} files)"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "{} contains more than one stack CodeOwl recognises — {listed}. CodeOwl \
+                 serves one stack per repo (ROADMAP.md design decision 6). Point it at a \
+                 subdirectory that's a single stack.",
+                root.display()
+            )
+        }
     }
 }
 

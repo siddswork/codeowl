@@ -134,11 +134,11 @@ struct EntryPoint {
 
 - **M13:** `EntryPoint { kind, id, title, file }`; `feature_model() -> Option`; `ExtractedSymbol.markers`; keep `FeatureModel` to two methods; don't touch the schema layer's file-dispatch beyond what M12 left.
 - **M14:** `RustStack::feature_model() -> None`; the self-corpus system spec carries the four flow sections above; verify `spec.rs` tolerates zero features; populate `markers` from Rust attributes so the field isn't dead on arrival.
-- **M16:** `JavaStack::feature_model() -> None`; confirm the zero-feature path on 627 files; `classify()` returns `Test` for `src/test/java`; resolution keys on the `src/main/java` layout, not `pom.xml` (Gradle then works for free).
+- **M16 (done):** `JavaStack::feature_model() -> None` — the zero-feature path confirmed on commons-lang (14,725 nodes; `get_spec_coverage` reports 0 features, pending queue is files → rollups → system, no crash). `classify()` → `Test` for `src/test/java`; resolution keys on the `src/main/java` path-suffix, not `pom.xml`, and lands **100 % of internal imports** plus 1,244 accurate same-package edges. Findings for M18: `get_next_spec_task` bundles a folded Container's whole-file source — 60–420 KB for a Java God-class, over the MCP token limit (the headline one); `get_spec_coverage`'s `pending` also over-limit at 626 files; same-package scan over-includes an ambiguous simple name already covered by an explicit import.
 - **M17:** `feature_model() -> Some`; implement `enumerate_entry_points` for `@Path` + `@Incoming`/`@Outgoing` first (the kinds actually present in quarkus-super-heroes), kind-unique slugs, type-reference `admits_to_core`, symbol-level `@Entity` schema detection, `@RegisterRestClient` flow edges.
 
 ## Open, deliberately
 
-- Whether a `record` is a `Container` (has members, gets a spec) or a `Value` (data-carrier, folded into its file spec) — M16 decides against real commons-lang code.
+- ~~Whether a `record` is a `Container` or a `Value`~~ — **resolved in M16 (Container, always).** commons-lang has zero records (Java 8), so it was decided on principle: a record is a restricted `final class`, and `Value` would drop a DTO-per-file layout out of the corpus (`file_is_spec_bearing` needs an exported `Container`/`Callable`). M17's Quarkus corpus is the real test.
 - Whether M17's `EntryPoint` needs the specific method or just the file. Left as `file` until a Quarkus resource class with several `@GET` methods proves otherwise — likely it does, and that's an M17 ask, not an M13 guess.
 - The merge/rename/exclude manifest (ARCHITECTURE open question 4). Still deferred.
