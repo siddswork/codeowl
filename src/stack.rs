@@ -190,6 +190,7 @@ pub fn typescript_next() -> Box<dyn StackPack> {
 pub fn for_name(name: &str) -> Box<dyn StackPack> {
     match name {
         "rust" => Box::new(RustStack),
+        "java" => Box::new(JavaStack),
         _ => Box::new(TypeScriptNextStack),
     }
 }
@@ -243,6 +244,67 @@ impl StackPack for RustStack {
         graph: &Graph,
     ) -> Vec<ResolvedImport> {
         crate::rust::resolve_imports(root, file_imports, graph)
+    }
+
+    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
+        Vec::new()
+    }
+
+    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
+        FlowTarget::Unresolved
+    }
+}
+
+/// The Java stack (M16): `tree-sitter-java` over `.java`, exercised on
+/// Apache commons-lang. Plain classic Java — no framework, so
+/// `feature_model()` takes the trait default `None` (a utility library has
+/// no runtime entry surface; its public API is already covered by symbol /
+/// file / rollup specs). `import`s resolve by the `src/main/java` package
+/// layout, not `pom.xml`, so Gradle works too (`java::resolve_imports`);
+/// same-package references with no `import` are picked up by a source scan.
+/// `extract_flow_edges` is empty — a Java call graph is deferred like the
+/// Rust one. M17 (Quarkus) is where a Java `feature_model()` and
+/// annotation-driven flow edges arrive.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct JavaStack;
+
+impl StackPack for JavaStack {
+    fn name(&self) -> &str {
+        "java"
+    }
+
+    fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+        (path.extension().and_then(|e| e.to_str()) == Some("java")).then_some(SourceKind::Code)
+    }
+
+    fn classify(&self, rel_path: &str) -> FileRole {
+        if rel_path.contains("src/test/") || rel_path.contains("/test/java/") {
+            FileRole::Test
+        } else if rel_path.contains("target/generated-sources/")
+            || rel_path.contains("build/generated/")
+        {
+            FileRole::Generated
+        } else {
+            // Java has no `components/ui`-style primitive tier.
+            FileRole::Domain
+        }
+    }
+
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+        crate::java::extract_file(source, rel_path)
+    }
+
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
+        crate::java::extract_imports(source, rel_path)
+    }
+
+    fn resolve_imports(
+        &self,
+        root: &Path,
+        file_imports: &HashMap<String, FileImports>,
+        graph: &Graph,
+    ) -> Vec<ResolvedImport> {
+        crate::java::resolve_imports(root, file_imports, graph)
     }
 
     fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
@@ -325,6 +387,38 @@ mod tests {
     }
 
     #[test]
+    fn java_pack_reads_java_and_has_no_feature_model() {
+        let pack = JavaStack;
+        assert_eq!(pack.name(), "java");
+        assert_eq!(
+            pack.source_kind(Path::new("src/main/java/com/ex/A.java")),
+            Some(SourceKind::Code)
+        );
+        assert_eq!(pack.source_kind(Path::new("pom.xml")), None);
+        assert_eq!(pack.source_kind(Path::new("A.kt")), None);
+        assert_eq!(
+            pack.classify("src/main/java/com/ex/A.java"),
+            FileRole::Domain
+        );
+        assert_eq!(
+            pack.classify("src/test/java/com/ex/ATest.java"),
+            FileRole::Test
+        );
+        assert_eq!(
+            pack.classify("target/generated-sources/foo/Gen.java"),
+            FileRole::Generated
+        );
+        // commons-lang is a library — the trait's `None` default stands (exp-02).
+        assert!(pack.feature_model().is_none());
+
+        let syms = pack.extract_symbols("A.java", "public class A { void m() {} }\n");
+        assert_eq!(syms[0].raw, "class");
+        let imports = pack.extract_imports("A.java", "import com.ex.Thing;\npublic class A {}\n");
+        assert_eq!(imports.imports[0].imported_name, "Thing");
+        assert!(pack.extract_flow_edges("A.java", "").is_empty());
+    }
+
+    #[test]
     fn detect_picks_the_pack_that_matches_and_errors_on_ambiguity() {
         let dir = std::env::temp_dir().join(format!("codeowl-detect-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -339,8 +433,32 @@ mod tests {
         std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
         assert_eq!(crate::lang::detect(&dir).unwrap().name(), "rust");
 
-        // Both -> one-stack-per-repo error (design decision 6).
+        // Java repo — a `src/main/java` tree, its `src/test/java` twin
+        // excluded from the count (so a test-heavy repo still detects).
+        std::fs::remove_file(dir.join("lib.rs")).unwrap();
+        std::fs::create_dir_all(dir.join("src/main/java/com/ex")).unwrap();
+        std::fs::create_dir_all(dir.join("src/test/java/com/ex")).unwrap();
+        std::fs::write(
+            dir.join("src/main/java/com/ex/A.java"),
+            "package com.ex;\npublic class A {}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("src/test/java/com/ex/ATest.java"),
+            "package com.ex;\npublic class ATest {}\n",
+        )
+        .unwrap();
+        assert_eq!(crate::lang::detect(&dir).unwrap().name(), "java");
+
+        // Java + Rust -> one-stack-per-repo error (design decision 6).
+        std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
+        assert!(crate::lang::detect(&dir).is_err());
+        std::fs::remove_file(dir.join("lib.rs")).unwrap();
+        std::fs::remove_dir_all(dir.join("src")).unwrap();
+
+        // Both TS and Rust -> also an error.
         std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
+        std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
         assert!(crate::lang::detect(&dir).is_err());
 
         // Neither.
