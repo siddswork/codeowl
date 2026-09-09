@@ -22,9 +22,15 @@
 //! produces the parent-then-children shape the Rust merge has to
 //! reconstruct.
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use tree_sitter::{Node, Parser};
 
+use crate::graph::{Graph, SymbolId};
 use crate::hash::hash_text;
+use crate::imports::{FileImports, ImportRef};
+use crate::resolve::ResolvedImport;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`, a `.java` file) and extract
@@ -388,6 +394,243 @@ fn node_lines(node: Node) -> [usize; 2] {
     [node.start_position().row + 1, node.end_position().row + 1]
 }
 
+// ---------------------------------------------------------------------------
+// Imports — `import` declarations and their resolution against the source
+// tree. The Java pack's counterpart to `imports.rs` + `resolve.rs`. Two
+// kinds of reference edge feed the graph:
+//   * explicit `import a.b.C;` / `import static a.b.C.m;` — the FQN maps to
+//     the walked `.java` file whose path ends `a/b/C.java` (a path-suffix
+//     match, so Maven / Gradle / bare layouts all work with no source-root
+//     discovery and — for M17 — cross-module resolution is free).
+//   * same-package implicit references — a Java class names a sibling in
+//     its own package with no `import` at all (`StringUtils` -> `ObjectUtils`).
+//     Detected by scanning a file's source for each sibling's simple name.
+// Java has no re-export (`pub use`) or default-import concept, so
+// `FileImports.re_exports` / `default_imports` stay empty.
+// ---------------------------------------------------------------------------
+
+/// Parse a `.java` file's `import` declarations. `import a.b.C;` -> `{
+/// specifier: "a.b", imported_name: "C" }`; `import static a.b.C.m;` keeps
+/// the class in the specifier (`"a.b.C"` / `"m"`); `import a.b.*;` records
+/// `"*"` as the name (it names no single declaration, so it resolves to
+/// nothing — most Java projects, commons-lang included, forbid star imports
+/// via checkstyle anyway).
+pub fn extract_imports(source: &str, _rel_path: &str) -> FileImports {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_java::LANGUAGE.into())
+        .expect("bundled tree-sitter-java grammar should always load");
+    let Some(tree) = parser.parse(source, None) else {
+        return FileImports::default();
+    };
+
+    let mut fi = FileImports::default();
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    for node in root.children(&mut cursor) {
+        if node.kind() != "import_declaration" {
+            continue;
+        }
+        let mut dc = node.walk();
+        let kids: Vec<Node> = node.children(&mut dc).collect();
+        let is_star = kids.iter().any(|c| c.kind() == "asterisk");
+        // The dotted path is a `scoped_identifier` (`a.b.C`), or a bare
+        // `identifier` for a single-segment `import C;` / `import a.*;`.
+        let Some(path) = kids
+            .iter()
+            .find(|c| matches!(c.kind(), "scoped_identifier" | "identifier"))
+        else {
+            continue;
+        };
+        let fqn = text(*path, source);
+        // `static` vs not doesn't change extraction — the FQN split lands
+        // the class in `specifier` either way (`a.b.C.m` -> `a.b.C` / `m`;
+        // `a.b.C` -> `a.b` / `C`). It matters only for resolution.
+        let (specifier, name) = if is_star {
+            (fqn.to_string(), "*".to_string())
+        } else if let Some((pre, last)) = fqn.rsplit_once('.') {
+            (pre.to_string(), last.to_string())
+        } else {
+            continue; // `import C;` from the default package — nothing to key on
+        };
+        fi.imports.push(ImportRef {
+            specifier,
+            imported_name: name,
+        });
+    }
+    fi
+}
+
+/// Resolve every file's `import`s to a target `SymbolId` and append the
+/// same-package implicit reference edges. Iterates files in path-sorted
+/// order so the persisted edge list is diffable (same reasoning as
+/// `resolve::resolve_imports`). `root` *is* read here — unlike the Rust
+/// pack — because the same-package scan needs each file's source text, and
+/// the graph doesn't retain bodies.
+pub fn resolve_imports(
+    root: &Path,
+    file_imports: &HashMap<String, FileImports>,
+    graph: &Graph,
+) -> Vec<ResolvedImport> {
+    let mut sorted: Vec<(&String, &FileImports)> = file_imports.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut out = Vec::new();
+    for (from_file, fi) in &sorted {
+        for imp in &fi.imports {
+            out.push(ResolvedImport {
+                from_file: (*from_file).clone(),
+                specifier: imp.specifier.clone(),
+                imported_name: imp.imported_name.clone(),
+                target: resolve_explicit(&imp.specifier, &imp.imported_name, file_imports, graph),
+            });
+        }
+    }
+    out.extend(same_package_edges(root, &sorted, graph));
+    out
+}
+
+/// `a.b.C` (or a longer `a.b.C.member`) -> the walked `.java` file whose
+/// path ends `a/b/C.java`. Path-suffix match: layout-agnostic, no
+/// source-root discovery. On the rare tie (the same FQN under two source
+/// roots — e.g. main and test) the path-sorted first wins, for determinism.
+fn fqn_to_file<'a>(fqn: &str, file_imports: &'a HashMap<String, FileImports>) -> Option<&'a str> {
+    let rel = format!("{}.java", fqn.replace('.', "/"));
+    let suffix = format!("/{rel}");
+    let mut hits: Vec<&str> = file_imports
+        .keys()
+        .map(String::as_str)
+        .filter(|k| *k == rel || k.ends_with(&suffix))
+        .collect();
+    hits.sort_unstable();
+    hits.into_iter().next()
+}
+
+/// One explicit import -> the symbol it names, or `None` (star import,
+/// external package, or a target file with no matching declaration).
+fn resolve_explicit(
+    specifier: &str,
+    name: &str,
+    file_imports: &HashMap<String, FileImports>,
+    graph: &Graph,
+) -> Option<SymbolId> {
+    if name == "*" {
+        return None; // names no single declaration
+    }
+    // `import a.b.C;` — the FQN `a.b.C` is itself a top-level type.
+    if let Some(id) = fqn_to_file(&format!("{specifier}.{name}"), file_imports)
+        .and_then(|file| graph.find(&format!("{file}::{name}")))
+    {
+        return Some(id);
+    }
+    // `import static a.b.C.m;` or `import a.b.Outer.Inner;` — here the
+    // *specifier* is the type FQN. Resolve to the nested member / static
+    // method if the graph has it, otherwise to the enclosing type (a
+    // method-level edge is call-graph granularity, deferred).
+    if let Some(file) = fqn_to_file(specifier, file_imports) {
+        let ty = specifier.rsplit('.').next().unwrap_or(specifier);
+        for cand in [
+            format!("{file}::{ty}::{name}"),
+            format!("{file}::{name}"),
+            format!("{file}::{ty}"),
+        ] {
+            if let Some(id) = graph.find(&cand) {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// The same-package implicit edges: a Java class refers to another class in
+/// its own package with no `import`. For each file, scan its source for the
+/// simple name of every *other* top-level container declared in the same
+/// directory; a whole-word hit is a reference edge. `specifier` is set to
+/// the package name so the edge is visibly not a written import.
+fn same_package_edges(
+    root: &Path,
+    sorted_files: &[(&String, &FileImports)],
+    graph: &Graph,
+) -> Vec<ResolvedImport> {
+    // (simple name, id, file) for every top-level container in the graph.
+    let containers: Vec<(&str, SymbolId, &str)> = graph
+        .symbols()
+        .filter(|s| matches!(s.kind, SymbolKind::Container))
+        .filter_map(|s| {
+            let rest = s.id.strip_prefix(&format!("{}::", s.file))?;
+            if rest.contains("::") {
+                return None; // a nested type, not top-level
+            }
+            Some((rest, graph.find(&s.id)?, s.file.as_str()))
+        })
+        .collect();
+
+    let mut out = Vec::new();
+    for (from_file, _) in sorted_files {
+        let dir = dir_of(from_file);
+        let siblings: Vec<&(&str, SymbolId, &str)> = containers
+            .iter()
+            .filter(|(_, _, f)| *f != from_file.as_str() && dir_of(f) == dir)
+            .collect();
+        if siblings.is_empty() {
+            continue;
+        }
+        let Ok(src) = std::fs::read_to_string(root.join(from_file.as_str())) else {
+            continue; // file gone (mid-watch delete) or unreadable — skip
+        };
+        for (name, id, _) in siblings {
+            if mentions_identifier(&src, name) {
+                out.push(ResolvedImport {
+                    from_file: (*from_file).clone(),
+                    specifier: package_of(dir),
+                    imported_name: (*name).to_string(),
+                    target: Some(*id),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The directory portion of a repo-relative path (`""` for a root file).
+fn dir_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(d, _)| d)
+}
+
+/// A package directory -> its dotted name, stripping the source-root prefix
+/// for the standard layouts. Cosmetic — it's only the `specifier` string on
+/// a synthetic edge.
+fn package_of(dir: &str) -> String {
+    let pkg = ["src/main/java/", "src/test/java/", "src/java/", "java/"]
+        .iter()
+        .find_map(|p| dir.strip_prefix(p))
+        .unwrap_or(dir);
+    pkg.replace('/', ".")
+}
+
+/// Whole-word substring search — `true` iff `name` occurs in `text` not
+/// flanked by identifier characters. Mirrors `spec::contains_identifier`
+/// (kept local so a pack doesn't depend on the spec renderer).
+fn mentions_identifier(text: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let is_ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'$';
+    let bytes = text.as_bytes();
+    let mut start = 0;
+    while let Some(pos) = text[start..].find(name) {
+        let idx = start + pos;
+        let before_ok = idx == 0 || !is_ident(bytes[idx - 1]);
+        let after = idx + name.len();
+        let after_ok = after >= bytes.len() || !is_ident(bytes[after]);
+        if before_ok && after_ok {
+            return true;
+        }
+        start = idx + 1;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,5 +830,199 @@ public interface Sized {\n\
         assert_ne!(a[0].source_hash, b[0].source_hash);
         // ...but its exported signature didn't change.
         assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    // --- imports + resolution -------------------------------------------
+
+    /// A fixture source tree, extracted + resolved end to end. `root` is
+    /// only read for the same-package scan — pass a bogus path to suppress
+    /// those edges, or a real dir whose files match `files` to exercise them.
+    fn resolved(root: &Path, files: &[(&str, &str)]) -> (Graph, Vec<ResolvedImport>) {
+        let extractions: Vec<crate::graph::FileExtraction> = files
+            .iter()
+            .map(|(p, src)| crate::graph::FileExtraction {
+                rel_path: (*p).to_string(),
+                source_hash: hash_text(src),
+                symbols: extract_file(src, p),
+            })
+            .collect();
+        let graph = Graph::build(extractions);
+        let file_imports: HashMap<String, FileImports> = files
+            .iter()
+            .map(|(p, src)| ((*p).to_string(), extract_imports(src, p)))
+            .collect();
+        let edges = resolve_imports(root, &file_imports, &graph);
+        (graph, edges)
+    }
+
+    #[test]
+    fn parses_plain_static_and_star_imports() {
+        let fi = extract_imports(
+            "package p;\n\
+             import java.util.List;\n\
+             import static org.junit.Assert.assertTrue;\n\
+             import com.example.util.*;\n\
+             public class A {}\n",
+            "src/main/java/p/A.java",
+        );
+        let got: Vec<(&str, &str)> = fi
+            .imports
+            .iter()
+            .map(|i| (i.specifier.as_str(), i.imported_name.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("java.util", "List"),
+                ("org.junit.Assert", "assertTrue"), // static: class stays in the specifier
+                ("com.example.util", "*"),          // star: names nothing
+            ]
+        );
+        assert!(fi.re_exports.is_empty() && fi.default_imports.is_empty());
+    }
+
+    #[test]
+    fn fqn_resolves_to_the_top_level_type() {
+        let (g, edges) = resolved(
+            Path::new("/unused"),
+            &[
+                (
+                    "src/main/java/com/ex/App.java",
+                    "package com.ex;\nimport com.ex.util.Strings;\npublic class App {}\n",
+                ),
+                (
+                    "src/main/java/com/ex/util/Strings.java",
+                    "package com.ex.util;\npublic class Strings {}\n",
+                ),
+            ],
+        );
+        let e = edges
+            .iter()
+            .find(|e| e.imported_name == "Strings")
+            .expect("the import edge exists");
+        assert_eq!(
+            g.string_id(e.target.expect("Strings should resolve")),
+            "src/main/java/com/ex/util/Strings.java::Strings"
+        );
+    }
+
+    #[test]
+    fn static_import_resolves_to_the_member_then_falls_back_to_the_class() {
+        let (g, edges) = resolved(
+            Path::new("/unused"),
+            &[
+                (
+                    "src/main/java/com/ex/Tests.java",
+                    "package com.ex;\nimport static com.ex.Check.ok;\npublic class Tests {}\n",
+                ),
+                (
+                    "src/main/java/com/ex/Check.java",
+                    "package com.ex;\npublic class Check { public static void ok(boolean b) {} }\n",
+                ),
+            ],
+        );
+        let e = edges.iter().find(|e| e.imported_name == "ok").unwrap();
+        assert_eq!(
+            g.string_id(e.target.unwrap()),
+            "src/main/java/com/ex/Check.java::Check::ok"
+        );
+    }
+
+    #[test]
+    fn same_package_sibling_referenced_in_source_resolves() {
+        let dir = std::env::temp_dir().join(format!("codeowl-java-pkg-{}", std::process::id()));
+        let pkg = dir.join("src/main/java/com/ex");
+        std::fs::create_dir_all(&pkg).unwrap();
+        let su = "package com.ex;\n\
+                  public class StringUtils {\n\
+                  static boolean blank(CharSequence cs) { return ObjectUtils.isNull(cs); }\n\
+                  }\n";
+        let ou = "package com.ex;\n\
+                  public class ObjectUtils {\n\
+                  static boolean isNull(Object o) { return o == null; }\n\
+                  }\n";
+        std::fs::write(pkg.join("StringUtils.java"), su).unwrap();
+        std::fs::write(pkg.join("ObjectUtils.java"), ou).unwrap();
+
+        let (_, edges) = resolved(
+            &dir,
+            &[
+                ("src/main/java/com/ex/StringUtils.java", su),
+                ("src/main/java/com/ex/ObjectUtils.java", ou),
+            ],
+        );
+
+        // StringUtils names ObjectUtils with no import -> a synthetic edge.
+        assert!(edges.iter().any(|e| {
+            e.from_file == "src/main/java/com/ex/StringUtils.java"
+                && e.imported_name == "ObjectUtils"
+                && e.specifier == "com.ex"
+                && e.target.is_some()
+        }));
+        // ObjectUtils never mentions StringUtils -> no reverse edge.
+        assert!(
+            !edges
+                .iter()
+                .any(|e| e.from_file.ends_with("ObjectUtils.java")
+                    && e.imported_name == "StringUtils")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn external_import_stays_unresolved() {
+        let (_, edges) = resolved(
+            Path::new("/unused"),
+            &[(
+                "src/main/java/com/ex/A.java",
+                "package com.ex;\n\
+                 import java.util.List;\n\
+                 import com.google.common.base.Strings;\n\
+                 public class A {}\n",
+            )],
+        );
+        assert_eq!(edges.len(), 2);
+        assert!(edges.iter().all(|e| e.target.is_none()));
+    }
+
+    #[test]
+    fn resolve_on_a_small_commons_lang_slice() {
+        // A lang3 shape: FQN imports across sub-packages, all internal.
+        let files: &[(&str, &str)] = &[
+            (
+                "src/main/java/org/apache/commons/lang3/StringUtils.java",
+                "package org.apache.commons.lang3;\n\
+                 import org.apache.commons.lang3.math.NumberUtils;\n\
+                 public class StringUtils {}\n",
+            ),
+            (
+                "src/main/java/org/apache/commons/lang3/ObjectUtils.java",
+                "package org.apache.commons.lang3;\n\
+                 import org.apache.commons.lang3.StringUtils;\n\
+                 public class ObjectUtils {}\n",
+            ),
+            (
+                "src/main/java/org/apache/commons/lang3/math/NumberUtils.java",
+                "package org.apache.commons.lang3.math;\n\
+                 import org.apache.commons.lang3.Validate;\n\
+                 public class NumberUtils {}\n",
+            ),
+            (
+                "src/main/java/org/apache/commons/lang3/Validate.java",
+                "package org.apache.commons.lang3;\npublic class Validate {}\n",
+            ),
+        ];
+        let (_, edges) = resolved(Path::new("/unused"), files);
+        let explicit: Vec<_> = edges
+            .iter()
+            .filter(|e| e.specifier.starts_with("org.apache"))
+            .collect();
+        assert_eq!(explicit.len(), 3, "three FQN imports in the slice");
+        let hit = explicit.iter().filter(|e| e.target.is_some()).count();
+        assert!(
+            hit as f64 / explicit.len() as f64 >= 0.8,
+            "{hit}/3 internal imports resolved"
+        );
     }
 }
