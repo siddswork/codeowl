@@ -157,14 +157,16 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
 
    **You may see the same target offered again even though nothing in
    `source`/`dependencies` looks different from last time, and `prior` is
-   `null`.** That means the previously-submitted content failed a
-   deterministic quality check (a "see the source" cop-out, or prose too
-   short to be real) — not that the source changed again. Write genuinely
-   better content this time: more specific, actually describing behavior.
-   Resubmitting similarly thin content will just get offered back to you
-   again.
+   `null`.** That means a *previously stored* spec (from an older run)
+   failed a deterministic quality check (a "see the source" cop-out, or
+   prose too short to be real) — not that the source changed again. Write
+   genuinely better content this time: more specific, actually describing
+   behavior.
 4. Call `submit_spec` with `id` set to the task's `id` and `content` set
-   to what you just wrote.
+   to what you just wrote. **`submit_spec` rejects content that fails the
+   same quality check** (Summary/Behavior under four words, or a "see the
+   source" phrase) — the error names what tripped it; expand that section
+   and submit again rather than moving on.
 5. Go back to step 1.
 
 ## Batch mode (`--all` / `--all --budget=N`)
