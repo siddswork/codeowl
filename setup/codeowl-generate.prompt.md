@@ -1,15 +1,17 @@
 ---
+mode: agent
+tools: ['codeowl']
 description: Generate (or refresh) specs via CodeOwl's MCP tools -- one target, the whole repo, or a budgeted batch
-argument-hint: <repo-relative-file-path> | system | . | --all [--budget=N]
 ---
 
-<!-- Claude Code slash command. The VS Code / Copilot port is
-setup/codeowl-generate.prompt.md — the loop body is identical; keep the
-two in sync. See setup/COPILOT.md. -->
+<!-- VS Code / GitHub Copilot port of setup/codeowl-generate.md (the Claude
+Code slash command). The loop body below is identical to that file — keep
+the two in sync; the only differences are this frontmatter and `$ARGUMENTS`
+-> `${input:target}`. See setup/COPILOT.md. -->
 
-Generate spec(s) for `$ARGUMENTS`, using CodeOwl's MCP tools
+Generate spec(s) for `${input:target}`, using CodeOwl's MCP tools
 (`get_next_spec_task`, `submit_spec`, `get_spec`, `get_spec_coverage`).
-This command is the *client-side* half of CodeOwl's generation loop:
+This prompt is the *client-side* half of CodeOwl's generation loop:
 CodeOwl itself never calls an LLM or writes prose — it only assembles
 context and persists whatever you write. You are the one writing the
 spec text.
@@ -17,10 +19,10 @@ spec text.
 The context a task hands you always reflects the current working tree:
 CodeOwl's in-session file watcher re-parses edited files within about a
 second, so if you changed code earlier in this session you can run this
-command straight away — the `source`/`dependencies` you get back are
+prompt straight away — the `source`/`dependencies` you get back are
 already up to date, no server restart.
 
-`$ARGUMENTS` is one of:
+`${input:target}` is one of:
 - A repo-relative file path (e.g. `src/util.rs`, `lib/utils.ts`), a
   feature entry point — one of your stack's entry points, whatever form
   they take (a Next.js page, an orphan API route / webhook with no page
@@ -42,7 +44,7 @@ if this file is also a recognized feature entry point — the feature; for
 a directory, each of its files' own ladder, then the directory's own
 rollup; for `system`/`.`, every module's and every feature's own ladder,
 then the system spec) and just tells you what's next each time. If
-`$ARGUMENTS` is empty, ask the user what to generate rather than
+`${input:target}` is empty, ask the user what to generate rather than
 guessing.
 
 **Read before writing, every time — this is not a formality.** Every
@@ -66,10 +68,10 @@ real generated output:
 
 Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
 
-1. Call `get_next_spec_task` with `target` set to `$ARGUMENTS` (or, in
+1. Call `get_next_spec_task` with `target` set to `${input:target}` (or, in
    batch mode, the current item's `id` — see "Batch mode" below).
 2. If the result's `kind` is `"done"`, stop — everything on this target
-   already has a current spec. Report that and end the command.
+   already has a current spec. Report that and end.
 3. Otherwise you'll get a task shaped one of five ways:
    - **`kind: "symbol"`** — write markdown containing exactly these two
      headings, in this order, each with real prose under it:
@@ -175,8 +177,8 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
 
 ## Batch mode (`--all` / `--all --budget=N`)
 
-Use this when `$ARGUMENTS` starts with `--all`, instead of the single-
-target loop above:
+Use this when `${input:target}` starts with `--all`, instead of the
+single-target loop above:
 
 1. Call `get_spec_coverage` (no `scope`, unless the user named one) to
    get `pending`: every non-current document, already in the order a
@@ -205,14 +207,14 @@ target loop above:
    If budget-capped, call `get_spec_coverage` once more and tell the user
    what's still pending (again by kind), so they know whether to run
    another batch or target something specific. If the system spec is the
-   only thing left, say so and suggest `/codeowl-generate system`.
+   only thing left, say so and suggest running this prompt with `system`.
 
 ## Termination and reporting
 
 `get_next_spec_task` is stateless and safe to call repeatedly — if a
 symbol's (or a feature's participant's) source hasn't changed since it
 was last generated, it's skipped automatically (no LLM call happens for
-it), so re-running this command on an already-current target is a fast
+it), so re-running this prompt on an already-current target is a fast
 no-op that reports nothing left to do.
 
 When the loop ends, report concisely: which symbols/file/feature/rollup/
