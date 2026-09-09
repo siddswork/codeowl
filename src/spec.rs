@@ -923,6 +923,25 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
 /// id (expects `### Summary` and `### Behavior` headings in `content`) or
 /// a file id (expects plain prose, becomes `## Summary`). Returns the
 /// hashes the persisted entry now carries.
+/// Refuse to persist prose that trips the deterministic quality check
+/// (`prose_smells`) `get_next_spec_task` also runs. Storing smelly prose
+/// isn't harmless: a smell in the "source unchanged, not human-edited"
+/// case is exactly what makes `next_task` re-offer the document, so a
+/// generate loop that keeps resubmitting equally-thin prose never
+/// terminates. Erroring at submit time turns that silent non-termination
+/// into a message naming what to fix — the same stance `submit` already
+/// takes on content missing a `### Summary`.
+fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()> {
+    if smells.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "{what} fails a quality check ({}) — expand it; `get_next_spec_task` \
+         re-offers a spec until its prose clears the check",
+        smells.join(", ")
+    );
+}
+
 pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<HashPair> {
     let node_id = graph
         .find(id)
@@ -933,6 +952,10 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             let mut spec =
                 read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
             let summary = content.trim().to_string();
+            reject_if_smelly(
+                &format!("submitted summary for {id:?}"),
+                prose_smells(&summary),
+            )?;
             let hash = HashPair {
                 source_hash: file.source_hash.clone(),
                 deps_hash: file_dependency_hash(graph, file_id),
@@ -957,6 +980,18 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             let behavior = extract_section(content, "### Behavior", "\n### ")
                 .filter(|s| !s.is_empty())
                 .context("submitted content missing a non-empty `### Behavior` section")?;
+            reject_if_smelly(
+                &format!("submitted prose for {id:?}"),
+                prose_smells(&summary)
+                    .into_iter()
+                    .map(|s| format!("Summary: {s}"))
+                    .chain(
+                        prose_smells(&behavior)
+                            .into_iter()
+                            .map(|s| format!("Behavior: {s}")),
+                    )
+                    .collect(),
+            )?;
 
             let mut spec =
                 read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
@@ -976,6 +1011,52 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             Ok(hash)
         }
     }
+}
+
+/// Test helper: put a hash-*current* symbol spec on disk whose prose would
+/// fail `prose_smells` — the shape a pre-fix cache carries, or a hand-edit
+/// whose frontmatter `spec_hash` was fixed up to match. `submit` now
+/// refuses to write such prose, so the tests that exercise the
+/// smell-driven `next_task` re-offer plant it directly. Seeds a clean spec
+/// via `submit`, then swaps in the smelly prose and its matching hash.
+#[cfg(test)]
+pub(crate) fn plant_smelly_symbol_spec(
+    graph: &Graph,
+    root: &Path,
+    sym_id: &str,
+    summary: &str,
+    behavior: &str,
+) {
+    const OK_S: &str = "A placeholder summary comfortably past the four word floor.";
+    const OK_B: &str = "A placeholder behavior sentence comfortably past the four word floor.";
+    submit(
+        graph,
+        root,
+        sym_id,
+        &format!("### Summary\n{OK_S}\n### Behavior\n{OK_B}\n"),
+    )
+    .expect("placeholder prose is clean");
+
+    let file_id = graph
+        .get_symbol(graph.find(sym_id).expect("symbol exists"))
+        .and_then(|s| s.parent)
+        .expect("symbol has a containing file");
+    let file_string_id = graph
+        .get_file(file_id)
+        .expect("parent is a file")
+        .id
+        .clone();
+    let path = spec_path(root, &file_string_id);
+
+    let patched = std::fs::read_to_string(&path)
+        .expect("spec was written")
+        .replace(OK_S, summary)
+        .replace(OK_B, behavior)
+        .replace(
+            &hash_text(&format!("{OK_S}\n{OK_B}")),
+            &hash_text(&format!("{summary}\n{behavior}")),
+        );
+    std::fs::write(&path, patched).expect("rewrite spec");
 }
 
 fn upsert(entries: &mut Vec<(String, HashPair)>, id: String, value: HashPair) {
@@ -1303,6 +1384,10 @@ pub fn submit_feature(
     if !body.starts_with("# ") {
         bail!("submitted feature content must start with a `# Title` heading");
     }
+    reject_if_smelly(
+        &format!("submitted feature spec for {entry_file:?}"),
+        body_smells(&body),
+    )?;
 
     let Some(fm) = feature_model_for(graph) else {
         bail!("this stack has no feature layer — nothing to submit a feature spec against");
@@ -1592,6 +1677,10 @@ pub fn submit_rollup(
     if body.is_empty() {
         bail!("submitted rollup content is empty");
     }
+    reject_if_smelly(
+        &format!("submitted rollup for {dir_path:?}"),
+        body_smells(&body),
+    )?;
 
     let files = current_file_hashes(graph, root, dir_path)?;
     if let Some((missing, _)) = files.iter().find(|(_, h)| h.is_empty()) {
@@ -1908,6 +1997,7 @@ pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<System
     if !body.starts_with("# ") {
         bail!("submitted system content must start with a `# Title` heading");
     }
+    reject_if_smelly("submitted system spec", body_smells(&body))?;
 
     let spec = SystemSpec {
         modules: current_module_hashes(graph, root)?,
@@ -2798,6 +2888,88 @@ impl Counter {\n\
     }
 
     #[test]
+    fn submit_rejects_prose_that_next_task_would_re_offer_forever() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-smelly", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+
+        // A Summary under the 4-word `prose_smells` floor — storing it would
+        // make the next `next_task` call re-offer `a.ts::one` indefinitely.
+        let err = submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nToo terse.\n\
+             ### Behavior\nThis behavior sentence is comfortably long enough to pass.\n",
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("quality check"), "{msg}");
+        assert!(msg.contains("Summary: suspiciously_short"), "{msg}");
+
+        // A "see the source" cop-out is rejected even at full length.
+        let err = submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nReturns the one canonical value for this module.\n\
+             ### Behavior\nIt does the obvious thing; see the source for the exact steps.\n",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("Behavior: cop_out_phrase"),
+            "{err}"
+        );
+
+        // Nothing was persisted: it's still a first-ever generation task.
+        assert!(matches!(
+            next_task(&graph, &dir, file_id).unwrap(),
+            Some(SpecTask::Symbol { ref id, prior: None, .. }) if id == "a.ts::one"
+        ));
+
+        // Real prose is accepted and the loop then terminates.
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nReturns the one canonical value this module exposes.\n\
+             ### Behavior\nReads a cached slot, initialising it on first call, never mutating after.\n",
+        )
+        .unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts",
+            "The single-value helper module used across the app.",
+        )
+        .unwrap();
+        assert_eq!(next_task(&graph, &dir, file_id).unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_rejects_a_smelly_file_summary() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-smellyf", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nReturns the one canonical value this module exposes.\n\
+             ### Behavior\nReads a cached slot, initialising it on first call, never mutating after.\n",
+        )
+        .unwrap();
+        let err = submit(&graph, &dir, "a.ts", "Three short words.").unwrap_err();
+        assert!(err.to_string().contains("suspiciously_short"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn resubmitting_the_same_symbol_after_no_source_change_leaves_next_task_past_it() {
         let dir = std::env::temp_dir().join(format!("codeowl-spec-test-{}-4", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -2838,7 +3010,7 @@ impl Counter {\n\
             &graph,
             &dir,
             "a.ts::one",
-            "### Summary\nOriginal summary.\n### Behavior\nOriginal behavior.\n",
+            "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n",
         )
         .unwrap();
 
@@ -2847,7 +3019,10 @@ impl Counter {\n\
         // were (a human wouldn't hand-update an opaque blake3 hash).
         let path = spec_path(&dir, "a.ts");
         let content = std::fs::read_to_string(&path).unwrap();
-        let edited = content.replace("Original summary.", "A human-corrected summary.");
+        let edited = content.replace(
+            "This is the original summary.",
+            "A careful human-corrected summary here.",
+        );
         assert_ne!(edited, content);
         std::fs::write(&path, &edited).unwrap();
 
@@ -2864,8 +3039,12 @@ impl Counter {\n\
         );
 
         let reread = read_file_spec(&dir, "a.ts").unwrap().unwrap();
-        assert_eq!(reread.sections[0].1.summary, "A human-corrected summary.");
-        let expected_hash = hash_text("A human-corrected summary.\nOriginal behavior.");
+        assert_eq!(
+            reread.sections[0].1.summary,
+            "A careful human-corrected summary here."
+        );
+        let expected_hash =
+            hash_text("A careful human-corrected summary here.\nThis is the original behavior.");
         assert_eq!(reread.symbols[0].1.spec_hash, expected_hash);
 
         std::fs::remove_dir_all(&dir).ok();
@@ -2883,13 +3062,16 @@ impl Counter {\n\
             &graph_v1,
             &dir,
             "a.ts::one",
-            "### Summary\nOriginal summary.\n### Behavior\nOriginal behavior.\n",
+            "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n",
         )
         .unwrap();
 
         let path = spec_path(&dir, "a.ts");
         let content = std::fs::read_to_string(&path).unwrap();
-        let edited = content.replace("Original summary.", "A human-corrected summary.");
+        let edited = content.replace(
+            "This is the original summary.",
+            "A careful human-corrected summary here.",
+        );
         std::fs::write(&path, &edited).unwrap();
 
         // The underlying source ALSO changes -- case 4: a reconciliation
@@ -2907,8 +3089,8 @@ impl Counter {\n\
                 signature: "function one(): void".to_string(),
                 docstring: None,
                 prior: Some(SymbolProse {
-                    summary: "A human-corrected summary.".to_string(),
-                    behavior: "Original behavior.".to_string(),
+                    summary: "A careful human-corrected summary here.".to_string(),
+                    behavior: "This is the original behavior.".to_string(),
                 }),
             })
         );
@@ -2926,13 +3108,15 @@ impl Counter {\n\
 
         let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
         let file_id = graph.find("a.ts").unwrap();
-        submit(
+        // A hash-current spec whose Behavior is a "see the source" cop-out
+        // (the shape a pre-fix cache carries — `submit` rejects it now).
+        plant_smelly_symbol_spec(
             &graph,
             &dir,
             "a.ts::one",
-            "### Summary\none does its job.\n### Behavior\nSee the source for details.\n",
-        )
-        .unwrap();
+            "One does its one small job.",
+            "See the source for details.",
+        );
 
         // Nothing about the source changed and nobody hand-edited the
         // file -- by hash alone this is "case 1: current" -- but the
@@ -3842,14 +4026,22 @@ impl Counter {\n\
     #[test]
     fn coverage_includes_a_current_but_smelly_file_in_pending() {
         let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "coverage3");
-        submit(
+        // A hash-current symbol spec with a cop-out Behavior — makes the
+        // whole file spec smelly without anything having moved.
+        plant_smelly_symbol_spec(
             &graph,
             &dir,
             "lib/supabase.ts::getSupabase",
-            "### Summary\nGetSupabase does its job.\n### Behavior\nSee the source for details.\n",
+            "Builds and returns the shared Supabase client.",
+            "See the source for details.",
+        );
+        submit(
+            &graph,
+            &dir,
+            "lib/supabase.ts",
+            "A thin wrapper module around the Supabase browser SDK.",
         )
         .unwrap();
-        submit(&graph, &dir, "lib/supabase.ts", "lib/supabase.ts summary.").unwrap();
 
         let items = coverage(&graph, &dir, Some("lib/supabase.ts")).unwrap();
         assert_eq!(items.len(), 1);

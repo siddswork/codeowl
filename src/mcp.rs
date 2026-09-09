@@ -342,6 +342,13 @@ impl CodeOwlServer {
         Arc::clone(&self.graph)
     }
 
+    /// The repo root this server was built against — for tests that need to
+    /// plant a fixture under `docs/specs/` directly.
+    #[cfg(test)]
+    pub(crate) fn root(&self) -> &std::path::Path {
+        &self.root
+    }
+
     fn not_found(id: &str) -> String {
         format!("no symbol with id {id:?}")
     }
@@ -1187,15 +1194,19 @@ mod tests {
     async fn a_cop_out_symbol_spec_is_flagged_smelly_via_get_spec_and_coverage_even_though_current()
     {
         let server = test_server(&[("a.ts", "export function one(): void {}\n")]);
-        server
-            .submit_spec(Parameters(SubmitSpecRequest {
-                id: "a.ts::one".to_string(),
-                content:
-                    "### Summary\none does its job.\n### Behavior\nSee the source for details.\n"
-                        .to_string(),
-            }))
-            .await
-            .unwrap();
+        // A hash-current symbol spec with a cop-out Behavior, planted
+        // directly: `submit_spec` rejects such prose now, but a pre-fix
+        // cache can still hold it and the MCP surface must still flag it.
+        {
+            let graph = server.graph_store().load_full();
+            crate::spec::plant_smelly_symbol_spec(
+                &graph,
+                server.root(),
+                "a.ts::one",
+                "One does its one small job.",
+                "See the source for details.",
+            );
+        }
         // Give the file itself a clean summary so the whole file's own
         // status is genuinely "current" -- isolating this test to the
         // "current but smelly because of one bad symbol" case, not also
@@ -1352,7 +1363,7 @@ mod tests {
         server_v1
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: "a.ts::one".to_string(),
-                content: "### Summary\nOriginal summary.\n### Behavior\nOriginal behavior.\n"
+                content: "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n"
                     .to_string(),
             }))
             .await
@@ -1368,7 +1379,10 @@ mod tests {
         let content = std::fs::read_to_string(&spec_path).unwrap();
         std::fs::write(
             &spec_path,
-            content.replace("Original summary.", "A human-corrected summary."),
+            content.replace(
+                "This is the original summary.",
+                "A careful human-corrected summary here.",
+            ),
         )
         .unwrap();
 
@@ -1392,8 +1406,14 @@ mod tests {
         else {
             panic!("expected a Symbol task");
         };
-        assert_eq!(prior_summary.as_deref(), Some("A human-corrected summary."));
-        assert_eq!(prior_behavior.as_deref(), Some("Original behavior."));
+        assert_eq!(
+            prior_summary.as_deref(),
+            Some("A careful human-corrected summary here.")
+        );
+        assert_eq!(
+            prior_behavior.as_deref(),
+            Some("This is the original behavior.")
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1720,7 +1740,7 @@ mod tests {
         server
             .submit_spec(Parameters(SubmitSpecRequest {
                 id: feature_id.clone(),
-                content: "# Widget\n## Summary\nShows the widget.\n## How it works\n1. Loads and fetches.\n## Data touched\nNone.\n## Rules & failure modes\nNone.\n".to_string(),
+                content: "# Widget\n## Summary\nShows the widget to visitors on its own page.\n## How it works\n1. Loads and fetches.\n## Data touched\nNone.\n## Rules & failure modes\nNone.\n".to_string(),
             }))
             .await
             .unwrap();
