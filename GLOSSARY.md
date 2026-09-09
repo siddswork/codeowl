@@ -322,6 +322,19 @@ why CodeOwl cares.
   points in this sense, and that's fine — it just gets symbol, file, and
   rollup specs.
 
+**Slug**
+: A short, lowercase, hyphenated name — the kind you'd put in a URL or a
+  filename. Web/CMS jargon (WordPress calls a post's URL name its "slug").
+
+  CodeOwl builds a **feature's slug** from its entry-point file path:
+  strip the `app/` prefix and the `page.tsx` / `route.ts` suffix, turn any
+  remaining `/` into `-`. So `app/submit/page.tsx` → `submit`,
+  `app/page.tsx` → `home`, `app/api/stripe-webhook/route.ts` →
+  `api-stripe-webhook`. The slug names the feature's spec file
+  (`docs/specs/_features/<slug>.md`) and its id in the tools
+  (`feature:<slug>`). It carries no meaning beyond "this names that
+  feature." (`src/features.rs::feature_slug`)
+
 **Reconciliation**
 : The special case where **both** things happened since a spec was last
   machine-written: the *source changed* **and** a *human hand-edited the
