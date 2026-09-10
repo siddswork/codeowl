@@ -2,68 +2,78 @@
 
 CodeOwl extracts a structural graph from a codebase and serves LLM-authored specs (the semantic layer) over MCP. Design lives in `ARCHITECTURE.md` (how it's built) and `REQUIREMENTS.md` (what and for whom); `ROADMAP.md` has the build sequence and test repos; `GLOSSARY.md` defines the static-analysis / graph / CodeOwl-coined vocabulary the rest use (symbol, spec-bearing, flow edge, fan-in, the four hashes, "the socket held", …). Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
 
-## Last Session (2026-09-08 — Phase 2: M15 shipped — trait iterated, docs neutralized, MCP fixes)
+## Last Session (2026-09-10 — M16 shipped, 3 rounds of macOS path fixes, big docs pass, self-corpus refresh)
 
-**Goal:** execute **M15** — the TS+Rust two-stack checkpoint: fold M14's one finding into the trait, first doc-neutralization pass, commit CodeOwl's self-spec corpus. One branch, one PR. **Mid-session the owner scoped the corpus down** to the 3-file re-render + defer the exhaustive corpus (it's big — see below).
+**Goal:** started as "finish M16 commit 5" (branch `m16-java-stack` had commits 1–4). Expanded, driven by the owner, into: ship M16; fix a macOS-only path bug that surfaced in 3 rounds of `cargo test` failures on his Mac; a large documentation pass (VS Code/Copilot setup, GLOSSARY rewrite, spec STYLE.md, `--stale` flag, team-split docs); and a self-corpus refresh + `src/java.rs` generation.
 
-### What was completed — all merged (PR #12, `HEAD` = `master` = `e53f837`, 14 commits `bf9d8d0`…`3049f75`)
+### What was completed — everything merged to `master` (`d5a2c43`), PRs #18–#29
 
-**Trait iteration — M14's one finding (a Rust type as two spec sections `## Graph` + `## impl Graph`):**
-- `bf9d8d0` — **`rust::merge_inherent_impls`** folds an inherent `impl Foo { … }` block into the `Foo` symbol *after* the tree-sitter walk: methods reparented (`<file>::impl Foo::m` → `<file>::Foo::m`), block `source_hash` Merkle-folded into `Foo`'s, attribute `markers` unioned, block dropped. A type's several inherent impls collapse in source order. **Trait impls (`impl Trait for Foo` — ` for ` in the header) stay their own symbols.** Done in the pack, not `spec.rs` — the renderer stays stack-neutral and sees a Rust type exactly like a TS class. **Zero `spec.rs` change; the socket held.** Incidental fix: two `impl CodeOwlServer` blocks in `mcp.rs` were colliding on one arena id (`src/mcp.rs::impl CodeOwlServer`) — now distinct `CodeOwlServer::<method>` ids. `FORMAT_VERSION` 5 → 6. `rust.rs` helpers: `inherent_impl_target`, `strip_leading_generics`, `short_id`.
-- `fb915d4` — **`spec::symbol_span_text(root, graph, rel_path, sym)`** replaces `read_symbol_text`/`read_lines`: a symbol's own line span **plus any direct child span that falls outside it**, adjacent spans merged. For a TS class the methods are already inside the class braces → identical output; for a folded Rust type the method bodies live elsewhere and are appended. Fixes two blind spots the fold created: `spec::dependency_lines`/`dependency_hash` and `get_next_spec_task`'s symbol `source` couldn't see a folded method's body (a dep used only in `Graph::save` wasn't listed). **`SpecTask::Symbol` loses its now-unused `lines` field.**
+**M16 — `JavaStack` on commons-lang (PR #18):**
+- `src/java.rs` — `tree-sitter-java` extractor (class/interface/enum/`@interface`/record → `Container`, methods/constructors/fields → Callable/Value, nested types recursed, Javadoc → docstring, annotations → `markers`), no `merge_inherent_impls` step. Import half: `extract_imports` splits FQNs; `resolve_imports` does path-suffix FQN→file matching (no `pom.xml`, Gradle-free) + a same-package source scan for import-less references.
+- `JavaStack` in `stack.rs`; `stack::for_name` gains `"java"`; `lang::detect` restructured from a `match (ts, rs)` 2-tuple to an N-candidate count-and-match; `is_test_tree` gains a `src/test/` clause.
+- **Design decision 1 resolved:** every named Java type kind → `Container`, no size test (a record is a restricted `final class`; `Value` would drop DTO-per-file layouts from the corpus). ROADMAP DD1 + exp-02 updated.
+- `tests/java_spec.rs` (2 tests). `feature_model()` = trait default `None`. `FORMAT_VERSION` unchanged.
+- **commons-lang dogfood** (`serve` + `/codeowl-generate --all --budget=15`, 7 specs read): internal import resolution 100 %, same-package edges accurate, `feature_model() -> None` composes, spec quality high. Findings → M18 (below). The 7 commons-lang specs are left uncommitted in `~/dev/openSource/test-repos/commons-lang/` (corpora are M18 scope).
 
-**Doc-neutralization, first pass** (`M18` finishes it):
-- `d013183` — `ARCHITECTURE.md` §1/§2 "per language" → "per stack" + a `StackPack` paragraph (one-stack-per-repo, `Container|Callable|Value|Schema` + `raw`); "Feature specs / Making them derivable" now leads with "these are a pack's *optional* hooks — a CLI/library has none" and names each generic seam (`extract_flow_edges`/`resolve_flow_edge`, `admits_to_core`). `setup/codeowl-generate.md` drops the hard-coded `app/submit/page.tsx`.
-- `d398d13` — `setup/USAGE.md` + `setup/README.md`: "TypeScript / TSX only" was M13-era. Now: one `StackPack` per repo auto-detected, dual-stack repo rejected, CLI/library stack → no feature layer / `## Key flows`. USAGE gains **"How the structural tools actually behave"** — `get_callers` is an import/`use` edge **not** a call graph (query the type/free-fn, **not** a method — a method comes back empty); `get_callees` is file-level; `search_code` is plain regex. Also: driving the tools yourself in chat is a normal workflow.
+**macOS symlink `strip_prefix` bug — 3 PRs (#19, #20, #21).** Root cause: an un-canonicalized repo root compared against a symlink-resolved path (oxc_resolver's output, and the file-watcher's event paths). macOS `std::env::temp_dir()` sits under `/var` → `/private/var`; Linux `/tmp` is real, so it only showed on his Mac. **Production (`main.rs` already canonicalizes) was never affected — it's a direct-library-caller (test) gap.** Fixes canonicalize at every path boundary:
+- #19 — `resolve.rs`: `resolve_imports` / `resolve_default_imports` canonicalize `repo_root`.
+- #20 — `index.rs`: `RepoIndex::build`/`open` add `canonical_root(root)`; `watch::spawn` canonicalizes its `root`; `CodeOwlServer::root()` test accessor added.
+- #21 — `index.rs`: `apply_changes` runs each event path through `canonicalize_event_path` (canonicalize, or canonicalize the parent + re-attach the name for a just-deleted file).
+- Full audit done — `lang.rs:detect`, `search.rs`, `rel_path` all walk-and-strip the *same* root so they're internally consistent; no other sites. `structural_sweep.py` byte-identical on the pilot for all three.
 
-**Self-spec corpus — SCOPED DOWN by the owner:**
-- `927de80` — `symbol.rs` + `graph.rs` self-specs re-rendered for the folded shape (`## impl SymbolId`/`## impl SymbolView`/`## impl Node`/`## impl Graph` folded into their types; `Graph`'s prose rewritten to cover its ~23 methods; deps now include `Symbol`/`SymbolId`/`anyhow` from method bodies). `imports.rs` was unaffected (no inherent impls) and the "pre-`50dcb1d` re-render" worry turned out moot (they were already in the new deps format). **The exhaustive ~239-generation corpus is DEFERRED** — see next step.
+**Docs (PRs #22–#25, #29):**
+- **VS Code + GitHub Copilot** — `setup/COPILOT.md`, `setup/codeowl-generate.prompt.md` (Copilot port of the slash command), `setup/mcp-vscode.json`. Frontmatter/config **verified against current VS Code docs**: `.vscode/mcp.json` uses `servers` (not `mcpServers`) + `type: "stdio"` + `${workspaceFolder}`; the prompt file uses `tools: ['codeowl/*']` (MCP-server wildcard, also implies agent mode — no `mode:`/`agent:` field); prompt files load automatically (no `chat.promptFiles` toggle in current VS Code) and are *not* loaded by Agent Host sessions.
+- **`GLOSSARY.md`** — full plain-English rewrite (295 → ~600 lines): every entry leads with the plain idea → example → precise detail. Expanded "Stacks and the pluggability work" section (added `Pack`, `detect`, `Pack hook / seam`, `The generic pipeline`). Defined `Slug`. Linked Niko Matsakis's "graphs via vector indices" post on the `Arena` entry.
+- **`docs/specs/STYLE.md`** — repo-specific spec-generation guidance (audience = app dev, no compiler background; Summary jargon-free; gloss terms inline). `/codeowl-generate` + `.prompt.md` gained a hook: "if the repo has `docs/specs/STYLE.md`, read it first." Generic (any repo can drop one).
+- **`--stale` flag** on `/codeowl-generate` (PR #26) — `--all --stale [--budget=N]` filters the batch's `pending` to `status: "stale"` only (skips `missing` and `smelly`). Purely client-side; `get_spec_coverage` already reports per-item `status`. Documented in `README.md` / `USAGE.md`.
+- **`setup/USAGE.md`** (PR #29) — "Splitting the work across a team" (divide by directory, `get_spec_coverage` `scope`, one PR per slice) + "What CodeOwl stores" (`docs/specs/**.md` committed vs `.codeowl/graph`+`.codeowl/index` per-machine cache, safe to delete).
 
-**MCP fixes surfaced while dogfooding:**
-- `7f6bea3` — **`get_spec_coverage` → `generations_remaining`** (top-level) + per-`pending` `generations`: the real `--budget=N` for a complete run, counting uncovered symbols not documents. `spec::file_pending_generations` is a read-only mirror of `next_task`'s per-symbol decision (never-generated / source-moved / smelly → a cycle; source-unchanged + human-edited → silent reconcile, not counted). CodeOwl's own remaining corpus = **239** (`spec.rs` = 88, `features.rs` = 36, `rust.rs` = 28, `mcp.rs` = 21, rest ≤12).
-- `70b0a32` — `structural_sweep.py` `normalize_coverage` folds the additive `generations` fields away before its byte-diff, like `markers`/`raw`.
-- `896ce4a` — **`get_callers` / `get_callees` / `search_code` returned a top-level JSON array** as `structuredContent`, which MCP forbids (must be an object) — a spec-compliant client (Claude Code) rejected them with a schema error; **broken from any real client since M3**. Now `{ "callers": [...] }` / `{ "callees": [...] }` / `{ "matches": [...] }` (`CallersResponse`/`CalleesResponse`/`SearchResponse`). Element shape untouched. Sweep gets `as_list()` to unwrap either form.
+**Self-corpus (PRs #27, #28):**
+- #27 — refreshed the **6 stale file specs** (`lang`, `resolve`, `stack`, `index`, `mcp`, `watch`) via `/codeowl-generate --all --stale --budget=20` — 17 generations, STYLE.md applied (first real use of both `--stale` and STYLE.md).
+- #28 — generated **`src/java.rs`** (23 generations, no spec existed).
 
-**Tooling:**
-- `47f652e` — `tests/rust_spec.rs`: a Rust file through `Graph::build` → the `next_task`/`submit`/`render` loop, asserting the folded section structure (one `## Counter`, no `## impl Counter`, trait impl keeps its section). The end-to-end version of `rust.rs`'s unit tests.
-- `7f487ca` — **`utility/check.sh`** — the pre-commit gate in one command: `fmt --check` (or `--fix`) → `clippy --all-targets -D warnings` → `cargo test` → staged-diff secret scan, exit on first failure.
-- `3049f75` — **`utility/release.sh`** — same gate in `--release` + `cargo build --release`. Slow; for before a release / after perf- or overflow-sensitive changes. Refreshed `target/release/codeowl` (was stale).
-- `211bd8a`, `7d77b3a` — ROADMAP M15 status boxes + sequence list + changelog.
+### Self-corpus state (live `get_spec_coverage` on this repo)
 
-### Validation done
+**15 current · 0 stale · 4 missing · 0 smelly** · `generations_remaining` 120. Missing = `src/rust.rs` (28 gens), `src/spec.rs` (90), `rollup:src` (1, **blocked**), `system` (1, **blocked**). `rollup:src` and `system` only become generable once every `src/` file is current — so `rust.rs` + `spec.rs` must be filled first. This is the **post-M18 batch** (owner scoped it there in M15; unchanged).
 
-- **`structural_sweep.py` byte-identical on the pilot** (`~/dev/startup/talentTrail`, TS+Next), M15 vs `master` — all six categories. The additive `generations` fields and the callers/callees envelope normalized away.
-- **Dual-binary generation on the pilot** — full `get_next_spec_task → submit_spec → render` loop for 3 *missing* files (`lib/date-utils.ts`, `lib/grade-utils.ts`, `lib/view-as-judge.ts`), `master` binary vs M15 binary, byte-identical `.md` output. Pilot working tree left pristine (only its pre-existing `.mcp.json` mod + 13 untracked owner specs).
-- `tests/rust_spec.rs` + the 6 new unit tests (`rust::inherent_impl_folds_into_its_type`, `…several_inherent_impls…`, `…folded_type_source_hash_moves…`, `…trait_impl_is_left_as_its_own_symbol`, `…inherent_impl_target_parses_headers`, `spec::symbol_span_text_includes_a_folded_impl_s_method_bodies`, `spec::coverage_counts_generations_not_just_documents`).
+### Known issues / carry-forward (mostly → M18)
 
-### Known issues / carry-forward
+1. **[M18 headline — from the M16 dogfood] `get_next_spec_task` returns a folded Container's whole-file source.** For a large file (`StringUtils` 420 KB on commons-lang; CodeOwl's own `mcp.rs`/`spec.rs` hit ~95 KB) this exceeds the MCP tool-result token limit → the client persists it to a file and greps. Fix: for a large Container task, send member signatures + docstrings, not full bodies. Related enhancement: **serve `docs/specs/STYLE.md` in `get_next_spec_task`'s context** so the guidance travels with the task regardless of client (currently only the slash command reads it).
+2. **`get_spec_coverage` `pending` payload** also over-limit on a big repo (commons-lang: 95 KB / 626 items) — cap or paginate. M18.
+3. **Java same-package scan over-inclusive** when a simple name is shadowed by an explicit `import` of a different class (commons-lang `lang3.Streams` vs `lang3.stream.Streams`). Also: a resolved `import static` lands a member-level dep next to a class-level one — decide the granularity. M18.
+4. **No pre-built binaries.** A GitHub Actions release workflow (macOS + Linux) is the real fix for any non-dev consumer — surfaced by the Copilot-setup work, **not yet a ROADMAP item**. Near-term workaround documented in `COPILOT.md` (`cargo install --git`).
+5. **Windows-native not covered** (owner set it aside). If revisited: `dunce::canonicalize` for the `\\?\` verbatim prefix + case-insensitivity in the `RepoIndex.files` lookup. macOS + WSL2-Ubuntu both green now. See memory `dev-environment`.
+6. `FeatureModel` still has ONE impl — M17 (Quarkus) is the second.
+7. `resolved_default_imports` still a separate `Graph` field — folds into `pack.resolve_imports`'s output at M18.
+8. M17 breaks M10's `.sql`-file schema assumption — M18 generalizes to a symbol-level `is_schema_symbol` hook.
+9. **`/home/sidd/.claude/plans/dapper-greeting-sprout.md`** is the M16 plan — M16 is done, so it's spent (leave or delete).
 
-- **The exhaustive self-spec corpus is the deferred follow-up — 239 generations.** `get_spec_coverage` (no scope, run in this repo) reports it live: `src/spec.rs` = 88, `src/features.rs` = 36, `src/rust.rs` = 28, `src/mcp.rs` = 21, `src/extract.rs` = 12, `src/lang.rs`/`src/schema.rs` = 10, `src/resolve.rs` = 9, `src/stack.rs` = 8, `src/index.rs`/`src/watch.rs` = 5, `src/search.rs` = 3, `src/hash.rs` = 2, `rollup:src` = 1, `system` = 1 (the `## Key flows` one — extraction / spec-generation / structural-query / incremental-reindex flows per `experiments/exp-02-feature-layer.md` Part 1). `src/main.rs` is not spec-bearing (no `pub` items). Run `/codeowl-generate --all --budget=40` in chunks, commit `docs/specs/` after each; `spec.rs` deserves its own chunk or two. `--all` order is fan-in first, so `lang`/`features`/`hash`/`resolve` generate before the long tail.
-- **`FeatureModel` still has ONE impl** (design decision 8) — M15 (`None`) and M16 (`None`) both take the trait default; the second real impl is M17 (Quarkus). Keep it to its two methods.
-- **`resolved_default_imports`** is still a separate `Graph` field — folds into `pack.resolve_imports`'s output at M18.
-- **M17 breaks M10's schema model.** `SourceKind::Schema` dispatches on file extension; Quarkus persistence is a `@Entity` annotation, no schema *file*. M18 generalizes to a symbol-level `is_schema_symbol` hook (`markers` makes it cheap) — don't deepen the file assumption before then.
-- **`utility/structural_sweep.py`'s "byte-identical" gate** now normalizes away `markers`/`raw` (M14), the `generations` coverage fields, and the callers/callees/search envelope (M15). Still the right tool for "did I *accidentally* change spec output for TS" — but the list of deliberate, normalized-away changes grows each milestone.
-- **Pilot corpus is uncommitted** in `~/dev/startup/talentTrail/` (owner's own PR): `docs/specs/` + `.mcp.json` release→debug + a `CLAUDE.md` section.
-- Carried from M8: human-edit reconciliation is file-specs-only.
-- **ROADMAP.md is ~570 lines** and carries finished Phase-1 milestones at full detail. Owner **decided no change** — the argued-through rationale is worth the weight.
+### Process notes for future-me
 
-### Exact next step to resume
-
-**Start M16 — `JavaStack` on commons-lang.** Read `ROADMAP.md` → M16 section (`### M16 — JavaStack on commons-lang`). A third stack the TS/Rust impls didn't shape, and the first real corpus exercising `feature_model() -> None` end to end. Highlights: `tree-sitter-java`; extract `class`/`interface`/`enum`/`record`/`@interface` + methods + nested types + fields (map onto `Container|Callable|Value` — records and annotation types are the awkward cases); **package→file resolution keyed on the `src/main/java` layout convention, not `pom.xml`** (so Gradle works free), the hard part being star imports and unqualified-name-against-enclosing-package + `java.lang`; Javadoc `/** */` as the docstring; `JavaStack::classify` returns `Test` for `src/test/java`; `feature_model()` returns `None` (verify `spec.rs`'s system-spec composition tolerates zero features — already true, but re-check on a real Java corpus); `extract_flow_edges` empty. Test repo: **commons-lang** (627 files, single-module Maven — see ROADMAP's test-repo list). Validation *is* the test (TDD): `codeowl extract` + `serve` on commons-lang, generate a partial corpus (shared-code tier + a sample of module rollups + the system spec), a human read of ~8–10 specs. Every place the trait still assumes a resolver config, a route-shaped feature, or a `.sql` schema file is an M18 finding.
-
-**Also pending (not blocking M16):** the deferred CodeOwl self-corpus (239 gens, above) — can be done anytime as its own PR; and the owner needs to re-sync `setup/codeowl-generate.md` → `~/.claude/commands/codeowl-generate.md` (entry-point wording changed).
+- **Branch-deletion mistake made TWICE this session** — deleted branches whose PRs were still OPEN (recovered both via reflog + `gh pr reopen`). **New rule (memory `never-delete-branch-before-pr-merged`): before ANY `git branch -d/-D` or `git push origin --delete`, run `gh pr view <n> --json state` and confirm `MERGED`. Do not tidy branches proactively — wait for the owner to say a PR is merged.**
+- **After any `cargo build`, ask the owner to `/mcp` reconnect** before trusting `mcp__codeowl__*` results — the server keeps its spawn-time binary. The *graph* is kept live by the watcher, but the binary's hashing/coverage logic isn't. Memory: `reconnect-mcp-after-code-change`.
+- The oxc_resolver-symlink memory (`fix-oxc-resolver-symlink-strip-prefix`) is now fully resolved (PRs #19–21 all merged) — safe to delete.
 
 ### State
 
-`cargo test`: **170 unit + 10 integration** (180 total), all green (`tests/`: extraction 2, feature_components 1, incremental 3, **rust_spec 1**, schema 4). `utility/check.sh` clean on `master` (`e53f837`). `.codeowl/` in this repo: pack `rust`, `format_version` **6**, ~410 nodes, warm. `target/debug/codeowl` and `target/release/codeowl` both current at M15. The session's `codeowl` MCP server was last reconnected after `896ce4a` and is current (everything since was docs/scripts).
+- `cargo test`: **204** (189 unit + 15 integration), all green. `utility/check.sh` clean on `master` (`d5a2c43`). No open PRs, no local branches but `master`, working tree clean.
+- `.codeowl/` in this repo: pack `rust`, `format_version` 6, warm. The session's `codeowl` MCP server was reconnected after PR #26 and used for the #27/#28 generation runs; **rebuild + `/mcp` reconnect at the start of the next code session** (many builds happened; the last generation run's server is on a debug binary that predates nothing code-relevant but reconnect anyway).
+- Test repos present: `~/dev/openSource/test-repos/{commons-lang, quarkus-super-heroes, leveldb}`.
 
-**MCP dogfood note:** the `codeowl` MCP server in a session keeps the binary it was spawned with — after any `cargo build` that could change the graph, **ask the owner to reconnect** (`/mcp` → reconnect `codeowl`) before trusting `mcp__codeowl__*` results; verify with `get_symbol` on something the change should have moved. (Saved as a memory: `reconnect-mcp-after-code-change`.)
+### Exact next step to resume
 
-### Git workflow
+Two independent tracks — the owner picks:
 
-- **`master` is protected.** Every change → branch → PR → Sidd merges via the **"Merge without waiting for requirements (bypass rules)"** checkbox (he's the last pusher, so the 1-code-owner-approval gate can't be met any other way — this is the intended path). Claude opens PRs (`gh pr create`) but **cannot merge** (`gh pr merge` is permission-blocked).
-- Commits milestone-scoped (`M16: …`), small, atomic, each compiles + passes its tests. `Authored by: Sidd & Claude Sonnet 5` line in the body, plus the harness `Co-Authored-By:` / `Claude-Session:` trailer.
-- `utility/check.sh` before every commit (`clippy` + `rustfmt` + `cargo test` + staged-diff secret scan).
+**A. M17 — Quarkus on quarkus-super-heroes.** The Java *feature layer*. Read `ROADMAP.md` → `### M17` (line ~481) and `experiments/exp-02-feature-layer.md` Part 2 / "M17" line. The work: `feature_model() -> Some` (the second `FeatureModel` impl); `enumerate_entry_points` for `@Path` + `@Incoming`/`@Outgoing` first (the kinds actually in quarkus-super-heroes); kind-prefixed `EntryPoint` slugs; a CDI-shaped `admits_to_core` (an `@Inject`ed type resolving to `@ApplicationScoped` / a Panache repository); `@RegisterRestClient` flow edges; `@Entity` symbol-level schema detection (which breaks M10's `.sql`-file model — an M18 finding to log); multi-module Maven (each module has its own `src/main/java` root — one graph, one walk, no reactor modelling unless a resolution ambiguity demands it). Test repo `~/dev/openSource/test-repos/quarkus-super-heroes` (`ui-super-heroes/` is ~10 JS files in a Maven module but zero `.ts`/`.tsx`, so `detect` is unambiguous). Validation *is* the test (TDD per the milestone).
+
+**B. Finish the self-corpus** (independent of M17, anytime, its own PR): `/codeowl-generate src/rust.rs` (28 gens) after `/mcp` reconnect, then `src/spec.rs` (90 gens — its own PR, maybe in `--budget` chunks), which unblocks `rollup:src` + `system`. STYLE.md applies. Commit `docs/specs/` on its own.
+
+### Git workflow (evergreen)
+
+- **`master` is protected.** Every change → branch → PR → **Sidd merges** via the "Merge without waiting for requirements (bypass rules)" checkbox (he's the last pusher, so the 1-owner-approval gate can't be met otherwise — the intended path). Claude opens PRs (`gh pr create`) but **cannot merge** (`gh pr merge` is permission-blocked).
+- Commits small, atomic, milestone-scoped where applicable (`M17: …`), each compiles + passes tests. Body carries `Authored by: Sidd & Claude Sonnet 5` plus the harness `Co-Authored-By:` / `Claude-Session:` trailers. PR body ends with the `🤖 Generated with Claude Code` line.
+- `utility/check.sh` before every commit (fmt + clippy `-D warnings` + `cargo test` + staged-diff secret scan). `utility/release.sh` = same in `--release` + a release build, before a release or after perf/overflow-sensitive changes.
+- **Delete a branch only after `gh pr view <n>` shows `MERGED`** (see Process notes).
 
 ## Hard invariants
 
