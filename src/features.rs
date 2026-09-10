@@ -574,24 +574,39 @@ pub fn assemble_participants(
         }
     }
 
+    let mut data = Vec::new();
+    let mut seen_data = HashSet::new();
+
     let mut dependencies = Vec::new();
     let mut seen_deps = HashSet::new();
     for file in &core {
         for imp in graph.imports().iter().filter(|i| &i.from_file == file) {
             let Some(target) = imp.target else { continue };
             let id = graph.string_id(target).to_string();
-            if !core.contains(&id) && seen_deps.insert(id.clone()) {
+            if core.contains(&id) {
+                continue;
+            }
+            // An import that resolves to a table symbol is `data`, not a
+            // plain dependency — an in-language ORM model (M17's
+            // `is_schema_symbol`) is reached this way, where the TS+SQL
+            // pack reaches its tables via a `.from("table")` flow edge.
+            if graph
+                .get_symbol(target)
+                .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
+            {
+                if seen_data.insert(id.clone()) {
+                    data.push(id);
+                }
+            } else if seen_deps.insert(id.clone()) {
                 dependencies.push(id);
             }
         }
     }
 
-    // The `data` tier: every flow edge from a `core` file that resolves
-    // to a *symbol* rather than a file. For the TS+SQL pack those are the
-    // Supabase `.from("table")` refs landing on a `SymbolKind::Schema`;
+    // The rest of the `data` tier: every flow edge from a `core` file that
+    // resolves to a *symbol* rather than a file. For the TS+SQL pack those
+    // are the Supabase `.from("table")` refs landing on a `SymbolKind::Schema`;
     // the walk doesn't need to know that.
-    let mut data = Vec::new();
-    let mut seen_data = HashSet::new();
     for file in &core {
         for edge in graph.flow_edges().iter().filter(|e| &e.from_file == file) {
             let FlowTarget::Node(target) = edge.target else {

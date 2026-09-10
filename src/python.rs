@@ -25,7 +25,7 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
-use crate::graph::{Graph, SymbolId};
+use crate::graph::{FlowTarget, Graph, SymbolId, UnresolvedFlowEdge};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, ImportRef};
 use crate::resolve::ResolvedImport;
@@ -565,6 +565,152 @@ fn pick_file<'a>(
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Flow edges — a FastAPI route's dependencies (M17). The import graph sees
+// `from app.api.deps import SessionDep`, but not that a route *uses*
+// `SessionDep` (which chains through `Annotated[Session, Depends(get_db)]`
+// to touch a table) or `Depends(get_current_user)`. So for each route-
+// decorated function, emit one edge per:
+//   * `Depends(<name>)` anywhere in its params or decorator, and
+//   * bare-identifier param type annotation (`session: SessionDep`).
+// `resolve_flow_edge` maps the name to the *file* that declares it; the
+// FastAPI feature model's `admits_to_core` then decides whether that file
+// (a CRUD module, a schema-touching `deps.py`) belongs in the feature.
+// ---------------------------------------------------------------------------
+
+const ROUTE_DECORATOR_VERBS: &[&str] = &[
+    ".get(",
+    ".post(",
+    ".put(",
+    ".patch(",
+    ".delete(",
+    ".head(",
+    ".options(",
+    ".websocket(",
+];
+
+/// Type names that never name a project symbol worth pulling into a
+/// feature's `core`.
+const PRIMITIVE_TYPES: &[&str] = &[
+    "int",
+    "str",
+    "bool",
+    "float",
+    "bytes",
+    "None",
+    "Any",
+    "dict",
+    "list",
+    "set",
+    "tuple",
+    "object",
+    "bytearray",
+    "complex",
+];
+
+/// Emit a `depends` / `dep-type` edge per dependency of each route-
+/// decorated function in the file.
+pub fn extract_flow_edges(source: &str, rel_path: &str) -> Vec<UnresolvedFlowEdge> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_python::LANGUAGE.into())
+        .expect("bundled tree-sitter-python grammar should always load");
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+
+    let mut out: Vec<UnresolvedFlowEdge> = Vec::new();
+    let mut stack = vec![tree.root_node()];
+    while let Some(node) = stack.pop() {
+        if node.kind() == "decorated_definition" && is_route_decorated(node, source) {
+            collect_route_deps(node, source, rel_path, &mut out);
+        }
+        let mut c = node.walk();
+        for child in node.children(&mut c) {
+            stack.push(child);
+        }
+    }
+    out.sort_by(|a, b| (a.kind.as_str(), a.raw.as_str()).cmp(&(b.kind.as_str(), b.raw.as_str())));
+    out.dedup_by(|a, b| a.kind == b.kind && a.raw == b.raw);
+    out
+}
+
+fn is_route_decorated(node: Node, source: &str) -> bool {
+    let mut c = node.walk();
+    node.children(&mut c)
+        .filter(|n| n.kind() == "decorator")
+        .any(|d| {
+            let t = text(d, source);
+            ROUTE_DECORATOR_VERBS.iter().any(|v| t.contains(v))
+        })
+}
+
+fn collect_route_deps(node: Node, source: &str, file: &str, out: &mut Vec<UnresolvedFlowEdge>) {
+    let mut stack = vec![node];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            // `Depends(<name>)` — a call whose callee is the bare name
+            // `Depends` and whose first argument is an identifier.
+            "call" => {
+                let callee = n.child_by_field_name("function").map(|f| text(f, source));
+                if callee == Some("Depends")
+                    && let Some(args) = n.child_by_field_name("arguments")
+                {
+                    let mut ac = args.walk();
+                    if let Some(id) = args.children(&mut ac).find(|c| c.kind() == "identifier") {
+                        out.push(UnresolvedFlowEdge {
+                            from_file: file.to_string(),
+                            kind: "depends".to_string(),
+                            raw: text(id, source).to_string(),
+                        });
+                    }
+                }
+            }
+            // A bare-identifier param type: `session: SessionDep`.
+            "type" => {
+                let mut tc = n.walk();
+                let kids: Vec<Node> = n.children(&mut tc).collect();
+                if let [only] = kids.as_slice()
+                    && only.kind() == "identifier"
+                {
+                    let name = text(*only, source);
+                    if !PRIMITIVE_TYPES.contains(&name) {
+                        out.push(UnresolvedFlowEdge {
+                            from_file: file.to_string(),
+                            kind: "dep-type".to_string(),
+                            raw: name.to_string(),
+                        });
+                    }
+                }
+            }
+            _ => {}
+        }
+        let mut c = n.walk();
+        for child in n.children(&mut c) {
+            stack.push(child);
+        }
+    }
+}
+
+/// A `depends` / `dep-type` edge → the file node that declares `raw`, or
+/// `Unresolved` (a stdlib type, an inline `Depends()` with no name, a typo).
+pub fn resolve_flow_edge(graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
+    if !matches!(edge.kind.as_str(), "depends" | "dep-type") {
+        return FlowTarget::Unresolved;
+    }
+    let mut files: Vec<&str> = graph
+        .symbols()
+        .filter(|s| s.id.rsplit("::").next() == Some(edge.raw.as_str()))
+        .map(|s| s.file.as_str())
+        .collect();
+    files.sort_unstable();
+    files
+        .into_iter()
+        .next()
+        .and_then(|f| graph.find(f))
+        .map_or(FlowTarget::Unresolved, FlowTarget::Node)
 }
 
 #[cfg(test)]

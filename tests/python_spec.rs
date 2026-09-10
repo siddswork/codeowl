@@ -7,8 +7,9 @@
 //! drives.
 //!
 //! Plus: a SQLModel `table=True` class is retagged `SymbolKind::Schema`
-//! and its importers resolve to it (the "code→table edge is free" path).
-//! The FastAPI feature model lands in a follow-up commit.
+//! and its importers resolve to it (the "code→table edge is free" path);
+//! and a `@router.get(…)` route enumerates as a feature whose `data` tier
+//! names the table it queries.
 
 use codeowl::graph::{FileExtraction, Graph};
 use codeowl::hash::hash_text;
@@ -222,6 +223,57 @@ fn a_sqlmodel_table_class_becomes_a_schema_node_with_its_queriers() {
         .collect();
     assert!(queriers.contains(&"app/api/routes/items.py"));
     assert!(queriers.contains(&"app/crud.py"));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_fastapi_route_becomes_a_feature_with_its_table_in_data() {
+    let dir = std::env::temp_dir().join(format!("codeowl-py-spec-{}-feat", std::process::id()));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n\n\nclass ItemPublic(SQLModel):\n    id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/deps.py"),
+        "from app.models import Item\n\n\ndef get_session():\n    yield Session()\n\n\nSessionDep = Session\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app.api.deps import SessionDep\nfrom app.models import Item, ItemPublic\n\nrouter = APIRouter(prefix=\"/items\", tags=[\"items\"])\n\n\n@router.get(\"/{id}\", response_model=ItemPublic)\ndef read_item(session: SessionDep, id: int):\n    return session.get(Item, id)\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("FastAPI feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    let ep = eps
+        .iter()
+        .find(|e| e.id == "http-get-items-id")
+        .expect("the GET /items/{id} route is an entry point");
+    assert_eq!(ep.kind, "http");
+    assert_eq!(
+        ep.title, "GET /items/{id}",
+        "the APIRouter prefix is applied"
+    );
+    assert_eq!(ep.file, "app/api/routes/items.py");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, ep);
+    assert!(
+        p.data.contains(&"app/models.py::Item".to_string()),
+        "the queried table is in `data`: {:?}",
+        p.data
+    );
+    assert!(
+        p.core.contains(&"app/api/deps.py".to_string()),
+        "deps.py (touches a table via SessionDep) joins core: {:?}",
+        p.core
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }

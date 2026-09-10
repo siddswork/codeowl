@@ -418,12 +418,16 @@ impl StackPack for PythonStack {
         crate::python::resolve_imports(root, file_imports, graph)
     }
 
-    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
-        Vec::new()
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {
+        crate::python::extract_flow_edges(source, rel_path)
     }
 
-    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
-        FlowTarget::Unresolved
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
+        crate::python::resolve_flow_edge(graph, edge)
+    }
+
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
+        Some(&crate::fastapi::FastApiFeatureModel)
     }
 
     fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {

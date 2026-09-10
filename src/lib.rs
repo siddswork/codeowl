@@ -1,4 +1,5 @@
 pub mod extract;
+pub mod fastapi;
 pub mod features;
 pub mod graph;
 pub mod hash;
