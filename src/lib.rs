@@ -7,6 +7,7 @@ pub mod index;
 pub mod java;
 pub mod lang;
 pub mod mcp;
+pub mod python;
 pub mod resolve;
 pub mod rust;
 pub mod schema;

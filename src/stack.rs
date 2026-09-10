@@ -191,6 +191,7 @@ pub fn for_name(name: &str) -> Box<dyn StackPack> {
     match name {
         "rust" => Box::new(RustStack),
         "java" => Box::new(JavaStack),
+        "python" => Box::new(PythonStack),
         _ => Box::new(TypeScriptNextStack),
     }
 }
@@ -305,6 +306,71 @@ impl StackPack for JavaStack {
         graph: &Graph,
     ) -> Vec<ResolvedImport> {
         crate::java::resolve_imports(root, file_imports, graph)
+    }
+
+    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
+        Vec::new()
+    }
+
+    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
+        FlowTarget::Unresolved
+    }
+}
+
+/// The Python stack (M17): `tree-sitter-python` extraction over `.py`
+/// files, exercised on `full-stack-fastapi-template/backend` (a FastAPI +
+/// SQLModel service). This first cut is extraction only — import
+/// resolution, the `is_schema_symbol` schema seam, and the FastAPI
+/// `feature_model()` land in follow-up commits, so `extract_imports` /
+/// `resolve_imports` / `extract_flow_edges` are still stubs and
+/// `feature_model()` takes the trait default `None`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PythonStack;
+
+impl StackPack for PythonStack {
+    fn name(&self) -> &str {
+        "python"
+    }
+
+    fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+        (path.extension().and_then(|e| e.to_str()) == Some("py")).then_some(SourceKind::Code)
+    }
+
+    fn classify(&self, rel_path: &str) -> FileRole {
+        let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+        if rel_path.contains("/tests/")
+            || rel_path.starts_with("tests/")
+            || name == "conftest.py"
+            || name.starts_with("test_")
+            || name.ends_with("_test.py")
+        {
+            FileRole::Test
+        } else if rel_path.contains("/alembic/versions/")
+            || rel_path.contains("/migrations/versions/")
+        {
+            // Alembic migrations describe schema *changes*, not current
+            // state, and are import-less — sink them like generated code.
+            FileRole::Generated
+        } else {
+            FileRole::Domain
+        }
+    }
+
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+        crate::python::extract_file(source, rel_path)
+    }
+
+    fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
+        FileImports::default()
+    }
+
+    fn resolve_imports(
+        &self,
+        _root: &Path,
+        _file_imports: &HashMap<String, FileImports>,
+        _graph: &Graph,
+    ) -> Vec<ResolvedImport> {
+        Vec::new()
     }
 
     fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {

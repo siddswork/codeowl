@@ -172,11 +172,16 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
     // make CodeOwl's own repo look like TypeScript. Skip the conventional
     // test / bench directories for the detection count only (they're still
     // walked and extracted once a pack is chosen).
-    fn is_test_tree(rel: &str) -> bool {
+    fn is_non_identity_tree(rel: &str) -> bool {
         let seg = |d: &str| rel == d || rel.starts_with(&format!("{d}/"));
-        // JS/Rust keep tests in a top-level `tests` / `test` / `benches`;
-        // Maven/Gradle keep them under `src/test/...`.
-        seg("tests") || seg("test") || seg("benches") || rel.contains("src/test/")
+        // Test trees: JS/Rust keep tests in a top-level `tests` / `test` /
+        // `benches`; Maven/Gradle keep them under `src/test/...`.
+        let is_test = seg("tests") || seg("test") || seg("benches") || rel.contains("src/test/");
+        // Tooling trees: build / dev / CI scripts don't define a repo's
+        // stack identity — CodeOwl's own `utility/*.py` mustn't make this
+        // Rust repo look ambiguously Python.
+        let is_tooling = seg("utility") || seg("scripts") || seg("tools") || seg("hack");
+        is_test || is_tooling
     }
 
     fn primary_count(root: &Path, pack: &dyn StackPack) -> usize {
@@ -190,19 +195,20 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
                     .strip_prefix(root)
                     .ok()
                     .and_then(|p| p.to_str())
-                    .is_none_or(|rel| !is_test_tree(rel))
+                    .is_none_or(|rel| !is_non_identity_tree(rel))
             })
             .filter(|entry| pack.source_kind(entry.path()) == Some(SourceKind::Code))
             .count()
     }
 
     type Ctor = fn() -> Box<dyn crate::stack::StackPack>;
-    let candidates: [(&str, Ctor); 3] = [
+    let candidates: [(&str, Ctor); 4] = [
         ("TypeScript/TSX", || {
             Box::new(crate::stack::TypeScriptNextStack)
         }),
         ("Rust", || Box::new(crate::stack::RustStack)),
         ("Java", || Box::new(crate::stack::JavaStack)),
+        ("Python", || Box::new(crate::stack::PythonStack)),
     ];
 
     let hits: Vec<(&str, usize, Ctor)> = candidates
