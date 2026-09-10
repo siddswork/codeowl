@@ -1,13 +1,18 @@
 ---
-mode: agent
-tools: ['codeowl']
 description: Generate (or refresh) specs via CodeOwl's MCP tools -- one target, the whole repo, or a budgeted batch
+argument-hint: <repo-relative-file-path> | system | . | --all [--budget=N] [--stale]
+tools: ['codeowl/*']
 ---
 
-<!-- VS Code / GitHub Copilot port of setup/codeowl-generate.md (the Claude
-Code slash command). The loop body below is identical to that file — keep
-the two in sync; the only differences are this frontmatter and `$ARGUMENTS`
--> `${input:target}`. See setup/COPILOT.md. -->
+<!-- VS Code / GitHub Copilot prompt file. Port of setup/codeowl-generate.md
+(the Claude Code slash command) — the loop body below is identical; keep
+the two in sync. The differences: this frontmatter, and `$ARGUMENTS` ->
+`${input:target}`.
+
+`tools: ['codeowl/*']` is the VS Code syntax for "every tool from the MCP
+server named codeowl", and specifying tools puts the prompt in agent mode
+(so no explicit `agent:`/`mode:` field is needed). If the codeowl server
+isn't running, the tools are silently skipped. See setup/COPILOT.md. -->
 
 Generate spec(s) for `${input:target}`, using CodeOwl's MCP tools
 (`get_next_spec_task`, `submit_spec`, `get_spec`, `get_spec_coverage`).
@@ -36,7 +41,9 @@ already up to date, no server restart.
 - `--all`, optionally with `--budget=N` — a *prioritized* batch instead of
   a plain sweep: high-fan-in files first, then feature specs, then the
   long tail of files, then rollups, then the system spec last. See "Batch
-  mode" below.
+  mode" below. Add `--stale` to refresh only specs that have gone out of
+  date and leave never-generated ones alone — a cheap way to keep an
+  existing corpus honest between full passes.
 
 You don't need to know in advance which single-target shape applies: the
 loop below walks bottom-up (a file's symbols, then the file, then — only
@@ -182,7 +189,7 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
    and submit again rather than moving on.
 5. Go back to step 1.
 
-## Batch mode (`--all` / `--all --budget=N`)
+## Batch mode (`--all` / `--all --budget=N` / `--all --stale`)
 
 Use this when `${input:target}` starts with `--all`, instead of the
 single-target loop above:
@@ -195,6 +202,13 @@ single-target loop above:
    system spec last. Each entry's `id` is ready to use as-is: a file
    path, `feature:<slug>`, `rollup:<dir>`, or `system` —
    `get_next_spec_task` accepts all of them.
+   - **If `--stale` was given**, drop every `pending` item whose `status`
+     is `"missing"` — keep only `"stale"` ones (a spec that exists but
+     the code moved underneath it). This *refreshes* the corpus without
+     taking on any never-written specs. `"smelly"` items — prose a
+     quality check distrusts, which is a different problem from code
+     drift — are also skipped; target those separately if you want them.
+     The priority order of what remains is unchanged.
 2. If `--budget=N` was given, you have `N` **generations** to spend —
    count every `get_next_spec_task` call that returns a real task (`kind`
    is not `"done"`) toward that budget, not every item in `pending` (a
@@ -211,10 +225,12 @@ single-target loop above:
 4. When you stop (budget exhausted or `pending` fully drained), report
    concisely: how many generations you spent and on what, broken down by
    kind — *N feature specs, M file specs, K rollups, system spec: yes/no*.
-   If budget-capped, call `get_spec_coverage` once more and tell the user
-   what's still pending (again by kind), so they know whether to run
-   another batch or target something specific. If the system spec is the
-   only thing left, say so and suggest running this prompt with `system`.
+   If `--stale` was in effect, say so and note how many `"missing"`
+   documents were deliberately skipped. If budget-capped, call
+   `get_spec_coverage` once more and tell the user what's still pending
+   (again by kind), so they know whether to run another batch or target
+   something specific. If the system spec is the only thing left, say so
+   and suggest running this prompt with `system`.
 
 ## Termination and reporting
 

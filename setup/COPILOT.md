@@ -15,9 +15,12 @@ Everything CodeOwl-side is client-neutral: the MCP tools, the graph, the
 | "use CodeOwl first" nudge | a line in `CLAUDE.md` | `.github/copilot-instructions.md` |
 
 Requires **Agent mode** (Copilot Chat → mode dropdown → *Agent*) and a
-recent VS Code — MCP support and prompt files are both GA as of 2025 but
-move quickly; if a step's setting name has changed, check the VS Code
-docs for "MCP servers" and "prompt files".
+recent VS Code — MCP support and prompt files are both GA as of 2025.
+This page and the prompt file's frontmatter follow the current VS Code
+docs ([MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers),
+[prompt files](https://code.visualstudio.com/docs/copilot/customization/prompt-files));
+those pages move quickly, so if a field or command name doesn't match
+what your VS Code expects, check them.
 
 ---
 
@@ -90,24 +93,27 @@ mkdir -p /path/to/your/repo/.github/prompts
 cp setup/codeowl-generate.prompt.md /path/to/your/repo/.github/prompts/
 ```
 
-Then in Copilot Chat (Agent mode) type `/codeowl-generate` — it takes one
-argument, the same targets the Claude Code command does:
+Then in Copilot Chat type `/codeowl-generate` and append the target — the
+same targets the Claude Code command takes:
 
 ```
 /codeowl-generate --all --budget=5
+/codeowl-generate --all --stale --budget=30
 /codeowl-generate src/util.rs
 /codeowl-generate system
 ```
 
-If `/codeowl-generate` doesn't appear, enable prompt files: settings →
-search `chat.promptFiles` → on. (Default-on in current VS Code; the
-setting may since have been renamed.)
+Its frontmatter declares `tools: ['codeowl/*']` (every tool from the
+`codeowl` MCP server), which also puts the prompt in **agent mode** — so
+you don't have to switch modes first. Prompt files load automatically for
+the Local agent; there's no enable-setting to flip in current VS Code.
+(They are *not* loaded by Agent Host / cloud-agent sessions — a local
+VS Code + Copilot Chat is the supported setup here.)
 
 `setup/codeowl-generate.prompt.md` is a port of
 `setup/codeowl-generate.md` — the loop body is identical; only the
-frontmatter (`mode: agent`, `tools: ['codeowl']`) and the argument token
-(`${input:target}`) differ. **When one changes upstream, the other must
-too.**
+frontmatter and the argument token (`$ARGUMENTS` → `${input:target}`)
+differ. **When one changes upstream, the other must too.**
 
 ## 4. The "use CodeOwl first" nudge — `.github/copilot-instructions.md`
 

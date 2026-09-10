@@ -92,6 +92,7 @@ truth, kept versioned here rather than duplicated.
 ```
 /codeowl-generate --all --budget=15       # the normal path: a budgeted batch,
                                            # order chosen by CodeOwl
+/codeowl-generate --all --stale --budget=30 # refresh only specs the code moved under
 /codeowl-generate lib/supabase.ts          # one file (+ its symbols)
 /codeowl-generate app/submit/page.tsx      # a feature entry point (+ its feature spec)
 /codeowl-generate system                   # the final capstone spec
@@ -103,6 +104,11 @@ symbol spec, file spec, feature spec, directory rollup, and the system
 spec counts as one; a file with three undocumented symbols costs four (the
 symbols, then the file). Without `--budget` the run continues until the
 whole scope is covered.
+
+`--stale` (with `--all`) narrows the batch to specs that *exist but have
+gone out of date* — it skips anything never generated. The cheap way to
+keep a committed corpus honest as the code changes, without taking on new
+documentation work.
 
 **`--all` picks the order for you** — high-fan-in files first (so feature
 specs get real dependency summaries), then feature specs, then the long
