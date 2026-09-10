@@ -122,6 +122,12 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
 - **Commit `docs/specs/` to git.** The hashes in each file's frontmatter
   are the staleness signal; they only work if the specs are versioned
   alongside the code.
+- **Optional: a `docs/specs/STYLE.md`.** `/codeowl-generate` reads it (if
+  present) before writing, and follows it for *audience and tone* — how
+  much domain vocabulary to assume, what to explain inline. Useful when
+  the codebase's domain is unfamiliar to its readers (compiler internals,
+  quant finance, a game engine). It doesn't change spec structure. See
+  this repo's own `docs/specs/STYLE.md` for an example.
 - **Gitignore `.codeowl/`.** It's the local graph + index cache, rebuilt
   on demand — never commit it. Add `/.codeowl` to your repo's
   `.gitignore`.

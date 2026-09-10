@@ -45,6 +45,13 @@ then the system spec) and just tells you what's next each time. If
 `$ARGUMENTS` is empty, ask the user what to generate rather than
 guessing.
 
+**Repo-specific spec style.** If the repo has a `docs/specs/STYLE.md`,
+read it before writing anything. It sets the intended *audience and tone*
+for this repo's specs — how much domain vocabulary to assume, what to
+explain inline, any house conventions. Follow it. It governs wording and
+reading level, never structure: the headings below and "base it only on
+`source`" always hold.
+
 **Read before writing, every time — this is not a formality.** Every
 piece of `source`/`core_sources` a task hands you exists to be read in
 full before you write anything, not skimmed for a plausible-sounding
