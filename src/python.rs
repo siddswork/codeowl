@@ -20,9 +20,15 @@
 //! (`@router.get("/items/{id}")`), the same way `java.rs::annotations`
 //! captures `@Path("/x")` — the FastAPI feature model (M17) reads them back.
 
+use std::collections::HashMap;
+use std::path::Path;
+
 use tree_sitter::{Node, Parser};
 
+use crate::graph::{Graph, SymbolId};
 use crate::hash::hash_text;
+use crate::imports::{FileImports, ImportRef};
+use crate::resolve::ResolvedImport;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`, a `.py` file) and extract
@@ -298,6 +304,269 @@ fn node_lines(node: Node) -> [usize; 2] {
     [node.start_position().row + 1, node.end_position().row + 1]
 }
 
+// ---------------------------------------------------------------------------
+// Imports — `import` / `from … import` statements and their resolution
+// against the walked source tree. The Python pack's counterpart to
+// `imports.rs` + `resolve.rs`.
+//
+// Resolution is a **path match against the walk root**, the same idea as
+// `java.rs` but keyed on the dotted module name rather than an FQN: CodeOwl
+// is pointed at the project root (the dir holding the top package), so
+// `from app.models import Item` → `app/models.py::Item`. No `pyproject.toml`
+// parse, no virtualenv. Relative imports (`from . import x`,
+// `from ..pkg import y`) resolve against the importing file's package.
+// `import *` and single-segment `import os` (stdlib / third-party) resolve
+// to nothing, like a Java star import.
+//
+// Python has no `export` keyword; an `__init__.py` that re-exports a name
+// (`from .models import Item`) is followed **one hop** so `from app import
+// Item` still lands on the real declaration.
+// ---------------------------------------------------------------------------
+
+/// One extra hop through an `__init__.py` re-export — enough for a barrel
+/// `__init__`, bounded so a circular re-export can't loop.
+const MAX_REEXPORT_HOPS: u8 = 1;
+
+/// Parse a `.py` file's `import` / `from … import` statements. `import
+/// a.b.c` → `{ specifier: "a.b", imported_name: "c" }`; `from a.b import x`
+/// → `{ specifier: "a.b", imported_name: "x" }`; a relative `from ..pkg
+/// import x` keeps the dotted prefix in the specifier (`"..pkg"`), resolved
+/// later against the importing file. `from x import *` records `"*"`.
+pub fn extract_imports(source: &str, _rel_path: &str) -> FileImports {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_python::LANGUAGE.into())
+        .expect("bundled tree-sitter-python grammar should always load");
+    let Some(tree) = parser.parse(source, None) else {
+        return FileImports::default();
+    };
+
+    let mut fi = FileImports::default();
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    for node in root.children(&mut cursor) {
+        match node.kind() {
+            "import_statement" => {
+                let mut nc = node.walk();
+                for name_node in node.children_by_field_name("name", &mut nc) {
+                    let Some(dotted) = dotted_of(name_node) else {
+                        continue;
+                    };
+                    let fqn = text(dotted, source);
+                    let (specifier, name) = match fqn.rsplit_once('.') {
+                        Some((pre, last)) => (pre.to_string(), last.to_string()),
+                        None => (String::new(), fqn.to_string()),
+                    };
+                    fi.imports.push(ImportRef {
+                        specifier,
+                        imported_name: name,
+                    });
+                }
+            }
+            "import_from_statement" => {
+                let Some(module) = node.child_by_field_name("module_name") else {
+                    continue;
+                };
+                let specifier = module_specifier(module, source);
+                let mut c = node.walk();
+                let is_star = node
+                    .children(&mut c)
+                    .any(|ch| ch.kind() == "wildcard_import");
+                if is_star {
+                    fi.imports.push(ImportRef {
+                        specifier,
+                        imported_name: "*".to_string(),
+                    });
+                    continue;
+                }
+                let mut nc = node.walk();
+                for name_node in node.children_by_field_name("name", &mut nc) {
+                    let Some(dotted) = dotted_of(name_node) else {
+                        continue;
+                    };
+                    fi.imports.push(ImportRef {
+                        specifier: specifier.clone(),
+                        imported_name: text(dotted, source).to_string(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    fi
+}
+
+/// Unwrap an `aliased_import` (`x as y` — the alias is a local rename,
+/// irrelevant to what it points at) down to its `dotted_name`.
+fn dotted_of(node: Node) -> Option<Node> {
+    match node.kind() {
+        "dotted_name" => Some(node),
+        "aliased_import" => node.child_by_field_name("name"),
+        _ => None,
+    }
+}
+
+/// The specifier string for a `from … import` module: a plain
+/// `dotted_name` verbatim (`"app.models"`), or a `relative_import` as its
+/// dot prefix plus any trailing path (`"."`, `".deps"`, `"..core"`).
+fn module_specifier(module: Node, source: &str) -> String {
+    if module.kind() == "relative_import" {
+        let mut prefix = String::new();
+        let mut rest = String::new();
+        let mut c = module.walk();
+        for child in module.children(&mut c) {
+            match child.kind() {
+                "import_prefix" => prefix = text(child, source).to_string(),
+                "dotted_name" => rest = text(child, source).to_string(),
+                _ => {}
+            }
+        }
+        format!("{prefix}{rest}")
+    } else {
+        text(module, source).to_string()
+    }
+}
+
+/// Resolve every file's imports to a target `SymbolId` (a declaration in
+/// the imported module, or the module's own file node for `import a.b.c` /
+/// a submodule import), or `None` (stdlib / third-party / `*` / broken).
+/// Iterates files path-sorted so the persisted edge list is diffable
+/// (same reasoning as `resolve::resolve_imports` / `java::resolve_imports`).
+pub fn resolve_imports(
+    _root: &Path,
+    file_imports: &HashMap<String, FileImports>,
+    graph: &Graph,
+) -> Vec<ResolvedImport> {
+    let mut sorted: Vec<(&String, &FileImports)> = file_imports.iter().collect();
+    sorted.sort_by(|a, b| a.0.cmp(b.0));
+
+    let mut out = Vec::new();
+    for (from_file, fi) in &sorted {
+        for imp in &fi.imports {
+            out.push(ResolvedImport {
+                from_file: (*from_file).clone(),
+                specifier: imp.specifier.clone(),
+                imported_name: imp.imported_name.clone(),
+                target: resolve_one(
+                    from_file,
+                    &imp.specifier,
+                    &imp.imported_name,
+                    file_imports,
+                    graph,
+                    0,
+                ),
+            });
+        }
+    }
+    out
+}
+
+#[allow(clippy::only_used_in_recursion)]
+fn resolve_one(
+    from_file: &str,
+    specifier: &str,
+    name: &str,
+    file_imports: &HashMap<String, FileImports>,
+    graph: &Graph,
+    hop: u8,
+) -> Option<SymbolId> {
+    if name == "*" {
+        return None;
+    }
+    let mod_path = module_path(from_file, specifier)?;
+
+    // The module the specifier names — `a/b.py` or `a/b/__init__.py`.
+    let mod_file = pick_file(file_imports, &[format!("{mod_path}.py")])
+        .or_else(|| pick_file(file_imports, &[format!("{mod_path}/__init__.py")]));
+
+    // (1) a declaration inside that module.
+    if let Some(mf) = mod_file
+        && let Some(id) = graph.find(&format!("{mf}::{name}"))
+    {
+        return Some(id);
+    }
+    // (2) `name` is a submodule / subpackage of the specifier.
+    for cand in [
+        format!("{mod_path}/{name}.py"),
+        format!("{mod_path}/{name}/__init__.py"),
+    ] {
+        if let Some(sub) = pick_file(file_imports, &[cand])
+            && let Some(id) = graph.find(sub)
+        {
+            return Some(id);
+        }
+    }
+    // (3) one hop through an `__init__.py` that re-exports `name`.
+    if hop < MAX_REEXPORT_HOPS
+        && let Some(mf) = mod_file
+        && mf.ends_with("/__init__.py")
+        && let Some(fi) = file_imports.get(mf)
+    {
+        for reexp in &fi.imports {
+            if reexp.imported_name == name {
+                return resolve_one(
+                    mf,
+                    &reexp.specifier,
+                    &reexp.imported_name,
+                    file_imports,
+                    graph,
+                    hop + 1,
+                );
+            }
+        }
+    }
+    None
+}
+
+/// The repo-relative directory-ish path a specifier names, minus any
+/// extension. Absolute (`app.api.deps` → `app/api/deps`) or relative
+/// (`.deps` / `..core` resolved against `from_file`'s package).
+fn module_path(from_file: &str, specifier: &str) -> Option<String> {
+    if !specifier.starts_with('.') {
+        return Some(specifier.replace('.', "/"));
+    }
+    let dots = specifier.chars().take_while(|c| *c == '.').count();
+    let rest = specifier[dots..].replace('.', "/");
+    // 1 dot → the importing file's own package (its directory); each extra
+    // dot climbs one more.
+    let mut base: &str = from_file.rsplit_once('/').map_or("", |(d, _)| d);
+    for _ in 1..dots {
+        base = base.rsplit_once('/').map_or("", |(d, _)| d);
+    }
+    Some(match (base.is_empty(), rest.is_empty()) {
+        (true, _) => rest,
+        (false, true) => base.to_string(),
+        (false, false) => format!("{base}/{rest}"),
+    })
+}
+
+/// First of `candidates` that's a walked file — an exact key, else a
+/// path-suffix match (covers CodeOwl being pointed above the project root).
+fn pick_file<'a>(
+    file_imports: &'a HashMap<String, FileImports>,
+    candidates: &[String],
+) -> Option<&'a str> {
+    for cand in candidates {
+        if file_imports.contains_key(cand) {
+            return file_imports
+                .keys()
+                .find(|k| k.as_str() == cand)
+                .map(String::as_str);
+        }
+        let suffix = format!("/{cand}");
+        let mut hits: Vec<&str> = file_imports
+            .keys()
+            .map(String::as_str)
+            .filter(|k| k.ends_with(&suffix))
+            .collect();
+        hits.sort_unstable();
+        if let Some(hit) = hits.into_iter().next() {
+            return Some(hit);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,5 +708,136 @@ def read_item(id: int) -> ItemPublic:
             syms[0].signature, "class Item(SQLModel, table=True)",
             "the class arg list is in the signature"
         );
+    }
+
+    // --- imports + resolution ------------------------------------------
+
+    #[test]
+    fn parses_the_import_forms() {
+        let src = r#"import os
+import app.core.config
+import app.core.db as database
+from app.models import Item, User
+from app.utils import send_email as mailer
+from app.api.routes import items
+from . import crud
+from .deps import SessionDep
+from ..core import config
+from legacy import *
+"#;
+        let fi = extract_imports(src, "app/api/x.py");
+        let got: Vec<(&str, &str)> = fi
+            .imports
+            .iter()
+            .map(|i| (i.specifier.as_str(), i.imported_name.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("", "os"),
+                ("app.core", "config"),
+                ("app.core", "db"), // alias `database` dropped
+                ("app.models", "Item"),
+                ("app.models", "User"),
+                ("app.utils", "send_email"), // alias `mailer` dropped
+                ("app.api.routes", "items"),
+                (".", "crud"),
+                (".deps", "SessionDep"),
+                ("..core", "config"),
+                ("legacy", "*"),
+            ]
+        );
+    }
+
+    /// Extract + resolve a small fixture tree end to end.
+    fn resolved(files: &[(&str, &str)]) -> (Graph, Vec<ResolvedImport>) {
+        let extractions: Vec<crate::graph::FileExtraction> = files
+            .iter()
+            .map(|(p, src)| crate::graph::FileExtraction {
+                rel_path: (*p).to_string(),
+                source_hash: hash_text(src),
+                symbols: extract_file(src, p),
+            })
+            .collect();
+        let graph = Graph::build(extractions);
+        let file_imports: HashMap<String, FileImports> = files
+            .iter()
+            .map(|(p, src)| ((*p).to_string(), extract_imports(src, p)))
+            .collect();
+        let edges = resolve_imports(Path::new("/unused"), &file_imports, &graph);
+        (graph, edges)
+    }
+
+    #[test]
+    fn from_import_resolves_to_a_declaration_in_the_module() {
+        let (g, edges) = resolved(&[
+            (
+                "app/api/routes/items.py",
+                "from app.models import Item\ndef read():\n    return Item\n",
+            ),
+            (
+                "app/models.py",
+                "class Item(SQLModel, table=True):\n    id: int\n",
+            ),
+        ]);
+        let e = edges.iter().find(|e| e.imported_name == "Item").unwrap();
+        assert_eq!(
+            g.string_id(e.target.expect("Item resolves")),
+            "app/models.py::Item"
+        );
+    }
+
+    #[test]
+    fn relative_and_parent_imports_resolve_against_the_package() {
+        let (g, edges) = resolved(&[
+            (
+                "app/api/routes/items.py",
+                "from ..deps import SessionDep\nfrom . import crud\n",
+            ),
+            ("app/api/deps.py", "SessionDep = object()\n"),
+            ("app/api/routes/crud.py", "def create():\n    ...\n"),
+        ]);
+        let dep = edges
+            .iter()
+            .find(|e| e.imported_name == "SessionDep")
+            .unwrap();
+        assert_eq!(
+            g.string_id(dep.target.expect("SessionDep resolves")),
+            "app/api/deps.py::SessionDep"
+        );
+        // `from . import crud` — crud is a submodule, so the target is its
+        // file node.
+        let crud = edges.iter().find(|e| e.imported_name == "crud").unwrap();
+        assert_eq!(
+            g.string_id(crud.target.expect("crud submodule resolves")),
+            "app/api/routes/crud.py"
+        );
+    }
+
+    #[test]
+    fn init_py_reexport_is_followed_one_hop() {
+        let (g, edges) = resolved(&[
+            ("app/main.py", "from app import Item\n"),
+            ("app/__init__.py", "from app.models import Item\n"),
+            ("app/models.py", "class Item:\n    pass\n"),
+        ]);
+        let e = edges
+            .iter()
+            .find(|e| e.from_file == "app/main.py" && e.imported_name == "Item")
+            .unwrap();
+        assert_eq!(
+            g.string_id(e.target.expect("Item resolves through __init__")),
+            "app/models.py::Item"
+        );
+    }
+
+    #[test]
+    fn stdlib_and_star_and_broken_imports_stay_unresolved() {
+        let (_, edges) = resolved(&[(
+            "app/x.py",
+            "import os\nfrom typing import Any\nfrom app.gone import Thing\nfrom app.models import *\n",
+        )]);
+        assert_eq!(edges.len(), 4);
+        assert!(edges.iter().all(|e| e.target.is_none()));
     }
 }

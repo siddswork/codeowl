@@ -1,15 +1,17 @@
-//! Integration (M17, commit 1 — extraction): a Python file goes through
-//! extraction → `Graph` → the spec `next_task`/`submit` loop → `render`,
-//! and comes out with the class as one `## `Type`` section, its methods
-//! folded in and never offered as their own top-level tasks. The
-//! end-to-end version of `python.rs`'s unit tests, on the path
-//! `/codeowl generate` drives.
+//! Integration (M17): a Python file goes through extraction → `Graph` →
+//! the spec `next_task`/`submit` loop → `render`, and comes out with the
+//! class as one `## `Type`` section, its methods folded in and never
+//! offered as their own top-level tasks. Plus: a `from app.models import
+//! Item` reference resolves end to end through `RepoIndex`. The end-to-end
+//! version of `python.rs`'s unit tests, on the path `/codeowl generate`
+//! drives.
 //!
-//! Resolution, the `is_schema_symbol` seam, and the FastAPI feature model
-//! land in follow-up commits with their own coverage.
+//! The `is_schema_symbol` seam and the FastAPI feature model land in
+//! follow-up commits with their own coverage.
 
 use codeowl::graph::{FileExtraction, Graph};
 use codeowl::hash::hash_text;
+use codeowl::index::RepoIndex;
 use codeowl::spec::{SpecTask, next_task, read_file_spec, render, submit};
 
 const PATH: &str = "app/api/routes/items.py";
@@ -131,6 +133,40 @@ fn a_class_renders_as_one_section_with_its_methods_folded_in() {
         rendered.matches("\n## `").count(),
         2,
         "two top-level sections — the class and the function:\n{rendered}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_from_import_resolves_end_to_end_through_repo_index() {
+    let dir = std::env::temp_dir().join(format!("codeowl-py-spec-{}-idx", std::process::id()));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n    owner_id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app.models import Item\n\n\ndef read_items(session):\n    return session.exec(select(Item)).all()\n",
+    )
+    .unwrap();
+    // A pyproject.toml so `detect` sees a Python project root (harmless if
+    // detection keys only on .py count — belt and braces).
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    // `open` picks the Python pack via `detect`, walks, and builds.
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+
+    let edge = graph
+        .imports()
+        .iter()
+        .find(|e| e.from_file == "app/api/routes/items.py" && e.imported_name == "Item")
+        .expect("items.py imports Item from app.models");
+    assert_eq!(
+        graph.string_id(edge.target.expect("the from-import resolves")),
+        "app/models.py::Item"
     );
 
     std::fs::remove_dir_all(&dir).ok();

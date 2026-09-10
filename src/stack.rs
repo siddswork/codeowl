@@ -317,12 +317,12 @@ impl StackPack for JavaStack {
     }
 }
 
-/// The Python stack (M17): `tree-sitter-python` extraction over `.py`
-/// files, exercised on `full-stack-fastapi-template/backend` (a FastAPI +
-/// SQLModel service). This first cut is extraction only — import
-/// resolution, the `is_schema_symbol` schema seam, and the FastAPI
-/// `feature_model()` land in follow-up commits, so `extract_imports` /
-/// `resolve_imports` / `extract_flow_edges` are still stubs and
+/// The Python stack (M17): `tree-sitter-python` extraction + dotted-module
+/// import resolution over `.py` files, exercised on
+/// `full-stack-fastapi-template/backend` (a FastAPI + SQLModel service).
+/// Still to come in follow-up commits: the `is_schema_symbol` schema seam
+/// (SQLModel `table=True` → `Schema` nodes) and the FastAPI
+/// `feature_model()` — so `extract_flow_edges` is still empty and
 /// `feature_model()` takes the trait default `None`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PythonStack;
@@ -360,17 +360,17 @@ impl StackPack for PythonStack {
         crate::python::extract_file(source, rel_path)
     }
 
-    fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
-        FileImports::default()
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
+        crate::python::extract_imports(source, rel_path)
     }
 
     fn resolve_imports(
         &self,
-        _root: &Path,
-        _file_imports: &HashMap<String, FileImports>,
-        _graph: &Graph,
+        root: &Path,
+        file_imports: &HashMap<String, FileImports>,
+        graph: &Graph,
     ) -> Vec<ResolvedImport> {
-        Vec::new()
+        crate::python::resolve_imports(root, file_imports, graph)
     }
 
     fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
