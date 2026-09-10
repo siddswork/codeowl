@@ -136,10 +136,12 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
   this repo's own `docs/specs/STYLE.md` for an example.
 - **Gitignore `.codeowl/`.** It's the local graph + index cache, rebuilt
   on demand — never commit it. Add `/.codeowl` to your repo's
-  `.gitignore`.
+  `.gitignore`. (What's in it, and why it's safe to delete:
+  [`USAGE.md`](USAGE.md) → "What CodeOwl stores".)
 - **Regenerate as its own commit**, not folded into a feature PR — a
   `/codeowl-generate` run mid-feature otherwise drags unrelated spec
-  diffs into the diff.
+  diffs into the diff. Splitting the corpus across several people:
+  [`USAGE.md`](USAGE.md) → "Splitting the work across a team".
 - **Add a line to your repo's `CLAUDE.md`** so agents reach for CodeOwl
   first:
 
