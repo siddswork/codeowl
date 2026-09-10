@@ -184,6 +184,12 @@ loop, and your agent writes every word. It writes specs into
   lists `smells` (the prose is a cop-out or too thin — a content check,
   independent of hashes). `get_spec_coverage` lists everything outstanding
   in priority order.
+- **A stale-only refresh** — `/codeowl-generate --all --stale --budget=N`
+  regenerates only the specs the code moved under and leaves
+  never-generated files alone. Cheaper than a full pass, lower-risk (it's
+  editing existing prose, not writing new), and the natural thing to run
+  after a batch of code changes when you want the committed corpus to stay
+  honest but aren't ready to document the gaps.
 - **As its own commit** — never fold a generation run into a feature PR,
   or unrelated spec diffs ride along. Regenerate, review, commit
   `docs/specs/` on its own.
