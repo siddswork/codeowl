@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/mcp.rs]
-file: { source_hash: a813768f067dcb235ab176fcac9c4878e46d09b875d378d670a7a9d55432aabc, deps_hash: 975dd8d0f623638a1980bef7947fa5865c62307ef3e0ca71cbfd0c3150e00e4f, spec_hash: 000e76390d056d5f810931d89f0ed4531dfbcd20f3795ed83cc31a758e67b119 }
+file: { source_hash: dcb1e18de3c17d95bc7b0437192ac596bccb82e2844b066ca8c320dedea62e82, deps_hash: 975dd8d0f623638a1980bef7947fa5865c62307ef3e0ca71cbfd0c3150e00e4f, spec_hash: 91f002908483cc7d28e885aaefa0717b6fc2164b96b162416102ea2dbe645ec9 }
 symbols:
   src/mcp.rs::IdRequest: { source_hash: 1a8c8cd9780880bfa33771eae8d57eb32484e98a388b9dcb6457be89cb80c17e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b6753fa54bac97b99eacd9350879fac13ef4011156bbc9eda090b5df2033e8e9 }
   src/mcp.rs::SearchRequest: { source_hash: c058d77878115105a646d7dc02e122e661a01aaf1ec2231095c2ff9f88820374, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 58e8255344988f2b7f18fde5a0dab88574c15016c9b6fb566bcb215df87944db }
@@ -24,12 +24,12 @@ symbols:
   src/mcp.rs::FeatureSummary: { source_hash: 1e781be75ba1df9ea4ef5ca9b08d034f2a1bb8d317733a83fe715f8e34425122, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 33a9a0611e0b5b3b2dc95ce6bdd23bccfb71e5396988b7e6cfb64f34b5c30481 }
   src/mcp.rs::SubmitSpecRequest: { source_hash: 4edc02af9e9f81e1f5ce611d75cfe2cb996f18df5a1e668ac68dce27f49e5aa0, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8949ba1067ae6d403fb2589b786dfb8110a2e678aa94efda8f05c6d02797aa4a }
   src/mcp.rs::SubmitSpecResponse: { source_hash: 14f325a086e3727d22d90f569557f8ef95e65e82b1aa49fa5c588b57a123cfa9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 18a688bb0fe1204c477c73feb95c47d9d3f40d2471505baa2f9d138111cfd00a }
-  src/mcp.rs::CodeOwlServer: { source_hash: 3598cc0590bea9fc216a585035742f5555b66e4c2936e2b00f7a7e0bb966d56b, deps_hash: 807f5f48e7ab107a937c575497edbc4c077b9beba1418d19338446159554301d, spec_hash: dffa430e68e5eee1aa435f9c9a68adf10ba97cf8ab13980a497d6a9bb0a21766 }
+  src/mcp.rs::CodeOwlServer: { source_hash: b9a76f57ffa4100846967bbc25248d623465fc788cfb68ea3668467c3d79b200, deps_hash: 807f5f48e7ab107a937c575497edbc4c077b9beba1418d19338446159554301d, spec_hash: d2231aab06430df1ff5100f294684bed633b49242396557f39aee27d6d5abf89 }
   src/mcp.rs::impl ServerHandler for CodeOwlServer: { source_hash: 185eab91c909c8d50f32e186992c3dda85f195985ba5f465e792b49be9467c4a, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 62834eba4f7c5b5f58a4ef4e8fce80c28162c9a960c5002a325cb19a7870bc5a }
 ---
 # src/mcp.rs
 ## Summary
-The MCP server — the process a coding agent connects to. Defines the eight tools (`get_symbol`, `get_callers`, `get_callees`, `get_spec`, `get_next_spec_task`, `submit_spec`, `search_code`, `get_spec_coverage`), their request/response wire structs, and `CodeOwlServer`, which holds an atomically-swappable `Arc<ArcSwap<Graph>>` (the watcher replaces it wholesale as source changes), the repo root, and the `rmcp` tool router. Every handler loads one graph snapshot up front and never straddles a swap. The read tools (`get_symbol`/`get_callers`/`get_callees`/`search_code`) are thin projections over the graph, each wrapping its list in an object because MCP forbids a top-level array. `get_spec` is a pure read that dispatches on id prefix (`system` / `rollup:` / `feature:` / symbol / file), recomputes the staleness diff, and always returns the last-good text. `get_next_spec_task` / `submit_spec` route a target to the matching `spec::next_*` / `spec::submit*` function and shape the result — the generation loop `/codeowl-generate` drives, which a normal consuming session never touches. `impl ServerHandler` supplies the `ServerInfo` and the instructions block clients show the agent.
+CodeOwl's MCP interface — every tool a coding agent can call. It has two halves: pure reads (`get_symbol`, `get_callers`, `get_callees`, `get_spec`, `get_spec_coverage`, `search_code`), which never write anything and never call an LLM, and the generation pair (`get_next_spec_task`, `submit_spec`), which hand the client's own LLM a unit of work and store the prose it writes back. `CodeOwlServer` is the server object holding the live graph and repo root; the rest of the file is the request and response shapes each tool takes and returns, plus the `rmcp` wiring that registers them. CodeOwl holds no API credentials and calls no model — a hard rule kept true by every write path here doing nothing but persist text the caller supplied.
 
 ## `IdRequest`
 `pub struct IdRequest`
@@ -223,13 +223,23 @@ The `submit_spec` result — confirms the id and returns the hashes the spec was
 ## `CodeOwlServer`
 `pub struct CodeOwlServer`
 ### Summary
-The MCP server state and every tool handler — `get_symbol`, `get_callers`, `get_callees`, `get_spec`, `get_next_spec_task`, `submit_spec`, `search_code`, `get_spec_coverage` — plus the private helpers that assemble task and spec responses. Holds an atomically-swappable graph, the repo root, and the `rmcp` tool router.
+The MCP server — the object a coding agent talks to. It holds one snapshot of the code graph plus the repo root, and exposes CodeOwl's tools: look up a symbol, list what imports it or what it imports, read or write a spec, report spec coverage, and grep the source.
 ### Behavior
-`graph: Arc<ArcSwap<Graph>>` is swapped wholesale by the file watcher as source changes mid-session (M9). **Every handler calls `self.graph.load_full()` once up front** and works off that one snapshot — a `SymbolId` is only valid for the graph that produced it, so a handler must never straddle a swap.
+The graph is stored behind an atomic pointer (`ArcSwap`) so the background file-watcher can swap in a freshly rebuilt one mid-session without any request blocking. Every handler grabs one consistent snapshot up front (`self.graph.load_full()`) and works against that for the whole call — an internal symbol id is only valid for the graph that produced it, so a handler must never straddle a swap.
 
-The read handlers are thin: `get_symbol` → `SymbolView::from_graph`; `get_callers` walks `imports` for edges targeting the id (or `table_callers` for a `Schema` node); `get_callees` returns the containing file's whole import list; all three wrap their list in an object (`CallersResponse` etc.) because MCP forbids a top-level array.
+Read tools:
+- `get_symbol` — one symbol's full record by id, or an error for an unknown id.
+- `get_callers` — every file that imports this symbol (for a database table: every file that queries it).
+- `get_callees` — everything the *file* this symbol lives in imports, with the resolved target where known. File-level, not per-symbol.
+- `search` — a plain regex sweep of the source, via `search_code`.
+- `get_spec` — the stored prose spec for a symbol / file / `feature:<slug>` / `rollup:<dir>` / `system`, tagged `missing`, `current`, or `stale` (with a `changed` list naming what moved) plus any quality `smells`.
+- `get_spec_coverage` — how much of the repo's spec inventory is current vs stale vs missing vs smelly, and a prioritised `pending` list of what to generate next.
 
-`get_spec` is a pure read that dispatches on id prefix — `"system"`, `"rollup:"`, `"feature:"`, else a symbol/file node — reads the persisted spec, recomputes the relevant hash diff (`symbol_changes` / `file_changes` / `diff_hash_lists`) to set `current` / `stale`, runs the prose smell check, and returns the last-good content regardless. `get_next_spec_task` / `resolve_next_task` route a target (`"system"`/`"."`, a `feature:`/`rollup:` id, a file, or a directory) to the right `spec::next_*` function and shape the result into a `SpecTaskResponse` — `spec_task_to_response` builds a symbol task's `source` via `symbol_span_text` (folded-impl aware) and its `dependencies` via `scoped_symbol_deps`. `submit_spec` dispatches the same way and calls the matching `spec::submit*`. `get_spec_coverage` is `coverage` → `summarize` → `prioritize`, projected onto the wire structs.
+Writes all go through `submit_spec`, which dispatches on the id prefix (`system`, `rollup:`, `feature:`, or a plain symbol/file id) to the matching `spec::submit_*` function and returns the new content hashes.
+
+`get_next_spec_task` / `resolve_next_task` walk the generation ladder for a target — a file's uncovered symbols, then the file, then the feature if it's an entry point; a directory's rollup; for `system`, every module and feature then the top-level spec — and return the next unit of work with everything needed to write it (source text, dependency summaries, any prior human edit to reconcile against), or `Done` when the target is fully covered.
+
+`new` constructs the server; `graph_store` hands out the shared graph cell for the watcher to publish into; `root` (test-only) exposes the repo root.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/graph.rs::SymbolView` — crate::graph

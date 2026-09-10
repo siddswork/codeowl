@@ -1,20 +1,20 @@
 ---
 kind: file
 source_paths: [src/resolve.rs]
-file: { source_hash: 720db06e10107e6dedf579227114756f70c9d4f28452c8afd9ed3b51979ac5e8, deps_hash: 2dc9684a80741e34b3ffd4549cd0cf8c54ddf39b72942a96621673bde276cf67, spec_hash: 87a86df9fa76fb244a613b0c71ad9e959863c21cdcd9c0cc135ff7c5a0592a76 }
+file: { source_hash: 4cbbbe1ebc75747a16fe3674c05c0b422ca2f8a9998c04c0dcf66a73e6daa8dc, deps_hash: 2dc9684a80741e34b3ffd4549cd0cf8c54ddf39b72942a96621673bde276cf67, spec_hash: 577a5c80f8ce87f155eb83631f58fe794d20c0bf35200f28d43d7698c725a791 }
 symbols:
   src/resolve.rs::ResolvedImport: { source_hash: 74349961b4a8ba1c665ea7eec95d24e6b0c9921cd22bed0944aeb367af610818, deps_hash: ac583dfc44b8c03e1d77dc3191f47c59b6bb6a7b182fa0031e169bb47d564290, spec_hash: 9bf21c9ea38f862917fad661bd80739849ddb3f4c1fd82717c258bbc5d83280c }
   src/resolve.rs::build_resolver: { source_hash: 5b0fc1ffe0ead87102dd5596a25736b6dd501923d3296ea2a087d4885c70a6c9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 544f7dee56518989e20066d205cecdef848471e1a35ce377cfd34bb74e6f46f4 }
-  src/resolve.rs::resolve_imports: { source_hash: c7de32163705f09a70d05ecf7eb6ae64fccfef609e49bf1d8cb6138cbb411c85, deps_hash: 337a50a06bf84de91dbf844388e6be67177c4ea99c6c77935d9bf40495e9ab79, spec_hash: 79987c6f6c1110dc0d5f28b48cb2e2903f440ed90febd58eaa6d2494e5117172 }
+  src/resolve.rs::resolve_imports: { source_hash: 24f79b4c1973b53c5f4962c41f34cdc7a3e373d2871b26494ad711b100c1e35d, deps_hash: 337a50a06bf84de91dbf844388e6be67177c4ea99c6c77935d9bf40495e9ab79, spec_hash: ecc63b9784eb555799d80545f2a73a89cebcabaf87181953849a29fcdee092d0 }
   src/resolve.rs::sorted_by_key: { source_hash: 617b8012a8c652159c02fb0db0c6b3717a03aa759e2c90c51bbdb9f5f24af7af, deps_hash: 8fcd29bb9cdbe400a1c914b64ea9a910b9aae08ec252f1e91a7f090f6fb6e82c, spec_hash: 549a1d95a6fb04e6039a9c8bbfe0492aebad408576935e6051ce06caa9522521 }
   src/resolve.rs::ResolvedDefaultImport: { source_hash: 4d9ef6b2727d4ae3c687d8789585af98c04eb83a663d2f94c2c243bdc9ae7aec, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 28df4b5b73749521d55c230b394c4ab8fcd10cf3e4b66c1e9acd2b41bed2692b }
-  src/resolve.rs::resolve_default_imports: { source_hash: a69428cdc5d2b88dc3986fca09114f475cb390f86f3eb7fc04b62cd8cddf33c5, deps_hash: 8fcd29bb9cdbe400a1c914b64ea9a910b9aae08ec252f1e91a7f090f6fb6e82c, spec_hash: 40ec1835bf35299b6d9db2b76834be7ef5c83a1155c31d7d4dcd3e3c561a69e3 }
+  src/resolve.rs::resolve_default_imports: { source_hash: f8dbeae49c58a45c30dfa1776f71e48ae74629d82ae8c563cc9d63a1dc7e442b, deps_hash: 8fcd29bb9cdbe400a1c914b64ea9a910b9aae08ec252f1e91a7f090f6fb6e82c, spec_hash: 011b1f6e7759f4b3fb16b4967e82321acf177bf4f82c74aef597405358620ac8 }
   src/resolve.rs::specifier_to_rel_path: { source_hash: 3229e450f1ad78c4d8aa1a1fdfabeff484b3da0f90e81a3eebfee7e092aeec95, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e428f2b0de6536c5a640b85ed8e722dc77dae8f1f301e0f27687e854d6357087 }
   src/resolve.rs::ResolveCtx: { source_hash: bdeed0f0ec8da67a67740cab5f7d27e4caaf83d430db165877a93fe38c90c744, deps_hash: 2dc9684a80741e34b3ffd4549cd0cf8c54ddf39b72942a96621673bde276cf67, spec_hash: e24b82f35bec742948a6454a438060de79f037215b6eb032151a304d71dfc132 }
 ---
 # src/resolve.rs
 ## Summary
-Ties `imports.rs` (what each file imports) to `graph.rs` (what symbols exist) via `oxc_resolver` (what file a specifier points at), producing the file-to-file reference edges M2 is about. Resolution is two steps: `oxc_resolver` turns `'./foo'` or `'@/lib/foo'` into an absolute path — handling relative imports, `tsconfig.json` path aliases (auto-discovered, so CodeOwl never parses `tsconfig` itself), and `node_modules` the way Node/TypeScript does — then a symbol named `<name>` is looked up in that file, following named re-export (barrel) chains up to `MAX_REEXPORT_HOPS` deep. `resolve_imports` produces the `ResolvedImport` edges (unresolved ones kept, not dropped); `resolve_default_imports` produces file-level `ResolvedDefaultImport`s for M11's component matcher; `ResolveCtx` bundles the recursion state. Both iterate files in path-sorted order so the persisted cache is diffable. This is the TypeScript + Next.js pack's resolver — a second language needs its own (`rust.rs` has one).
+Turns the raw import lists from `imports.rs` into resolved dependency edges — the "file A's code depends on symbol B in file C" links that `get_callers` and `get_callees` answer from. For each import it uses `oxc_resolver` to work out which file a specifier like `./foo` or `@/lib/foo` actually means (following relative paths, `tsconfig` path aliases, and `node_modules` the way Node and TypeScript do), then finds the named declaration there, chasing through re-export "barrel" files (which just forward a name from elsewhere) up to a fixed depth. Unresolved imports — external packages, broken paths — are kept in the output rather than dropped, since a broken import is real signal. `build_resolver` configures the resolver for a TypeScript project; `resolve_default_imports` is the file-level-only variant the feature layer uses to follow `<Component/>` tags. All of this is TypeScript/Node-specific — Rust and Java have their own resolution in `rust.rs` / `java.rs`.
 
 ## `ResolvedImport`
 `pub struct ResolvedImport`
@@ -42,9 +42,13 @@ Sets two non-default options: the extension list from `lang::RESOLVER_EXTENSIONS
     graph: &Graph,
 ) -> Vec<ResolvedImport>`
 ### Summary
-Resolves every named import across the repo into a flat `Vec<ResolvedImport>` — the file-to-file reference edges the graph is built with. Called once per rebuild, after `Graph::build` (it needs the arena to look symbols up in).
+Takes every `import` CodeOwl found across the repo and works out which actual declaration each one points at — turning `import { Graph } from './graph'` into a link to `src/graph.rs::Graph`. These resolved links are the file-to-file dependency edges the rest of the graph is built on (what `get_callers` / `get_callees` read). Runs once per rebuild, after the symbol graph already exists.
 ### Behavior
-Wraps the four inputs in a `ResolveCtx` and iterates `file_imports` in **path-sorted** order — not `HashMap` order — because the result is persisted to `.codeowl/graph` and a run-to-run-stable array is what makes that cache diffable. Within a file, imports stay in source order. For each import it calls `ctx.resolve_named` with a hop budget of `MAX_REEXPORT_HOPS` (to follow barrel re-export chains without looping) and records the outcome — `target: Some(id)` or `None` — verbatim; an unresolved import is kept, not dropped. `re_exports` themselves aren't emitted as edges here; they're only followed while resolving someone else's import.
+First it canonicalizes `repo_root` — resolving any symlinks in the path. The underlying resolver (`oxc_resolver`) returns symlink-free absolute paths, and a later step strips `repo_root` off them to recover a repo-relative path; if `repo_root` itself still contained a symlink (on macOS, temp dirs live under `/var`, which is a symlink to `/private/var`), that strip would fail and *every* import would come back unresolved. Falls back to the path as given if it can't be canonicalized.
+
+Then it walks the files in sorted path order — not hash-map order — because the result is written to the on-disk cache, and a run-to-run-stable order is what lets that cache be diffed. Within a file, imports stay in source order.
+
+For each import it calls `resolve_named`, which asks `oxc_resolver` for the file the specifier lands on (handling relative paths, `tsconfig` path aliases, and `node_modules` the way Node/TypeScript does), then looks for the named declaration in that file — following up to `MAX_REEXPORT_HOPS` re-export hops if the file just forwards the name from somewhere else. The outcome (the target, or `None`) is recorded exactly as found: an unresolved import — an external package, a broken path, or a name the target file doesn't actually export — is kept in the list, not dropped, because a broken import is real signal worth surfacing.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/imports.rs::FileImports` — crate::imports
@@ -76,9 +80,9 @@ Plain data: the importing file, the local binding name, the resolved target file
     file_imports: &HashMap<String, FileImports>,
 ) -> Vec<ResolvedDefaultImport>`
 ### Summary
-Resolves every file's default imports to the repo-relative file each points at — the lookup `assemble_participants` uses to follow a `<Component/>` (a default-exported React component) into a feature's `core`.
+Resolves each file's *default* imports (`import Form from './form'`) to the repo file they point at — just the file, not a specific symbol. The feature-spec builder uses this to follow a `<Component/>` tag in JSX into the component's source, since React components are almost always default-exported and the named-import list alone can't locate them.
 ### Behavior
-Iterates `file_imports` in path-sorted order (same determinism reasoning as `resolve_imports`), and for each `default_imports` entry runs `specifier_to_rel_path` — a *file*-only resolution, no symbol lookup and no re-export following. A specifier that resolves outside the repo, or not at all, is silently skipped (`continue`) rather than recorded as unresolved, because the only consumer (component matching) has nothing to do with an external default import. Separate from `resolve_imports` because default imports need file granularity, not symbol granularity.
+Same shape as `resolve_imports`, but file-level and simpler. Canonicalizes `repo_root` first (see `resolve_imports` for why a symlinked root would otherwise break every lookup), walks files in sorted path order for a stable cache, and for each `default_imports` entry asks `oxc_resolver` which file the specifier resolves to. A specifier that lands outside the repo, or doesn't resolve at all, is silently skipped — `assemble_participants`, the only caller, has nothing to do with an external default import. No symbol lookup and no re-export chasing: it stops once it has the file.
 ### Depends on
 - `src/imports.rs::FileImports` — crate::imports
 - externals: oxc_resolver, std
