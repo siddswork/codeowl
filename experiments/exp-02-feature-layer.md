@@ -1,8 +1,10 @@
 # exp-02 — The feature layer across stacks (M13-pre spike)
 
 **Status:** spike, on paper. Written before M13 freezes `trait StackPack` / `trait FeatureModel`.
-**Feeds:** M13 (trait shape), M14 (`RustStack::feature_model()`), M16/M17 (`JavaStack`).
+**Feeds:** M13 (trait shape), M14 (`RustStack::feature_model()`), M16/M18 (`JavaStack`).
 **Not a decision doc** — its conclusions fold into `ARCHITECTURE.md` open question 4 and each milestone's plan as it starts.
+
+> **Numbering note (2026-09-10):** this spike was written when Quarkus was M17. Python + FastAPI was later inserted as M17 and Quarkus shifted to M18 (iterate-and-ship to M19). Every "M17" below means **the Quarkus milestone (now M18)** — the spike's forward sketch was entirely about Java entry points. FastAPI's feature model is the *first* second-`FeatureModel` implementation; it doesn't change the Java conclusions here.
 
 ---
 

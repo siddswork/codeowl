@@ -92,6 +92,24 @@ why CodeOwl cares.
   `struct`, not just a `Container`") and for language-specific logic inside
   a pack. (M14 / `src/symbol.rs`)
 
+**`is_schema_symbol` (the schema seam)**
+: The pack hook that answers "is this symbol a database table?" — one
+  method on `StackPack`, default `false`.
+
+  M10 decided this by **file extension**: a `.sql` file's symbols were
+  tables, nothing else could be (`SourceKind::Schema`, baked into the
+  generic core). That doesn't survive an ORM — SQLModel, SQLAlchemy, JPA
+  and Django all declare tables as ordinary classes in ordinary code files.
+  So M17 moves the question down a level: the pipeline extracts a file
+  normally, then asks the pack, per symbol, whether to retag it
+  `SymbolKind::Schema`. The Python pack answers "class with `table=True`,
+  or a `Base` subclass"; the Java pack (M18) answers "carries `@Entity`, or
+  extends `PanacheEntity`". A `.sql` file becomes the degenerate case
+  where every symbol is a table, handled by a pack that *declares* it reads
+  `.sql`. A pack with no persistence model just takes the default and gets
+  no schema layer — see `ARCHITECTURE.md` open question 8 for why coverage
+  is a growing list, not a closed set. (M17)
+
 **Signature**
 : The type-level shape of a callable — its parameter list and return type
   — or the declared header of a type. For example, `pub fn build(files:
@@ -117,7 +135,9 @@ why CodeOwl cares.
   This matters a lot for Java: a Quarkus service's entire notion of "what's
   an HTTP endpoint" and "what's a database entity" is expressed through
   annotations (`@Path`, `@Entity`), so the Java pack's feature and schema
-  models are almost entirely marker-driven (M17).
+  models are almost entirely marker-driven (M18). Python decorators
+  (`@router.get("/items")`) are captured the same way, arguments included,
+  and drive the FastAPI feature model (M17).
 
 **Extraction**
 : The first pass CodeOwl runs on each file: parse it with tree-sitter, walk
@@ -484,11 +504,13 @@ checking that the socket didn't have to change shape to fit them.
   as a feature here." Two responsibilities: enumerate the stack's entry
   points, and provide the `admits_to_core` rule.
 
-  A framework-shaped stack (Next.js, Quarkus) has one. A library or a
-  plain CLI (a pure Rust crate, Apache commons-lang) returns `None` — it
-  still gets symbol / file / rollup / system specs, just no feature layer,
-  and its system spec is composed from module rollups instead of from
-  feature narratives. (`src/features.rs::FeatureModel`)
+  A framework-shaped stack (Next.js, FastAPI, Quarkus) has one. A library
+  or a plain CLI (a pure Rust crate, Apache commons-lang) returns `None` —
+  it still gets symbol / file / rollup / system specs, just no feature
+  layer, and its system spec is composed from module rollups instead of
+  from feature narratives. Next.js was the only implementation for three
+  milestones; FastAPI (M17) is the second, Quarkus (M18) the third and
+  first non-web one. (`src/features.rs::FeatureModel`)
 
 **The generic pipeline (also: the stack-neutral core)**
 : Everything that *isn't* a pack: `graph.rs` (the arena and edge types),
