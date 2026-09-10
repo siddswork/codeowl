@@ -1,16 +1,16 @@
 ---
 kind: file
 source_paths: [src/watch.rs]
-file: { source_hash: 5e8eb1c334d1728dec8f66cfc3ce75ade2dba0564ff9c7fe392df3edd0249104, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: d524976cb5664eebecbe82eb31c85f86cdbd3e511b944db14887bd9d2218d8a5 }
+file: { source_hash: 5a233068bb9858d0af025543cd933f7a6552e39e98d4b90ae1326c5bb2f369b3, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: 094482d1a876dce40fbb4c6a7a60e5ef963f7525391bf09babb611fe56bc1dfa }
 symbols:
   src/watch.rs::RepoWatcher: { source_hash: 4d5c0ef544e0b633a82d64c394c500df4fd0f9397e8a1bd09afcb6070c84d039, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8125586fc161a88292dc53d8556ed1dfb57c4eb9ecc0b787265362ebbb13f435 }
-  src/watch.rs::spawn: { source_hash: cfc031ad531cf0d19cfa52fe285164a638a6b50026d3cb9dfc720c7bbb74acf4, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: de537dfc926ecc8b4d631fcc4f326c49089b57c5a3767fcfce97578fbb10dbc1 }
+  src/watch.rs::spawn: { source_hash: 53d8e42152c83bbfe3e230d000b76a3dce79065de996cb02eaf4701a8b0ef227, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: 54a13ba501e76251fa5f9b020f209a34ce2340f6668484e4b67b6db366406a74 }
   src/watch.rs::watch_loop: { source_hash: 4675d570d6ecc15f05360defd6042e9abd01623b76a48dd77d3d3203c8737d45, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: 46f78b5351c8bf39363da85649a41503db1191b633c2439c3aa69c59f602400c }
   src/watch.rs::collect: { source_hash: 10e08326e50f6e590691b7444d3662ed876c843287a218626b1deccba260249a, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: be0985e33d578cb512fef6ac0f6cb693a3d0c8fa23eafef1e6f4f25ca12c98dc }
 ---
 # src/watch.rs
 ## Summary
-The in-session file watcher (M9) — the second of the two moments `ARCHITECTURE.md`'s "Incremental indexing" describes. For the life of one `codeowl serve` process it keeps the served graph in step with the working directory as the developer edits, so the MCP surface behaves like a language server across a long session rather than something you re-run. `spawn` registers per-directory (non-recursive) watches over the gitignore-visible tree — a recursive watch on the root would blow past the OS inotify limit on a real Next.js repo — and starts one background thread running `watch_loop`, which debounces an editor's save-burst into a single `RepoIndex::apply_changes` rebuild and publishes the result by atomically swapping a fresh `Arc<Graph>` into the `ArcSwap` every request handler reads through. `collect` folds each raw event into the batch and adds a watch to any newly-created directory. There is no clean shutdown in Phase 1 — the thread runs until the process exits.
+The in-session file watcher. While `codeowl serve` is running, this keeps the served graph in step with the working directory as the developer edits — so the MCP tools behave like a language server across a long session rather than something you re-run. `spawn` starts a background thread; that thread drains filesystem events, waits a short debounce (300 ms) so a burst of editor saves becomes a single rebuild, hands the changed paths to `RepoIndex::apply_changes`, and — only if something actually changed — swaps the freshly rebuilt graph into the atomic cell the server reads from, so request handlers never block on the watcher. A directory created mid-session is picked up and watched on the fly. `RepoWatcher` is the handle that keeps the thread and the OS watch alive; dropping it (when `serve` exits) stops watching.
 
 ## `RepoWatcher`
 `pub struct RepoWatcher`
@@ -24,9 +24,11 @@ Wraps only a `JoinHandle`, prefixed `_` because nothing joins it — the thread 
 ## `spawn`
 `pub fn spawn(root: PathBuf, graph: Arc<ArcSwap<Graph>>, index: RepoIndex) -> Result<RepoWatcher>`
 ### Summary
-Starts the background watcher: registers OS watches on every directory under `root` and spawns the thread that re-parses changed files and republishes the graph. Takes ownership of the already-warm `RepoIndex` from the catch-up pass.
+Starts the background file-watcher. From here on, whenever a source file in the repo changes, CodeOwl re-indexes just that file and swaps the updated graph in — so the served data stays live across a long session without a restart.
 ### Behavior
-Creates a `notify::RecommendedWatcher` feeding an `mpsc` channel (a send failure is ignored — it just means the loop exited). Registers a **non-recursive** watch per directory from `RepoIndex::watchable_dirs` — non-recursive plus the gitignore-filtered directory list is what keeps `node_modules` unwatched even though it's a subtree of `root`. Then spawns a named thread running `watch_loop`, and returns the `RepoWatcher` handle. A failure to create the watcher, watch a directory, or spawn the thread is a hard error from `serve` startup.
+Canonicalizes `root` first (resolving symlinks) so the directories it watches are named the same way the operating system will report events under them — without this, a symlinked root would make every event fail to match and get dropped.
+
+Sets up a filesystem watcher (the `notify` crate) whose callback forwards each raw event down a channel. Registers a *non-recursive* watch on every directory in the repo, from `RepoIndex::watchable_dirs` (which honors `.gitignore`) — non-recursive on purpose, because a recursive watch on the root would also cover `node_modules` and blow past the OS's per-process watch limit on a real project. Then spawns a background thread running `watch_loop`, which drains events, collapses a burst of editor saves into one rebuild, calls `RepoIndex::apply_changes`, and publishes the fresh graph. The returned `RepoWatcher` keeps the thread and the OS watch alive; dropping it (when `serve` exits) stops watching.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/index.rs::RepoIndex` — crate::index

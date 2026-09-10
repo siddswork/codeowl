@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/lang.rs]
-file: { source_hash: 2fa841df26ee032d0dbe43d0c43a97f6533715cbd68fbdb24aaa05aeb61abf0e, deps_hash: 8327ad3224849edf0d1a55c3a19add2d918ce0f21cd578b0bfc847eb4064e594, spec_hash: 5cc265fda79c3647787fc95487328955ec8ce0610c538bebe615daeed11a5aa7 }
+file: { source_hash: fffdeb3bbc079db8c800ebf3f48b2cd2fa8f66a1b1182f400ae6d2f27015f655, deps_hash: 8327ad3224849edf0d1a55c3a19add2d918ce0f21cd578b0bfc847eb4064e594, spec_hash: 2b189edb963a705adab19eb9e9147995a9cfe0b6e4d18edaf3f5027f71e64b29 }
 symbols:
   src/lang.rs::SourceKind: { source_hash: 71f79d3a8773c4e818baa090f23294a54504f8a0d201f005e1bef8efcb48801f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a9c5de3c32b7f2c9af3acf91d5cf587768ea607a6183ec4a6d7a1caac4ca4f8a }
   src/lang.rs::is_extractable: { source_hash: 832112a79779a048177b44c06d6b3e5e65c840538b69f5a3e30b1a618cd6ebef, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4224b3a3f47674e4c25cd37c32d2feba06b60b52b31e5c5e1b25486b78bd2f0d }
@@ -11,11 +11,11 @@ symbols:
   src/lang.rs::classify: { source_hash: 908bf0c8a6f2bb97bc5feed5c0cd0e4df84717e8c481b29b9f1ac2eed35b626f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: cb5f679c4c0e908c4665e90988e4a80a1825f3fdab8173f868ad5a56ba9148c5 }
   src/lang.rs::is_test_path: { source_hash: 43bd27fc12cb63b5b6e60e8b23cc75ba2d0bc82465e1ffb6cf530d089aab30e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a511957bab4e03e1d307eb16d4d08b01087428c3d50e9d8673f9d4e459a0ea28 }
   src/lang.rs::is_ui_primitive: { source_hash: 209f4445fe0023de0546da9717f126bbf2a38ed1753a94a50ca314462c748675, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 367ced1d96d513b98d77c48ddb63572c0bcfb1d984742211d1bf495007b8c895 }
-  src/lang.rs::detect: { source_hash: fc7d106212ae46a28cea737c72b862a26fa8ae37df6ea92361ed66febbdda32d, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: e54fa9a7ed58fba9c88e60560d250c66243b7db8903b6a36202ccc46b1b4deb2 }
+  src/lang.rs::detect: { source_hash: ea74de7e49f739d02194f31b7eb7af7cbac589845823439d39f59d900f24d8fa, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 9382f4c5b3d0303d9f1384a85dd5e6d49a7078c0df4fe318819fd7d53e949209 }
 ---
 # src/lang.rs
 ## Summary
-Two things live here: `detect`, the startup routine that picks the one `StackPack` for a repo (or fails fast), and the TypeScript + SQL pack's own internals that `TypeScriptNextStack` delegates to as free functions — `SourceKind`/`is_extractable` (which extensions are source and which extractor they go to), `ts_parser` (the right tree-sitter grammar per extension), `extract_symbols` (the schema-vs-code dispatch), `RESOLVER_EXTENSIONS`, and the JS-convention `classify`/`is_test_path`/`is_ui_primitive` path heuristics. `SourceKind` and `FileRole` are the two stack-neutral types the `StackPack` trait hands back; everything else is TS-specific and destined to move fully behind `TypeScriptNextStack`, leaving `detect` as the only genuinely generic piece. The Rust pack keeps its counterparts in `rust.rs`.
+This file does two jobs. First, `detect` — the startup step that picks which language pack (TypeScript/Next, Rust, or Java) CodeOwl uses for a repo, by counting each stack's source files and refusing to guess when zero or several match. Second, it holds the TypeScript + SQL pack's own building blocks: which extensions count as source (`SourceKind`, `is_extractable`), how to set up the parser for a `.ts` vs a `.tsx` file (`ts_parser`), which extractor a file's contents go to (`extract_symbols` — SQL tables for `.sql`, TypeScript declarations otherwise), the extension list the import resolver tries, and `classify`, which tags each file as product code, a UI primitive, test code, or generated so spec generation can prioritise them. Only `detect` is language-neutral; the rest is TypeScript-specific and slated to move inside `TypeScriptNextStack` in a later refactor.
 
 ## `SourceKind`
 `pub enum SourceKind`
@@ -92,9 +92,13 @@ Detects a shadcn/ui-style presentational primitive by path — a file in a `comp
 ## `detect`
 `pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>>`
 ### Summary
-Chooses the single `StackPack` for a repo at startup (from `RepoIndex::build`/`open`), or fails with an error naming the supported stacks — rather than silently serving an empty graph. This is where the "one stack per repo, auto-detected" rule (M13 design decision 6) is enforced.
+Picks the one language pack CodeOwl uses for a repo — TypeScript/Next, Rust, or Java — by counting what source files are actually present. Runs once at startup. If nothing matches, or more than one stack does, it stops with an error instead of serving a wrong or empty model of the code.
 ### Behavior
-For each candidate pack (`TypeScriptNextStack`, `RustStack`) it walks `root` with the `ignore` crate and counts files whose `source_kind` is `SourceKind::Code` — the pack's *primary* language (`.ts`/`.tsx` vs `.rs`). Conventional test/bench trees (`tests/`, `test/`, `benches/`) are excluded from this count only — they're still walked and extracted once a pack is chosen — so a `tests/fixtures/*.tsx` file read as a string by a Rust test doesn't make CodeOwl's own repo look like TypeScript. A `.sql` file is `Schema`, not `Code`, so migrations alone never make a repo "TypeScript". Then: both counts zero → `bail!` listing the supported stacks; exactly one non-zero → that pack; both non-zero → `bail!` telling the user to point CodeOwl at a single-stack subdirectory (multi-pack per repo is deferred).
+Walks the whole file tree (honoring `.gitignore`) and, for each candidate pack, counts the files that pack treats as *primary source*: `.ts`/`.tsx` for TypeScript, `.rs` for Rust, `.java` for Java. A `.sql` file is schema, not code, so a migrations folder on its own never makes a Rust repo look like TypeScript.
+
+Test trees are left out of that count — top-level `tests/`, `test/`, `benches/`, and anything under `src/test/` (the Maven/Gradle layout) — so a `.tsx` fixture that a Rust test reads as a string can't swing the result. Those files are still parsed once a pack is chosen; they just don't get a vote.
+
+Outcome: exactly one pack with a non-zero count wins and is returned. Zero counts → an error naming the three supported stacks. Two or more → an error listing which stacks were found and their file counts, telling the caller to point CodeOwl at a subdirectory that's a single stack. One stack per repo is a deliberate limit (M13 design decision 6).
 ### Depends on
 - `src/stack.rs::StackPack` — crate::stack
 - externals: anyhow, std
