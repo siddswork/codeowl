@@ -200,6 +200,67 @@ and `smelly` at once; both are reasons to regenerate.
 
 ---
 
+## Splitting the work across a team
+
+Documenting a large repo is a divide-and-conquer job, and CodeOwl is
+built for it — the specs are committed content-hashed Markdown, so
+independently generated pieces merge like code and every piece is
+validated the same way regardless of who wrote it.
+
+**The workflow:**
+
+- Each person clones the repo and runs their own MCP server. Their
+  `.codeowl/` cache is built locally and is per-machine (it's gitignored
+  — see "What CodeOwl stores" below); nobody shares it.
+- Divide by directory. Ask your agent: *"run `get_spec_coverage` scoped
+  to `src/lib`, then generate what's missing there."* Or target a subtree
+  directly — `/codeowl-generate src/lib --budget=20`. `get_spec_coverage`
+  takes a `scope` (a directory prefix) precisely so two people can see
+  non-overlapping slices of what's left.
+- Each person commits their slice — `docs/specs/src/lib/…` — as its own
+  PR, separate from any feature work.
+- Merges are clean: different directories touch different `.md` files. If
+  two people do land on the same file's spec, git merges the Markdown; a
+  leftover conflict is resolved by hand or by re-running
+  `/codeowl-generate <that-file>` once on the merged result.
+- On any machine, `get_spec_coverage` reports the union of what's
+  committed plus what that person has generated locally — so anyone can
+  check what's left and claim a slice.
+
+Feature and system specs are the exception to "divide by directory" —
+they cross files, so one person should own each. `/codeowl-generate
+system` is the last thing anyone runs, once every file and rollup is
+current.
+
+## What CodeOwl stores
+
+Two places, with opposite lifecycles:
+
+| | committed? | rebuilt? | safe to delete? |
+|---|---|---|---|
+| `docs/specs/**.md` | **yes** — reviewed in PRs, this is the product | no — the LLM writes it | no |
+| `.codeowl/graph` | no — gitignore it | yes, from source | **yes** |
+| `.codeowl/index` | no — gitignore it | yes, from source | **yes** |
+
+- **`.codeowl/graph`** — the built structural graph (every symbol, every
+  import edge), kept as plain JSON so you can `cat` / `jq` it.
+- **`.codeowl/index`** — the per-file input cache: each file's extracted
+  symbols, imports, and a hash of its text. On a fresh `serve`, CodeOwl
+  hash-checks this against what's on disk and re-parses only the files
+  that changed while nothing was running.
+- Both are **per-machine, cheap to rebuild, and never shared**. A
+  missing, unreadable, or format-outdated cache just triggers a full walk
+  on the next startup (a few seconds on a laptop-scale repo). Deleting
+  `.codeowl/` and restarting the server is the correct fix for any cache
+  weirdness.
+- `.codeowl/` carries a `format_version` stamp (see `GLOSSARY.md`); when
+  CodeOwl's on-disk format changes, an older cache is discarded whole
+  rather than migrated.
+
+`ARCHITECTURE.md`'s "Storage" section is the design-level version of this.
+
+---
+
 ## What Phase 1 does *not* do
 
 - **Two stacks so far** — TypeScript + Next.js + SQL, or Rust. One per
