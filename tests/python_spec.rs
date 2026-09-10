@@ -6,8 +6,9 @@
 //! version of `python.rs`'s unit tests, on the path `/codeowl generate`
 //! drives.
 //!
-//! The `is_schema_symbol` seam and the FastAPI feature model land in
-//! follow-up commits with their own coverage.
+//! Plus: a SQLModel `table=True` class is retagged `SymbolKind::Schema`
+//! and its importers resolve to it (the "code→table edge is free" path).
+//! The FastAPI feature model lands in a follow-up commit.
 
 use codeowl::graph::{FileExtraction, Graph};
 use codeowl::hash::hash_text;
@@ -168,6 +169,59 @@ fn a_from_import_resolves_end_to_end_through_repo_index() {
         graph.string_id(edge.target.expect("the from-import resolves")),
         "app/models.py::Item"
     );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_sqlmodel_table_class_becomes_a_schema_node_with_its_queriers() {
+    let dir = std::env::temp_dir().join(format!("codeowl-py-spec-{}-schema", std::process::id()));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class ItemBase(SQLModel):\n    title: str\n\n\nclass Item(ItemBase, table=True):\n    id: int\n\n\nclass ItemCreate(ItemBase):\n    pass\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app.models import Item\n\n\ndef read_items(session):\n    return session.exec(select(Item)).all()\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/crud.py"),
+        "from app.models import Item\n\n\ndef create_item(session, data):\n    obj = Item(**data)\n    session.add(obj)\n    return obj\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+
+    // `Item` (table=True) is retagged Schema; `ItemBase` / `ItemCreate` are not.
+    let item = graph.find("app/models.py::Item").expect("Item node");
+    assert_eq!(
+        graph.get_symbol(item).unwrap().kind,
+        codeowl::symbol::SymbolKind::Schema,
+        "table=True model is a Schema node"
+    );
+    for not_table in ["app/models.py::ItemBase", "app/models.py::ItemCreate"] {
+        let s = graph.find(not_table).unwrap();
+        assert_ne!(
+            graph.get_symbol(s).unwrap().kind,
+            codeowl::symbol::SymbolKind::Schema,
+            "{not_table} is a request/response schema, not a table"
+        );
+    }
+
+    // The querying modules resolve their `from app.models import Item` to
+    // the Schema node — "get_callers on the table" for free, no flow edge.
+    let queriers: Vec<&str> = graph
+        .imports()
+        .iter()
+        .filter(|e| e.target == Some(item))
+        .map(|e| e.from_file.as_str())
+        .collect();
+    assert!(queriers.contains(&"app/api/routes/items.py"));
+    assert!(queriers.contains(&"app/crud.py"));
 
     std::fs::remove_dir_all(&dir).ok();
 }
