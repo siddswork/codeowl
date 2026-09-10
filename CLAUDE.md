@@ -13,7 +13,7 @@ CodeOwl extracts a structural graph from a codebase and serves LLM-authored spec
 - `JavaStack` in `stack.rs`; `stack::for_name` gains `"java"`; `lang::detect` restructured from a `match (ts, rs)` 2-tuple to an N-candidate count-and-match; `is_test_tree` gains a `src/test/` clause.
 - **Design decision 1 resolved:** every named Java type kind → `Container`, no size test (a record is a restricted `final class`; `Value` would drop DTO-per-file layouts from the corpus). ROADMAP DD1 + exp-02 updated.
 - `tests/java_spec.rs` (2 tests). `feature_model()` = trait default `None`. `FORMAT_VERSION` unchanged.
-- **commons-lang dogfood** (`serve` + `/codeowl-generate --all --budget=15`, 7 specs read): internal import resolution 100 %, same-package edges accurate, `feature_model() -> None` composes, spec quality high. Findings → M18 (below). The 7 commons-lang specs are left uncommitted in `~/dev/openSource/test-repos/commons-lang/` (corpora are M18 scope).
+- **commons-lang dogfood** (`serve` + `/codeowl-generate --all --budget=15`, 7 specs read): internal import resolution 100 %, same-package edges accurate, `feature_model() -> None` composes, spec quality high. Findings → M19 (below). The 7 commons-lang specs are left uncommitted in `~/dev/openSource/test-repos/commons-lang/` (corpora are M19 scope).
 
 **macOS symlink `strip_prefix` bug — 3 PRs (#19, #20, #21).** Root cause: an un-canonicalized repo root compared against a symlink-resolved path (oxc_resolver's output, and the file-watcher's event paths). macOS `std::env::temp_dir()` sits under `/var` → `/private/var`; Linux `/tmp` is real, so it only showed on his Mac. **Production (`main.rs` already canonicalizes) was never affected — it's a direct-library-caller (test) gap.** Fixes canonicalize at every path boundary:
 - #19 — `resolve.rs`: `resolve_imports` / `resolve_default_imports` canonicalize `repo_root`.
@@ -34,18 +34,18 @@ CodeOwl extracts a structural graph from a codebase and serves LLM-authored spec
 
 ### Self-corpus state (live `get_spec_coverage` on this repo)
 
-**15 current · 0 stale · 4 missing · 0 smelly** · `generations_remaining` 120. Missing = `src/rust.rs` (28 gens), `src/spec.rs` (90), `rollup:src` (1, **blocked**), `system` (1, **blocked**). `rollup:src` and `system` only become generable once every `src/` file is current — so `rust.rs` + `spec.rs` must be filled first. This is the **post-M18 batch** (owner scoped it there in M15; unchanged).
+**15 current · 0 stale · 4 missing · 0 smelly** · `generations_remaining` 120. Missing = `src/rust.rs` (28 gens), `src/spec.rs` (90), `rollup:src` (1, **blocked**), `system` (1, **blocked**). `rollup:src` and `system` only become generable once every `src/` file is current — so `rust.rs` + `spec.rs` must be filled first. This is the **post-polyglot-core batch** (owner scoped it there in M15; the polyglot core now ends at M19).
 
-### Known issues / carry-forward (mostly → M18)
+### Known issues / carry-forward (mostly → M19)
 
-1. **[M18 headline — from the M16 dogfood] `get_next_spec_task` returns a folded Container's whole-file source.** For a large file (`StringUtils` 420 KB on commons-lang; CodeOwl's own `mcp.rs`/`spec.rs` hit ~95 KB) this exceeds the MCP tool-result token limit → the client persists it to a file and greps. Fix: for a large Container task, send member signatures + docstrings, not full bodies. Related enhancement: **serve `docs/specs/STYLE.md` in `get_next_spec_task`'s context** so the guidance travels with the task regardless of client (currently only the slash command reads it).
-2. **`get_spec_coverage` `pending` payload** also over-limit on a big repo (commons-lang: 95 KB / 626 items) — cap or paginate. M18.
-3. **Java same-package scan over-inclusive** when a simple name is shadowed by an explicit `import` of a different class (commons-lang `lang3.Streams` vs `lang3.stream.Streams`). Also: a resolved `import static` lands a member-level dep next to a class-level one — decide the granularity. M18.
+1. **[M18 — owner scoped it with the Java revisit; from the M16 dogfood] `get_next_spec_task` returns a folded Container's whole-file source.** For a large file (`StringUtils` 420 KB on commons-lang; CodeOwl's own `mcp.rs`/`spec.rs` hit ~95 KB) this exceeds the MCP tool-result token limit → the client persists it to a file and greps. Fix: for a large Container task, send member signatures + docstrings, not full bodies. Related enhancement: **serve `docs/specs/STYLE.md` in `get_next_spec_task`'s context** so the guidance travels with the task regardless of client (currently only the slash command reads it).
+2. **`get_spec_coverage` `pending` payload** also over-limit on a big repo (commons-lang: 95 KB / 626 items) — cap or paginate. M19.
+3. **Java same-package scan over-inclusive** when a simple name is shadowed by an explicit `import` of a different class (commons-lang `lang3.Streams` vs `lang3.stream.Streams`). Also: a resolved `import static` lands a member-level dep next to a class-level one — decide the granularity. M19.
 4. **No pre-built binaries.** A GitHub Actions release workflow (macOS + Linux) is the real fix for any non-dev consumer — surfaced by the Copilot-setup work, **not yet a ROADMAP item**. Near-term workaround documented in `COPILOT.md` (`cargo install --git`).
 5. **Windows-native not covered** (owner set it aside). If revisited: `dunce::canonicalize` for the `\\?\` verbatim prefix + case-insensitivity in the `RepoIndex.files` lookup. macOS + WSL2-Ubuntu both green now. See memory `dev-environment`.
-6. `FeatureModel` still has ONE impl — M17 (Quarkus) is the second.
-7. `resolved_default_imports` still a separate `Graph` field — folds into `pack.resolve_imports`'s output at M18.
-8. M17 breaks M10's `.sql`-file schema assumption — M18 generalizes to a symbol-level `is_schema_symbol` hook.
+6. `FeatureModel` still has ONE impl — M17 (FastAPI) is the second, M18 (Quarkus) the third and first non-web.
+7. `resolved_default_imports` still a separate `Graph` field — folds into `pack.resolve_imports`'s output at M19.
+8. **M17 fixes** M10's `.sql`-file schema assumption — a symbol-level `is_schema_symbol` pack hook, `.sql` out of `lang.rs` core, SQLModel/SQLAlchemy impl. (Was slated for M18/"generalize later"; pulled forward into M17 so a second persistence idiom isn't bolted onto the wrong shape.) M18 adds the JPA/Panache impl.
 9. **`/home/sidd/.claude/plans/dapper-greeting-sprout.md`** is the M16 plan — M16 is done, so it's spent (leave or delete).
 
 ### Process notes for future-me
@@ -58,15 +58,17 @@ CodeOwl extracts a structural graph from a codebase and serves LLM-authored spec
 
 - `cargo test`: **204** (189 unit + 15 integration), all green. `utility/check.sh` clean on `master` (`d5a2c43`). No open PRs, no local branches but `master`, working tree clean.
 - `.codeowl/` in this repo: pack `rust`, `format_version` 6, warm. The session's `codeowl` MCP server was reconnected after PR #26 and used for the #27/#28 generation runs; **rebuild + `/mcp` reconnect at the start of the next code session** (many builds happened; the last generation run's server is on a debug binary that predates nothing code-relevant but reconnect anyway).
-- Test repos present: `~/dev/openSource/test-repos/{commons-lang, quarkus-super-heroes, leveldb}`.
+- Test repos present: `~/dev/openSource/test-repos/{commons-lang, quarkus-super-heroes, leveldb, full-stack-fastapi-template}`.
 
 ### Exact next step to resume
 
-Two independent tracks — the owner picks:
+**M17 was rescoped 2026-09-10 (owner's call) — it is now `PythonStack` + FastAPI, not Quarkus.** Quarkus → M18, iterate-and-ship → M19. Docs for this land on branch `m17-python-fastapi-docs` (PR pending review — no code yet). Once merged:
 
-**A. M17 — Quarkus on quarkus-super-heroes.** The Java *feature layer*. Read `ROADMAP.md` → `### M17` (line ~481) and `experiments/exp-02-feature-layer.md` Part 2 / "M17" line. The work: `feature_model() -> Some` (the second `FeatureModel` impl); `enumerate_entry_points` for `@Path` + `@Incoming`/`@Outgoing` first (the kinds actually in quarkus-super-heroes); kind-prefixed `EntryPoint` slugs; a CDI-shaped `admits_to_core` (an `@Inject`ed type resolving to `@ApplicationScoped` / a Panache repository); `@RegisterRestClient` flow edges; `@Entity` symbol-level schema detection (which breaks M10's `.sql`-file model — an M18 finding to log); multi-module Maven (each module has its own `src/main/java` root — one graph, one walk, no reactor modelling unless a resolution ambiguity demands it). Test repo `~/dev/openSource/test-repos/quarkus-super-heroes` (`ui-super-heroes/` is ~10 JS files in a Maven module but zero `.ts`/`.tsx`, so `detect` is unambiguous). Validation *is* the test (TDD per the milestone).
+**A. M17 — `PythonStack` + FastAPI** on `~/dev/openSource/test-repos/full-stack-fastapi-template/backend` (the `backend/` subdir — the repo root is polyglot and would `detect()` as TypeScript). Read `ROADMAP.md` → `### M17`. The work, TDD (`tests/python_spec.rs` first): `src/python.rs` (`tree-sitter-python`; classes/defs/assignments; decorators-with-args → `markers`; `"""docstrings"""`; path-suffix + relative-import resolution); the **schema seam** — `fn is_schema_symbol(&self, sym) -> bool` on `StackPack` (default `false`), pipeline retags to `SymbolKind::Schema`, `SourceKind::Schema` + the `.sql` branch leave `lang.rs`; the Python body keys on `table=True` (SQLModel) / `Base` subclass (SQLAlchemy); the **FastAPI feature model** (`feature_model() -> Some` — the second impl) — decorator scan, `APIRouter`/`include_router` prefix assembly (a flow edge), `Depends()`/`Annotated`-alias `core` walk. No cross-service edges (that's M18). Pilot must regenerate schema specs byte-identical (`structural_sweep.py`). Design-decision notes to log: `is_schema_symbol` signature (needs class args — a new `ExtractedSymbol.bases` field), `Depends()` chain depth, `tree-sitter-python` crate version.
 
-**B. Finish the self-corpus** (independent of M17, anytime, its own PR): `/codeowl-generate src/rust.rs` (28 gens) after `/mcp` reconnect, then `src/spec.rs` (90 gens — its own PR, maybe in `--budget` chunks), which unblocks `rollup:src` + `system`. STYLE.md applies. Commit `docs/specs/` on its own.
+**B. Finish the self-corpus** (independent, anytime, its own PR): `/codeowl-generate src/rust.rs` (28 gens) after `/mcp` reconnect, then `src/spec.rs` (90 gens — its own PR, maybe in `--budget` chunks), which unblocks `rollup:src` + `system`. STYLE.md applies. Commit `docs/specs/` on its own.
+
+**Later — M18: Quarkus on quarkus-super-heroes.** The Java *feature layer* + the JPA/Panache `is_schema_symbol` impl (second one) + `@RegisterRestClient` cross-service edges + multi-module Maven. See `ROADMAP.md` → `### M18` and `experiments/exp-02-feature-layer.md` Part 2.
 
 ### Git workflow (evergreen)
 
