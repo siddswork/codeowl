@@ -1,13 +1,18 @@
 ---
-mode: agent
-tools: ['codeowl']
 description: Generate (or refresh) specs via CodeOwl's MCP tools -- one target, the whole repo, or a budgeted batch
+argument-hint: <repo-relative-file-path> | system | . | --all [--budget=N] [--stale]
+tools: ['codeowl/*']
 ---
 
-<!-- VS Code / GitHub Copilot port of setup/codeowl-generate.md (the Claude
-Code slash command). The loop body below is identical to that file — keep
-the two in sync; the only differences are this frontmatter and `$ARGUMENTS`
--> `${input:target}`. See setup/COPILOT.md. -->
+<!-- VS Code / GitHub Copilot prompt file. Port of setup/codeowl-generate.md
+(the Claude Code slash command) — the loop body below is identical; keep
+the two in sync. The differences: this frontmatter, and `$ARGUMENTS` ->
+`${input:target}`.
+
+`tools: ['codeowl/*']` is the VS Code syntax for "every tool from the MCP
+server named codeowl", and specifying tools puts the prompt in agent mode
+(so no explicit `agent:`/`mode:` field is needed). If the codeowl server
+isn't running, the tools are silently skipped. See setup/COPILOT.md. -->
 
 Generate spec(s) for `${input:target}`, using CodeOwl's MCP tools
 (`get_next_spec_task`, `submit_spec`, `get_spec`, `get_spec_coverage`).
