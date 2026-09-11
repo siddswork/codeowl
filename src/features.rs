@@ -554,15 +554,32 @@ pub fn assemble_participants(
             continue;
         }
         core.push(file.clone());
-        for edge in graph.flow_edges().iter().filter(|e| e.from_file == file) {
-            let FlowTarget::Node(target) = edge.target else {
-                continue;
-            };
-            // Only an edge into a *file* can pull that file into `core`;
-            // an edge into a symbol (a SQL table) is the `data` tier,
-            // collected below.
+
+        // Two ways a file can pull another *file* into `core`, both gated
+        // by `fm.admits_to_core`:
+        //   1. a flow edge into a file node (the pilot's route-literal /
+        //      rendered-component edges; M17's `Depends()` / param-type
+        //      edges), and
+        //   2. an import that resolves to a file node — a module import
+        //      like Python's `from app import crud` (M17; a named symbol
+        //      import resolves to a symbol and is handled in the
+        //      `dependencies` tier below, never here).
+        let flow_targets = graph
+            .flow_edges()
+            .iter()
+            .filter(|e| e.from_file == file)
+            .filter_map(|e| match e.target {
+                FlowTarget::Node(t) => Some(t),
+                FlowTarget::Unresolved => None,
+            });
+        let import_targets = graph
+            .imports()
+            .iter()
+            .filter(|i| i.from_file == file)
+            .filter_map(|i| i.target);
+        for target in flow_targets.chain(import_targets) {
             if graph.get_file(target).is_none() {
-                continue;
+                continue; // an edge into a symbol (a table) — not `core`
             }
             let target_file = graph.string_id(target).to_string();
             if seen.contains(&target_file) {
@@ -582,6 +599,15 @@ pub fn assemble_participants(
     for file in &core {
         for imp in graph.imports().iter().filter(|i| &i.from_file == file) {
             let Some(target) = imp.target else { continue };
+            // A module import (`from app import crud`) resolves to a file
+            // node — it either joined `core` above or does no data work;
+            // either way it isn't a one-hop *symbol* dependency (those are
+            // keyed on `interface_hash`, which a file has none of). The
+            // edge still shows in `get_callers`. (M17 — feature-participant
+            // granularity for module imports is an M19 question.)
+            if graph.get_file(target).is_some() {
+                continue;
+            }
             let id = graph.string_id(target).to_string();
             if core.contains(&id) {
                 continue;

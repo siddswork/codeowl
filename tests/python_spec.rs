@@ -277,3 +277,69 @@ fn a_fastapi_route_becomes_a_feature_with_its_table_in_data() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_route_that_imports_modules_assembles_without_crashing() {
+    // Regression (M17 dogfood): `from app import crud` / `from app.core
+    // import security` resolve to *file* nodes. Before the fix these
+    // leaked into a feature's `dependencies` as bare file ids and
+    // `current_participant_hashes` rejected them ("not a symbol").
+    let dir = std::env::temp_dir().join(format!("codeowl-py-spec-{}-modimp", std::process::id()));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::create_dir_all(dir.join("app/core")).unwrap();
+    std::fs::write(dir.join("app/__init__.py"), "").unwrap();
+    std::fs::write(dir.join("app/core/__init__.py"), "").unwrap();
+    std::fs::write(dir.join("app/api/__init__.py"), "").unwrap();
+    std::fs::write(dir.join("app/api/routes/__init__.py"), "").unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/crud.py"),
+        "from app.models import Item\n\n\ndef create_item(session, data):\n    return Item(**data)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/core/security.py"),
+        "def hash_pw(p):\n    return p\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app import crud\nfrom app.core import security\n\nrouter = APIRouter(prefix=\"/items\")\n\n\n@router.post(\"/\")\ndef create_item(session, data):\n    security.hash_pw(\"x\")\n    return crud.create_item(session, data)\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).unwrap();
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-post-items")
+        .expect("the POST /items/ route");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+    // The bug: this used to error.
+    codeowl::spec::current_participant_hashes(&graph, &p)
+        .expect("participant hashes assemble without a 'not a symbol' error");
+
+    // `crud.py` (a CRUD module reached by a module import) now joins core.
+    assert!(
+        p.core.contains(&"app/crud.py".to_string()),
+        "a crud module import joins core: {:?}",
+        p.core
+    );
+    // `security.py` — module import, not crud, no schema → dropped from
+    // both tiers (its bare file id must never reach `dependencies`).
+    assert!(
+        !p.dependencies.iter().any(|d| d == "app/core/security.py"),
+        "a bare file id must not be a dependency participant: {:?}",
+        p.dependencies
+    );
+    assert!(!p.core.contains(&"app/core/security.py".to_string()));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
