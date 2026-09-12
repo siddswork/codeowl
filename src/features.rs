@@ -865,7 +865,7 @@ mod tests {
         let entry = fm
             .enumerate_entry_points(&graph)
             .into_iter()
-            .find(|e| e.file == "app/submit/page.tsx")
+            .find(|e| e.id == "submit")
             .unwrap();
         let participants = assemble_participants(&graph, fm, &entry);
         assert_eq!(

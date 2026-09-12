@@ -3217,7 +3217,7 @@ impl Counter {\n\
         let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "1");
         let entry = enumerate_entry_points(&graph)
             .into_iter()
-            .find(|e| e.file == "app/submit/page.tsx")
+            .find(|e| e.id == "submit")
             .unwrap();
 
         let task = next_feature_task(&graph, &dir, &entry)
