@@ -23,43 +23,37 @@ use crate::symbol::ExtractedSymbol;
 /// import specifier — Node/TypeScript resolution order.
 pub const RESOLVER_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".d.ts", ".js", ".jsx", ".json"];
 
-/// Which extractor a source file's *contents* go to. Derived from the
-/// extension for now; M13 folds this and `is_extractable` into a single
-/// `pack.is_source_file(path) -> Option<SourceKind>` the active stack
-/// owns. See `ROADMAP.md`'s "Phase 2".
+/// What a `StackPack::source_kind` says about a file it reads. Stack-
+/// neutral vocabulary (like `SymbolKind`), but which *extension* maps to
+/// which kind is each pack's decision, not this module's — as of M17
+/// `lang.rs` no longer names `.sql` at all; `TypeScriptNextStack` owns
+/// that mapping.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
-    /// TypeScript / TSX — `ts_parser` + `extract.rs`.
+    /// A normal source file — parsed by the pack's grammar, and put
+    /// through the import / flow-edge passes.
     Code,
-    /// A SQL schema file — `tree-sitter-sequel` + `schema.rs`.
+    /// A dedicated schema file (the TS pack's `.sql`) — parsed for table
+    /// declarations only; `index.rs` skips the import / flow-edge passes.
+    /// An *in-language* ORM model is not this — it's a `Code` file whose
+    /// model class `is_schema_symbol` retags to `SymbolKind::Schema` (M17).
     Schema,
 }
 
 impl SourceKind {
-    /// The kind for a repo-relative path, or `None` when CodeOwl's Phase 1
-    /// extractor reads nothing from it. `.d.ts` is `None` on purpose —
-    /// ambient declaration files use grammar shapes M1 doesn't handle (see
-    /// `ROADMAP.md`'s M1 scope). The single source of truth behind both
-    /// `is_extractable` and the extract dispatch.
+    /// The kind for a TypeScript path — `.ts`/`.tsx` (never `.d.ts`, whose
+    /// grammar shapes M1 doesn't handle). Only `TypeScriptNextStack` calls
+    /// this; every other pack matches its own extension directly, and the
+    /// TS pack maps `.sql` → `Schema` before falling back here.
     pub fn of(rel_path: &str) -> Option<SourceKind> {
         if rel_path.ends_with(".d.ts") {
             None
-        } else if rel_path.ends_with(".sql") {
-            Some(SourceKind::Schema)
         } else if rel_path.ends_with(".ts") || rel_path.ends_with(".tsx") {
             Some(SourceKind::Code)
         } else {
             None
         }
     }
-}
-
-/// Whether CodeOwl extracts anything from this file — `.ts`/`.tsx` (never
-/// `.d.ts`) and `.sql`. The single definition `main.rs`, the catch-up
-/// pass, and the file watcher all share. "What goes to which extractor"
-/// is [`SourceKind::of`].
-pub fn is_extractable(path: &Path) -> bool {
-    path.to_str().and_then(SourceKind::of).is_some()
 }
 
 /// A tree-sitter `Parser` loaded with the right grammar for `rel_path`:
@@ -79,16 +73,12 @@ pub fn ts_parser(rel_path: &str) -> Parser {
     parser
 }
 
-/// Extract a file's symbols with the right extractor for its kind — SQL
-/// tables for a schema file, TypeScript declarations otherwise. The single
-/// dispatch point `graph.rs` and `index.rs` both call. A path with no
-/// [`SourceKind`] (never reached from the walk, which filters on
-/// `is_extractable` first) is parsed as `Code`.
+/// Parse a TypeScript file into its declarations — the TS pack's symbol
+/// extractor, kept as a free function so `graph.rs`'s test helper and
+/// `TypeScriptNextStack` share one entry point. `.sql` dispatch moved into
+/// the pack at M17; this is TS-only now.
 pub fn extract_symbols(rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
-    match SourceKind::of(rel_path) {
-        Some(SourceKind::Schema) => crate::schema::extract_tables(source, rel_path),
-        Some(SourceKind::Code) | None => crate::extract::extract_file(source, rel_path),
-    }
+    crate::extract::extract_file(source, rel_path)
 }
 
 /// What kind of code a file holds, for the purpose of deciding how its
@@ -172,11 +162,16 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
     // make CodeOwl's own repo look like TypeScript. Skip the conventional
     // test / bench directories for the detection count only (they're still
     // walked and extracted once a pack is chosen).
-    fn is_test_tree(rel: &str) -> bool {
+    fn is_non_identity_tree(rel: &str) -> bool {
         let seg = |d: &str| rel == d || rel.starts_with(&format!("{d}/"));
-        // JS/Rust keep tests in a top-level `tests` / `test` / `benches`;
-        // Maven/Gradle keep them under `src/test/...`.
-        seg("tests") || seg("test") || seg("benches") || rel.contains("src/test/")
+        // Test trees: JS/Rust keep tests in a top-level `tests` / `test` /
+        // `benches`; Maven/Gradle keep them under `src/test/...`.
+        let is_test = seg("tests") || seg("test") || seg("benches") || rel.contains("src/test/");
+        // Tooling trees: build / dev / CI scripts don't define a repo's
+        // stack identity — CodeOwl's own `utility/*.py` mustn't make this
+        // Rust repo look ambiguously Python.
+        let is_tooling = seg("utility") || seg("scripts") || seg("tools") || seg("hack");
+        is_test || is_tooling
     }
 
     fn primary_count(root: &Path, pack: &dyn StackPack) -> usize {
@@ -190,19 +185,20 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
                     .strip_prefix(root)
                     .ok()
                     .and_then(|p| p.to_str())
-                    .is_none_or(|rel| !is_test_tree(rel))
+                    .is_none_or(|rel| !is_non_identity_tree(rel))
             })
             .filter(|entry| pack.source_kind(entry.path()) == Some(SourceKind::Code))
             .count()
     }
 
     type Ctor = fn() -> Box<dyn crate::stack::StackPack>;
-    let candidates: [(&str, Ctor); 3] = [
+    let candidates: [(&str, Ctor); 4] = [
         ("TypeScript/TSX", || {
             Box::new(crate::stack::TypeScriptNextStack)
         }),
         ("Rust", || Box::new(crate::stack::RustStack)),
         ("Java", || Box::new(crate::stack::JavaStack)),
+        ("Python", || Box::new(crate::stack::PythonStack)),
     ];
 
     let hits: Vec<(&str, usize, Ctor)> = candidates
@@ -239,33 +235,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn is_extractable_accepts_ts_tsx_sql_and_rejects_dts() {
-        assert!(is_extractable(Path::new("a/b.ts")));
-        assert!(is_extractable(Path::new("a/b.tsx")));
-        assert!(is_extractable(Path::new("supabase/schema.sql")));
-        assert!(!is_extractable(Path::new("a/b.d.ts")));
-        assert!(!is_extractable(Path::new("a/b.js")));
-        assert!(!is_extractable(Path::new("README.md")));
-    }
-
-    #[test]
-    fn source_kind_maps_extensions() {
-        // Purely on extension — the directory is never consulted.
+    fn source_kind_of_is_typescript_only_now() {
+        // `.sql` left `lang.rs` at M17 — `TypeScriptNextStack::source_kind`
+        // maps it; this free function is TS extensions only.
         assert_eq!(SourceKind::of("a/b.ts"), Some(SourceKind::Code));
         assert_eq!(SourceKind::of("a/b.tsx"), Some(SourceKind::Code));
-        assert_eq!(SourceKind::of("a/b.sql"), Some(SourceKind::Schema));
+        assert_eq!(SourceKind::of("a/b.sql"), None);
         assert_eq!(SourceKind::of("a/b.d.ts"), None);
         assert_eq!(SourceKind::of("a/b.js"), None);
         assert_eq!(SourceKind::of("README.md"), None);
     }
 
     #[test]
-    fn extract_symbols_dispatches_on_extension() {
+    fn extract_symbols_parses_typescript() {
         let ts = extract_symbols("a.ts", "export function f() {}\n");
         assert_eq!(ts[0].id, "a.ts::f");
-
-        let sql = extract_symbols("s.sql", "CREATE TABLE public.t (id integer);\n");
-        assert_eq!(sql[0].id, "s.sql::t");
     }
 
     #[test]

@@ -91,12 +91,34 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
         None
     }
+
+    /// Given a symbol this pack just extracted, is it a database table?
+    /// The generic pipeline (`index::FileInputs::extract`) retags any
+    /// symbol this returns `true` for as [`crate::symbol::SymbolKind::Schema`]
+    /// (M17). Default: this stack has no persistence model.
+    ///
+    /// This is the seam that replaces M10's file-level `.sql`-is-schema
+    /// rule with a symbol-level one — an in-language ORM model
+    /// (`PythonStack` on SQLModel `table=True` / a SQLAlchemy `Base`
+    /// subclass; a JPA `@Entity` at M18) becomes a table without a
+    /// dedicated schema file. A `.sql` file is still handled by its own
+    /// extractor (`schema::extract_tables`, which sets `Schema` directly),
+    /// so this hook is a no-op there. See `ARCHITECTURE.md` open question 8.
+    fn is_schema_symbol(&self, _sym: &ExtractedSymbol) -> bool {
+        false
+    }
 }
 
 /// The Phase 1 stack: TypeScript / TSX + SQL schema files, Next.js App
 /// Router routing, Supabase `.from()`. Every method delegates to the
 /// free functions in `extract.rs` / `imports.rs` / `resolve.rs` /
 /// `lang.rs`; M13 is a re-wiring, not a rewrite.
+///
+/// **`.sql` is this pack's concern, not the core's (M17).** `lang.rs` no
+/// longer knows the extension — this pack maps it to `SourceKind::Schema`
+/// and routes its contents to `schema::extract_tables`. `SourceKind::Schema`
+/// still tells `index.rs` to skip the import / flow-edge passes for a
+/// dedicated schema file.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TypeScriptNextStack;
 
@@ -106,7 +128,10 @@ impl StackPack for TypeScriptNextStack {
     }
 
     fn source_kind(&self, path: &Path) -> Option<SourceKind> {
-        path.to_str().and_then(SourceKind::of)
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("sql") => Some(SourceKind::Schema),
+            _ => path.to_str().and_then(SourceKind::of),
+        }
     }
 
     fn classify(&self, rel_path: &str) -> FileRole {
@@ -114,7 +139,11 @@ impl StackPack for TypeScriptNextStack {
     }
 
     fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
-        crate::lang::extract_symbols(rel_path, source)
+        if rel_path.ends_with(".sql") {
+            crate::schema::extract_tables(source, rel_path)
+        } else {
+            crate::lang::extract_symbols(rel_path, source)
+        }
     }
 
     fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
@@ -191,6 +220,7 @@ pub fn for_name(name: &str) -> Box<dyn StackPack> {
     match name {
         "rust" => Box::new(RustStack),
         "java" => Box::new(JavaStack),
+        "python" => Box::new(PythonStack),
         _ => Box::new(TypeScriptNextStack),
     }
 }
@@ -313,6 +343,98 @@ impl StackPack for JavaStack {
 
     fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
         FlowTarget::Unresolved
+    }
+}
+
+/// The Python stack (M17): `tree-sitter-python` extraction + dotted-module
+/// import resolution over `.py` files, plus the symbol-level
+/// `is_schema_symbol` seam (SQLModel `table=True` / SQLAlchemy `Base`
+/// subclass → `Schema` nodes). Exercised on
+/// `full-stack-fastapi-template/backend` (a FastAPI + SQLModel service).
+/// Still to come: the FastAPI `feature_model()` — so `extract_flow_edges`
+/// is empty and `feature_model()` takes the trait default `None`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PythonStack;
+
+/// Is `sig` (a `class …(…)` signature) a declarative ORM table? True for
+/// a SQLModel `table=True` kwarg or a `Base` / `DeclarativeBase` base
+/// class — **not** a bare `SQLModel` / `BaseModel` base (those are
+/// request/response schemas). Naive `,`-split of the base list; a nested
+/// comma in `Generic[T, U]` could misparse, unlikely for a model. (M17)
+fn python_class_is_table(sig: &str) -> bool {
+    let Some(open) = sig.find('(') else {
+        return false;
+    };
+    let inner = sig[open + 1..].trim_end().trim_end_matches(')');
+    inner.split(',').map(str::trim).any(|arg| {
+        let squashed: String = arg.chars().filter(|c| !c.is_whitespace()).collect();
+        squashed == "table=True" || matches!(arg, "Base" | "DeclarativeBase")
+    })
+}
+
+impl StackPack for PythonStack {
+    fn name(&self) -> &str {
+        "python"
+    }
+
+    fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+        (path.extension().and_then(|e| e.to_str()) == Some("py")).then_some(SourceKind::Code)
+    }
+
+    fn classify(&self, rel_path: &str) -> FileRole {
+        let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+        if rel_path.contains("/tests/")
+            || rel_path.starts_with("tests/")
+            || name == "conftest.py"
+            || name.starts_with("test_")
+            || name.ends_with("_test.py")
+        {
+            FileRole::Test
+        } else if rel_path.contains("/alembic/versions/")
+            || rel_path.contains("/migrations/versions/")
+        {
+            // Alembic migrations describe schema *changes*, not current
+            // state, and are import-less — sink them like generated code.
+            FileRole::Generated
+        } else {
+            FileRole::Domain
+        }
+    }
+
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+        crate::python::extract_file(source, rel_path)
+    }
+
+    fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
+        crate::python::extract_imports(source, rel_path)
+    }
+
+    fn resolve_imports(
+        &self,
+        root: &Path,
+        file_imports: &HashMap<String, FileImports>,
+        graph: &Graph,
+    ) -> Vec<ResolvedImport> {
+        crate::python::resolve_imports(root, file_imports, graph)
+    }
+
+    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {
+        crate::python::extract_flow_edges(source, rel_path)
+    }
+
+    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
+        crate::python::resolve_flow_edge(graph, edge)
+    }
+
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
+        Some(&crate::fastapi::FastApiFeatureModel)
+    }
+
+    fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {
+        // Only a class, and only a leaf one — a table with methods is more
+        // class than table; leave it a Container (an M19 refinement if a
+        // real repo needs it).
+        sym.raw == "class" && sym.children.is_empty() && python_class_is_table(&sym.signature)
     }
 }
 
@@ -475,5 +597,37 @@ mod tests {
         // The M14 dogfood: CodeOwl's own repo root.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         assert_eq!(crate::lang::detect(root).unwrap().name(), "rust");
+    }
+
+    #[test]
+    fn python_is_schema_symbol_keys_on_table_true_or_a_declarative_base() {
+        let pack = PythonStack;
+        let mk = |sig: &str| ExtractedSymbol {
+            id: "m.py::X".into(),
+            kind: crate::symbol::SymbolKind::Container,
+            raw: "class".into(),
+            file: "m.py".into(),
+            lines: [1, 1],
+            signature: sig.into(),
+            docstring: None,
+            is_exported: true,
+            source_hash: String::new(),
+            interface_hash: None,
+            markers: vec![],
+            parent: None,
+            children: vec![],
+        };
+        // SQLModel table + classic SQLAlchemy Base → a table.
+        assert!(pack.is_schema_symbol(&mk("class Item(ItemBase, table=True)")));
+        assert!(pack.is_schema_symbol(&mk("class User(SQLModel, table = True)")));
+        assert!(pack.is_schema_symbol(&mk("class Hero(Base)")));
+        // A request/response schema sharing the SQLModel base is NOT.
+        assert!(!pack.is_schema_symbol(&mk("class ItemCreate(ItemBase)")));
+        assert!(!pack.is_schema_symbol(&mk("class Msg(SQLModel)")));
+        assert!(!pack.is_schema_symbol(&mk("class C(BaseModel)")));
+        // A table class with members stays a Container (leaf-only guard).
+        let mut with_method = mk("class Item(SQLModel, table=True)");
+        with_method.children = vec!["m.py::Item::save".into()];
+        assert!(!pack.is_schema_symbol(&with_method));
     }
 }

@@ -357,41 +357,49 @@ impl CodeOwlServer {
     /// tasks are exhausted: if `target` is a recognized feature entry
     /// point and its feature spec isn't current, return that as the next
     /// task; otherwise there's genuinely nothing left.
+    ///
+    /// **Several entry points can share one file** — several FastAPI
+    /// routes decorated in one module (M17); the pilot's Next.js pages and
+    /// routes never had this, one file per entry point. So this tries
+    /// every entry on `target` in order and returns the first whose
+    /// feature spec isn't current yet, rather than a single `.find()` that
+    /// would collapse to the same (possibly already-current) entry
+    /// regardless of which one is actually still missing — the M17
+    /// dogfood bug where, once the first route's feature spec existed,
+    /// every other route on that file reported `{"kind":"done"}`.
     fn next_feature_task_response(
         &self,
         graph: &Graph,
         target: &str,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         let entry_points = crate::features::enumerate_entry_points(graph);
-        let Some(entry) = entry_points.iter().find(|e| e.file == target) else {
-            return Ok(Json(None));
-        };
-
-        let task =
-            crate::spec::next_feature_task(graph, &self.root, entry).map_err(|e| e.to_string())?;
-        let Some(task) = task else {
-            return Ok(Json(None));
-        };
-
-        Ok(Json(Some(SpecTaskResponse::Feature {
-            id: format!("feature:{}", task.slug),
-            entry_point: task.entry_point,
-            core_sources: task
-                .core_sources
-                .into_iter()
-                .map(|(file, source)| CoreSource { file, source })
-                .collect(),
-            dependencies: task
-                .dependencies
-                .into_iter()
-                .map(|(id, summary)| DependencyContext { id, summary })
-                .collect(),
-            data: task
-                .data
-                .into_iter()
-                .map(|(id, columns)| TableContext { id, columns })
-                .collect(),
-        })))
+        for entry in entry_points.iter().filter(|e| e.file == target) {
+            let Some(task) = crate::spec::next_feature_task(graph, &self.root, entry)
+                .map_err(|e| e.to_string())?
+            else {
+                continue; // this entry's feature is already current
+            };
+            return Ok(Json(Some(SpecTaskResponse::Feature {
+                id: format!("feature:{}", task.slug),
+                entry_point: task.entry_point,
+                core_sources: task
+                    .core_sources
+                    .into_iter()
+                    .map(|(file, source)| CoreSource { file, source })
+                    .collect(),
+                dependencies: task
+                    .dependencies
+                    .into_iter()
+                    .map(|(id, summary)| DependencyContext { id, summary })
+                    .collect(),
+                data: task
+                    .data
+                    .into_iter()
+                    .map(|(id, columns)| TableContext { id, columns })
+                    .collect(),
+            })));
+        }
+        Ok(Json(None))
     }
 
     /// `get_next_spec_task`'s path when `target` doesn't resolve as a
@@ -904,7 +912,7 @@ impl CodeOwlServer {
                 .iter()
                 .find(|e| e.id == slug)
                 .ok_or_else(|| format!("no feature entry point with slug {slug:?}"))?;
-            let spec = crate::spec::submit_feature(&graph, &self.root, &entry.file, &req.content)
+            let spec = crate::spec::submit_feature(&graph, &self.root, &entry.id, &req.content)
                 .map_err(|e| e.to_string())?;
             return Ok(Json(SubmitSpecResponse {
                 id: req.id,
@@ -2072,6 +2080,213 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(done.0, SpecTaskResponse::Done {});
+    }
+
+    #[tokio::test]
+    async fn get_next_spec_task_does_not_collapse_several_entries_sharing_one_file() {
+        // M17 dogfood bug: several FastAPI routes decorated in one module
+        // share `EntryPoint.file` -- something the pilot's one-page/route-
+        // per-file Next.js world never exercised. `next_feature_task_response`
+        // used to `.find()` the *first* entry on that file regardless of
+        // its status, so once one route's feature spec existed, every
+        // other route on the same file reported `{"kind":"done"}` even
+        // though `get_spec_coverage` still listed them as missing.
+        let server = test_server(&[(
+            "app/api/routes/items.py",
+            "router = APIRouter(prefix=\"/items\")\n\n\n@router.get(\"/\")\ndef read_items():\n    return []\n\n\n@router.get(\"/{id}\")\ndef read_item(id: int):\n    return None\n",
+        )]);
+
+        // Drain the file's own ladder once -- both entry points share it.
+        for sym_id in [
+            "app/api/routes/items.py::read_items",
+            "app/api/routes/items.py::read_item",
+        ] {
+            let task = server
+                .get_next_spec_task(Parameters(GenerateTaskRequest {
+                    target: "app/api/routes/items.py".to_string(),
+                }))
+                .await
+                .unwrap()
+                .0;
+            assert!(matches!(task, SpecTaskResponse::Symbol { .. }));
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: sym_id.to_string(),
+                    content: "### Summary\nReads item rows for the current caller.\n### Behavior\nRuns a SQLModel select against the item table and returns the rows.\n"
+                        .to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+        let file_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/api/routes/items.py".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(matches!(file_task, SpecTaskResponse::File { .. }));
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "app/api/routes/items.py".to_string(),
+                content: "Item routes -- list and read endpoints backed by the item table."
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // The first feature on the file.
+        let first = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "feature:http-get-items".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        let SpecTaskResponse::Feature { id: first_id, .. } = first else {
+            panic!("expected a Feature task, got {first:?}");
+        };
+        assert_eq!(first_id, "feature:http-get-items");
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: first_id,
+                content: "# Items\n## Summary\nLists every item belonging to the current user, newest first.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // The bug: this used to return `Done` — the first (now-current)
+        // entry sharing the file was all `.find()` ever saw.
+        let second = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "feature:http-get-items-id".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        let SpecTaskResponse::Feature { id: second_id, .. } = second else {
+            panic!("a sibling route on the same file must still be offered a task, got {second:?}");
+        };
+        assert_eq!(second_id, "feature:http-get-items-id");
+    }
+
+    #[tokio::test]
+    async fn submit_spec_does_not_misattribute_a_feature_to_its_file_sibling() {
+        // The write-side twin of the read-side bug above, and the actual
+        // dogfood report: `submit_feature` used to re-resolve "which entry
+        // point" from the *file* (`.find(|e| e.file == entry_file)`), so
+        // submitting `feature:http-get-items` silently wrote its content
+        // into `http-get-items-id`'s spec file instead (whichever sibling
+        // `enumerate_entry_points`'s sort happened to return first) --
+        // overwriting that sibling's real, current spec with no error.
+        let server = test_server(&[
+            (
+                "app/api/routes/items.py",
+                "router = APIRouter(prefix=\"/items\")\n\n\n@router.get(\"/\")\ndef read_items():\n    return []\n\n\n@router.get(\"/{id}\")\ndef read_item(id: int):\n    return None\n",
+            ),
+            (
+                "app/api/routes/users.py",
+                "router = APIRouter(prefix=\"/users\")\n\n\n@router.delete(\"/{user_id}\")\ndef delete_user(user_id: str):\n    return None\n\n\n@router.delete(\"/me\")\ndef delete_me():\n    return None\n",
+            ),
+        ]);
+
+        // Drain both files' own ladders (symbols, then file spec).
+        for file in ["app/api/routes/items.py", "app/api/routes/users.py"] {
+            for _ in 0..2 {
+                let task = server
+                    .get_next_spec_task(Parameters(GenerateTaskRequest {
+                        target: file.to_string(),
+                    }))
+                    .await
+                    .unwrap()
+                    .0;
+                let SpecTaskResponse::Symbol { id, .. } = task else {
+                    panic!("expected a Symbol task for {file}, got {task:?}");
+                };
+                server
+                    .submit_spec(Parameters(SubmitSpecRequest {
+                        id,
+                        content: "### Summary\nHandles one HTTP endpoint.\n### Behavior\nDelegates to the ORM for the actual query or mutation.\n".to_string(),
+                    }))
+                    .await
+                    .unwrap();
+            }
+            let file_task = server
+                .get_next_spec_task(Parameters(GenerateTaskRequest {
+                    target: file.to_string(),
+                }))
+                .await
+                .unwrap()
+                .0;
+            assert!(matches!(file_task, SpecTaskResponse::File { .. }));
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: file.to_string(),
+                    content: "Route handlers for this resource.".to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+
+        // Submit exactly the two ids from the real dogfood report.
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "feature:http-get-items".to_string(),
+                content:
+                    "# List Items\n## Summary\nLists every item belonging to the current user.\n"
+                        .to_string(),
+            }))
+            .await
+            .unwrap();
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "feature:http-delete-users-user-id".to_string(),
+                content: "# Delete User (Admin)\n## Summary\nAn administrator deletes another user's account.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Each submitted id must carry *its own* content...
+        let items_spec = server
+            .get_spec(Parameters(IdRequest {
+                id: "feature:http-get-items".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(items_spec.status, "current");
+        assert!(items_spec.content.unwrap().contains("List Items"));
+
+        let delete_user_spec = server
+            .get_spec(Parameters(IdRequest {
+                id: "feature:http-delete-users-user-id".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(delete_user_spec.status, "current");
+        assert!(
+            delete_user_spec
+                .content
+                .unwrap()
+                .contains("Delete User (Admin)")
+        );
+
+        // ...and neither file sibling was clobbered -- they're still
+        // missing, exactly as `get_spec_coverage` would report.
+        for untouched in ["feature:http-get-items-id", "feature:http-delete-users-me"] {
+            let spec = server
+                .get_spec(Parameters(IdRequest {
+                    id: untouched.to_string(),
+                }))
+                .await
+                .unwrap()
+                .0;
+            assert_eq!(
+                spec.status, "missing",
+                "{untouched} must be untouched by its sibling's submit, got {spec:?}"
+            );
+        }
     }
 
     #[tokio::test]
