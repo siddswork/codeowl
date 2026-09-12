@@ -912,7 +912,7 @@ impl CodeOwlServer {
                 .iter()
                 .find(|e| e.id == slug)
                 .ok_or_else(|| format!("no feature entry point with slug {slug:?}"))?;
-            let spec = crate::spec::submit_feature(&graph, &self.root, &entry.file, &req.content)
+            let spec = crate::spec::submit_feature(&graph, &self.root, &entry.id, &req.content)
                 .map_err(|e| e.to_string())?;
             return Ok(Json(SubmitSpecResponse {
                 id: req.id,
@@ -2168,6 +2168,125 @@ mod tests {
             panic!("a sibling route on the same file must still be offered a task, got {second:?}");
         };
         assert_eq!(second_id, "feature:http-get-items-id");
+    }
+
+    #[tokio::test]
+    async fn submit_spec_does_not_misattribute_a_feature_to_its_file_sibling() {
+        // The write-side twin of the read-side bug above, and the actual
+        // dogfood report: `submit_feature` used to re-resolve "which entry
+        // point" from the *file* (`.find(|e| e.file == entry_file)`), so
+        // submitting `feature:http-get-items` silently wrote its content
+        // into `http-get-items-id`'s spec file instead (whichever sibling
+        // `enumerate_entry_points`'s sort happened to return first) --
+        // overwriting that sibling's real, current spec with no error.
+        let server = test_server(&[
+            (
+                "app/api/routes/items.py",
+                "router = APIRouter(prefix=\"/items\")\n\n\n@router.get(\"/\")\ndef read_items():\n    return []\n\n\n@router.get(\"/{id}\")\ndef read_item(id: int):\n    return None\n",
+            ),
+            (
+                "app/api/routes/users.py",
+                "router = APIRouter(prefix=\"/users\")\n\n\n@router.delete(\"/{user_id}\")\ndef delete_user(user_id: str):\n    return None\n\n\n@router.delete(\"/me\")\ndef delete_me():\n    return None\n",
+            ),
+        ]);
+
+        // Drain both files' own ladders (symbols, then file spec).
+        for file in ["app/api/routes/items.py", "app/api/routes/users.py"] {
+            for _ in 0..2 {
+                let task = server
+                    .get_next_spec_task(Parameters(GenerateTaskRequest {
+                        target: file.to_string(),
+                    }))
+                    .await
+                    .unwrap()
+                    .0;
+                let SpecTaskResponse::Symbol { id, .. } = task else {
+                    panic!("expected a Symbol task for {file}, got {task:?}");
+                };
+                server
+                    .submit_spec(Parameters(SubmitSpecRequest {
+                        id,
+                        content: "### Summary\nHandles one HTTP endpoint.\n### Behavior\nDelegates to the ORM for the actual query or mutation.\n".to_string(),
+                    }))
+                    .await
+                    .unwrap();
+            }
+            let file_task = server
+                .get_next_spec_task(Parameters(GenerateTaskRequest {
+                    target: file.to_string(),
+                }))
+                .await
+                .unwrap()
+                .0;
+            assert!(matches!(file_task, SpecTaskResponse::File { .. }));
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: file.to_string(),
+                    content: "Route handlers for this resource.".to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+
+        // Submit exactly the two ids from the real dogfood report.
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "feature:http-get-items".to_string(),
+                content:
+                    "# List Items\n## Summary\nLists every item belonging to the current user.\n"
+                        .to_string(),
+            }))
+            .await
+            .unwrap();
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "feature:http-delete-users-user-id".to_string(),
+                content: "# Delete User (Admin)\n## Summary\nAn administrator deletes another user's account.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Each submitted id must carry *its own* content...
+        let items_spec = server
+            .get_spec(Parameters(IdRequest {
+                id: "feature:http-get-items".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(items_spec.status, "current");
+        assert!(items_spec.content.unwrap().contains("List Items"));
+
+        let delete_user_spec = server
+            .get_spec(Parameters(IdRequest {
+                id: "feature:http-delete-users-user-id".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(delete_user_spec.status, "current");
+        assert!(
+            delete_user_spec
+                .content
+                .unwrap()
+                .contains("Delete User (Admin)")
+        );
+
+        // ...and neither file sibling was clobbered -- they're still
+        // missing, exactly as `get_spec_coverage` would report.
+        for untouched in ["feature:http-get-items-id", "feature:http-delete-users-me"] {
+            let spec = server
+                .get_spec(Parameters(IdRequest {
+                    id: untouched.to_string(),
+                }))
+                .await
+                .unwrap()
+                .0;
+            assert_eq!(
+                spec.status, "missing",
+                "{untouched} must be untouched by its sibling's submit, got {spec:?}"
+            );
+        }
     }
 
     #[tokio::test]
