@@ -102,15 +102,53 @@ fn router_prefix(graph: &Graph, file: &str) -> Option<String> {
 }
 
 /// The string literal assigned to kwarg `key` in `sig`, if it's a literal
-/// (`prefix="/x"` → `"/x"`; `prefix=settings.X` → `None`).
+/// (`prefix="/x"` → `"/x"`; `prefix=settings.X` → `None`). A byte scan, not
+/// an unanchored `sig.find(key=)` (the code-review finding this fixes: that
+/// matched the literal text `"prefix="` wherever it first appeared,
+/// including inside an earlier kwarg's own string value, e.g.
+/// `responses={404: {"description": "...prefix=legacy..."}}, prefix="/x"`)
+/// -- so this skips over quoted spans entirely and only matches `key=` at a
+/// real token boundary (preceded by the start of `sig` or a non-identifier
+/// character).
 fn kwarg_string_literal(sig: &str, key: &str) -> Option<String> {
-    let at = sig.find(&format!("{key}="))? + key.len() + 1;
-    let rest = sig[at..].trim_start();
-    if rest.starts_with('"') || rest.starts_with('\'') {
-        first_string_literal(rest)
-    } else {
-        None
+    let bytes = sig.as_bytes();
+    let mut i = 0;
+    let mut in_string: Option<u8> = None;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if let Some(quote) = in_string {
+            i += if c == b'\\' { 2 } else { 1 };
+            if c == quote {
+                in_string = None;
+            }
+            continue;
+        }
+        if c == b'"' || c == b'\'' {
+            in_string = Some(c);
+            i += 1;
+            continue;
+        }
+        let at_boundary = i == 0 || !is_ident_byte(bytes[i - 1]);
+        if at_boundary && sig[i..].starts_with(key) && bytes.get(i + key.len()) == Some(&b'=') {
+            let rest = sig[i + key.len() + 1..].trim_start();
+            return if rest.starts_with('"') || rest.starts_with('\'') {
+                first_string_literal(rest)
+            } else {
+                None
+            };
+        }
+        // A full UTF-8 char, not a blind `i += 1` -- `sig[i..]` above only
+        // slices at a valid char boundary if `i` always lands on one; a
+        // multi-byte char outside any string (an allowed if unusual
+        // Python identifier) advanced one raw byte at a time could
+        // otherwise leave `i` mid-character and panic on the next slice.
+        i += sig[i..].chars().next().map_or(1, char::len_utf8);
     }
+    None
+}
+
+fn is_ident_byte(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
 }
 
 fn join_route(prefix: &str, path: &str) -> String {
@@ -262,6 +300,36 @@ mod tests {
                 "prefix"
             ),
             None
+        );
+    }
+
+    #[test]
+    fn kwarg_string_literal_does_not_panic_on_multi_byte_utf8_content() {
+        // Guards the byte-scan fix above: a non-ASCII character inside a
+        // string value must not leave the scan mid-character and panic on
+        // the next `sig[i..]` slice.
+        assert_eq!(
+            kwarg_string_literal(
+                r#"router = APIRouter(tags=["café"], prefix="/items")"#,
+                "prefix"
+            ),
+            Some("/items".to_string())
+        );
+    }
+
+    #[test]
+    fn kwarg_string_literal_ignores_the_key_text_inside_another_kwargs_value() {
+        // Code-review finding: an unanchored `sig.find("prefix=")`
+        // matched the *literal text* "prefix=" wherever it first
+        // appeared, including inside an earlier kwarg's own string value
+        // -- corrupting the parsed route prefix.
+        assert_eq!(
+            kwarg_string_literal(
+                r#"router = APIRouter(responses={404: {"description": "see prefix=legacy for old routes"}}, prefix="/items")"#,
+                "prefix"
+            ),
+            Some("/items".to_string()),
+            "must find the real prefix= kwarg, not the literal text inside another kwarg's string value"
         );
     }
 
