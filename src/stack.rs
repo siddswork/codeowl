@@ -349,10 +349,9 @@ impl StackPack for JavaStack {
 /// The Python stack (M17): `tree-sitter-python` extraction + dotted-module
 /// import resolution over `.py` files, plus the symbol-level
 /// `is_schema_symbol` seam (SQLModel `table=True` / SQLAlchemy `Base`
-/// subclass → `Schema` nodes). Exercised on
+/// subclass → `Schema` nodes) and the FastAPI `feature_model()` (routes as
+/// entry points, `Depends()` / param-type flow edges). Exercised on
 /// `full-stack-fastapi-template/backend` (a FastAPI + SQLModel service).
-/// Still to come: the FastAPI `feature_model()` — so `extract_flow_edges`
-/// is empty and `feature_model()` takes the trait default `None`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PythonStack;
 
