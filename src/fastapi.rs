@@ -16,6 +16,8 @@
 //! segment is what the slug and BA-facing title need; the API-version
 //! prefix is cosmetic (`ROADMAP.md` M17 → "router-prefix resolution").
 
+use std::collections::HashMap;
+
 use crate::features::{EntryPoint, FeatureModel};
 use crate::graph::Graph;
 use crate::symbol::SymbolKind;
@@ -36,12 +38,22 @@ pub struct FastApiFeatureModel;
 
 impl FeatureModel for FastApiFeatureModel {
     fn enumerate_entry_points(&self, graph: &Graph) -> Vec<EntryPoint> {
+        // `router_prefix` scans every symbol in the file looking for its
+        // `APIRouter(prefix=...)` -- the same answer for every route the
+        // file hosts, so a file with several routes (the common case)
+        // must not pay for that scan once per route. Memoized per file for
+        // this one enumeration call (code-review finding).
+        let mut prefix_cache: HashMap<&str, Option<String>> = HashMap::new();
         let mut out: Vec<EntryPoint> = graph
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
             .filter_map(|s| {
                 let (verb, raw_path) = s.markers.iter().find_map(|m| parse_route_decorator(m))?;
-                let prefix = router_prefix(graph, &s.file).unwrap_or_default();
+                let prefix = prefix_cache
+                    .entry(s.file.as_str())
+                    .or_insert_with(|| router_prefix(graph, &s.file))
+                    .clone()
+                    .unwrap_or_default();
                 let full = join_route(&prefix, &raw_path);
                 let kind = if verb == "websocket" {
                     "websocket"

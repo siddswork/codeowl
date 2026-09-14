@@ -571,6 +571,13 @@ pub fn assemble_participants(
     let mut core = Vec::new();
     let mut seen = HashSet::new();
     let mut queue = VecDeque::from([entry.file.clone()]);
+    // `entry` is fixed for the whole walk, so `fm.admits_to_core`'s answer
+    // for a given candidate file never changes within one call -- memoized
+    // so a file reached as a candidate from several different core files
+    // before it's dequeued (a real shape: several routes each importing
+    // the same crud module) is only ever judged once (code-review
+    // finding: FastAPI's admits_to_core does a full graph scan per call).
+    let mut admits_to_core_cache: HashMap<String, bool> = HashMap::new();
 
     while let Some(file) = queue.pop_front() {
         if !seen.insert(file.clone()) {
@@ -600,7 +607,10 @@ pub fn assemble_participants(
             if seen.contains(&target_file) {
                 continue;
             }
-            if fm.admits_to_core(graph, entry, &target_file) {
+            let admits = *admits_to_core_cache
+                .entry(target_file.clone())
+                .or_insert_with(|| fm.admits_to_core(graph, entry, &target_file));
+            if admits {
                 queue.push_back(target_file);
             }
         }
