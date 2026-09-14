@@ -367,6 +367,12 @@ impl CodeOwlServer {
     /// regardless of which one is actually still missing — the M17
     /// dogfood bug where, once the first route's feature spec existed,
     /// every other route on that file reported `{"kind":"done"}`.
+    ///
+    /// This "first not-yet-current entry" walk is only correct for a bare
+    /// file-path `target` (the intentional round-robin `codeowl-generate.md`
+    /// documents: repeat against the same file to drain every feature it
+    /// hosts). A `feature:<slug>` target must not land here — see
+    /// `next_task_for_feature`, which resolves to that exact entry instead.
     fn next_feature_task_response(
         &self,
         graph: &Graph,
@@ -379,27 +385,71 @@ impl CodeOwlServer {
             else {
                 continue; // this entry's feature is already current
             };
-            return Ok(Json(Some(SpecTaskResponse::Feature {
-                id: format!("feature:{}", task.slug),
-                entry_point: task.entry_point,
-                core_sources: task
-                    .core_sources
-                    .into_iter()
-                    .map(|(file, source)| CoreSource { file, source })
-                    .collect(),
-                dependencies: task
-                    .dependencies
-                    .into_iter()
-                    .map(|(id, summary)| DependencyContext { id, summary })
-                    .collect(),
-                data: task
-                    .data
-                    .into_iter()
-                    .map(|(id, columns)| TableContext { id, columns })
-                    .collect(),
-            })));
+            return Ok(Json(Some(Self::feature_task_response(task))));
         }
         Ok(Json(None))
+    }
+
+    /// `feature:<slug>` targets resolve here, never through
+    /// `next_task_for_target`/`next_feature_task_response`'s generic
+    /// file-target walk. That walk returns the first not-yet-current entry
+    /// point *on the file*, which is right for a bare file-path target but
+    /// wrong for a `feature:<slug>` one: `codeowl-generate.md` documents
+    /// `feature:<slug>` as "equivalent to naming the feature's entry
+    /// point," so it must resolve to `entry`'s own task, or report done
+    /// because `entry` itself is current — never a sibling's task, even
+    /// one that sorts earlier and is still pending (the M17 dogfood bug:
+    /// `feature:http-get-items` silently returned
+    /// `feature:http-delete-items-id`'s task instead, because
+    /// `enumerate_entry_points` sorts globally by slug id and the delete
+    /// route sorts first).
+    ///
+    /// The file's own symbol/file ladder still runs first, same bottom-up
+    /// order as every other target — a feature is never offered before its
+    /// hosting file is itself current.
+    fn next_task_for_feature(
+        &self,
+        graph: &Graph,
+        entry: &crate::features::EntryPoint,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        let Some(file_id) = graph.find(&entry.file) else {
+            return Ok(Json(None));
+        };
+        let task = crate::spec::next_task(graph, &self.root, file_id).map_err(|e| e.to_string())?;
+        if let Some(task) = task {
+            return Ok(Json(Some(self.spec_task_to_response(graph, task)?)));
+        }
+        let Some(task) =
+            crate::spec::next_feature_task(graph, &self.root, entry).map_err(|e| e.to_string())?
+        else {
+            return Ok(Json(None)); // this exact feature is already current
+        };
+        Ok(Json(Some(Self::feature_task_response(task))))
+    }
+
+    /// Shared by `next_feature_task_response` (file-target round-robin) and
+    /// `next_task_for_feature` (a specific `feature:<slug>` target): turns
+    /// an assembled `FeatureTask` into the wire response.
+    fn feature_task_response(task: crate::spec::FeatureTask) -> SpecTaskResponse {
+        SpecTaskResponse::Feature {
+            id: format!("feature:{}", task.slug),
+            entry_point: task.entry_point,
+            core_sources: task
+                .core_sources
+                .into_iter()
+                .map(|(file, source)| CoreSource { file, source })
+                .collect(),
+            dependencies: task
+                .dependencies
+                .into_iter()
+                .map(|(id, summary)| DependencyContext { id, summary })
+                .collect(),
+            data: task
+                .data
+                .into_iter()
+                .map(|(id, columns)| TableContext { id, columns })
+                .collect(),
+        }
     }
 
     /// `get_next_spec_task`'s path when `target` doesn't resolve as a
@@ -811,7 +861,7 @@ impl CodeOwlServer {
             else {
                 return Ok(Json(None));
             };
-            return self.next_task_for_target(&graph, &entry.file);
+            return self.next_task_for_feature(&graph, &entry);
         }
         if let Some(dir) = target.strip_prefix("rollup:") {
             return self.next_directory_task_response(&graph, dir);
@@ -2168,6 +2218,115 @@ mod tests {
             panic!("a sibling route on the same file must still be offered a task, got {second:?}");
         };
         assert_eq!(second_id, "feature:http-get-items-id");
+    }
+
+    #[tokio::test]
+    async fn get_next_spec_task_for_a_specific_feature_slug_does_not_substitute_a_sibling() {
+        // A third M17 dogfood finding, read-side, distinct from the two
+        // above: `resolve_next_task`'s `feature:<slug>` branch resolves the
+        // exact `EntryPoint` matching `slug`, then discards everything but
+        // its `.file` and hands that off to the generic file-target chase
+        // -- which, once the file itself is current, falls into
+        // `next_feature_task_response`'s "first not-yet-current entry on
+        // this file" walk. `enumerate_entry_points` sorts globally by slug
+        // id, so a target like `feature:http-get-items` on a file that also
+        // hosts `http-delete-items-id` (alphabetically prior) silently
+        // returns the *delete* route's task instead -- even though nothing
+        // about the delete route was asked for. `feature:<slug>` is
+        // documented (`codeowl-generate.md`) as "equivalent to naming the
+        // feature's entry point"; it must return that entry's own task, or
+        // report done because that entry itself is current -- never a
+        // sibling's task.
+        let server = test_server(&[(
+            "app/api/routes/items.py",
+            "router = APIRouter(prefix=\"/items\")\n\n\n@router.get(\"/\")\ndef read_items():\n    return []\n\n\n@router.delete(\"/{id}\")\ndef delete_item(id: int):\n    return None\n",
+        )]);
+
+        // Drain the file's own ladder -- both entry points share it.
+        for _ in 0..2 {
+            let task = server
+                .get_next_spec_task(Parameters(GenerateTaskRequest {
+                    target: "app/api/routes/items.py".to_string(),
+                }))
+                .await
+                .unwrap()
+                .0;
+            let SpecTaskResponse::Symbol { id, .. } = task else {
+                panic!("expected a Symbol task, got {task:?}");
+            };
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id,
+                    content: "### Summary\nHandles one HTTP endpoint.\n### Behavior\nDelegates to the ORM for the actual query or mutation.\n".to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+        let file_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "app/api/routes/items.py".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(matches!(file_task, SpecTaskResponse::File { .. }));
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "app/api/routes/items.py".to_string(),
+                content: "Item routes -- list and delete endpoints backed by the item table."
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Ask for the GET route specifically, without ever touching the
+        // DELETE route (which sorts first alphabetically as
+        // `http-delete-items-id`). The bug: this used to hand back the
+        // delete route's task instead.
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "feature:http-get-items".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        let SpecTaskResponse::Feature { id, .. } = task else {
+            panic!("expected the requested feature's own task, got {task:?}");
+        };
+        assert_eq!(
+            id, "feature:http-get-items",
+            "a feature:<slug> target must never substitute a file sibling's task"
+        );
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id,
+                content: "# Items\n## Summary\nLists every item belonging to the current user.\n"
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // The untouched sibling is still independently obtainable and
+        // wasn't silently consumed by the request above.
+        let sibling_spec = server
+            .get_spec(Parameters(IdRequest {
+                id: "feature:http-delete-items-id".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(sibling_spec.status, "missing");
+        let sibling_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "feature:http-delete-items-id".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(
+            matches!(&sibling_task, SpecTaskResponse::Feature { id, .. } if id == "feature:http-delete-items-id"),
+            "the sibling must still get its own task when targeted directly, got {sibling_task:?}"
+        );
     }
 
     #[tokio::test]
