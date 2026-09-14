@@ -630,9 +630,12 @@ pub fn assemble_participants(
     }
 
     // The rest of the `data` tier: every flow edge from a `core` file that
-    // resolves to a *symbol* rather than a file. For the TS+SQL pack those
-    // are the Supabase `.from("table")` refs landing on a `SymbolKind::Schema`;
-    // the walk doesn't need to know that.
+    // resolves to a *table* symbol. For the TS+SQL pack those are the
+    // Supabase `.from("table")` refs; the walk doesn't need to know that --
+    // it just applies the same `SymbolKind::Schema` check the import-
+    // resolved path above already does, so a flow edge resolving to an
+    // ordinary (non-table) symbol lands in `dependencies` instead, exactly
+    // as an import to the same symbol would.
     for file in &core {
         for edge in graph.flow_edges().iter().filter(|e| &e.from_file == file) {
             let FlowTarget::Node(target) = edge.target else {
@@ -642,8 +645,15 @@ pub fn assemble_participants(
                 continue;
             }
             let id = graph.string_id(target).to_string();
-            if seen_data.insert(id.clone()) {
-                data.push(id);
+            if graph
+                .get_symbol(target)
+                .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
+            {
+                if seen_data.insert(id.clone()) {
+                    data.push(id);
+                }
+            } else if seen_deps.insert(id.clone()) {
+                dependencies.push(id);
             }
         }
     }
@@ -878,6 +888,58 @@ mod tests {
         assert_eq!(
             participants.dependencies,
             vec!["lib/supabase.ts::getSupabase".to_string()]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_flow_edge_resolving_to_a_non_schema_symbol_is_a_dependency_not_data() {
+        // Code-review finding: the `data` tier was classified
+        // inconsistently between the two paths that populate it -- the
+        // import-resolved path (above) requires SymbolKind::Schema before
+        // routing a target into `data`, but the flow-edge-resolved path
+        // below it treated *any* symbol a flow edge resolves to as
+        // `data`, unconditionally, with no kind check. Currently harmless
+        // (every stack's flow edges that resolve straight to a symbol
+        // happen to be table refs), but latent: a future flow-edge kind
+        // resolving to an ordinary (non-table) symbol would be silently
+        // mis-tagged into `data` instead of `dependencies`. Reproduced
+        // here with a hand-crafted flow edge, since no real pack produces
+        // this shape today.
+        let (mut graph, dir) = fixture(
+            "assemble-non-schema-flow-edge",
+            &[
+                (
+                    "app/submit/page.tsx",
+                    "export default function Page() { return null; }\n",
+                ),
+                ("lib/util.ts", "export function util(): void {}\n"),
+            ],
+        );
+        let target = graph.find("lib/util.ts::util").unwrap();
+        graph.set_flow_edges(vec![crate::graph::FlowEdge {
+            from_file: "app/submit/page.tsx".to_string(),
+            kind: "test-non-schema".to_string(),
+            raw: "util".to_string(),
+            target: FlowTarget::Node(target),
+        }]);
+
+        let fm = default_feature_model();
+        let entry = fm
+            .enumerate_entry_points(&graph)
+            .into_iter()
+            .find(|e| e.id == "submit")
+            .unwrap();
+        let participants = assemble_participants(&graph, fm, &entry);
+        assert_eq!(
+            participants.dependencies,
+            vec!["lib/util.ts::util".to_string()],
+            "a flow edge to a non-table symbol belongs in dependencies: {participants:?}"
+        );
+        assert!(
+            !participants.data.contains(&"lib/util.ts::util".to_string()),
+            "a non-table symbol must never land in data: {participants:?}"
         );
 
         std::fs::remove_dir_all(&dir).ok();
