@@ -273,9 +273,7 @@ fn docstring(node: Node, source: &str) -> Option<String> {
     }
     let raw = text(s, source);
     let inner = raw
-        .trim_start_matches(|c| {
-            c == 'r' || c == 'b' || c == 'u' || c == 'f' || c == 'R' || c == 'B'
-        })
+        .trim_start_matches(['r', 'b', 'u', 'f', 'R', 'B', 'F', 'U'])
         .trim_matches('"')
         .trim_matches('\'');
     let lines: Vec<&str> = inner
@@ -843,6 +841,24 @@ def get_db():
             .map(|s| (s.id.rsplit("::").next().unwrap(), s.is_exported))
             .collect();
         assert_eq!(vals, vec![("_internal", false), ("VERSION", true)]);
+    }
+
+    #[test]
+    fn an_uppercase_f_or_u_string_prefix_is_stripped_from_a_docstring() {
+        // Code-review finding: the prefix stripper handled r/b/u/f/R/B but
+        // not F/U, even though tree-sitter-python tags an f-string as the
+        // same "string" node kind a plain docstring is. An F"""..."""
+        // first statement (legal syntax, if unconventional -- Python
+        // itself doesn't treat an f-string as __doc__, but this function
+        // extracts whatever string literal is first regardless) kept a
+        // stray leading 'F' glued onto the extracted text.
+        let src = "def f():\n    F\"\"\"Formatted-looking docstring.\"\"\"\n    ...\n";
+        let syms = extract_file(src, "m.py");
+        assert_eq!(
+            syms[0].docstring.as_deref(),
+            Some("Formatted-looking docstring."),
+            "a leading F/U string prefix must be stripped like r/b/u/f/R/B already are"
+        );
     }
 
     #[test]
