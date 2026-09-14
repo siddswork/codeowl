@@ -1408,12 +1408,7 @@ pub fn submit_feature(
         .enumerate_entry_points(graph)
         .into_iter()
         .find(|e| e.id == entry_id)
-        .unwrap_or_else(|| EntryPoint {
-            kind: String::new(),
-            id: entry_id.to_string(),
-            title: String::new(),
-            file: entry_id.to_string(),
-        });
+        .with_context(|| format!("no feature entry point with slug {entry_id:?}"))?;
     let slug = entry.id.clone();
     let entry_file = entry.file.clone();
     let participants = assemble_participants(graph, fm, &entry);
@@ -3258,6 +3253,46 @@ impl Counter {\n\
         let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "2");
         let result = submit_feature(&graph, &dir, "submit", "no title here, just prose");
         assert!(result.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_feature_errors_loudly_on_an_id_matching_no_entry_point() {
+        // Code-review finding: an unmatched entry_id used to fall back to a
+        // fabricated EntryPoint whose `file` field was the raw id/slug
+        // string itself (a leftover from entry_file -> entry_id being
+        // renamed without updating this fallback's semantics) -- not a
+        // real path. The dangerous case is an entry_id that happens to
+        // collide with a *real* node in the graph that isn't a feature
+        // entry point at all -- here, `lib/supabase.ts`, a real file in
+        // the fixture, but not the fixture's one real entry point
+        // ("submit"). Under the fallback, assemble_participants/
+        // current_participant_hashes both succeed against that
+        // coincidentally-real file, silently persisting a nonsensical
+        // "feature" spec whose slug and entry_point are just a random
+        // file's path. mcp.rs's sole production caller pre-validates the
+        // id today, so this was unreachable there, but submit_feature is
+        // `pub fn` and directly callable (as this test is) -- it must
+        // fail loudly on its own, not rely on every future caller
+        // re-implementing the same pre-validation.
+        let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "no-such-entry");
+        let result = submit_feature(
+            &graph,
+            &dir,
+            "lib/supabase.ts",
+            "# Not a feature\n## Summary\nThis id names a real file, not an entry point.\n",
+        );
+        let err = result.expect_err(
+            "an id that names a real file/symbol but no feature entry point must still error",
+        );
+        assert!(
+            err.to_string().contains("lib/supabase.ts"),
+            "the error should name the id that failed to match, got: {err}"
+        );
+        assert!(
+            !feature_spec_path(&dir, "lib/supabase.ts").exists(),
+            "no spec file should be written for an id that was never a real entry point"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
