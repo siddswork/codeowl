@@ -24,13 +24,14 @@
 //! all. The `extract_*` / `resolve_*` free functions below stay `pub` as
 //! shims for `TypeScriptNextStack` and the tests.
 
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
-use crate::graph::{FlowTarget, Graph, SymbolId};
+use crate::graph::{FlowEdge, FlowTarget, Graph, SymbolId};
 use crate::lang::ts_parser;
+use crate::resolve::ResolvedImport;
 
 /// One `fetch("/api/...")` call site found anywhere in a file — not just
 /// top-level, since these calls are almost always inside event handlers or
@@ -545,6 +546,28 @@ pub fn assemble_participants(
     fm: &dyn FeatureModel,
     entry: &EntryPoint,
 ) -> Participants {
+    // Group every flow edge / resolved import by its `from_file` once, up
+    // front, instead of re-filtering the whole list by `from_file == file`
+    // in each of the three passes below (code-review finding: the BFS
+    // below, the dependencies loop, and the data loop each independently
+    // rescanned the same edge lists for the same file).
+    let mut flow_by_file: HashMap<&str, Vec<&FlowEdge>> = HashMap::new();
+    for e in graph.flow_edges() {
+        flow_by_file
+            .entry(e.from_file.as_str())
+            .or_default()
+            .push(e);
+    }
+    let mut imports_by_file: HashMap<&str, Vec<&ResolvedImport>> = HashMap::new();
+    for i in graph.imports() {
+        imports_by_file
+            .entry(i.from_file.as_str())
+            .or_default()
+            .push(i);
+    }
+    let flow_edges_from = |file: &str| flow_by_file.get(file).into_iter().flatten().copied();
+    let imports_from = |file: &str| imports_by_file.get(file).into_iter().flatten().copied();
+
     let mut core = Vec::new();
     let mut seen = HashSet::new();
     let mut queue = VecDeque::from([entry.file.clone()]);
@@ -564,19 +587,11 @@ pub fn assemble_participants(
         //      like Python's `from app import crud` (M17; a named symbol
         //      import resolves to a symbol and is handled in the
         //      `dependencies` tier below, never here).
-        let flow_targets = graph
-            .flow_edges()
-            .iter()
-            .filter(|e| e.from_file == file)
-            .filter_map(|e| match e.target {
-                FlowTarget::Node(t) => Some(t),
-                FlowTarget::Unresolved => None,
-            });
-        let import_targets = graph
-            .imports()
-            .iter()
-            .filter(|i| i.from_file == file)
-            .filter_map(|i| i.target);
+        let flow_targets = flow_edges_from(&file).filter_map(|e| match e.target {
+            FlowTarget::Node(t) => Some(t),
+            FlowTarget::Unresolved => None,
+        });
+        let import_targets = imports_from(&file).filter_map(|i| i.target);
         for target in flow_targets.chain(import_targets) {
             if graph.get_file(target).is_none() {
                 continue; // an edge into a symbol (a table) — not `core`
@@ -596,8 +611,26 @@ pub fn assemble_participants(
 
     let mut dependencies = Vec::new();
     let mut seen_deps = HashSet::new();
+    // A symbol target reached from a `core` file — by import or by flow
+    // edge — lands in `data` if it's a table (an in-language ORM model,
+    // M17's `is_schema_symbol`, or the TS+SQL pack's `.from("table")`
+    // flow edge target) and `dependencies` otherwise. Shared by both
+    // passes below so an import and a flow edge to the same kind of
+    // symbol are classified identically.
+    let mut classify_symbol_target = |id: String, target: SymbolId| {
+        if graph
+            .get_symbol(target)
+            .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
+        {
+            if seen_data.insert(id.clone()) {
+                data.push(id);
+            }
+        } else if seen_deps.insert(id.clone()) {
+            dependencies.push(id);
+        }
+    };
     for file in &core {
-        for imp in graph.imports().iter().filter(|i| &i.from_file == file) {
+        for imp in imports_from(file) {
             let Some(target) = imp.target else { continue };
             // A module import (`from app import crud`) resolves to a file
             // node — it either joined `core` above or does no data work;
@@ -612,49 +645,20 @@ pub fn assemble_participants(
             if core.contains(&id) {
                 continue;
             }
-            // An import that resolves to a table symbol is `data`, not a
-            // plain dependency — an in-language ORM model (M17's
-            // `is_schema_symbol`) is reached this way, where the TS+SQL
-            // pack reaches its tables via a `.from("table")` flow edge.
-            if graph
-                .get_symbol(target)
-                .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
-            {
-                if seen_data.insert(id.clone()) {
-                    data.push(id);
-                }
-            } else if seen_deps.insert(id.clone()) {
-                dependencies.push(id);
-            }
+            classify_symbol_target(id, target);
         }
     }
-
-    // The rest of the `data` tier: every flow edge from a `core` file that
-    // resolves to a *table* symbol. For the TS+SQL pack those are the
-    // Supabase `.from("table")` refs; the walk doesn't need to know that --
-    // it just applies the same `SymbolKind::Schema` check the import-
-    // resolved path above already does, so a flow edge resolving to an
-    // ordinary (non-table) symbol lands in `dependencies` instead, exactly
-    // as an import to the same symbol would.
+    // The rest of the `data`/`dependencies` tiers: every flow edge from a
+    // `core` file that resolves to a symbol rather than a file.
     for file in &core {
-        for edge in graph.flow_edges().iter().filter(|e| &e.from_file == file) {
+        for edge in flow_edges_from(file) {
             let FlowTarget::Node(target) = edge.target else {
                 continue;
             };
             if graph.get_file(target).is_some() {
                 continue;
             }
-            let id = graph.string_id(target).to_string();
-            if graph
-                .get_symbol(target)
-                .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
-            {
-                if seen_data.insert(id.clone()) {
-                    data.push(id);
-                }
-            } else if seen_deps.insert(id.clone()) {
-                dependencies.push(id);
-            }
+            classify_symbol_target(graph.string_id(target).to_string(), target);
         }
     }
     data.sort();
