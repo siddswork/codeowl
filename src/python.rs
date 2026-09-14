@@ -485,11 +485,19 @@ fn resolve_one(
     {
         return Some(id);
     }
-    // (2) `name` is a submodule / subpackage of the specifier.
-    for cand in [
-        format!("{mod_path}/{name}.py"),
-        format!("{mod_path}/{name}/__init__.py"),
-    ] {
+    // (2) `name` is a submodule / subpackage of the specifier. `mod_path`
+    // is empty for a bare single-segment `import app` (nothing for
+    // `rsplit_once('.')` to split, so `extract_imports` records specifier
+    // "" / name "app") -- joining with a literal `/` there would produce
+    // a spuriously-leading-slash `"/app.py"` that can never match a real
+    // repo-relative path, the same empty-prefix join `module_path`'s own
+    // relative-import branch above already has to guard against.
+    let mod_name = if mod_path.is_empty() {
+        name.to_string()
+    } else {
+        format!("{mod_path}/{name}")
+    };
+    for cand in [format!("{mod_name}.py"), format!("{mod_name}/__init__.py")] {
         if let Some(sub) = pick_file(file_imports, &[cand])
             && let Some(id) = graph.find(sub)
         {
@@ -696,9 +704,53 @@ fn collect_route_deps(node: Node, source: &str, file: &str, out: &mut Vec<Unreso
 
 /// A `depends` / `dep-type` edge → the file node that declares `raw`, or
 /// `Unresolved` (a stdlib type, an inline `Depends()` with no name, a typo).
+///
+/// Resolution follows the same precedence Python's own name lookup would:
+/// a declaration in the route's own file wins first (code-review finding:
+/// a per-router local `get_db` must resolve to itself, not a same-named
+/// `get_db` elsewhere that happens to sort first); failing that, whatever
+/// `edge.from_file` actually imported under that name -- the real
+/// disambiguator when two *different* files each declare a same-named
+/// FastAPI dependency (a per-router local one beside the real one in
+/// `app/api/deps.py`, before consolidation). Only when neither applies
+/// (the name isn't declared locally or resolvably imported -- a wildcard
+/// import, or genuinely not present) does this fall back to a best-effort,
+/// deterministic global search, tie-broken alphabetically.
 pub fn resolve_flow_edge(graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
     if !matches!(edge.kind.as_str(), "depends" | "dep-type") {
         return FlowTarget::Unresolved;
+    }
+    // A name declared right in the route's own file wins first -- Python's
+    // own scoping would use it regardless of what else shares the name
+    // elsewhere in the graph.
+    if graph
+        .find(&format!("{}::{}", edge.from_file, edge.raw))
+        .is_some()
+    {
+        return graph
+            .find(&edge.from_file)
+            .map_or(FlowTarget::Unresolved, FlowTarget::Node);
+    }
+    // Next, whatever `edge.from_file` actually imported under that name --
+    // the real disambiguator when two different files each declare a
+    // same-named dependency. The import may have resolved straight to a
+    // file node (`from app import crud`) or to a specific declaration
+    // inside one (`SessionDep = Session`) -- either way this function's
+    // contract is "the file node", so a symbol target is followed back to
+    // the file that declares it.
+    if let Some(target) = graph
+        .imports()
+        .iter()
+        .find(|imp| imp.from_file == edge.from_file && imp.imported_name == edge.raw)
+        .and_then(|imp| imp.target)
+    {
+        let file_id = match graph.get_symbol(target) {
+            Some(sym) => graph.find(&sym.file),
+            None => Some(target),
+        };
+        if let Some(file_id) = file_id {
+            return FlowTarget::Node(file_id);
+        }
     }
     let mut files: Vec<&str> = graph
         .symbols()
@@ -934,6 +986,69 @@ from legacy import *
     }
 
     #[test]
+    fn depends_resolves_via_the_route_files_own_import_not_alphabetically() {
+        // Code-review finding: resolve_flow_edge used to match a
+        // `Depends(x)`/bare-param-type dependency's name against *every*
+        // symbol in the graph and break ties by picking whichever
+        // declaring file sorted first alphabetically -- ignoring which
+        // file the route actually imported the name from. Two files each
+        // declaring their own same-named FastAPI dependency (a real
+        // shape: a per-router local `get_db` beside the real one in
+        // `app/api/deps.py`) would silently bind to the wrong one.
+        // `app/aaa_decoy.py` is named to sort before `app/api/deps.py` so
+        // the old alphabetical fallback picks it if this regresses.
+        let (mut graph, edges) = resolved(&[
+            ("app/aaa_decoy.py", "def get_db():\n    yield None\n"),
+            ("app/api/deps.py", "def get_db():\n    yield Session()\n"),
+            (
+                "app/api/routes/items.py",
+                "from app.api.deps import get_db\n",
+            ),
+        ]);
+        graph.set_resolved_imports(edges);
+
+        let edge = UnresolvedFlowEdge {
+            from_file: "app/api/routes/items.py".to_string(),
+            kind: "depends".to_string(),
+            raw: "get_db".to_string(),
+        };
+        let want = graph.find("app/api/deps.py").unwrap();
+        assert_eq!(
+            resolve_flow_edge(&graph, &edge),
+            FlowTarget::Node(want),
+            "must resolve to the file items.py actually imports get_db from, not the alphabetically-first same-named decoy"
+        );
+    }
+
+    #[test]
+    fn depends_prefers_a_local_declaration_over_a_same_named_import_elsewhere() {
+        // A per-router local dependency (no import needed -- it's declared
+        // right in the route's own file) must resolve to itself even when
+        // an alphabetically-earlier file elsewhere declares a same-named
+        // one, exactly matching Python's own name resolution.
+        let (mut graph, edges) = resolved(&[
+            ("app/aaa_decoy.py", "def get_db():\n    yield None\n"),
+            (
+                "app/api/routes/items.py",
+                "def get_db():\n    yield Session()\n",
+            ),
+        ]);
+        graph.set_resolved_imports(edges);
+
+        let edge = UnresolvedFlowEdge {
+            from_file: "app/api/routes/items.py".to_string(),
+            kind: "depends".to_string(),
+            raw: "get_db".to_string(),
+        };
+        let want = graph.find("app/api/routes/items.py").unwrap();
+        assert_eq!(
+            resolve_flow_edge(&graph, &edge),
+            FlowTarget::Node(want),
+            "a locally-declared dependency must resolve to its own file, not a same-named decoy elsewhere"
+        );
+    }
+
+    #[test]
     fn relative_and_parent_imports_resolve_against_the_package() {
         let (g, edges) = resolved(&[
             (
@@ -957,6 +1072,29 @@ from legacy import *
         assert_eq!(
             g.string_id(crud.target.expect("crud submodule resolves")),
             "app/api/routes/crud.py"
+        );
+    }
+
+    #[test]
+    fn a_bare_single_segment_import_resolves_to_the_repos_own_top_level_package() {
+        // Code-review finding: `import app` (a single-segment absolute
+        // import -- distinct from `from app.x import y`, which already
+        // worked) produces an `ImportRef` with an *empty* specifier
+        // (nothing to `rsplit_once('.')` on), and `module_path` returning
+        // `Some("")` made every candidate path `resolve_one` built from it
+        // malformed (`"/app.py"`, `"/app/__init__.py"` -- a spurious
+        // leading `/`), so the import always resolved to `None` even when
+        // `app` is a real, walked package. This is a normal idiom for
+        // CodeOwl's own repo (`import lang` / `import graph`-style module
+        // access) as much as any target repo's.
+        let (g, edges) = resolved(&[("app/__init__.py", ""), ("app/main.py", "import app\n")]);
+        let imp = edges.iter().find(|e| e.imported_name == "app").unwrap();
+        assert_eq!(
+            g.string_id(
+                imp.target
+                    .expect("`import app` resolves to the app package")
+            ),
+            "app/__init__.py"
         );
     }
 
