@@ -24,13 +24,14 @@
 //! all. The `extract_*` / `resolve_*` free functions below stay `pub` as
 //! shims for `TypeScriptNextStack` and the tests.
 
-use std::collections::{BTreeSet, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
-use crate::graph::{FlowTarget, Graph, SymbolId};
+use crate::graph::{FlowEdge, FlowTarget, Graph, SymbolId};
 use crate::lang::ts_parser;
+use crate::resolve::ResolvedImport;
 
 /// One `fetch("/api/...")` call site found anywhere in a file — not just
 /// top-level, since these calls are almost always inside event handlers or
@@ -545,65 +546,129 @@ pub fn assemble_participants(
     fm: &dyn FeatureModel,
     entry: &EntryPoint,
 ) -> Participants {
+    // Group every flow edge / resolved import by its `from_file` once, up
+    // front, instead of re-filtering the whole list by `from_file == file`
+    // in each of the three passes below (code-review finding: the BFS
+    // below, the dependencies loop, and the data loop each independently
+    // rescanned the same edge lists for the same file).
+    let mut flow_by_file: HashMap<&str, Vec<&FlowEdge>> = HashMap::new();
+    for e in graph.flow_edges() {
+        flow_by_file
+            .entry(e.from_file.as_str())
+            .or_default()
+            .push(e);
+    }
+    let mut imports_by_file: HashMap<&str, Vec<&ResolvedImport>> = HashMap::new();
+    for i in graph.imports() {
+        imports_by_file
+            .entry(i.from_file.as_str())
+            .or_default()
+            .push(i);
+    }
+    let flow_edges_from = |file: &str| flow_by_file.get(file).into_iter().flatten().copied();
+    let imports_from = |file: &str| imports_by_file.get(file).into_iter().flatten().copied();
+
     let mut core = Vec::new();
     let mut seen = HashSet::new();
     let mut queue = VecDeque::from([entry.file.clone()]);
+    // `entry` is fixed for the whole walk, so `fm.admits_to_core`'s answer
+    // for a given candidate file never changes within one call -- memoized
+    // so a file reached as a candidate from several different core files
+    // before it's dequeued (a real shape: several routes each importing
+    // the same crud module) is only ever judged once (code-review
+    // finding: FastAPI's admits_to_core does a full graph scan per call).
+    let mut admits_to_core_cache: HashMap<String, bool> = HashMap::new();
 
     while let Some(file) = queue.pop_front() {
         if !seen.insert(file.clone()) {
             continue;
         }
         core.push(file.clone());
-        for edge in graph.flow_edges().iter().filter(|e| e.from_file == file) {
-            let FlowTarget::Node(target) = edge.target else {
-                continue;
-            };
-            // Only an edge into a *file* can pull that file into `core`;
-            // an edge into a symbol (a SQL table) is the `data` tier,
-            // collected below.
+
+        // Two ways a file can pull another *file* into `core`, both gated
+        // by `fm.admits_to_core`:
+        //   1. a flow edge into a file node (the pilot's route-literal /
+        //      rendered-component edges; M17's `Depends()` / param-type
+        //      edges), and
+        //   2. an import that resolves to a file node — a module import
+        //      like Python's `from app import crud` (M17; a named symbol
+        //      import resolves to a symbol and is handled in the
+        //      `dependencies` tier below, never here).
+        let flow_targets = flow_edges_from(&file).filter_map(|e| match e.target {
+            FlowTarget::Node(t) => Some(t),
+            FlowTarget::Unresolved => None,
+        });
+        let import_targets = imports_from(&file).filter_map(|i| i.target);
+        for target in flow_targets.chain(import_targets) {
             if graph.get_file(target).is_none() {
-                continue;
+                continue; // an edge into a symbol (a table) — not `core`
             }
             let target_file = graph.string_id(target).to_string();
             if seen.contains(&target_file) {
                 continue;
             }
-            if fm.admits_to_core(graph, entry, &target_file) {
+            let admits = *admits_to_core_cache
+                .entry(target_file.clone())
+                .or_insert_with(|| fm.admits_to_core(graph, entry, &target_file));
+            if admits {
                 queue.push_back(target_file);
             }
         }
     }
 
-    let mut dependencies = Vec::new();
-    let mut seen_deps = HashSet::new();
-    for file in &core {
-        for imp in graph.imports().iter().filter(|i| &i.from_file == file) {
-            let Some(target) = imp.target else { continue };
-            let id = graph.string_id(target).to_string();
-            if !core.contains(&id) && seen_deps.insert(id.clone()) {
-                dependencies.push(id);
-            }
-        }
-    }
-
-    // The `data` tier: every flow edge from a `core` file that resolves
-    // to a *symbol* rather than a file. For the TS+SQL pack those are the
-    // Supabase `.from("table")` refs landing on a `SymbolKind::Schema`;
-    // the walk doesn't need to know that.
     let mut data = Vec::new();
     let mut seen_data = HashSet::new();
+
+    let mut dependencies = Vec::new();
+    let mut seen_deps = HashSet::new();
+    // A symbol target reached from a `core` file — by import or by flow
+    // edge — lands in `data` if it's a table (an in-language ORM model,
+    // M17's `is_schema_symbol`, or the TS+SQL pack's `.from("table")`
+    // flow edge target) and `dependencies` otherwise. Shared by both
+    // passes below so an import and a flow edge to the same kind of
+    // symbol are classified identically.
+    let mut classify_symbol_target = |id: String, target: SymbolId| {
+        if graph
+            .get_symbol(target)
+            .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
+        {
+            if seen_data.insert(id.clone()) {
+                data.push(id);
+            }
+        } else if seen_deps.insert(id.clone()) {
+            dependencies.push(id);
+        }
+    };
     for file in &core {
-        for edge in graph.flow_edges().iter().filter(|e| &e.from_file == file) {
+        for imp in imports_from(file) {
+            let Some(target) = imp.target else { continue };
+            // A module import (`from app import crud`) resolves to a file
+            // node — it either joined `core` above or does no data work;
+            // either way it isn't a one-hop *symbol* dependency (those are
+            // keyed on `interface_hash`, which a file has none of). The
+            // edge still shows in `get_callers`. (M17 — feature-participant
+            // granularity for module imports is an M19 question.)
+            if graph.get_file(target).is_some() {
+                continue;
+            }
+            let id = graph.string_id(target).to_string();
+            if core.contains(&id) {
+                continue;
+            }
+            classify_symbol_target(id, target);
+        }
+    }
+    // The rest of the `data`/`dependencies` tiers: every flow edge from a
+    // `core` file that resolves to a symbol rather than a file.
+    for file in &core {
+        for edge in flow_edges_from(file) {
             let FlowTarget::Node(target) = edge.target else {
                 continue;
             };
             if graph.get_file(target).is_some() {
                 continue;
             }
-            let id = graph.string_id(target).to_string();
-            if seen_data.insert(id.clone()) {
-                data.push(id);
-            }
+            classify_symbol_target(graph.string_id(target).to_string(), target);
         }
     }
     data.sort();
@@ -824,7 +889,7 @@ mod tests {
         let entry = fm
             .enumerate_entry_points(&graph)
             .into_iter()
-            .find(|e| e.file == "app/submit/page.tsx")
+            .find(|e| e.id == "submit")
             .unwrap();
         let participants = assemble_participants(&graph, fm, &entry);
         assert_eq!(
@@ -837,6 +902,58 @@ mod tests {
         assert_eq!(
             participants.dependencies,
             vec!["lib/supabase.ts::getSupabase".to_string()]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_flow_edge_resolving_to_a_non_schema_symbol_is_a_dependency_not_data() {
+        // Code-review finding: the `data` tier was classified
+        // inconsistently between the two paths that populate it -- the
+        // import-resolved path (above) requires SymbolKind::Schema before
+        // routing a target into `data`, but the flow-edge-resolved path
+        // below it treated *any* symbol a flow edge resolves to as
+        // `data`, unconditionally, with no kind check. Currently harmless
+        // (every stack's flow edges that resolve straight to a symbol
+        // happen to be table refs), but latent: a future flow-edge kind
+        // resolving to an ordinary (non-table) symbol would be silently
+        // mis-tagged into `data` instead of `dependencies`. Reproduced
+        // here with a hand-crafted flow edge, since no real pack produces
+        // this shape today.
+        let (mut graph, dir) = fixture(
+            "assemble-non-schema-flow-edge",
+            &[
+                (
+                    "app/submit/page.tsx",
+                    "export default function Page() { return null; }\n",
+                ),
+                ("lib/util.ts", "export function util(): void {}\n"),
+            ],
+        );
+        let target = graph.find("lib/util.ts::util").unwrap();
+        graph.set_flow_edges(vec![crate::graph::FlowEdge {
+            from_file: "app/submit/page.tsx".to_string(),
+            kind: "test-non-schema".to_string(),
+            raw: "util".to_string(),
+            target: FlowTarget::Node(target),
+        }]);
+
+        let fm = default_feature_model();
+        let entry = fm
+            .enumerate_entry_points(&graph)
+            .into_iter()
+            .find(|e| e.id == "submit")
+            .unwrap();
+        let participants = assemble_participants(&graph, fm, &entry);
+        assert_eq!(
+            participants.dependencies,
+            vec!["lib/util.ts::util".to_string()],
+            "a flow edge to a non-table symbol belongs in dependencies: {participants:?}"
+        );
+        assert!(
+            !participants.data.contains(&"lib/util.ts::util".to_string()),
+            "a non-table symbol must never land in data: {participants:?}"
         );
 
         std::fs::remove_dir_all(&dir).ok();

@@ -1,4 +1,5 @@
 pub mod extract;
+pub mod fastapi;
 pub mod features;
 pub mod graph;
 pub mod hash;
@@ -7,6 +8,7 @@ pub mod index;
 pub mod java;
 pub mod lang;
 pub mod mcp;
+pub mod python;
 pub mod resolve;
 pub mod rust;
 pub mod schema;

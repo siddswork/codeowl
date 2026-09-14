@@ -1370,11 +1370,23 @@ pub fn next_feature_task(
 }
 
 /// Persist `content` (the agent's LLM-written feature narrative, title
-/// included) as `entry_file`'s feature spec.
+/// included) as `entry_id`'s feature spec.
+///
+/// **Resolves the entry by its `id` (the feature slug), never by `file`.**
+/// A file-based lookup (`.find(|e| e.file == …)`) is ambiguous the moment
+/// a stack's entry points can share a file — several `@router` decorators
+/// in one FastAPI module (M17), where the pilot's Next.js pages/routes
+/// were always one-per-file and never exposed this. The pre-M17 signature
+/// took the entry's *file* and re-derived "which entry" from it, which
+/// silently resolved to the wrong sibling entry once a file had several —
+/// misattributing (and overwriting) a *different* feature's spec on disk.
+/// `get_next_spec_task`'s `next_feature_task_response` had the identical
+/// bug on the read side (fixed separately); this is the write-side twin,
+/// found by the `full-stack-fastapi-template` dogfood.
 pub fn submit_feature(
     graph: &Graph,
     root: &Path,
-    entry_file: &str,
+    entry_id: &str,
     content: &str,
 ) -> Result<FeatureSpec> {
     let body = content.trim().to_string();
@@ -1385,7 +1397,7 @@ pub fn submit_feature(
         bail!("submitted feature content must start with a `# Title` heading");
     }
     reject_if_smelly(
-        &format!("submitted feature spec for {entry_file:?}"),
+        &format!("submitted feature spec for {entry_id:?}"),
         body_smells(&body),
     )?;
 
@@ -1395,20 +1407,16 @@ pub fn submit_feature(
     let entry = fm
         .enumerate_entry_points(graph)
         .into_iter()
-        .find(|e| e.file == entry_file)
-        .unwrap_or_else(|| EntryPoint {
-            kind: String::new(),
-            id: feature_slug(entry_file),
-            title: String::new(),
-            file: entry_file.to_string(),
-        });
+        .find(|e| e.id == entry_id)
+        .with_context(|| format!("no feature entry point with slug {entry_id:?}"))?;
     let slug = entry.id.clone();
+    let entry_file = entry.file.clone();
     let participants = assemble_participants(graph, fm, &entry);
     let hashes = current_participant_hashes(graph, &participants)?;
 
     let spec = FeatureSpec {
         slug: slug.clone(),
-        entry_point: entry_file.to_string(),
+        entry_point: entry_file,
         participants: hashes,
         spec_hash: hash_text(&body),
         body,
@@ -3204,7 +3212,7 @@ impl Counter {\n\
         let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "1");
         let entry = enumerate_entry_points(&graph)
             .into_iter()
-            .find(|e| e.file == "app/submit/page.tsx")
+            .find(|e| e.id == "submit")
             .unwrap();
 
         let task = next_feature_task(&graph, &dir, &entry)
@@ -3229,7 +3237,7 @@ impl Counter {\n\
         submit_feature(
             &graph,
             &dir,
-            "app/submit/page.tsx",
+            "submit",
             "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
         )
         .unwrap();
@@ -3243,13 +3251,48 @@ impl Counter {\n\
     #[test]
     fn submit_feature_rejects_content_without_a_title() {
         let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "2");
+        let result = submit_feature(&graph, &dir, "submit", "no title here, just prose");
+        assert!(result.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submit_feature_errors_loudly_on_an_id_matching_no_entry_point() {
+        // Code-review finding: an unmatched entry_id used to fall back to a
+        // fabricated EntryPoint whose `file` field was the raw id/slug
+        // string itself (a leftover from entry_file -> entry_id being
+        // renamed without updating this fallback's semantics) -- not a
+        // real path. The dangerous case is an entry_id that happens to
+        // collide with a *real* node in the graph that isn't a feature
+        // entry point at all -- here, `lib/supabase.ts`, a real file in
+        // the fixture, but not the fixture's one real entry point
+        // ("submit"). Under the fallback, assemble_participants/
+        // current_participant_hashes both succeed against that
+        // coincidentally-real file, silently persisting a nonsensical
+        // "feature" spec whose slug and entry_point are just a random
+        // file's path. mcp.rs's sole production caller pre-validates the
+        // id today, so this was unreachable there, but submit_feature is
+        // `pub fn` and directly callable (as this test is) -- it must
+        // fail loudly on its own, not rely on every future caller
+        // re-implementing the same pre-validation.
+        let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "no-such-entry");
         let result = submit_feature(
             &graph,
             &dir,
-            "app/submit/page.tsx",
-            "no title here, just prose",
+            "lib/supabase.ts",
+            "# Not a feature\n## Summary\nThis id names a real file, not an entry point.\n",
         );
-        assert!(result.is_err());
+        let err = result.expect_err(
+            "an id that names a real file/symbol but no feature entry point must still error",
+        );
+        assert!(
+            err.to_string().contains("lib/supabase.ts"),
+            "the error should name the id that failed to match, got: {err}"
+        );
+        assert!(
+            !feature_spec_path(&dir, "lib/supabase.ts").exists(),
+            "no spec file should be written for an id that was never a real entry point"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -3540,7 +3583,7 @@ impl Counter {\n\
         submit_feature(
             &graph,
             &dir,
-            "app/submit/page.tsx",
+            "submit",
             "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
         )
         .unwrap();
@@ -3679,7 +3722,7 @@ impl Counter {\n\
         submit_feature(
             &graph,
             &dir,
-            "app/submit/page.tsx",
+            "submit",
             "# Artwork submission\n## Summary\nLets an artist submit artwork for judging.\n",
         )
         .unwrap();

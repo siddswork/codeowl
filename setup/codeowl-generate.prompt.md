@@ -46,13 +46,22 @@ already up to date, no server restart.
   existing corpus honest between full passes.
 
 You don't need to know in advance which single-target shape applies: the
-loop below walks bottom-up (a file's symbols, then the file, then — only
-if this file is also a recognized feature entry point — the feature; for
-a directory, each of its files' own ladder, then the directory's own
-rollup; for `system`/`.`, every module's and every feature's own ladder,
-then the system spec) and just tells you what's next each time. If
-`${input:target}` is empty, ask the user what to generate rather than
-guessing.
+loop below walks bottom-up (a file's symbols, then the file, then — for
+each feature entry point this file hosts, one per call — its feature
+spec; for a directory, each of its files' own ladder, then the
+directory's own rollup; for `system`/`.`, every module's and every
+feature's own ladder, then the system spec) and just tells you what's
+next each time. **A file can host more than one feature** — several
+`@router`-decorated routes in one FastAPI module, say, or several
+`@GET`/`@POST` methods on one Quarkus resource class — in which case
+repeating the loop against that same file keeps handing you the next
+not-yet-current one until all of them are done, never re-offering one
+already written. Each still gets its own separate document under its own
+`id`; don't fold several routes from one file into a single broader
+write-up even if it'd be easier — CodeOwl already tracks and reports them
+as distinct specs, and a merged doc would leave the others permanently
+"missing" in `get_spec_coverage`. If `${input:target}` is empty, ask the
+user what to generate rather than guessing.
 
 **Repo-specific spec style.** If the repo has a `docs/specs/STYLE.md`,
 read it before writing anything. It sets the intended *audience and tone*

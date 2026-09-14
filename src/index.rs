@@ -25,7 +25,7 @@ use crate::hash::hash_text;
 use crate::imports::FileImports;
 use crate::lang::SourceKind;
 use crate::stack::StackPack;
-use crate::symbol::ExtractedSymbol;
+use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Everything `Graph::build` plus import resolution needs from one file,
 /// cached so an unchanged file is never re-parsed on a rebuild.
@@ -42,12 +42,20 @@ pub struct FileInputs {
 
 impl FileInputs {
     /// Everything that depends on a file's contents, recomputed together
-    /// whenever that file changes. A schema file gets only the table pass
-    /// (folded into `pack.extract_symbols`); the pack's import and
-    /// flow-edge passes are skipped for it.
+    /// whenever that file changes. A dedicated schema file (`.sql`) gets
+    /// only the table pass; the import and flow-edge passes are skipped for
+    /// it. Every extracted symbol is offered to `pack.is_schema_symbol` —
+    /// an in-language ORM model (SQLModel `table=True`, a JPA `@Entity`)
+    /// gets retagged `SymbolKind::Schema` here (M17), the symbol-level
+    /// replacement for M10's file-level `.sql`-is-schema rule.
     fn extract(pack: &dyn StackPack, rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
-        let symbols = pack.extract_symbols(rel_path, source);
+        let mut symbols = pack.extract_symbols(rel_path, source);
+        for s in &mut symbols {
+            if s.kind != SymbolKind::Schema && pack.is_schema_symbol(s) {
+                s.kind = SymbolKind::Schema;
+            }
+        }
         match pack.source_kind(Path::new(rel_path)) {
             Some(SourceKind::Schema) => Self {
                 source_hash,
