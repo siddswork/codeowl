@@ -343,3 +343,59 @@ fn a_route_that_imports_modules_assembles_without_crashing() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn colliding_route_slugs_are_disambiguated_not_dropped() {
+    // Code-review finding: enumerate_entry_points sorted by slug id and
+    // called dedup_by on it, so two different routes (different files,
+    // different functions) that happen to produce the same verb+path slug
+    // silently collapsed to one -- the second vanished from
+    // get_spec_coverage/generation forever, with no error, even though
+    // this file's own doc comment claims slugs are unique. A real
+    // collision shape today: two routers each with no distinguishing
+    // `APIRouter(prefix=...)` exposing the same path.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-py-spec-{}-slugcollide",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/a_router.py"),
+        "router = APIRouter()\n\n\n@router.get(\"/health\")\ndef health_a():\n    return True\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/b_router.py"),
+        "router = APIRouter()\n\n\n@router.get(\"/health\")\ndef health_b():\n    return True\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).unwrap();
+    let eps = fm.enumerate_entry_points(&graph);
+
+    let matching: Vec<_> = eps
+        .iter()
+        .filter(|e| e.id.starts_with("http-get-health"))
+        .collect();
+    assert_eq!(
+        matching.len(),
+        2,
+        "both routes must survive, each under its own id, not collapse to one: {matching:?}"
+    );
+    let files: std::collections::HashSet<_> = matching.iter().map(|e| e.file.as_str()).collect();
+    assert!(
+        files.contains("app/api/routes/a_router.py")
+            && files.contains("app/api/routes/b_router.py"),
+        "both files' routes must be present: {matching:?}"
+    );
+    let ids: std::collections::HashSet<_> = matching.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(
+        ids.len(),
+        2,
+        "the two entries must have distinct ids: {matching:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

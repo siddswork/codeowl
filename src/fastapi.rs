@@ -56,8 +56,8 @@ impl FeatureModel for FastApiFeatureModel {
                 })
             })
             .collect();
-        out.sort_by(|a, b| a.id.cmp(&b.id));
-        out.dedup_by(|a, b| a.id == b.id);
+        out.sort_by(|a, b| (a.id.as_str(), a.file.as_str()).cmp(&(b.id.as_str(), b.file.as_str())));
+        disambiguate_colliding_slugs(&mut out);
         out
     }
 
@@ -125,8 +125,12 @@ fn join_route(prefix: &str, path: &str) -> String {
 }
 
 /// `("http", "get", "/items/{id}")` → `"http-get-items-id"`. Filename-safe,
-/// and unique across the verbs/paths of one router (`ROADMAP.md` M17 —
-/// "slugs must be unique across kinds").
+/// and unique across the verbs/paths of *one router* (`ROADMAP.md` M17 —
+/// "slugs must be unique across kinds") -- but two *different* routers can
+/// still produce the same slug (most likely today because the outer
+/// `app.include_router(prefix=...)` chain isn't threaded in yet, M19); see
+/// `disambiguate_colliding_slugs`, which `enumerate_entry_points` always
+/// runs afterward, for how that case is handled.
 fn route_slug(kind: &str, verb: &str, path: &str) -> String {
     let path_part = path
         .split(|c: char| !c.is_ascii_alphanumeric())
@@ -138,6 +142,27 @@ fn route_slug(kind: &str, verb: &str, path: &str) -> String {
         format!("{kind}-{verb}-root")
     } else {
         format!("{kind}-{verb}-{path_part}")
+    }
+}
+
+/// `entries` sorted by `(id, file)`: give every id beyond the first in a
+/// run a stable, deterministic `-2`, `-3`, … suffix instead of letting
+/// `enumerate_entry_points` silently collapse them (the code-review
+/// finding this fixes -- a `dedup_by` on `id` alone dropped every route
+/// after the first whenever two different files' routes collided). The
+/// first entry in each run keeps its clean id unchanged, so the common,
+/// non-colliding case never churns existing spec ids.
+fn disambiguate_colliding_slugs(entries: &mut [EntryPoint]) {
+    let mut i = 0;
+    while i < entries.len() {
+        let mut n = 2;
+        let mut j = i + 1;
+        while j < entries.len() && entries[j].id == entries[i].id {
+            entries[j].id = format!("{}-{n}", entries[i].id);
+            n += 1;
+            j += 1;
+        }
+        i = j;
     }
 }
 
