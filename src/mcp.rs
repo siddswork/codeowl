@@ -379,15 +379,7 @@ impl CodeOwlServer {
         target: &str,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         let entry_points = crate::features::enumerate_entry_points(graph);
-        for entry in entry_points.iter().filter(|e| e.file == target) {
-            let Some(task) = crate::spec::next_feature_task(graph, &self.root, entry)
-                .map_err(|e| e.to_string())?
-            else {
-                continue; // this entry's feature is already current
-            };
-            return Ok(Json(Some(Self::feature_task_response(task))));
-        }
-        Ok(Json(None))
+        self.first_pending_feature_task(graph, entry_points.iter().filter(|e| e.file == target))
     }
 
     /// `feature:<slug>` targets resolve here, never through
@@ -419,16 +411,34 @@ impl CodeOwlServer {
         if let Some(task) = task {
             return Ok(Json(Some(self.spec_task_to_response(graph, task)?)));
         }
-        let Some(task) =
-            crate::spec::next_feature_task(graph, &self.root, entry).map_err(|e| e.to_string())?
-        else {
-            return Ok(Json(None)); // this exact feature is already current
-        };
-        Ok(Json(Some(Self::feature_task_response(task))))
+        self.first_pending_feature_task(graph, std::iter::once(entry))
     }
 
-    /// Shared by `next_feature_task_response` (file-target round-robin) and
-    /// `next_task_for_feature` (a specific `feature:<slug>` target): turns
+    /// The one loop `next_feature_task_response` (candidates: every entry
+    /// sharing a file) and `next_task_for_feature` (candidates: exactly one
+    /// entry) both need: try each candidate's feature task in order, return
+    /// the first that isn't already current. Pulled out so a third
+    /// target-resolution mode (a different candidate set, same "first
+    /// not-yet-current" semantics) extends this instead of cloning the loop
+    /// a third time — code-review finding, these two started as
+    /// near-duplicate copies of it.
+    fn first_pending_feature_task<'a>(
+        &self,
+        graph: &Graph,
+        candidates: impl Iterator<Item = &'a crate::features::EntryPoint>,
+    ) -> Result<Json<Option<SpecTaskResponse>>, String> {
+        for entry in candidates {
+            let Some(task) = crate::spec::next_feature_task(graph, &self.root, entry)
+                .map_err(|e| e.to_string())?
+            else {
+                continue; // this entry's feature is already current
+            };
+            return Ok(Json(Some(Self::feature_task_response(task))));
+        }
+        Ok(Json(None))
+    }
+
+    /// Shared by `first_pending_feature_task`'s single return point: turns
     /// an assembled `FeatureTask` into the wire response.
     fn feature_task_response(task: crate::spec::FeatureTask) -> SpecTaskResponse {
         SpecTaskResponse::Feature {
