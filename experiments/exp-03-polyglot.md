@@ -4,6 +4,8 @@
 **Feeds:** the polyglot milestone plan; `ARCHITECTURE.md` open question 3 ("Secondary-language subtrees") and the "Language & stack coverage" scope decision in `REQUIREMENTS.md`.
 **Not a decision doc** — its conclusions fold into `ARCHITECTURE.md` and the milestone's own plan when it starts.
 
+**Revision (2026-09-14, before this PR is reviewed):** Q2's original "reduced mode" answer — primary gets full capability, every secondary gets a fixed reduced subset — is replaced below. The owner's framing: once a language has a `StackPack`, it should work the same way in *any* subtree of a polyglot repo, not just as a designated primary. This resolves one of the "Open, deliberately" items outright (whether a secondary ever gets a feature layer) rather than leaving it for the follow-up repo. See Q2 and the consolidated implications for what changed; Q1/Q3/Q4/Q5 are unaffected.
+
 ---
 
 ## Why this spike exists
@@ -83,23 +85,27 @@ M17's `serve <repo>/backend` keeps working unchanged; the milestone adds step 2 
 
 ---
 
-## Q2 — What does a secondary pack *do*? ("reduced mode")
+## Q2 — What does a secondary pack *do*? (revised: no fixed "reduced mode")
 
-A secondary is not "run the full pack on a subtree." The question is which pack capabilities a secondary exercises.
+*Original framing, superseded below:* "a secondary is not 'run the full pack on a subtree' — which capabilities does a fixed reduced mode expose?" That framing is the wrong shape. The question isn't what a *secondary* gets; it's what *every root* gets, and the answer is: **whatever its own pack supports, applied to its own subtree, exactly as if that subtree were the only thing CodeOwl was pointed at.**
 
-| Capability | Primary | Secondary (proposed) | Why |
-|---|---|---|---|
-| `extract_symbols` | ✔ | ✔ | file/symbol specs need it; cheap |
-| `classify` | ✔ | ✔ | test/generated sorting still matters |
-| `extract_imports` / `resolve_imports` | ✔ | **✔** | see below — cheap and high-value *within* the subtree |
-| `extract_flow_edges` / `resolve_flow_edge` | ✔ | ✘ | cross-language edges are Q4; intra-frontend `fetch` strings aren't worth it alone |
-| `feature_model()` | ✔ | ✘ | a secondary has no BA-facing narrative of its own in this model |
+| Capability | Every root | Why |
+|---|---|---|
+| `extract_symbols` | ✔ | file/symbol specs need it; cheap |
+| `classify` | ✔ | test/generated sorting still matters everywhere |
+| `extract_imports` / `resolve_imports` | ✔ | the same `oxc_resolver` / module-tree walk any single-stack repo already gets — cheap, and what makes `get_callers`/`get_callees` work *inside* a subtree ("what uses this hook?") |
+| `extract_flow_edges` / `resolve_flow_edge` | ✔, scoped to the root | needed by that root's *own* `feature_model()`, if it has one — a Next.js frontend secondary can't get real feature specs without its own route-literal/rendered-component edges |
+| `feature_model()` | ✔, gated on firing | a CLI/library pack returns `None` regardless of root kind (unchanged, existing behavior); a pack whose model *does* fire for that subtree (real routes, real entry points) gets real feature specs, whether it's the primary or not |
 
-**Revision from the handoff's first proposal.** The handoff floated "symbols + rollups only, no resolution." On reflection, **keep `resolve_imports` for secondaries** — it's the same `oxc_resolver` / module-tree walk the primary uses, it's cheap, and it's what makes `get_callers`/`get_callees` work *inside* the frontend ("what uses this hook?"). Dropping it would make the secondary graph nearly inert for no real saving. What a secondary drops is the **feature layer** and **cross-language flow edges** — the parts that model a product or cross a language boundary.
+**What's actually excluded, and it's a different axis than "primary vs. secondary":** only work that crosses a root boundary. Resolving `ItemsService.readItems` (a frontend root) to `read_items` (a Python root) needs a generated-client parser plus cross-graph matching — Q4's problem, genuinely separate from whether either side gets its own feature layer, and it stays deferred regardless of this revision.
 
-So a secondary subtree gets: symbol specs, file specs, directory rollups, and a working reference graph *within itself*. It does **not** get: feature specs, a slot in the feature tier of `--all`, or resolved edges to/from the primary.
+**Why this is a better answer than the original table, not just a different one:** the old version made "does this subtree get a feature layer" depend on an accident of which path you typed into `serve`, not on whether the subtree has a real product surface. Two repos with the *identical* set of subtrees, pointed at from different starting directories, would have produced different corpora under the old model — the same subtree tree having two different valid interpretations depending on which one you called "primary" is a smell, not a feature. Under the revised model, the corpus a polyglot repo produces is the same regardless of which root you pointed `serve` at first; "primary" stops being a capability gate and becomes purely which root `detect()`'s discovery step starts walking outward from (Q1) — an ergonomics/bootstrapping detail, not a modeling decision.
 
-The `system` spec composes over **both** — the primary's module rollups + feature specs *and* each secondary's top-level rollup — so "the product is a FastAPI service (primary) with a React SPA client (secondary)" is sayable. That's the one place the two graphs meet in the first cut.
+**Cost, honestly.** The old design's "secondary = reduced" was partly a scope decision, not only a capability one — bounding feature-layer work to one root keeps a repo with several subtrees cheap to generate. The revised model doesn't reopen that: feature-layer cost is still bounded by *how many roots' packs actually produce entry points*, not by root count. This repo's own Vite frontend is the concrete proof — its `feature_model()` correctly produces zero entry points either way (Vite/TanStack Router, not Next.js's `app/**/page.tsx` convention), so nothing about this validation repo's expected output changes. What the revision actually changes is the *next* repo: a Next.js frontend as a secondary, previously guaranteed no feature layer by construction, now correctly gets one if its routes are real — which is what "Open, deliberately"'s second bullet was waiting on a real example to decide, and this resolves it without needing one.
+
+So every root gets: symbol specs, file specs, directory rollups, a working reference graph *within itself*, and — if its own pack's `feature_model()` fires for it — feature specs too. What no root gets, ever, in the first cut: a resolved edge *to* or *from* another root.
+
+The `system` spec composes over **every root**, uniformly — each root's module rollups, and each root's feature specs if it produced any — so "the product is a FastAPI service with a React SPA client" is sayable regardless of which one happened to be primary. That's the one place all the graphs meet in the first cut.
 
 ---
 
@@ -123,7 +129,7 @@ Every symbol from every subtree lands in the same `Graph`, carrying which pack p
 
 `RepoIndex` gains `roots: Vec<RootSpec { path, pack_name, kind: Primary | Secondary }>` (replacing the single `root` + `pack`). The catch-up/watch walk visits every root; `extract_*` dispatches on the owning root's pack; `resolve_imports` runs once per root against only that root's files. `graph.rs` is untouched except for the `roots` metadata. `FORMAT_VERSION` bumps (the persisted `RepoIndex`/`Graph` shape changes) — expected, not a concern (`pack_name` already forces a rebuild on pack change; this generalises it).
 
-One real subtlety: **`classify` and the shared-code / fan-in tiers** in `spec.rs::prioritize` currently assume one pack's conventions. A secondary's files must sort into the long tail (or after it), never the shared-code tier or the feature tier — they have no feature to feed. Simplest rule: **secondary files always sort after every primary file**, regardless of fan-in, the same way test code already does.
+One real subtlety, updated by Q2's revision: **`classify` and the shared-code / fan-in tiers** in `spec.rs::prioritize` currently assume one pack's conventions, and — since a non-primary root can now produce real feature specs too (Q2) — a secondary's files are no longer barred from the shared-code or feature tiers on principle; a high-fan-in file or a firing entry point in a secondary root earns its tier the same way a primary root's does. What *does* still favor the primary: within a budgeted `--all` run, primary-root work sorts first as a tiebreak when tiers are otherwise equal — the root you pointed `serve` at is the one you most likely want covered first — not because a secondary's work is excluded from a tier, only deprioritized within it.
 
 ---
 
@@ -148,10 +154,10 @@ Revisit the resolved edge once M18 has built the cross-service `@RegisterRestCli
 `full-stack-fastapi-template` (whole repo, not the `backend/` subdir M17 uses). Same clone, already on disk. It exercises:
 
 - primary discovery via `serve <repo>/backend` + secondary auto-discovery of `../frontend`;
-- a secondary whose pack (`TypeScriptNextStack`) has a feature model that correctly **does not fire** (Vite, not Next) — validating that "secondary ⇒ no feature layer" is the right cut and not a limitation;
+- a secondary whose pack (`TypeScriptNextStack`) has a feature model that correctly **does not fire** (Vite, not Next) — validating that a non-firing model produces no feature layer *because it doesn't fire*, the same as it would for a primary, not because secondaries are excluded by rule (Q2's revision);
 - `packages/react-email/` as a *third* subtree — does discovery pull it in, and should it? (probably: yes as a second secondary, or excluded via `.codeowl.toml` — a good forcing case for the config).
 
-No second repo needed for the first cut. A backend+frontend split where the frontend *is* Next.js (so its feature model *would* fire, and we'd have to decide whether a secondary ever gets a feature layer) is the obvious follow-up repo — deferred with the resolved cross-language edge.
+No second repo needed for the first cut. A backend+frontend split where the frontend *is* Next.js (so its feature model *would* fire) is the obvious follow-up repo — under Q2's revision the expected outcome is no longer an open question (that root gets real feature specs, symmetrically with the primary), just unvalidated against a real repo. Deferred with the resolved cross-language edge.
 
 ---
 
@@ -159,9 +165,9 @@ No second repo needed for the first cut. A backend+frontend split where the fron
 
 1. **`RepoIndex`: `root: PathBuf` → `roots: Vec<RootSpec>`.** One primary, zero-or-more secondaries. The walk, catch-up, and watcher iterate roots; `extract_*` and `resolve_imports` dispatch per root's pack. `FORMAT_VERSION` bump.
 2. **`detect()` gains a discovery step** — from the primary root, find sibling/child subtrees another registered pack claims (floor: ~5 non-test files). Plus a `.codeowl.toml` `[stack]` block that overrides everything.
-3. **Secondary = reduced mode** — `extract_symbols` + `classify` + `resolve_imports` (scoped to the subtree), **no** `feature_model`, **no** flow edges. Enforced structurally: a secondary's `feature_model()` result is ignored, its files sort after all primary files in `prioritize`.
+3. **No fixed reduced mode (revised, Q2).** Every root runs its own pack's full capability set against its own subtree — `extract_symbols`, `classify`, `resolve_imports`, `extract_flow_edges`/`resolve_flow_edge`, and `feature_model()` if the pack has one and it fires. Nothing is structurally suppressed for being a "secondary"; a secondary's `feature_model()` result is used exactly like the primary's. The only thing that's still primary-favoring is `prioritize`'s tiebreak order (primary-root work sorts first within an otherwise-equal tier), not capability.
 4. **One arena.** `graph.rs` untouched bar the `roots` metadata. Resolution scoped per root.
-5. **`system` spec composes over primary rollups + primary features + each secondary's top-level rollup.** The one place the graphs meet in the first cut. `spec.rs`'s system composition already tolerates "zero features"; it now also has to tolerate "modules from more than one pack."
+5. **`system` spec composes over every root uniformly** — each root's module rollups, and each root's feature specs if it produced any. The one place the graphs meet in the first cut. `spec.rs`'s system composition already tolerates "zero features"; it now also has to tolerate "modules (and possibly features) from more than one pack."
 6. **No cross-language edges.** `fetch`/generated-client → route resolution is deferred behind M18's `@RegisterRestClient` work.
 7. **`.codeowl.toml`** is introduced here (minimal: `[stack]` only). Document it in `setup/`.
 
@@ -169,7 +175,7 @@ No second repo needed for the first cut. A backend+frontend split where the fron
 
 - `graph.rs`'s arena, edge types, `SymbolId` scheme.
 - The four hashes, granularity rules, staleness diffing.
-- `feature_model()` / `is_schema_symbol` / the trait shape — a secondary just doesn't call some of it.
+- `feature_model()` / `is_schema_symbol` / the trait shape themselves — unchanged; what changed (Q2) is only that every root's pack now gets to *call* all of it, not a fixed subset gated on primary/secondary.
 - M17's `serve <repo>/backend` flow — still valid, now a subset of the general case.
 
 ---
@@ -179,7 +185,7 @@ No second repo needed for the first cut. A backend+frontend split where the fron
 **Validation:** `codeowl serve ~/dev/openSource/test-repos/full-stack-fastapi-template/backend` discovers `frontend/` as a secondary. Generate:
 
 - the Python backend corpus as M17 already specifies (unchanged);
-- file specs + directory rollups for a sample of the frontend (`src/routes/`, `src/components/Items/`, `src/hooks/`) — a human read confirms extraction/resolution is right and that **no feature specs** were produced for it;
+- file specs + directory rollups for a sample of the frontend (`src/routes/`, `src/components/Items/`, `src/hooks/`) — a human read confirms extraction/resolution is right and that **no feature specs** were produced for it *because `TypeScriptNextFeatureModel` correctly finds no `app/**/page.tsx` convention to fire on* (Vite + TanStack Router, not Next.js) — not because it's a secondary. This is also where the revised Q2 gets its first real check: if a feature spec *did* somehow appear for this frontend, that's a bug, but "it's a secondary" must not be the reason cited for its absence anywhere in the implementation;
 - `get_callers` on a frontend hook lists its frontend callers (intra-subtree resolution works);
 - the `system` spec — a human read confirms it names *both* the FastAPI service and the React client, and describes their relationship in prose even though no resolved edge connects them.
 
@@ -189,7 +195,7 @@ Every place `spec.rs` / `mcp.rs` / `index.rs` needs a "which pack / which root" 
 
 ## Open, deliberately
 
-- **`serve <repo-root>` with two firing feature models** (a Next frontend + a FastAPI backend) — the primary tiebreak. No repo forces it yet; `.codeowl.toml` is the escape hatch until one does.
-- **Whether a secondary ever gets a feature layer.** The model says no. A Next.js frontend as a secondary would test whether that's right or whether "secondary" needs a `full | reduced` dial. Deferred with the follow-up repo.
+- **`serve <repo-root>` with two firing feature models** (a Next frontend + a FastAPI backend) — still open, but lower-stakes after Q2's revision: under the old model, "which one is primary" decided whether the loser got a feature layer *at all*; under the revised model, both get one regardless, so the only thing the tiebreak still decides is `prioritize` ordering within a budgeted run. No repo forces even that yet; `.codeowl.toml` is the escape hatch until one does.
+- ~~**Whether a secondary ever gets a feature layer.**~~ Resolved by this revision (Q2, 2026-09-14): yes, symmetrically — every root's `feature_model()` gets called and respected, gated only on whether it actually fires for that subtree, never on primary/secondary status. No `full | reduced` dial needed. Still genuinely untested against a real firing secondary (the follow-up repo — a Next.js frontend as a secondary — is what would validate this in practice, not just on paper), so keep it flagged as unvalidated-by-a-real-repo, just no longer undecided.
 - **The resolved frontend→backend edge.** Deferred behind M18's cross-service resolver; the shapes match.
 - **`packages/` / monorepo workspaces** — is every `package.json` subtree a secondary, or only ones the primary or another secondary actually imports? `full-stack-fastapi-template`'s `packages/react-email/` is the forcing case; lean toward "discovered but excludable via config".
