@@ -1,39 +1,29 @@
 ---
 kind: file
 source_paths: [src/lang.rs]
-file: { source_hash: fffdeb3bbc079db8c800ebf3f48b2cd2fa8f66a1b1182f400ae6d2f27015f655, deps_hash: 8327ad3224849edf0d1a55c3a19add2d918ce0f21cd578b0bfc847eb4064e594, spec_hash: 2b189edb963a705adab19eb9e9147995a9cfe0b6e4d18edaf3f5027f71e64b29 }
+file: { source_hash: aa4a56983460aff174ca497bff6fdf10736d5ddace764e125746fb7a7c8a70ff, deps_hash: 8327ad3224849edf0d1a55c3a19add2d918ce0f21cd578b0bfc847eb4064e594, spec_hash: 12d923da62218a75cbc1f977afc61ad094f5e380ecdad31610a143dc49d78241 }
 symbols:
-  src/lang.rs::SourceKind: { source_hash: 71f79d3a8773c4e818baa090f23294a54504f8a0d201f005e1bef8efcb48801f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a9c5de3c32b7f2c9af3acf91d5cf587768ea607a6183ec4a6d7a1caac4ca4f8a }
-  src/lang.rs::is_extractable: { source_hash: 832112a79779a048177b44c06d6b3e5e65c840538b69f5a3e30b1a618cd6ebef, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4224b3a3f47674e4c25cd37c32d2feba06b60b52b31e5c5e1b25486b78bd2f0d }
+  src/lang.rs::SourceKind: { source_hash: 030d6675bccb66a7f8439dc3f04f8c310d7bd2c00ab00dac67bec882b8ca1a15, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: bc02ee0a2ff92e0a20aef9446cf846aabfc7d9387530f38f83a01e24f787cb14 }
   src/lang.rs::ts_parser: { source_hash: a4658a5c6fc19c35d73f060642c96c4e029a9fb4ac78f7d14c6f8a2ab39892cf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3ca8125f4a6f16954cd35389b931e4f5254eed0644541aa93296a4246335abee }
-  src/lang.rs::extract_symbols: { source_hash: adc245db587f476386bdf9f366d3114d17cc70733d0006744a8853abeef9dab3, deps_hash: ce7d9d7fc16420378d45b890370f2eb5a11a122aee5b39ac6d807d291364fb0f, spec_hash: 7df04949e7e52807257648b948e7ecca6e8e3f0bb531ed1ee3ee22d339a9a379 }
+  src/lang.rs::extract_symbols: { source_hash: 9884210b833cf488592ee7a0904ea061eae1990853e1d2d70a2a41e5ae137746, deps_hash: ce7d9d7fc16420378d45b890370f2eb5a11a122aee5b39ac6d807d291364fb0f, spec_hash: 29f4be406bc146e17b2b6ae1d41a331c7b0e245f68df8761335dabb13a0375b2 }
   src/lang.rs::FileRole: { source_hash: 664e61d3b1ae6a13b12f0d090d22185e85254a0dee982702438d9a1223428088, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 99e9dec2af1c03a82d76c0e3fb72e3bfbaea90093c1abd1edd1599458fcae911 }
   src/lang.rs::classify: { source_hash: 908bf0c8a6f2bb97bc5feed5c0cd0e4df84717e8c481b29b9f1ac2eed35b626f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: cb5f679c4c0e908c4665e90988e4a80a1825f3fdab8173f868ad5a56ba9148c5 }
   src/lang.rs::is_test_path: { source_hash: 43bd27fc12cb63b5b6e60e8b23cc75ba2d0bc82465e1ffb6cf530d089aab30e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a511957bab4e03e1d307eb16d4d08b01087428c3d50e9d8673f9d4e459a0ea28 }
   src/lang.rs::is_ui_primitive: { source_hash: 209f4445fe0023de0546da9717f126bbf2a38ed1753a94a50ca314462c748675, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 367ced1d96d513b98d77c48ddb63572c0bcfb1d984742211d1bf495007b8c895 }
-  src/lang.rs::detect: { source_hash: ea74de7e49f739d02194f31b7eb7af7cbac589845823439d39f59d900f24d8fa, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 9382f4c5b3d0303d9f1384a85dd5e6d49a7078c0df4fe318819fd7d53e949209 }
+  src/lang.rs::detect: { source_hash: bf5a35d9c182615746de8e548978dfcb8c4f4f396d653eb226ec749eb4974eef, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 6023b6cdacf7a4189fbc14e29480486a3c7052d4d83bf5a8c4171ece41ef22b2 }
 ---
 # src/lang.rs
 ## Summary
-This file does two jobs. First, `detect` — the startup step that picks which language pack (TypeScript/Next, Rust, or Java) CodeOwl uses for a repo, by counting each stack's source files and refusing to guess when zero or several match. Second, it holds the TypeScript + SQL pack's own building blocks: which extensions count as source (`SourceKind`, `is_extractable`), how to set up the parser for a `.ts` vs a `.tsx` file (`ts_parser`), which extractor a file's contents go to (`extract_symbols` — SQL tables for `.sql`, TypeScript declarations otherwise), the extension list the import resolver tries, and `classify`, which tags each file as product code, a UI primitive, test code, or generated so spec generation can prioritise them. Only `detect` is language-neutral; the rest is TypeScript-specific and slated to move inside `TypeScriptNextStack` in a later refactor.
+This file has two jobs. The first, `detect`, is the very first thing CodeOwl does when pointed at a repo: it scans the file tree and decides which single supported language/framework ("stack" — TypeScript/Next.js, Rust, Java, or Python) the repo is written in, erroring out clearly rather than silently indexing the wrong thing or an empty graph if it finds no matching files or more than one stack's worth. The second job is the internal machinery specific to the TypeScript + Next.js stack: which file extensions count as source code, loading the right parser grammar (plain TypeScript vs. TSX, which adds JSX support), turning a file's text into its list of declared functions/classes, which file extensions the import resolver tries when following an `import` statement, and classifying a file's "role" (ordinary product code, a shared UI primitive like a button component, test code, or machine-generated code) — used to decide how a file's documentation gets prioritized and whether it counts as genuinely shared infrastructure. Everything except `detect` here is TypeScript-specific; other stacks (Rust, Java, Python) keep their own equivalent logic in their own files.</content>
 
 ## `SourceKind`
 `pub enum SourceKind`
 ### Summary
-Which of the TypeScript pack's two extractors a source file's contents belong to — `Code` (`.ts`/`.tsx` → `ts_parser` + `extract.rs`) or `Schema` (`.sql` → `tree-sitter-sequel` + `schema.rs`). Extension-derived for now; M13's plan is to fold this into a `pack.is_source_file` hook the active stack owns.
+Tags what kind of thing a source file is, once CodeOwl decides to look at it: ordinary code, or a dedicated database-schema file (like a `.sql` file full of `CREATE TABLE` statements). Which file extensions map to which kind is decided by each language "stack" (the pack of rules for one language/framework — see `GLOSSARY.md`), not by this enum itself.
 ### Behavior
-`SourceKind::of(rel_path)` is a pure extension match with one deliberate exclusion: a `.d.ts` declaration file returns `None` (it has no runtime symbols worth extracting), checked before the `.ts` case so it isn't misrouted to `Code`. `.sql` → `Schema`, `.ts`/`.tsx` → `Code`, anything else → `None`. A `None` result means "the walker skips this file entirely" — it is how a Rust file, a JSON config, or a Markdown doc is left out of the TypeScript pack's graph.
+Two variants: `Code` is a normal source file, parsed with the stack's grammar and run through the usual import-resolution and "flow edge" passes (the looser cross-file links like a rendered component — see `GLOSSARY.md`). `Schema` is a file parsed only for table declarations; the indexer skips the code-oriented passes for it entirely. Note that an ORM model class defined *inside* a regular code file (e.g. a Python class with `table=True`) is still `Code`, not `Schema` — it gets flagged as schema-like symbol-by-symbol later, via a separate mechanism (`is_schema_symbol`), not by this file-level classification. The associated `of` function (shown alongside this enum) is this module's own default mapping — as of the M17 milestone it recognizes only TypeScript/TSX as `Code` and no longer names `.sql` at all, since that mapping moved to be owned by the TypeScript/Next.js stack instead of living here.</content>
 ### Depends on
 - (none)
-
-## `is_extractable`
-`pub fn is_extractable(path: &Path) -> bool`
-### Summary
-The one predicate for "does CodeOwl's TypeScript pack read this file at all" — shared by `main.rs`'s walk, the fresh-spawn catch-up pass, and the in-session file watcher, so all three agree on the file set.
-### Behavior
-A thin wrapper over `SourceKind::of`: converts the path to `&str` (non-UTF-8 paths fall through to `false`) and returns whether that yields any `SourceKind`. So it is `true` for `.ts` / `.tsx` / `.sql` and `false` for everything else, including `.d.ts`. Kept separate from `SourceKind::of` because most callers only need the yes/no, not which extractor — routing to the right one is `of`'s job.
-### Depends on
-- externals: std
 
 ## `ts_parser`
 `pub fn ts_parser(rel_path: &str) -> Parser`
@@ -47,9 +37,9 @@ Extension check on the string path: `.tsx` selects `LANGUAGE_TSX`, any other suf
 ## `extract_symbols`
 `pub fn extract_symbols(rel_path: &str, source: &str) -> Vec<ExtractedSymbol>`
 ### Summary
-The TypeScript pack's single symbol-extraction entry point — hands a file to the SQL table extractor if it's a schema file, or the TypeScript declaration extractor otherwise. `graph.rs` and `index.rs` both route through here rather than calling `schema.rs` / `extract.rs` directly.
+Parses one TypeScript/TSX file's source text and pulls out its declarations (functions, classes, exports, etc.) as a list of extracted symbols — the entry point the TypeScript stack uses to turn a file's text into structured data.
 ### Behavior
-Matches on `SourceKind::of(rel_path)`: `Schema` → `schema::extract_tables`, `Code` → `extract::extract_file`. A path with no `SourceKind` (`None`) also goes to `extract_file` — a deliberate fallback that never actually triggers from the file walk, since the walk filters on `is_extractable` first, but keeps the function total. In the current codebase this is the TypeScript pack's implementation of `StackPack::extract_symbols`; the Rust pack has its own (`rust::extract_file`).
+A thin pass-through to `extract::extract_file`, which does the actual parsing (via tree-sitter — the parser library CodeOwl uses to build a syntax tree from source text). Kept as its own free function, rather than inlined at each call site, so both the graph module's test helper and the production `TypeScriptNextStack` extractor can share one entry point. TypeScript-only: as of the M17 milestone, dispatching `.sql` schema files to the table extractor moved into the stack itself, so this function no longer branches on file extension at all.</content>
 ### Depends on
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 
@@ -92,13 +82,11 @@ Detects a shadcn/ui-style presentational primitive by path — a file in a `comp
 ## `detect`
 `pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>>`
 ### Summary
-Picks the one language pack CodeOwl uses for a repo — TypeScript/Next, Rust, or Java — by counting what source files are actually present. Runs once at startup. If nothing matches, or more than one stack does, it stops with an error instead of serving a wrong or empty model of the code.
+Figures out which single programming-language "stack" (the pack of language-specific rules CodeOwl uses to parse and index a repo — TypeScript/Next.js, Rust, Java, or Python) a repo is written in, or fails with a clear error rather than silently building an empty or wrong index. Runs once when CodeOwl starts up.
 ### Behavior
-Walks the whole file tree (honoring `.gitignore`) and, for each candidate pack, counts the files that pack treats as *primary source*: `.ts`/`.tsx` for TypeScript, `.rs` for Rust, `.java` for Java. A `.sql` file is schema, not code, so a migrations folder on its own never makes a Rust repo look like TypeScript.
+For each supported stack, counts how many files in the repo are that stack's "primary" source files (e.g. `.rs` for Rust) — a database schema file like `.sql` never counts toward this, since a Rust repo that happens to have migrations is still a Rust repo. While counting, it deliberately skips test directories (`tests/`, `test/`, `benches/`, Maven/Gradle's `src/test/...`) and tooling directories (`utility/`, `scripts/`, `tools/`, `hack/`) — those files are still parsed and indexed later once a stack is chosen, but they don't get a vote on *which* stack the repo is, so CodeOwl's own Python build scripts don't make CodeOwl's own (Rust) repo look ambiguous.
 
-Test trees are left out of that count — top-level `tests/`, `test/`, `benches/`, and anything under `src/test/` (the Maven/Gradle layout) — so a `.tsx` fixture that a Rust test reads as a string can't swing the result. Those files are still parsed once a pack is chosen; they just don't get a vote.
-
-Outcome: exactly one pack with a non-zero count wins and is returned. Zero counts → an error naming the three supported stacks. Two or more → an error listing which stacks were found and their file counts, telling the caller to point CodeOwl at a subdirectory that's a single stack. One stack per repo is a deliberate limit (M13 design decision 6).
+Only stacks with at least one matching file are kept as candidates. If none match, it fails with an error listing the stacks CodeOwl supports. If exactly one matches, that stack is returned. If more than one stack has matching files, it fails with an error naming every stack that matched and how many files each had — CodeOwl deliberately serves only one stack per repo (a genuinely polyglot repo is out of scope for now), so the fix is to point CodeOwl at a subdirectory that's a single stack.</content>
 ### Depends on
 - `src/stack.rs::StackPack` — crate::stack
 - externals: anyhow, std

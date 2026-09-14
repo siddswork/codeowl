@@ -1,9 +1,9 @@
 ---
 kind: file
 source_paths: [src/index.rs]
-file: { source_hash: 45e891ff0e2acdbdce12446a57e6d150c84741a2ddc97bbb1543372bd157a170, deps_hash: d46ca85156fba54dcdee1dbb3de6f6d202918947d5733888806580a8a18bc595, spec_hash: e83b3b04f36831fe6c939f848ca476408ce58f2971823f6e468562873d2a4219 }
+file: { source_hash: 90c9ccd8f976a4af2783ba6f6a9d46e6c9c3b471909df3fd42787878a6e40dbc, deps_hash: 272826bcf6e38116ff6985b994d826d5e0f61540038f3c5b50c6724d3d64914f, spec_hash: 6b0a950e9b7cfbd3eccd4d49e7bc3e4580964566f262998f30f3dc9c518d06de }
 symbols:
-  src/index.rs::FileInputs: { source_hash: 5d489492ec616b18b0be27bfae344514646ac53700a7973f8dc8ff6bed62f939, deps_hash: 5b97c6225d0be7f3c906750f5e4443b00e9f9ffa801407ddbbb089efd9da46d6, spec_hash: 97bfa518ac935fdbfd888fe92e4c58f7dc1fa47a1dd87eec46fd23a80ad35ed5 }
+  src/index.rs::FileInputs: { source_hash: fbecd5dce11211eb08c26741360e048b5070afb4e23695b3e68ee0de30bbc445, deps_hash: b3e22fbedd140b149388c32715b9051e6eff3d7c6ade1e6e7ad1b060540d0825, spec_hash: d40cb41e07c71ff865a9b4d47e61d288ed018462fea2198c7f15118560c75512 }
   src/index.rs::CatchUp: { source_hash: 677e9d2d3bd8a4bd4101ed2c956aa8dfb785a27dca9f0f6fb4994179f445a6dd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3dee682eb6762f6361122003798ef4c5917cbc7bdb96a62b8fdb8ed1b4867085 }
   src/index.rs::RepoIndex: { source_hash: 35d4957e14d8e2f99cef049ee3db84574fe4875c40056414c91741aff238526f, deps_hash: f4472e7729baf28d1ef0aa1677f7817d40e163c3b948f849ca5204ba3bd9746f, spec_hash: 024200935414252f806b3aee536cedd4edd7299689f8f580f4350b07a71e6525 }
   src/index.rs::canonical_root: { source_hash: a12afe5bc286ba94b312c3a2ed43df1be87659af6c1dc03d27fb702901f0ad8e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c006dd5c57e68d23df0160e998922dd80f01dcdcbe723ac1f3913c9cc2c77ff8 }
@@ -12,14 +12,14 @@ symbols:
 ---
 # src/index.rs
 ## Summary
-Makes CodeOwl's re-indexing incremental. Rather than re-parsing the whole repo on every startup or every keystroke, it caches the per-file inputs the graph is built from — a file's extracted symbols, its imports, its flow edges, and a hash of its text — and re-parses only the files whose hash changed. `RepoIndex` is the type; `FileInputs` is one file's cache entry; `CatchUp` records what a re-scan actually touched (added / modified / removed). It drives two moments: `open`, the fresh-process catch-up that diffs the saved cache against what's on disk now, and `apply_changes`, the live update the file watcher calls with each batch of changed paths. The `canonical_root` / `canonicalize_event_path` helpers keep every path in one symlink-free form, so the prefix-stripping that turns absolute paths into repo-relative ones always matches.
+This file makes CodeOwl's indexing incremental: instead of re-parsing every file in a repo each time it runs, `RepoIndex` remembers each file's raw-text hash and extracted data on disk (in `.codeowl/index`), so on a fresh run it only re-parses files that actually changed since the last time — and while CodeOwl is running, a background file watcher feeds it individual edits (via `apply_changes`) so the graph stays current without waiting for a restart. It handles both the cold-start case (no cache yet, or a cache from an incompatible format/language stack, so a full walk-and-parse happens) and the warm-start case (a valid cache exists, so only added/modified/deleted files get re-processed). After updating its cached per-file data, it rebuilds the full graph from that data (cheap, since no parsing is needed) and resolves cross-file links — imports, and the "flow edges" that need the whole graph to resolve against — before saving both the graph and the index back to disk. It also tracks which directories the file watcher should actually watch, respecting `.gitignore` so things like `node_modules` are never monitored.</content>
 
 ## `FileInputs`
 `pub struct FileInputs`
 ### Summary
-Everything `Graph::build` and import resolution need from one file — its raw-text hash, extracted symbols, imports, and unresolved flow edges — cached (`.codeowl/index`) so an unchanged file is never re-parsed on a rebuild.
+A per-file cache entry holding everything needed to build the graph and resolve imports for one file, without re-parsing that file's text again — the reason an unchanged file in a repo isn't re-scanned every time CodeOwl rebuilds its index.
 ### Behavior
-Its constructor `FileInputs::extract(pack, rel_path, source)` hashes the source, runs `pack.extract_symbols`, then branches on `pack.source_kind`: a `Schema` file gets empty `imports`/`flow_edges` (a `.sql` file has neither), while `Code` (and the `None` fallback) additionally runs `pack.extract_imports` and `pack.extract_flow_edges`. `flow_edges` is `#[serde(default)]` so a pre-M13 cache without the field deserializes cleanly. The flow edges are stored *unresolved* here — resolution against the whole graph happens in `rebuild`, once every file's inputs are in hand.
+Holds a hash of the file's raw source text (used to detect whether it changed since it was cached), its extracted symbols, its parsed imports, and its unresolved "flow edges" (looser cross-file links, like a URL literal, that get resolved separately once the whole graph exists). The `extract` constructor is where a file actually gets processed for the first time: it hashes the source, asks the active language stack (a `StackPack`) to extract the file's symbols, and then applies the schema-detection hook (`is_schema_symbol`) to retag any symbol the stack recognizes as a database table (e.g. an ORM model class) from its default kind to `Schema`. For a dedicated schema file (like a `.sql` file), it skips import and flow-edge extraction entirely, since such a file has neither; for an ordinary code file (or an unrecognized kind), it also extracts imports and flow edges from the stack.</content>
 ### Depends on
 - `src/graph.rs::UnresolvedFlowEdge` — crate::graph
 - `src/hash.rs::hash_text` — crate::hash
@@ -27,6 +27,7 @@ Its constructor `FileInputs::extract(pack, rel_path, source)` hashes the source,
 - `src/lang.rs::SourceKind` — crate::lang
 - `src/stack.rs::StackPack` — crate::stack
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- `src/symbol.rs::SymbolKind` — crate::symbol
 - externals: std
 
 ## `CatchUp`
