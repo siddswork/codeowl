@@ -22,11 +22,23 @@
 //! `Container` symbol rather than scanning the file for a router
 //! assignment.
 //!
-//! **Not yet (later M18 commits):** `admits_to_core` is a stub (`false`)
-//! — the CDI-shaped admission rule (`ROADMAP.md`: `@Inject`ed type's own
-//! annotations decide) is its own commit. Kafka/`@Scheduled`/gRPC entry
+//! **`admits_to_core` is CDI-shaped, not co-location-shaped** — a Java
+//! service's `core` grows through what's *managed* (`@ApplicationScoped`
+//! / `@Singleton`), not what's nearby on disk. `@Inject` itself isn't
+//! parsed: the ordinary resolved reference to the injected type is what
+//! `assemble_participants`'s walk already sees (a field of that type, a
+//! constructor param, a bare static call), so this only needs to judge
+//! the *referenced class*, the same "type-reference classification, not
+//! dataflow" ROADMAP.md describes. A Panache repository/entity also
+//! admits — until the JPA/Panache `is_schema_symbol` body (a later
+//! commit) retags an entity's file as schema-bearing, at which point the
+//! generic core's `schema_files` exclusion (`ARCHITECTURE.md`'s "Feature
+//! specs" section) takes over and this check simply never fires for it
+//! again; checking it here too is a no-op then, not a conflict.
+//!
+//! **Not yet (later M18 commits):** Kafka/`@Scheduled`/gRPC entry
 //! points, the JPA/Panache `is_schema_symbol` body, and
-//! `@RegisterRestClient` cross-service edges are separate commits too —
+//! `@RegisterRestClient` cross-service edges are separate commits —
 //! same incremental pattern M17 used.
 
 use std::collections::HashMap;
@@ -73,13 +85,29 @@ impl FeatureModel for QuarkusFeatureModel {
         out
     }
 
-    fn admits_to_core(&self, _graph: &Graph, _entry: &EntryPoint, _candidate_file: &str) -> bool {
-        // The CDI-shaped admission rule (`@Inject`ed type's own
-        // annotations decide) is its own commit -- see the module doc
-        // comment. Every reached file is a one-hop dependency stub until
-        // then, never `core`.
-        false
+    fn admits_to_core(&self, graph: &Graph, _entry: &EntryPoint, candidate_file: &str) -> bool {
+        graph.symbols().any(|s| {
+            s.file == candidate_file && s.kind == SymbolKind::Container && is_cdi_managed(s)
+        })
     }
+}
+
+/// `sym` is a CDI-managed bean (`@ApplicationScoped` / `@Singleton`) or a
+/// JPA/Panache data type (`@Entity`, or `extends`/`implements` a Panache
+/// base) -- see the module doc comment for why both count. An injected
+/// framework primitive (`Config`, `ObjectMapper`, …) never reaches this
+/// check at all: those are external classes with no resolved reference
+/// edge into this repo's graph in the first place.
+fn is_cdi_managed(sym: &crate::symbol::Symbol) -> bool {
+    sym.markers.iter().any(|m| is_admitting_annotation(m))
+        || sym.signature.contains("PanacheEntity")
+        || sym.signature.contains("PanacheRepository")
+}
+
+fn is_admitting_annotation(marker: &str) -> bool {
+    let name = marker.trim_start().trim_start_matches('@');
+    let name = name.split(['(', ' ']).next().unwrap_or(name);
+    matches!(name, "ApplicationScoped" | "Singleton" | "Entity")
 }
 
 /// `@GET` / `@POST` / … -> its lowercase verb name. Exact match only (not
@@ -240,5 +268,16 @@ mod tests {
             "http-get-entity-fruits-id"
         );
         assert_eq!(route_slug("post", "/"), "http-post-root");
+    }
+
+    #[test]
+    fn admitting_annotations_are_matched_exactly() {
+        assert!(is_admitting_annotation("@ApplicationScoped"));
+        assert!(is_admitting_annotation("@Singleton"));
+        assert!(is_admitting_annotation("@Entity"));
+        assert!(is_admitting_annotation("@Entity(name = \"fruit\")"));
+        assert!(!is_admitting_annotation("@RequestScoped"));
+        assert!(!is_admitting_annotation("@Path(\"/x\")"));
+        assert!(!is_admitting_annotation("@Override"));
     }
 }
