@@ -552,10 +552,20 @@ fn same_package_edges(
     sorted_files: &[(&String, &FileImports)],
     graph: &Graph,
 ) -> Vec<ResolvedImport> {
-    // (simple name, id, file) for every top-level container in the graph.
+    // (simple name, id, file) for every top-level container in the graph
+    // -- `Schema` included: an `@Entity`/Panache-entity class is retagged
+    // from `Container` to `Schema` by the generic pipeline (M18's
+    // `is_schema_symbol`) *before* this runs, and a same-package
+    // reference with no explicit `import` (`FruitRepository implements
+    // PanacheRepository<Fruit>`, both in `org.acme...repository` with no
+    // `import ...Fruit;` -- the real `hibernate-orm-panache-quickstart`
+    // shape) must resolve exactly like an explicit-import reference to
+    // the same symbol already does (`resolve_explicit` below is kind-
+    // agnostic). Bug surfaced by M18's first real schema-symbol case;
+    // harmless before it since M16 never retagged anything.
     let containers: Vec<(&str, SymbolId, &str)> = graph
         .symbols()
-        .filter(|s| matches!(s.kind, SymbolKind::Container))
+        .filter(|s| matches!(s.kind, SymbolKind::Container | SymbolKind::Schema))
         .filter_map(|s| {
             let rest = s.id.strip_prefix(&format!("{}::", s.file))?;
             if rest.contains("::") {

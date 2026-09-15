@@ -24,22 +24,22 @@
 //!
 //! **`admits_to_core` is CDI-shaped, not co-location-shaped** — a Java
 //! service's `core` grows through what's *managed* (`@ApplicationScoped`
-//! / `@Singleton`), not what's nearby on disk. `@Inject` itself isn't
-//! parsed: the ordinary resolved reference to the injected type is what
-//! `assemble_participants`'s walk already sees (a field of that type, a
-//! constructor param, a bare static call), so this only needs to judge
-//! the *referenced class*, the same "type-reference classification, not
-//! dataflow" ROADMAP.md describes. A Panache repository/entity also
-//! admits — until the JPA/Panache `is_schema_symbol` body (a later
-//! commit) retags an entity's file as schema-bearing, at which point the
-//! generic core's `schema_files` exclusion (`ARCHITECTURE.md`'s "Feature
-//! specs" section) takes over and this check simply never fires for it
-//! again; checking it here too is a no-op then, not a conflict.
+//! / `@Singleton`) or is a Panache repository, not what's nearby on
+//! disk. `@Inject` itself isn't parsed: the ordinary resolved reference
+//! to the injected type is what `assemble_participants`'s walk already
+//! sees (a field of that type, a constructor param, a bare static call),
+//! so this only needs to judge the *referenced class*, the same
+//! "type-reference classification, not dataflow" ROADMAP.md describes.
+//! An `@Entity`/Panache-entity class deliberately does **not** admit
+//! here — `stack.rs::JavaStack::is_schema_symbol` retags it `Schema`
+//! instead, and a schema-bearing file is excluded from `core`-promotion
+//! entirely by the generic core's `schema_files` guard
+//! (`ARCHITECTURE.md`'s "Feature specs" section) before this hook is
+//! even called.
 //!
 //! **Not yet (later M18 commits):** Kafka/`@Scheduled`/gRPC entry
-//! points, the JPA/Panache `is_schema_symbol` body, and
-//! `@RegisterRestClient` cross-service edges are separate commits —
-//! same incremental pattern M17 used.
+//! points and `@RegisterRestClient` cross-service edges — same
+//! incremental pattern M17 used.
 
 use std::collections::HashMap;
 
@@ -93,21 +93,20 @@ impl FeatureModel for QuarkusFeatureModel {
 }
 
 /// `sym` is a CDI-managed bean (`@ApplicationScoped` / `@Singleton`) or a
-/// JPA/Panache data type (`@Entity`, or `extends`/`implements` a Panache
-/// base) -- see the module doc comment for why both count. An injected
+/// Panache repository (`implements PanacheRepository<...>`) -- see the
+/// module doc comment for why an entity is excluded here. An injected
 /// framework primitive (`Config`, `ObjectMapper`, …) never reaches this
 /// check at all: those are external classes with no resolved reference
 /// edge into this repo's graph in the first place.
 fn is_cdi_managed(sym: &crate::symbol::Symbol) -> bool {
     sym.markers.iter().any(|m| is_admitting_annotation(m))
-        || sym.signature.contains("PanacheEntity")
         || sym.signature.contains("PanacheRepository")
 }
 
 fn is_admitting_annotation(marker: &str) -> bool {
     let name = marker.trim_start().trim_start_matches('@');
     let name = name.split(['(', ' ']).next().unwrap_or(name);
-    matches!(name, "ApplicationScoped" | "Singleton" | "Entity")
+    matches!(name, "ApplicationScoped" | "Singleton")
 }
 
 /// `@GET` / `@POST` / … -> its lowercase verb name. Exact match only (not
@@ -274,8 +273,9 @@ mod tests {
     fn admitting_annotations_are_matched_exactly() {
         assert!(is_admitting_annotation("@ApplicationScoped"));
         assert!(is_admitting_annotation("@Singleton"));
-        assert!(is_admitting_annotation("@Entity"));
-        assert!(is_admitting_annotation("@Entity(name = \"fruit\")"));
+        // `@Entity` is Schema territory (`stack.rs::is_entity_annotation`),
+        // not a core-admitting annotation -- see the module doc comment.
+        assert!(!is_admitting_annotation("@Entity"));
         assert!(!is_admitting_annotation("@RequestScoped"));
         assert!(!is_admitting_annotation("@Path(\"/x\")"));
         assert!(!is_admitting_annotation("@Override"));

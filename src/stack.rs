@@ -348,6 +348,32 @@ impl StackPack for JavaStack {
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
         Some(&crate::quarkus::QuarkusFeatureModel)
     }
+
+    fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {
+        // The second `is_schema_symbol` implementation (M17 did SQLModel /
+        // SQLAlchemy) — a JPA `@Entity`, or the Panache active-record base
+        // (which already implies the entity mapping, annotated or not).
+        // Deliberately **not** `implements PanacheRepository<...>` despite
+        // ROADMAP.md's original wording listing it as a signal too: a
+        // repository is the DAO/service layer *around* a table, not the
+        // table itself (no columns to report via `get_symbol`), and
+        // tagging it Schema would exclude its file from ever joining a
+        // feature's `core` via `admits_to_core`'s `schema_files` guard —
+        // see `quarkus.rs`'s `is_cdi_managed`, which already treats an
+        // injected repository as a `core`-worthy CDI/data-access type.
+        sym.raw == "class"
+            && (sym.markers.iter().any(|m| is_entity_annotation(m))
+                || sym.signature.contains("PanacheEntity"))
+    }
+}
+
+/// `@Entity` / `@Entity(name = "…")` -> true. Exact match on the
+/// annotation name, not a prefix check, matching `quarkus.rs`'s
+/// `is_admitting_annotation` convention.
+fn is_entity_annotation(marker: &str) -> bool {
+    let name = marker.trim_start().trim_start_matches('@');
+    let name = name.split(['(', ' ']).next().unwrap_or(name);
+    name == "Entity"
 }
 
 /// The Python stack (M17): `tree-sitter-python` extraction + dotted-module
@@ -635,5 +661,53 @@ mod tests {
         let mut with_method = mk("class Item(SQLModel, table=True)");
         with_method.children = vec!["m.py::Item::save".into()];
         assert!(!pack.is_schema_symbol(&with_method));
+    }
+
+    #[test]
+    fn java_is_schema_symbol_keys_on_entity_annotation_or_a_panache_entity_base() {
+        let pack = JavaStack;
+        let mk = |sig: &str, markers: &[&str]| ExtractedSymbol {
+            id: "org/acme/X.java::X".into(),
+            kind: crate::symbol::SymbolKind::Container,
+            raw: "class".into(),
+            file: "org/acme/X.java".into(),
+            lines: [1, 1],
+            signature: sig.into(),
+            docstring: None,
+            is_exported: true,
+            source_hash: String::new(),
+            interface_hash: None,
+            markers: markers.iter().map(|m| m.to_string()).collect(),
+            parent: None,
+            children: vec!["org/acme/X.java::X::name".into()],
+        };
+        // A plain JPA `@Entity` (repository style, no Panache base) is a table.
+        assert!(pack.is_schema_symbol(&mk("public class Fruit", &["@Entity"])));
+        assert!(pack.is_schema_symbol(&mk("public class Fruit", &["@Entity(name = \"fruit\")"])));
+        // Active-record style: `extends PanacheEntity`, annotated or not (the
+        // active-record base already implies the entity mapping).
+        assert!(pack.is_schema_symbol(&mk(
+            "public class FruitEntity extends PanacheEntity",
+            &["@Entity"]
+        )));
+        assert!(pack.is_schema_symbol(&mk(
+            "public class FruitEntity extends PanacheEntityBase",
+            &[]
+        )));
+        // A Panache *repository* is not itself a table -- it's the
+        // service/DAO layer that operates on one (ROADMAP.md's literal
+        // wording listed `implements PanacheRepository<...>` as a schema
+        // signal too, but a repository has no columns to report via
+        // `get_symbol` and, more concretely, tagging it Schema would
+        // exclude its file from ever joining a feature's `core` via
+        // `admits_to_core`'s `schema_files` guard -- regressing the real,
+        // tested case of an injected repository belonging in `core`
+        // (`quarkus.rs`'s `is_cdi_managed`). Stays a plain Container.
+        assert!(!pack.is_schema_symbol(&mk(
+            "public class FruitRepository implements PanacheRepository<Fruit>",
+            &[]
+        )));
+        // An ordinary, unannotated class is not a table.
+        assert!(!pack.is_schema_symbol(&mk("public class SlugFormatter", &[])));
     }
 }

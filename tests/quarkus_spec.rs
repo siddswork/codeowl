@@ -312,3 +312,113 @@ fn a_plain_unannotated_helper_class_stays_a_one_hop_dependency() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_panache_entity_is_schema_and_a_repository_using_it_stays_core() {
+    // The two real quarkus-quickstarts persistence idioms in one fixture:
+    // `Fruit` is a plain JPA `@Entity` (repository style -- no Panache
+    // base of its own), `FruitRepository implements
+    // PanacheRepository<Fruit>` is the DAO around it, and
+    // `FruitRepositoryResource` injects the repository. The entity must
+    // land in `data` (not `core`, not `dependencies`); the repository
+    // must still land in `core`, exactly as
+    // `an_injected_application_scoped_panache_repository_joins_core`
+    // already established -- this test's real job is confirming that
+    // adding the schema seam doesn't regress that.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-schema",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/Fruit.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.persistence.Entity;\n\
+         import jakarta.persistence.Id;\n\
+         \n\
+         @Entity\n\
+         public class Fruit {\n\
+         \x20   @Id\n\
+         \x20   public Long id;\n\
+         \x20   public String name;\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/FruitRepository.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import io.quarkus.hibernate.orm.panache.PanacheRepository;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class FruitRepository implements PanacheRepository<Fruit> {\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/FruitRepositoryResource.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.inject.Inject;\n\
+         import jakarta.ws.rs.GET;\n\
+         import jakarta.ws.rs.Path;\n\
+         \n\
+         @Path(\"repository/fruits\")\n\
+         public class FruitRepositoryResource {\n\
+         \n\
+         \x20   @Inject\n\
+         \x20   FruitRepository fruitRepository;\n\
+         \n\
+         \x20   @GET\n\
+         \x20   public String get() { return fruitRepository.listAll().toString(); }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+
+    let fruit = graph
+        .find("src/main/java/org/acme/Fruit.java::Fruit")
+        .expect("Fruit node");
+    assert_eq!(
+        graph.get_symbol(fruit).unwrap().kind,
+        codeowl::symbol::SymbolKind::Schema,
+        "an @Entity class is retagged Schema"
+    );
+    let repo = graph
+        .find("src/main/java/org/acme/FruitRepository.java::FruitRepository")
+        .expect("FruitRepository node");
+    assert_ne!(
+        graph.get_symbol(repo).unwrap().kind,
+        codeowl::symbol::SymbolKind::Schema,
+        "a PanacheRepository is not itself a table"
+    );
+
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-get-repository-fruits")
+        .expect("the GET repository/fruits route");
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+
+    assert!(
+        p.data
+            .contains(&"src/main/java/org/acme/Fruit.java::Fruit".to_string()),
+        "the entity is a data participant: {p:?}"
+    );
+    assert!(
+        p.core
+            .contains(&"src/main/java/org/acme/FruitRepository.java".to_string()),
+        "the repository still joins core, schema seam notwithstanding: {p:?}"
+    );
+    assert!(
+        !p.core
+            .contains(&"src/main/java/org/acme/Fruit.java".to_string()),
+        "the entity's own file must never be promoted to core: {p:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
