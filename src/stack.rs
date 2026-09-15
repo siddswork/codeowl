@@ -285,16 +285,16 @@ impl StackPack for RustStack {
     }
 }
 
-/// The Java stack (M16): `tree-sitter-java` over `.java`, exercised on
-/// Apache commons-lang. Plain classic Java — no framework, so
-/// `feature_model()` takes the trait default `None` (a utility library has
-/// no runtime entry surface; its public API is already covered by symbol /
-/// file / rollup specs). `import`s resolve by the `src/main/java` package
-/// layout, not `pom.xml`, so Gradle works too (`java::resolve_imports`);
-/// same-package references with no `import` are picked up by a source scan.
+/// The Java stack (M16 core + M18 feature layer): `tree-sitter-java` over
+/// `.java`, exercised on Apache commons-lang (M16, `feature_model() ->
+/// None` — a utility library has no runtime entry surface) and Quarkus
+/// (M18, `QuarkusFeatureModel` — JAX-RS `@Path`-annotated resources).
+/// `import`s resolve by the `src/main/java` package layout, not
+/// `pom.xml`, so Gradle works too (`java::resolve_imports`); same-package
+/// references with no `import` are picked up by a source scan.
 /// `extract_flow_edges` is empty — a Java call graph is deferred like the
-/// Rust one. M17 (Quarkus) is where a Java `feature_model()` and
-/// annotation-driven flow edges arrive.
+/// Rust one (M18's `@RegisterRestClient` cross-service edges are a later
+/// commit, not general call-graph analysis).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct JavaStack;
 
@@ -343,6 +343,10 @@ impl StackPack for JavaStack {
 
     fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
         FlowTarget::Unresolved
+    }
+
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
+        Some(&crate::quarkus::QuarkusFeatureModel)
     }
 }
 
@@ -508,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn java_pack_reads_java_and_has_no_feature_model() {
+    fn java_pack_reads_java_and_has_a_quarkus_feature_model() {
         let pack = JavaStack;
         assert_eq!(pack.name(), "java");
         assert_eq!(
@@ -529,8 +533,11 @@ mod tests {
             pack.classify("target/generated-sources/foo/Gen.java"),
             FileRole::Generated
         );
-        // commons-lang is a library — the trait's `None` default stands (exp-02).
-        assert!(pack.feature_model().is_none());
+        // A plain library with no `@Path`-annotated classes (commons-lang)
+        // enumerates zero entry points through this model rather than
+        // taking the trait's `None` default — see `quarkus.rs`'s module
+        // doc comment and `ARCHITECTURE.md` open question 10.
+        assert!(pack.feature_model().is_some());
 
         let syms = pack.extract_symbols("A.java", "public class A { void m() {} }\n");
         assert_eq!(syms[0].raw, "class");
