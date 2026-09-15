@@ -19,10 +19,10 @@ CodeOwl never calls an LLM. It assembles context and stores results; your
 agent writes the spec prose.
 
 **One stack per repo, auto-detected.** The extractor picks a `StackPack`
-from what it walks — TypeScript + Next.js + SQL, or Rust. A CLI or library
-stack (no routes, no framework entry points) gets symbols, file specs, and
-rollups but no feature layer; its system spec leads with a `## Key flows`
-section instead.
+from what it walks — TypeScript + Next.js + SQL, Rust, Java, or Python +
+FastAPI. A CLI or library stack (no routes, no framework entry points)
+gets symbols, file specs, and rollups but no feature layer; its system
+spec leads with a `## Key flows` section instead.
 
 ---
 
@@ -263,13 +263,17 @@ Two places, with opposite lifecycles:
 
 ## What Phase 1 does *not* do
 
-- **Two stacks so far** — TypeScript + Next.js + SQL, or Rust. One per
-  repo, auto-detected; a repo that looks like both is rejected rather than
-  guessed. Other languages get no symbols. Java (plain, then Quarkus) is
-  the next stack in.
-- **The feature layer is stack-specific.** For the Next.js pack it assumes
-  App Router (`app/**/page.tsx`, `app/**/route.ts`). The Rust pack has no
-  feature layer at all.
+- **Four stacks so far** — TypeScript + Next.js + SQL, Rust, Java, or
+  Python + FastAPI. One per repo, auto-detected; a repo that looks like
+  more than one is rejected rather than guessed (a polyglot mode — several
+  stacks in one repo, mixed freely — is planned, after Quarkus). Other
+  languages get no symbols.
+- **The feature layer is stack-specific, and optional.** The Next.js pack
+  assumes App Router (`app/**/page.tsx`, `app/**/route.ts`); FastAPI
+  assumes route decorators and `Depends()`. Rust and plain Java have no
+  feature layer at all — a library has no routes to enumerate. Quarkus
+  (heterogeneous entry points — HTTP, Kafka, scheduled jobs, gRPC — on the
+  Java pack) is in progress.
 - **`get_callers` is import-edge, not call-graph** — see "How the
   structural tools actually behave" above.
 - **`search_code` is plain regex** — no semantic / embedding search.

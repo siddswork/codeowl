@@ -73,13 +73,15 @@ automatically.
 | **SQL schema** | `CREATE TABLE` → table nodes with column lists, resolved against the app code that queries them |
 | **Rust** | `fn` / `struct` / `enum` / `trait` / `impl` / `mod` / `const` / `macro_rules!`; `use crate::…` / `super::` / `pub use` module-tree resolution; `///` + `//!` docs; `#[derive(…)]` / attribute markers. No feature layer — a library or CLI has no routes to enumerate. |
 | **Java** | `class` / `interface` / `enum` / `record` / `@interface` → containers, with their methods, constructors, and fields; Javadoc docstrings; `@Annotation` markers; `import a.b.C` resolved by path-suffix match (Maven, Gradle, or bare layout) plus same-package implicit references. No feature layer for a plain library. |
-| **Python** *(extraction shipped; the rest in progress — M17)* | `class` / `def` / module-level assignments; decorators captured verbatim (with arguments) as markers; `"""docstrings"""`. Import resolution, a symbol-level schema seam (SQLModel / SQLAlchemy `table=True` → schema nodes), and a **FastAPI** feature model (routes, `APIRouter` prefixes, `Depends()`) are on the way. |
+| **Python** | `class` / `def` / module-level assignments; decorators captured verbatim (with arguments) as markers; `"""docstrings"""`; dotted-module and relative `import` resolution; a symbol-level schema seam (SQLModel / SQLAlchemy `table=True` → schema nodes); a **FastAPI** feature model (route enumeration, `APIRouter` prefix threading, `Depends()` → flow edges). No feature layer for a plain library. |
 
-**Python + FastAPI** is in progress (M17). **Quarkus** microservices —
-heterogeneous entry points (`@Path`, Kafka, `@Scheduled`), cross-service
-edges carried by string — follow (M18). A polyglot mode (one primary
-stack plus secondary-language subtrees in the same repo) is planned before
-that. See `ROADMAP.md`.
+**Quarkus** microservices are in progress (M18) — heterogeneous entry
+points (`@Path`, Kafka, `@Scheduled`, gRPC) coexisting in one service,
+cross-service edges carried by string (`@RegisterRestClient`), a second
+schema idiom (JPA / Panache). A polyglot mode (one primary stack plus
+secondary-language subtrees in the same repo — mix TypeScript, Rust,
+Java, and Python freely, not just one per repo) follows after. See
+`ROADMAP.md`.
 
 ## Docs
 

@@ -11,12 +11,14 @@ that up against your own repo.
 generation prompt, instructions file) differ.
 
 **Current scope:** one `StackPack` per repo, auto-detected — TypeScript +
-Next.js + SQL, or Rust. The Next.js pack's feature detection assumes
-**App Router** conventions (`app/**/page.tsx`, `app/**/route.ts`,
-`fetch("/api/...")`); a CLI/library stack (Rust here) gets symbols, file
-specs, and rollups but no feature layer. A repo that looks like two stacks
-at once is rejected rather than guessed. See `REQUIREMENTS.md` /
-`ROADMAP.md`.
+Next.js + SQL, Rust, Java, or Python + FastAPI. The Next.js pack's feature
+detection assumes **App Router** conventions (`app/**/page.tsx`,
+`app/**/route.ts`, `fetch("/api/...")`); FastAPI's assumes route
+decorators (`@router.get(...)`) and `Depends()`. A CLI/library stack (Rust,
+or plain Java) gets symbols, file specs, and rollups but no feature layer.
+A repo that looks like two stacks at once is rejected rather than
+guessed. Quarkus (heterogeneous service entry points on the Java pack) is
+in progress. See `REQUIREMENTS.md` / `ROADMAP.md`.
 
 ---
 
