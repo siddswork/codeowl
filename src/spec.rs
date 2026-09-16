@@ -390,6 +390,66 @@ pub(crate) fn symbol_span_text(
     Ok(out)
 }
 
+/// Above this many bytes, a Container's generation-task `source` is
+/// reduced to signatures + docstrings instead of full bodies (M16's
+/// headline finding, fixed at M18 since Java's classes are where it bites
+/// hardest — `StringUtils` on commons-lang is 9,421 lines / ~420 KB;
+/// CodeOwl's own `mcp.rs`/`spec.rs` hit ~95 KB). Both real cases clear
+/// this by more than 3x; an ordinary class (a few KB at most) never gets
+/// near it. Byte-based, not line-based: token count tracks text volume
+/// more directly than line count, and this codebase has no precise
+/// tokenizer to reach for (`ARCHITECTURE.md` open question 2 is exactly
+/// that gap, still open) — a laptop-scale heuristic constant, in the same
+/// spirit as `SHARED_CODE_MAX_FILES`, not a measured limit.
+pub(crate) const LARGE_CONTAINER_BYTES: usize = 30_000;
+
+/// `full_source` (the true full span from [`symbol_span_text`]) unless
+/// `sym` is a `Container` over [`LARGE_CONTAINER_BYTES`] with members to
+/// reduce, in which case each child's `signature` + `docstring` replaces
+/// its body — a class-level `### Summary`/`### Behavior` prompt needs to
+/// know a member exists and what it's for, not reproduce every
+/// implementation. Deliberately **no** visibility-aware carve-out (a
+/// private helper keeping its full body, as `ROADMAP.md`'s original
+/// wording sketched): the real forcing case (`StringUtils`) is 240 public
+/// methods against 15 private ones, so the exception would buy little for
+/// real added complexity (and language-specific visibility rules
+/// awkwardly fit this generic, stack-neutral function) — revisit only if
+/// a real dogfood pass shows those bodies were actually load-bearing.
+///
+/// Correctness-critical callers (`### Depends on`, `scoped_symbol_deps`)
+/// must keep scanning `full_source` itself, never this reduced text — a
+/// dependency used only inside a now-omitted body must still be found.
+/// This function is for the *generation-task display* only.
+pub(crate) fn maybe_reduce_container_source(
+    sym: &Symbol,
+    graph: &Graph,
+    full_source: String,
+) -> String {
+    if sym.kind != SymbolKind::Container
+        || sym.children.is_empty()
+        || full_source.len() <= LARGE_CONTAINER_BYTES
+    {
+        return full_source;
+    }
+    let mut out = sym.signature.clone();
+    if let Some(doc) = &sym.docstring {
+        out.push('\n');
+        out.push_str(doc);
+    }
+    for &child_id in &sym.children {
+        let Some(child) = graph.get_symbol(child_id) else {
+            continue;
+        };
+        out.push_str("\n\n");
+        out.push_str(&child.signature);
+        if let Some(doc) = &child.docstring {
+            out.push('\n');
+            out.push_str(doc);
+        }
+    }
+    out
+}
+
 /// Whole-word substring search: `name` must not be immediately preceded
 /// or followed by another identifier character, so `useLabel` doesn't
 /// count as a use of the import `Label`.
@@ -2798,6 +2858,91 @@ impl Counter {\n\
             "folded method body missing from span text:\n{text}"
         );
         assert!(text.contains("pub struct Counter"), "struct decl missing");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn maybe_reduce_container_source_replaces_bodies_with_signatures_over_the_threshold() {
+        // M18: the God-class fix. A synthetic large class -- one
+        // documented method padded well past `LARGE_CONTAINER_BYTES` --
+        // must come back as signature + docstring only, its body gone.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-godclass", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let padding = "x".repeat(LARGE_CONTAINER_BYTES + 1000);
+        let src = format!(
+            "public class Big {{\n\
+             \x20   /** Adds one to a running total. */\n\
+             \x20   public int bump(int n) {{\n\
+             \x20       // {padding}\n\
+             \x20       return n + 1;\n\
+             \x20   }}\n\
+             }}\n"
+        );
+        std::fs::write(dir.join("src/Big.java"), &src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/Big.java".to_string(),
+            source_hash: hash_text(&src),
+            symbols: crate::java::extract_file(&src, "src/Big.java"),
+        }]);
+        let big = graph
+            .get_symbol(graph.find("src/Big.java::Big").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/Big.java", big).unwrap();
+        assert!(
+            full.len() > LARGE_CONTAINER_BYTES,
+            "fixture must actually clear the threshold"
+        );
+
+        let reduced = maybe_reduce_container_source(big, &graph, full.clone());
+        assert!(
+            reduced.contains("Adds one to a running total"),
+            "docstring must survive:\n{reduced}"
+        );
+        assert!(
+            reduced.contains("public int bump(int n)"),
+            "signature must survive:\n{reduced}"
+        );
+        assert!(
+            !reduced.contains("return n + 1"),
+            "body must be dropped:\n{reduced}"
+        );
+        assert!(
+            reduced.len() < full.len(),
+            "reduced text must actually be smaller"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn maybe_reduce_container_source_leaves_an_ordinary_class_untouched() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-smallclass",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let src = "public class Small {\n    public int bump(int n) { return n + 1; }\n}\n";
+        std::fs::write(dir.join("src/Small.java"), src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/Small.java".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::java::extract_file(src, "src/Small.java"),
+        }]);
+        let small = graph
+            .get_symbol(graph.find("src/Small.java::Small").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/Small.java", small).unwrap();
+        let reduced = maybe_reduce_container_source(small, &graph, full.clone());
+        assert_eq!(
+            reduced, full,
+            "an ordinary-sized class is returned unchanged"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
