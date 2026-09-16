@@ -147,13 +147,26 @@ CodeOwl was built and tuned against Claude Code. The read tools
 `get_spec_coverage`, `search_code`) work the same anywhere. The
 **generation loop** has two Copilot-specific frictions:
 
-1. **Large-file tool output.** `get_next_spec_task` returns a symbol's
-   full source. For a large file (a multi-thousand-line utility class) the
-   payload can exceed VS Code's tool-result size limit and get truncated —
-   Claude Code spills it to a file instead. Until CodeOwl trims that
-   payload (a planned change), generation of the biggest files may be
-   unreliable in Copilot; everything else, and all the read tools, are
-   fine.
+1. **Large-file tool output — fixed by default, tunable if it still
+   happens.** `get_next_spec_task` used to return a symbol's full source
+   unconditionally. CodeOwl now reduces an oversized class to its member
+   signatures + docstrings, and hard-caps every generation-task payload
+   (8 KB by default) so nothing it returns can exceed that — Copilot Chat
+   spills anything larger than its own inline-context limit to a
+   `content.json` temp file and asks the agent to `read_file` it back,
+   which fails outright if `read_file` isn't enabled for the session (a
+   documented Copilot limitation, confirmed on GitHub's own Copilot
+   community discussion board, not a CodeOwl/`rmcp`/transport bug). The
+   8 KB default has margin against every case seen so far, but
+   if your setup still spills, lower it further with `codeowl serve`'s
+   `--max-generation-bytes` flag (and optionally `--large-container-bytes`,
+   the smaller threshold that triggers the nicer signature-only reduction
+   before the hard cap ever needs to bite) — add them to the `args` array
+   in `.vscode/mcp.json`:
+
+   ```json
+   "args": ["serve", "${workspaceFolder}", "--max-generation-bytes", "5000"]
+   ```
 
 2. **The prompt is Claude-tuned.** Copilot's agent may not follow the
    multi-step loop as faithfully — reading *every* `core_sources` file,
