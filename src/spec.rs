@@ -394,17 +394,77 @@ pub(crate) fn symbol_span_text(
 /// reduced to signatures + docstrings instead of full bodies (M16's
 /// headline finding, fixed at M18 since Java's classes are where it bites
 /// hardest — `StringUtils` on commons-lang is 9,421 lines / ~420 KB;
-/// CodeOwl's own `mcp.rs`/`spec.rs` hit ~95 KB). Both real cases clear
-/// this by more than 3x; an ordinary class (a few KB at most) never gets
-/// near it. Byte-based, not line-based: token count tracks text volume
-/// more directly than line count, and this codebase has no precise
-/// tokenizer to reach for (`ARCHITECTURE.md` open question 2 is exactly
-/// that gap, still open) — a laptop-scale heuristic constant, in the same
-/// spirit as `SHARED_CODE_MAX_FILES`, not a measured limit.
-pub(crate) const LARGE_CONTAINER_BYTES: usize = 30_000;
+/// CodeOwl's own `mcp.rs`/`spec.rs` hit ~95 KB).
+///
+/// **Recalibrated 2026-09-16, after this constant's first value (30,000)
+/// shipped without ever being validated against a real MCP client.** A
+/// real user's Python class hit VS Code Copilot Chat's inline-context
+/// overflow (it spills an oversized tool result to a `content.json` temp
+/// file and asks the agent to `read_file` it back — a documented Copilot
+/// limitation, not an `rmcp`/transport bug) at just **11,498 bytes** —
+/// under a third of the old threshold, so that class sailed through
+/// unreduced. The original number was anchored to "when does this get
+/// absurdly large" (the two cases above), not "what's actually safe for
+/// a real client" — those are different questions, and only the second
+/// one matters here. Lowered well under the observed failure; see
+/// [`MAX_GENERATION_TASK_TEXT_BYTES`] below for the hard backstop that
+/// doesn't depend on this number being right, since Copilot's exact
+/// ceiling still isn't known — only that it's ≤ 11,498.
+///
+/// Byte-based, not line-based: token count tracks text volume more
+/// directly than line count, and this codebase has no precise tokenizer
+/// to reach for (`ARCHITECTURE.md` open question 2 is exactly that gap,
+/// still open) — a laptop-scale heuristic constant, in the same spirit
+/// as `SHARED_CODE_MAX_FILES`, not a measured limit. Overridable per
+/// server instance (`mcp.rs::CodeOwlServer::with_generation_limits`,
+/// wired to `codeowl serve`'s `--large-container-bytes` flag) since no
+/// single number is right for every MCP client, and guessing wrong once
+/// already shipped a bug — an explicit parameter, not an env var read,
+/// so the value is visible in one place (the CLI invocation) and every
+/// call site stays a pure function with no hidden global state.
+pub(crate) const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
+
+/// A hard ceiling on any single generation-task text field
+/// (`SpecTaskResponse::Symbol::source` or `::File::source`), applied
+/// *after* whatever reduction already happened — the backstop for the
+/// real bug this constant's sibling above was recalibrated from: we
+/// don't actually know VS Code Copilot Chat's overflow threshold, only
+/// that it's ≤ 11,498 bytes, so a heuristic reduction trigger alone is a
+/// guess, never a guarantee. This is the guarantee: nothing this crate
+/// hands back as a generation-task `source` can ever exceed this many
+/// bytes, full stop, regardless of which code path produced it. Set well
+/// under the observed failure for real margin. `File` tasks had **no**
+/// size handling at all before this — a large flat file with no single
+/// big class was completely unprotected even after the Container fix.
+/// Overridable the same way as `LARGE_CONTAINER_BYTES_DEFAULT` (the
+/// `--max-generation-bytes` flag) — different MCP clients have different
+/// real ceilings, and this codebase can't know all of them.
+pub(crate) const MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT: usize = 8_000;
+
+/// Truncate `text` to at most `max_bytes`, cutting at a `char` boundary
+/// (never splitting a multi-byte UTF-8 sequence) and appending a visible
+/// marker so truncation is never silent — an agent that gets a
+/// suspiciously neat cutoff with no note would have no way to know the
+/// class continues past what it can see. Returns `text` unchanged if
+/// it's already within the cap.
+pub(crate) fn cap_generation_text(text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    let mut cut = max_bytes;
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut out = text[..cut].to_string();
+    out.push_str(
+        "\n\n[... truncated: this content exceeded the generation-task size limit. \
+        Use get_symbol / search_code / get_callers for the parts not shown here.]",
+    );
+    out
+}
 
 /// `full_source` (the true full span from [`symbol_span_text`]) unless
-/// `sym` is a `Container` over [`LARGE_CONTAINER_BYTES`] with members to
+/// `sym` is a `Container` over `threshold` bytes with members to
 /// reduce, in which case each child's `signature` + `docstring` replaces
 /// its body — a class-level `### Summary`/`### Behavior` prompt needs to
 /// know a member exists and what it's for, not reproduce every
@@ -424,10 +484,11 @@ pub(crate) fn maybe_reduce_container_source(
     sym: &Symbol,
     graph: &Graph,
     full_source: String,
+    threshold: usize,
 ) -> String {
     if sym.kind != SymbolKind::Container
         || sym.children.is_empty()
-        || full_source.len() <= LARGE_CONTAINER_BYTES
+        || full_source.len() <= threshold
     {
         return full_source;
     }
@@ -2865,12 +2926,12 @@ impl Counter {\n\
     #[test]
     fn maybe_reduce_container_source_replaces_bodies_with_signatures_over_the_threshold() {
         // M18: the God-class fix. A synthetic large class -- one
-        // documented method padded well past `LARGE_CONTAINER_BYTES` --
-        // must come back as signature + docstring only, its body gone.
+        // documented method padded well past `LARGE_CONTAINER_BYTES_DEFAULT`
+        // -- must come back as signature + docstring only, its body gone.
         let dir =
             std::env::temp_dir().join(format!("codeowl-spec-test-{}-godclass", std::process::id()));
         std::fs::create_dir_all(dir.join("src")).unwrap();
-        let padding = "x".repeat(LARGE_CONTAINER_BYTES + 1000);
+        let padding = "x".repeat(LARGE_CONTAINER_BYTES_DEFAULT + 1000);
         let src = format!(
             "public class Big {{\n\
              \x20   /** Adds one to a running total. */\n\
@@ -2893,11 +2954,12 @@ impl Counter {\n\
 
         let full = symbol_span_text(&dir, &graph, "src/Big.java", big).unwrap();
         assert!(
-            full.len() > LARGE_CONTAINER_BYTES,
+            full.len() > LARGE_CONTAINER_BYTES_DEFAULT,
             "fixture must actually clear the threshold"
         );
 
-        let reduced = maybe_reduce_container_source(big, &graph, full.clone());
+        let reduced =
+            maybe_reduce_container_source(big, &graph, full.clone(), LARGE_CONTAINER_BYTES_DEFAULT);
         assert!(
             reduced.contains("Adds one to a running total"),
             "docstring must survive:\n{reduced}"
@@ -2938,13 +3000,50 @@ impl Counter {\n\
             .unwrap();
 
         let full = symbol_span_text(&dir, &graph, "src/Small.java", small).unwrap();
-        let reduced = maybe_reduce_container_source(small, &graph, full.clone());
+        let reduced = maybe_reduce_container_source(
+            small,
+            &graph,
+            full.clone(),
+            LARGE_CONTAINER_BYTES_DEFAULT,
+        );
         assert_eq!(
             reduced, full,
             "an ordinary-sized class is returned unchanged"
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cap_generation_text_leaves_short_text_untouched() {
+        let text = "hello world".to_string();
+        assert_eq!(
+            cap_generation_text(text.clone(), MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT),
+            text
+        );
+    }
+
+    #[test]
+    fn cap_generation_text_truncates_and_marks_it_visibly() {
+        let text = "x".repeat(MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 500);
+        let capped = cap_generation_text(text, MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT);
+        assert!(
+            capped.len() < MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 500,
+            "must actually be shorter"
+        );
+        assert!(
+            capped.contains("truncated"),
+            "must visibly mark that it was cut, not silently drop content: {capped}"
+        );
+    }
+
+    #[test]
+    fn cap_generation_text_never_splits_a_multi_byte_char() {
+        // A run of 3-byte UTF-8 characters (☃, U+2603) straddling the cut
+        // point -- a naive byte-index slice would panic mid-character.
+        let text = "☃".repeat(MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT); // well over the byte cap
+        let capped = cap_generation_text(text, MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT); // must not panic
+        assert!(capped.len() <= MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 200);
     }
 
     #[test]
