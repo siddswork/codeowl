@@ -417,7 +417,7 @@ pub(crate) fn symbol_span_text(
 /// still open) — a laptop-scale heuristic constant, in the same spirit
 /// as `SHARED_CODE_MAX_FILES`, not a measured limit. Overridable per
 /// server instance (`mcp.rs::CodeOwlServer::with_generation_limits`,
-/// wired to `codeowl serve`'s `--large-container-bytes` flag) since no
+/// wired to `codeowl serve`'s `--large-class-bytes` flag) since no
 /// single number is right for every MCP client, and guessing wrong once
 /// already shipped a bug — an explicit parameter, not an env var read,
 /// so the value is visible in one place (the CLI invocation) and every
@@ -437,7 +437,7 @@ pub const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
 /// size handling at all before this — a large flat file with no single
 /// big class was completely unprotected even after the Container fix.
 /// Overridable the same way as `LARGE_CONTAINER_BYTES_DEFAULT` (the
-/// `--max-generation-bytes` flag) — different MCP clients have different
+/// `--max-spec-task-bytes` flag) — different MCP clients have different
 /// real ceilings, and this codebase can't know all of them.
 pub const MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT: usize = 8_000;
 

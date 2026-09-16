@@ -158,11 +158,11 @@ CodeOwl was built and tuned against Claude Code. The read tools
    this with two `codeowl serve` flags, both with defaults tuned to have
    margin against every case seen so far:
 
-   - **`--large-container-bytes`** (default **4,000**) — above this many
+   - **`--large-class-bytes`** (default **4,000**) — above this many
      bytes, a class with many methods gets reduced to member signatures +
      docstrings instead of full bodies. This is the "nicer" fix: it keeps
      as much real content as it safely can, tried first.
-   - **`--max-generation-bytes`** (default **8,000**) — a hard ceiling
+   - **`--max-spec-task-bytes`** (default **8,000**) — a hard ceiling
      applied *after* that reduction, to *any* generation-task response
      (a class, or a plain large file with no single big class — the
      latter had no protection at all before this). This is the actual
@@ -170,11 +170,11 @@ CodeOwl was built and tuned against Claude Code. The read tools
      exceed this many bytes, full stop.
 
    If your setup still spills a `content.json` at the defaults, lower
-   `--max-generation-bytes` below whatever size you saw it happen at —
+   `--max-spec-task-bytes` below whatever size you saw it happen at —
    add it to the `args` array in `.vscode/mcp.json`:
 
    ```json
-   "args": ["serve", "${workspaceFolder}", "--max-generation-bytes", "5000"]
+   "args": ["serve", "${workspaceFolder}", "--max-spec-task-bytes", "5000"]
    ```
 
 2. **The prompt is Claude-tuned.** Copilot's agent may not follow the
