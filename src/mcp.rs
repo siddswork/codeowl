@@ -1778,8 +1778,8 @@ mod tests {
             panic!("expected the file task next");
         };
         assert!(
-            source.len() <= crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 200,
-            "a large flat file's task source must be capped: {} bytes",
+            source.len() <= crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
+            "a large flat file's task source must be capped, marker included: {} bytes",
             source.len()
         );
         assert!(
@@ -1813,9 +1813,9 @@ mod tests {
             panic!("expected the symbol task");
         };
         assert!(
-            source.len() <= 20 + 200,
+            source.len() <= 20,
             "a caller-supplied max_spec_task_bytes must actually take effect, \
-             even on a file the compiled-in default would never touch: {} bytes",
+             marker included, even on a file the compiled-in default would never touch: {} bytes",
             source.len()
         );
         assert!(source.contains("truncated"));
