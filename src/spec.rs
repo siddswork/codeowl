@@ -422,7 +422,7 @@ pub(crate) fn symbol_span_text(
 /// already shipped a bug — an explicit parameter, not an env var read,
 /// so the value is visible in one place (the CLI invocation) and every
 /// call site stays a pure function with no hidden global state.
-pub(crate) const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
+pub const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
 
 /// A hard ceiling on any single generation-task text field
 /// (`SpecTaskResponse::Symbol::source` or `::File::source`), applied
@@ -439,7 +439,7 @@ pub(crate) const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
 /// Overridable the same way as `LARGE_CONTAINER_BYTES_DEFAULT` (the
 /// `--max-generation-bytes` flag) — different MCP clients have different
 /// real ceilings, and this codebase can't know all of them.
-pub(crate) const MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT: usize = 8_000;
+pub const MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT: usize = 8_000;
 
 /// Truncate `text` to at most `max_bytes`, cutting at a `char` boundary
 /// (never splitting a multi-byte UTF-8 sequence) and appending a visible

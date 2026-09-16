@@ -149,20 +149,29 @@ CodeOwl was built and tuned against Claude Code. The read tools
 
 1. **Large-file tool output — fixed by default, tunable if it still
    happens.** `get_next_spec_task` used to return a symbol's full source
-   unconditionally. CodeOwl now reduces an oversized class to its member
-   signatures + docstrings, and hard-caps every generation-task payload
-   (8 KB by default) so nothing it returns can exceed that — Copilot Chat
-   spills anything larger than its own inline-context limit to a
-   `content.json` temp file and asks the agent to `read_file` it back,
-   which fails outright if `read_file` isn't enabled for the session (a
-   documented Copilot limitation, confirmed on GitHub's own Copilot
-   community discussion board, not a CodeOwl/`rmcp`/transport bug). The
-   8 KB default has margin against every case seen so far, but
-   if your setup still spills, lower it further with `codeowl serve`'s
-   `--max-generation-bytes` flag (and optionally `--large-container-bytes`,
-   the smaller threshold that triggers the nicer signature-only reduction
-   before the hard cap ever needs to bite) — add them to the `args` array
-   in `.vscode/mcp.json`:
+   unconditionally. Copilot Chat spills anything larger than its own
+   (undocumented) inline-context limit to a `content.json` temp file and
+   asks the agent to `read_file` it back, which fails outright if
+   `read_file` isn't enabled for the session — a documented Copilot
+   limitation, confirmed on GitHub's own Copilot community discussion
+   board, not a CodeOwl/`rmcp`/transport bug. CodeOwl now protects against
+   this with two `codeowl serve` flags, both with defaults tuned to have
+   margin against every case seen so far:
+
+   - **`--large-container-bytes`** (default **4,000**) — above this many
+     bytes, a class with many methods gets reduced to member signatures +
+     docstrings instead of full bodies. This is the "nicer" fix: it keeps
+     as much real content as it safely can, tried first.
+   - **`--max-generation-bytes`** (default **8,000**) — a hard ceiling
+     applied *after* that reduction, to *any* generation-task response
+     (a class, or a plain large file with no single big class — the
+     latter had no protection at all before this). This is the actual
+     guarantee: nothing CodeOwl returns from `get_next_spec_task` can
+     exceed this many bytes, full stop.
+
+   If your setup still spills a `content.json` at the defaults, lower
+   `--max-generation-bytes` below whatever size you saw it happen at —
+   add it to the `args` array in `.vscode/mcp.json`:
 
    ```json
    "args": ["serve", "${workspaceFolder}", "--max-generation-bytes", "5000"]
