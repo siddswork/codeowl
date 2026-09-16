@@ -422,3 +422,72 @@ fn a_panache_entity_is_schema_and_a_repository_using_it_stays_core() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_register_rest_client_interface_is_not_an_entry_point() {
+    // Real shape: `rest-fights/client/HeroRestClient` -- a
+    // `@RegisterRestClient` interface with the exact same `@Path` +
+    // `@GET` shape as a real server resource, but it describes an
+    // *outbound* call this service makes to another one's endpoint, not
+    // something this service serves. `extract_file` genuinely can't tell
+    // the two apart from a method's own markers alone (confirmed: it
+    // extracts as an ordinary Callable with `@GET`/`@Path` markers) --
+    // the discriminator is the *containing interface's* own
+    // `@RegisterRestClient` marker.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-restclient",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme/client")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/client/HeroRestClient.java"),
+        "package org.acme.client;\n\
+         \n\
+         import jakarta.ws.rs.GET;\n\
+         import jakarta.ws.rs.Path;\n\
+         import org.eclipse.microprofile.rest.client.inject.RegisterRestClient;\n\
+         \n\
+         @Path(\"/api/heroes\")\n\
+         @RegisterRestClient(configKey = \"hero-client\")\n\
+         interface HeroRestClient {\n\
+         \x20   @GET\n\
+         \x20   @Path(\"/random\")\n\
+         \x20   String findRandomHero();\n\
+         }\n",
+    )
+    .unwrap();
+    // A real server resource in the same repo, to confirm the exclusion
+    // is narrow -- only `@RegisterRestClient` interfaces are skipped, not
+    // every interface or every `@Path`-annotated type.
+    std::fs::write(
+        dir.join("src/main/java/org/acme/GreetingResource.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.ws.rs.GET;\n\
+         import jakarta.ws.rs.Path;\n\
+         \n\
+         @Path(\"/hello\")\n\
+         public class GreetingResource {\n\
+         \x20   @GET\n\
+         \x20   public String hello() { return \"hello\"; }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert!(
+        !eps.iter().any(|e| e.file.ends_with("HeroRestClient.java")),
+        "a @RegisterRestClient interface's methods must never be entry points: {eps:?}"
+    );
+    assert_eq!(
+        eps.len(),
+        1,
+        "only the real server resource remains: {eps:?}"
+    );
+    assert_eq!(eps[0].id, "http-get-hello");
+
+    std::fs::remove_dir_all(&dir).ok();
+}

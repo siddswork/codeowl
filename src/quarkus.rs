@@ -37,9 +37,30 @@
 //! (`ARCHITECTURE.md`'s "Feature specs" section) before this hook is
 //! even called.
 //!
+//! **`@RegisterRestClient` interfaces are excluded from
+//! `enumerate_entry_points`, not modeled as cross-service flow edges.**
+//! `HeroRestClient` in `quarkus-super-heroes` carries the identical
+//! `@Path`/`@GET` shape as a real server resource (confirmed:
+//! `extract_file` can't tell them apart from a method's own markers
+//! alone) but describes an *outbound* call to another service, not
+//! something this one serves — `is_register_rest_client` is the
+//! discriminator. Deliberately **not** attempting to trace the call
+//! itself into a flow edge: the real chain is
+//! `FightResource → FightService → HeroClient → @RestClient HeroRestClient`,
+//! three hops from any entry point to the interface that actually
+//! carries the path, with no distinguishing syntax at the call site the
+//! way `fetch("literal")` / `.from("literal")` / `Depends(x)` have —
+//! every other pack's flow edges are single-hop and syntax-triggered.
+//! Building multi-hop tracing here would be real call-graph analysis,
+//! which this project has repeatedly declined to build (M16/M18 docs).
+//! The ordinary resolved-import chain plus the client interface's own
+//! Javadoc (which already states the target path in prose in the real
+//! repo) already carry this information to a generating agent with no
+//! new mechanism; whether that's actually sufficient is a question for
+//! this milestone's dogfood validation, not something to guess at now.
+//!
 //! **Not yet (later M18 commits):** Kafka/`@Scheduled`/gRPC entry
-//! points and `@RegisterRestClient` cross-service edges — same
-//! incremental pattern M17 used.
+//! points — same incremental pattern M17 used.
 
 use std::collections::HashMap;
 
@@ -60,6 +81,14 @@ impl FeatureModel for QuarkusFeatureModel {
         // memoization `fastapi.rs::router_prefix` uses for
         // `APIRouter(prefix=...)` (a code-review finding there).
         let mut class_path_cache: HashMap<SymbolId, Option<String>> = HashMap::new();
+        // A `@RegisterRestClient` interface's methods carry the identical
+        // `@Path`/`@GET` shape as a real server resource (confirmed:
+        // `extract_file` can't tell them apart from a method's own
+        // markers alone) but describe an *outbound* call this service
+        // makes to another one's endpoint, not something it serves --
+        // `HeroRestClient` in `quarkus-super-heroes` is the real case.
+        // Same per-class memoization as the path cache above.
+        let mut is_rest_client_cache: HashMap<SymbolId, bool> = HashMap::new();
         let mut out: Vec<EntryPoint> = graph
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
@@ -67,6 +96,12 @@ impl FeatureModel for QuarkusFeatureModel {
                 let verb = s.markers.iter().find_map(|m| parse_verb(m))?;
                 let method_path = s.markers.iter().find_map(|m| parse_path_annotation(m));
                 let parent_id = s.parent?;
+                let is_rest_client = *is_rest_client_cache
+                    .entry(parent_id)
+                    .or_insert_with(|| is_register_rest_client(graph, parent_id));
+                if is_rest_client {
+                    return None;
+                }
                 let class_path = class_path_cache
                     .entry(parent_id)
                     .or_insert_with(|| class_path_for(graph, parent_id))
@@ -152,6 +187,20 @@ fn first_string_literal(s: &str) -> Option<String> {
 fn class_path_for(graph: &Graph, class_id: SymbolId) -> Option<String> {
     let sym = graph.get_symbol(class_id)?;
     sym.markers.iter().find_map(|m| parse_path_annotation(m))
+}
+
+/// Does `class_id`'s own declaration carry `@RegisterRestClient`? The
+/// discriminator between a real server resource and an outbound client
+/// contract that happens to share the identical `@Path`/verb shape.
+fn is_register_rest_client(graph: &Graph, class_id: SymbolId) -> bool {
+    let Some(sym) = graph.get_symbol(class_id) else {
+        return false;
+    };
+    sym.markers.iter().any(|m| {
+        let name = m.trim_start().trim_start_matches('@');
+        let name = name.split(['(', ' ']).next().unwrap_or(name);
+        name == "RegisterRestClient"
+    })
 }
 
 /// Join a class-level `@Path` and an optional method-level `@Path` the
