@@ -542,6 +542,11 @@ impl CodeOwlServer {
                 if !scoped.externals.is_empty() {
                     dependencies.push(format!("externals: {}", scoped.externals.join(", ")));
                 }
+                // Dependency scanning above already ran against the true
+                // full text -- only the payload actually handed to the
+                // agent is reduced for a God-class Container (M18,
+                // M16's headline finding).
+                let source = crate::spec::maybe_reduce_container_source(sym, graph, source);
                 SpecTaskResponse::Symbol {
                     id,
                     signature,
@@ -1615,6 +1620,69 @@ mod tests {
         assert_eq!(
             other_spec.0.status, "current",
             "an unrelated file must not be affected"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- M18: the God-class generation-task payload fix ----------------
+
+    #[tokio::test]
+    async fn a_god_class_generation_task_has_reduced_source_but_keeps_its_real_dependencies() {
+        let dir = std::env::temp_dir().join(format!("codeowl-mcp-godclass-{}", std::process::id()));
+        let helper_src = "package org.acme;\n\npublic class Helper {\n    public static int assist(int n) { return n; }\n}\n";
+        let padding = "x".repeat(crate::spec::LARGE_CONTAINER_BYTES + 1000);
+        let big_src = format!(
+            "package org.acme;\n\n\
+             public class Big {{\n\
+             \x20   /** Computes a padded total. */\n\
+             \x20   public int compute(int n) {{\n\
+             \x20       // {padding}\n\
+             \x20       return Helper.assist(n) + 1;\n\
+             \x20   }}\n\
+             }}\n"
+        );
+
+        let server = rebuild_server(
+            dir.clone(),
+            &[
+                ("src/main/java/org/acme/Helper.java", helper_src),
+                ("src/main/java/org/acme/Big.java", &big_src),
+            ],
+        );
+
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "src/main/java/org/acme/Big.java".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let SpecTaskResponse::Symbol {
+            source,
+            dependencies,
+            ..
+        } = task.0
+        else {
+            panic!("expected a Symbol task");
+        };
+        assert!(
+            source.contains("Computes a padded total"),
+            "docstring must survive:\n{source}"
+        );
+        assert!(
+            source.contains("public int compute(int n)"),
+            "signature must survive:\n{source}"
+        );
+        assert!(
+            !source.contains("Helper.assist(n) + 1"),
+            "the body must be dropped from the task source:\n{source}"
+        );
+        assert!(
+            dependencies.iter().any(|d| d.contains("Helper")),
+            "the real dependency, referenced only inside the now-dropped body, \
+             must still be listed -- ### Depends on scans the full text, not \
+             the reduced one: {dependencies:?}"
         );
 
         std::fs::remove_dir_all(&dir).ok();
