@@ -324,6 +324,19 @@ pub struct CodeOwlServer {
     graph: Arc<ArcSwap<Graph>>,
     root: Arc<PathBuf>,
     tool_router: ToolRouter<Self>,
+    /// The two `get_next_spec_task` size knobs — see
+    /// `spec::LARGE_CONTAINER_BYTES_DEFAULT` /
+    /// `spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT` for why these need
+    /// to be overridable per MCP client at all (a real user's class hit
+    /// VS Code Copilot Chat's overflow threshold at a size well under the
+    /// original hardcoded default). Explicit fields, not an env var read
+    /// inside `spec.rs`, so the active values are visible in one place
+    /// (the `codeowl serve` invocation, via `with_generation_limits`)
+    /// rather than ambient process state — and so every existing test
+    /// that builds a `CodeOwlServer` via `::new` keeps compiling
+    /// unchanged, since these just default here.
+    large_class_bytes: usize,
+    max_spec_task_bytes: usize,
 }
 
 impl CodeOwlServer {
@@ -332,7 +345,28 @@ impl CodeOwlServer {
             graph: Arc::new(ArcSwap::from_pointee(graph)),
             root: Arc::new(root),
             tool_router: Self::tool_router(),
+            large_class_bytes: crate::spec::LARGE_CONTAINER_BYTES_DEFAULT,
+            max_spec_task_bytes: crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
         }
+    }
+
+    /// Override the two `get_next_spec_task` size knobs from their
+    /// compiled-in defaults — `codeowl serve`'s `--large-class-bytes`
+    /// / `--max-spec-task-bytes` flags call this. `None` leaves the
+    /// corresponding default in place, so a caller only needs to specify
+    /// the one it actually wants to change.
+    pub fn with_generation_limits(
+        mut self,
+        large_class_bytes: Option<usize>,
+        max_spec_task_bytes: Option<usize>,
+    ) -> Self {
+        if let Some(v) = large_class_bytes {
+            self.large_class_bytes = v;
+        }
+        if let Some(v) = max_spec_task_bytes {
+            self.max_spec_task_bytes = v;
+        }
+        self
     }
 
     /// The shared graph cell for `watch::spawn` to publish reindexed
@@ -542,6 +576,21 @@ impl CodeOwlServer {
                 if !scoped.externals.is_empty() {
                     dependencies.push(format!("externals: {}", scoped.externals.join(", ")));
                 }
+                // Dependency scanning above already ran against the true
+                // full text -- only the payload actually handed to the
+                // agent is reduced for a God-class Container (M18,
+                // M16's headline finding), then hard-capped regardless
+                // (a real MCP client's overflow threshold isn't known
+                // precisely -- see `self.large_class_bytes` /
+                // `self.max_spec_task_bytes`, both overridable via
+                // `with_generation_limits`).
+                let source = crate::spec::maybe_reduce_container_source(
+                    sym,
+                    graph,
+                    source,
+                    self.large_class_bytes,
+                );
+                let source = crate::spec::cap_generation_text(source, self.max_spec_task_bytes);
                 SpecTaskResponse::Symbol {
                     id,
                     signature,
@@ -555,6 +604,10 @@ impl CodeOwlServer {
             crate::spec::SpecTask::File { id, prior } => {
                 let source =
                     std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
+                // A `File` task had no size handling at all before this --
+                // a large flat file with no single big class was
+                // completely unprotected even after the Container fix.
+                let source = crate::spec::cap_generation_text(source, self.max_spec_task_bytes);
                 SpecTaskResponse::File { id, source, prior }
             }
         })
@@ -1616,6 +1669,156 @@ mod tests {
             other_spec.0.status, "current",
             "an unrelated file must not be affected"
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // --- M18: the God-class generation-task payload fix ----------------
+
+    #[tokio::test]
+    async fn a_god_class_generation_task_has_reduced_source_but_keeps_its_real_dependencies() {
+        let dir = std::env::temp_dir().join(format!("codeowl-mcp-godclass-{}", std::process::id()));
+        let helper_src = "package org.acme;\n\npublic class Helper {\n    public static int assist(int n) { return n; }\n}\n";
+        let padding = "x".repeat(crate::spec::LARGE_CONTAINER_BYTES_DEFAULT + 1000);
+        let big_src = format!(
+            "package org.acme;\n\n\
+             public class Big {{\n\
+             \x20   /** Computes a padded total. */\n\
+             \x20   public int compute(int n) {{\n\
+             \x20       // {padding}\n\
+             \x20       return Helper.assist(n) + 1;\n\
+             \x20   }}\n\
+             }}\n"
+        );
+
+        let server = rebuild_server(
+            dir.clone(),
+            &[
+                ("src/main/java/org/acme/Helper.java", helper_src),
+                ("src/main/java/org/acme/Big.java", &big_src),
+            ],
+        );
+
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "src/main/java/org/acme/Big.java".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let SpecTaskResponse::Symbol {
+            source,
+            dependencies,
+            ..
+        } = task.0
+        else {
+            panic!("expected a Symbol task");
+        };
+        assert!(
+            source.contains("Computes a padded total"),
+            "docstring must survive:\n{source}"
+        );
+        assert!(
+            source.contains("public int compute(int n)"),
+            "signature must survive:\n{source}"
+        );
+        assert!(
+            !source.contains("Helper.assist(n) + 1"),
+            "the body must be dropped from the task source:\n{source}"
+        );
+        assert!(
+            dependencies.iter().any(|d| d.contains("Helper")),
+            "the real dependency, referenced only inside the now-dropped body, \
+             must still be listed -- ### Depends on scans the full text, not \
+             the reduced one: {dependencies:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_large_flat_file_task_gets_capped_even_with_no_big_container() {
+        // The real-world case that surfaced this: `File` tasks had zero
+        // size handling at all, even after the Container reduction fix --
+        // a large file with no single dominant class (a long flat script,
+        // or in this fixture a file padded outside any symbol's own span)
+        // was completely unprotected.
+        let dir = std::env::temp_dir().join(format!("codeowl-mcp-bigfile-{}", std::process::id()));
+        let padding = "x".repeat(crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 2000);
+        let src = format!("// {padding}\nexport function tiny(): number {{ return 1; }}\n");
+        let server = rebuild_server(dir.clone(), &[("big.ts", &src)]);
+
+        // The lone symbol is offered first; submit it so the file task
+        // (which reads the whole raw file, comment padding included) is
+        // what comes back next.
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "big.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let SpecTaskResponse::Symbol { id, .. } = task.0 else {
+            panic!("expected the symbol task first");
+        };
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id,
+                content: "### Summary\nReturns the constant value one to its caller.\n### Behavior\nAlways evaluates to the integer one, with no branching.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let file_task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "big.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let SpecTaskResponse::File { source, .. } = file_task.0 else {
+            panic!("expected the file task next");
+        };
+        assert!(
+            source.len() <= crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
+            "a large flat file's task source must be capped, marker included: {} bytes",
+            source.len()
+        );
+        assert!(
+            source.contains("truncated"),
+            "must visibly mark truncation, not silently drop content"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn with_generation_limits_overrides_the_compiled_in_defaults() {
+        // The actual configurability this whole fix is for: a caller
+        // (`codeowl serve --max-spec-task-bytes N`) can tighten the cap
+        // below the compiled-in default for a client whose real overflow
+        // threshold is smaller -- proven here with a tiny override that
+        // truncates even a normally-small file.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-customlimit-{}", std::process::id()));
+        let src = "export function tiny(): number { return 1; }\n";
+        let server = rebuild_server(dir.clone(), &[("small.ts", src)])
+            .with_generation_limits(None, Some(20));
+
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "small.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let SpecTaskResponse::Symbol { source, .. } = task.0 else {
+            panic!("expected the symbol task");
+        };
+        assert!(
+            source.len() <= 20,
+            "a caller-supplied max_spec_task_bytes must actually take effect, \
+             marker included, even on a file the compiled-in default would never touch: {} bytes",
+            source.len()
+        );
+        assert!(source.contains("truncated"));
 
         std::fs::remove_dir_all(&dir).ok();
     }

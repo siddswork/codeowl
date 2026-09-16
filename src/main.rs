@@ -19,7 +19,28 @@ enum Command {
     /// resulting symbol list as JSON.
     Extract { path: PathBuf },
     /// Same extraction, then serve the MCP read surface over stdio.
-    Serve { path: PathBuf },
+    Serve {
+        path: PathBuf,
+        /// The byte threshold above which a large class (or struct /
+        /// interface / enum with members) is reduced to member signatures
+        /// and docstrings instead of full method bodies, in a
+        /// `get_next_spec_task` response — the "nicer" fix, tried first.
+        /// Lower it if your MCP client still spills responses to a temp
+        /// file at this default; raise it if you'd rather keep more body
+        /// text and your client tolerates larger responses.
+        #[arg(long, default_value_t = codeowl::spec::LARGE_CONTAINER_BYTES_DEFAULT)]
+        large_class_bytes: usize,
+        /// The hard byte ceiling applied to any single `get_next_spec_task`
+        /// response (a class/symbol task *or* a plain file task), after
+        /// whatever reduction already happened above. This is the actual
+        /// guarantee — nothing returned can exceed it, regardless of which
+        /// code path produced it. Set it below whatever size you've
+        /// observed your MCP client spill to a `content.json`-style temp
+        /// file instead of injecting inline (VS Code Copilot Chat does
+        /// this above its own undocumented inline-context limit).
+        #[arg(long, default_value_t = codeowl::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT)]
+        max_spec_task_bytes: usize,
+    },
 }
 
 #[tokio::main]
@@ -37,7 +58,11 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&views)?);
             Ok(())
         }
-        Command::Serve { path } => {
+        Command::Serve {
+            path,
+            large_class_bytes,
+            max_spec_task_bytes,
+        } => {
             let root = canonical_root(&path)?;
             let (index, graph, caught) = RepoIndex::open(&root)?;
             let resolved = graph
@@ -55,7 +80,8 @@ async fn main() -> Result<()> {
                     caught.total()
                 );
             }
-            let server = CodeOwlServer::new(root.clone(), graph);
+            let server = CodeOwlServer::new(root.clone(), graph)
+                .with_generation_limits(Some(large_class_bytes), Some(max_spec_task_bytes));
             // Keep the watcher alive for the whole session — it stops when
             // this handle drops, which is when `serve` returns.
             let _watcher = codeowl::watch::spawn(root, server.graph_store(), index)
