@@ -2574,6 +2574,81 @@ pub fn summarize(items: &[CoverageItem]) -> CoverageSummary {
     summary
 }
 
+impl CoverageSummary {
+    /// `current + stale + missing` — every item this summary covers.
+    /// Deliberately not a stored field: it's trivially derived, and storing
+    /// it would just be one more thing `summarize` could get out of sync.
+    pub fn total(&self) -> usize {
+        self.current + self.stale + self.missing
+    }
+}
+
+/// The canonical kind order a caller should render `by_kind` in — matches
+/// `prioritize`'s own file/rollup/feature/system tiering, so "coverage
+/// broken down by kind" reads in the same order a generate run would work
+/// through them.
+const KIND_ORDER: [&str; 4] = ["file", "rollup", "feature", "system"];
+
+/// `coverage()`'s items, grouped by `kind` and each group summarized with
+/// the same `summarize` every other rollup uses — so "how many feature
+/// specs total" is `by_kind` finding `"feature"` and reading its `total()`,
+/// not a separate count computed a second way. Kinds with no items are
+/// omitted rather than reported as an all-zero row (a scoped `coverage()`
+/// call never produces `"feature"`/`"system"` items at all).
+pub fn by_kind(items: &[CoverageItem]) -> Vec<(String, CoverageSummary)> {
+    KIND_ORDER
+        .iter()
+        .filter_map(|kind| {
+            let matching: Vec<CoverageItem> =
+                items.iter().filter(|i| i.kind == *kind).cloned().collect();
+            if matching.is_empty() {
+                None
+            } else {
+                Some((kind.to_string(), summarize(&matching)))
+            }
+        })
+        .collect()
+}
+
+/// The directory `item` should be bucketed under for `by_module`, or `None`
+/// if it doesn't belong to one (a feature or the system spec is a repo-wide
+/// concept, not a directory's). A file's module is its own containing
+/// directory; a rollup's module is the directory it *summarizes* (not that
+/// directory's parent) — so `rollup:lib/email` lands in the same bucket as
+/// `lib/email/foo.ts`, which is what "what's left in lib/email" actually
+/// means. The repo root is `"."`, never an empty string.
+fn module_of(item: &CoverageItem) -> Option<String> {
+    let dir = match item.kind.as_str() {
+        "file" => Path::new(&item.id).parent()?.to_string_lossy().into_owned(),
+        "rollup" => item.id.strip_prefix("rollup:")?.to_string(),
+        _ => return None,
+    };
+    Some(if dir.is_empty() { ".".to_string() } else { dir })
+}
+
+/// `coverage()`'s items, grouped by directory (see `module_of`) and each
+/// group summarized with `summarize` — the per-directory breakdown
+/// `ARCHITECTURE.md` already (prematurely) claimed `get_spec_coverage` had.
+/// Sorted by path so the result is deterministic and reads top-down like a
+/// file tree.
+pub fn by_module(items: &[CoverageItem]) -> Vec<(String, CoverageSummary)> {
+    let mut buckets: Vec<(String, Vec<CoverageItem>)> = Vec::new();
+    for item in items {
+        let Some(module) = module_of(item) else {
+            continue;
+        };
+        match buckets.iter_mut().find(|(m, _)| *m == module) {
+            Some((_, v)) => v.push(item.clone()),
+            None => buckets.push((module, vec![item.clone()])),
+        }
+    }
+    buckets.sort_by(|a, b| a.0.cmp(&b.0));
+    buckets
+        .into_iter()
+        .map(|(m, v)| (m, summarize(&v)))
+        .collect()
+}
+
 /// The "shared infrastructure" tier that gets documented before features
 /// is the `SHARED_CODE_MAX_FILES` files with the highest import fan-in
 /// across the whole repo (only counting those imported at least
@@ -4476,6 +4551,96 @@ impl Counter {\n\
                 "system",                      // system still dead last
             ]
         );
+    }
+
+    #[test]
+    fn by_kind_groups_and_summarizes_per_kind_in_canonical_order() {
+        fn item(id: &str, kind: &str, status: &str) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: status.into(),
+                fan_in: 0,
+                smells: Vec::new(),
+                generations: usize::from(status != "current"),
+            }
+        }
+        let items = vec![
+            item("system", "system", "stale"),
+            item("feature:checkout", "feature", "missing"),
+            item("rollup:lib", "rollup", "current"),
+            item("lib/db.ts", "file", "current"),
+            item("lib/utils.ts", "file", "stale"),
+        ];
+        let buckets = by_kind(&items);
+        let kinds: Vec<&str> = buckets.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(
+            kinds,
+            vec!["file", "rollup", "feature", "system"],
+            "canonical order regardless of input order"
+        );
+
+        let file_summary = &buckets.iter().find(|(k, _)| k == "file").unwrap().1;
+        assert_eq!(file_summary.current, 1);
+        assert_eq!(file_summary.stale, 1);
+        assert_eq!(file_summary.total(), 2);
+    }
+
+    #[test]
+    fn by_kind_omits_kinds_with_no_items() {
+        fn item(id: &str, kind: &str) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: "missing".into(),
+                fan_in: 0,
+                smells: Vec::new(),
+                generations: 1,
+            }
+        }
+        // A scoped coverage() call never produces feature/system items.
+        let items = vec![item("lib/db.ts", "file")];
+        let kinds: Vec<String> = by_kind(&items).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(kinds, vec!["file".to_string()]);
+    }
+
+    #[test]
+    fn by_module_groups_files_and_their_rollup_by_directory() {
+        fn item(id: &str, kind: &str, status: &str) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: status.into(),
+                fan_in: 0,
+                smells: Vec::new(),
+                generations: usize::from(status != "current"),
+            }
+        }
+        let items = vec![
+            item("lib/email/foo.ts", "file", "current"),
+            item("lib/email/bar.ts", "file", "stale"),
+            item("rollup:lib/email", "rollup", "missing"),
+            item("index.ts", "file", "current"),
+            item("feature:checkout", "feature", "missing"),
+            item("system", "system", "missing"),
+        ];
+        let buckets = by_module(&items);
+        let paths: Vec<&str> = buckets.iter().map(|(p, _)| p.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec![".", "lib/email"],
+            "sorted by path; features/system have no module and are excluded"
+        );
+
+        let email = &buckets.iter().find(|(p, _)| p == "lib/email").unwrap().1;
+        assert_eq!(
+            email.total(),
+            3,
+            "the two files plus their own directory's rollup, bucketed together"
+        );
+        assert_eq!(email.current, 1);
+        assert_eq!(email.stale, 1);
+        assert_eq!(email.missing, 1);
     }
 
     #[test]

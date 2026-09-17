@@ -71,6 +71,67 @@ pub struct CoverageItemResponse {
     pub generations: usize,
 }
 
+/// The same `current`/`stale`/`missing`/`smelly`/`generations_remaining`
+/// shape `CoverageResponse`'s top level carries, scoped to one `kind`
+/// (`"file"`/`"rollup"`/`"feature"`/`"system"`) — see `by_kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct KindBreakdown {
+    pub kind: String,
+    pub current: usize,
+    pub stale: usize,
+    pub missing: usize,
+    pub smelly: usize,
+    pub generations_remaining: usize,
+    /// `current + stale + missing` — e.g. `by_kind`'s `"feature"` row's
+    /// `total` directly answers "how many feature specs will exist."
+    pub total: usize,
+}
+
+/// The same breakdown as [`KindBreakdown`], scoped to one directory instead
+/// of one kind — see `by_module`. A file's directory and its own rollup's
+/// directory share a bucket (`rollup:lib/email` and `lib/email/foo.ts` both
+/// land under `"lib/email"`), so a bucket answers "what's left in this
+/// module" as one number, not two. Features and the system spec have no
+/// directory and never appear here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ModuleBreakdown {
+    pub path: String,
+    pub current: usize,
+    pub stale: usize,
+    pub missing: usize,
+    pub smelly: usize,
+    pub generations_remaining: usize,
+    pub total: usize,
+}
+
+impl From<(String, crate::spec::CoverageSummary)> for KindBreakdown {
+    fn from((kind, s): (String, crate::spec::CoverageSummary)) -> Self {
+        KindBreakdown {
+            kind,
+            current: s.current,
+            stale: s.stale,
+            missing: s.missing,
+            smelly: s.smelly,
+            generations_remaining: s.generations_remaining,
+            total: s.total(),
+        }
+    }
+}
+
+impl From<(String, crate::spec::CoverageSummary)> for ModuleBreakdown {
+    fn from((path, s): (String, crate::spec::CoverageSummary)) -> Self {
+        ModuleBreakdown {
+            path,
+            current: s.current,
+            stale: s.stale,
+            missing: s.missing,
+            smelly: s.smelly,
+            generations_remaining: s.generations_remaining,
+            total: s.total(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct CoverageResponse {
     pub current: usize,
@@ -85,6 +146,17 @@ pub struct CoverageResponse {
     /// document's `generations`, so it counts uncovered symbols, not just
     /// files (`missing: 15` files can be 240+ generations).
     pub generations_remaining: usize,
+    /// The same counts as above, broken down by document kind — in
+    /// `"file"`, `"rollup"`, `"feature"`, `"system"` order, omitting any
+    /// kind with nothing in this scope. `by_kind`'s `"feature"` row's
+    /// `total` is the full count of feature specs this repo will ever have
+    /// (enumeration is deterministic — see `ARCHITECTURE.md`'s "Feature
+    /// specs").
+    pub by_kind: Vec<KindBreakdown>,
+    /// The same counts broken down by directory instead of by kind, sorted
+    /// by path. A directory's own rollup and the files inside it share one
+    /// row — see `ModuleBreakdown`.
+    pub by_module: Vec<ModuleBreakdown>,
     /// Every document still needing attention — non-current, or
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
     /// "Generation priority" and "Quality smells".
@@ -1057,7 +1129,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly. `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry carries its own `generations` share. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -1067,6 +1139,14 @@ impl CodeOwlServer {
         let items = crate::spec::coverage(&graph, &self.root, req.scope.as_deref())
             .map_err(|e| e.to_string())?;
         let summary = crate::spec::summarize(&items);
+        let by_kind = crate::spec::by_kind(&items)
+            .into_iter()
+            .map(KindBreakdown::from)
+            .collect();
+        let by_module = crate::spec::by_module(&items)
+            .into_iter()
+            .map(ModuleBreakdown::from)
+            .collect();
         let pending = crate::spec::prioritize(items, &graph)
             .into_iter()
             .map(|i| CoverageItemResponse {
@@ -1084,6 +1164,8 @@ impl CodeOwlServer {
             missing: summary.missing,
             smelly: summary.smelly,
             generations_remaining: summary.generations_remaining,
+            by_kind,
+            by_module,
             pending,
         }))
     }
@@ -1474,6 +1556,56 @@ mod tests {
             vec!["b.ts"],
             "budget was spent on the first 2 priority items only -- b.ts is untouched"
         );
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_breaks_down_by_kind_and_by_module() {
+        let server = test_server(&[
+            ("index.ts", "export function root(): void {}\n"),
+            ("lib/email/send.ts", "export function send(): void {}\n"),
+            ("lib/email/queue.ts", "export function queue(): void {}\n"),
+        ]);
+
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .await
+            .unwrap()
+            .0;
+
+        // Whole-repo call -> feature/system rows exist too, alongside file
+        // and (once lib/email has >=2 spec-bearing files) rollup.
+        let kinds: Vec<&str> = coverage.by_kind.iter().map(|b| b.kind.as_str()).collect();
+        assert_eq!(
+            kinds,
+            vec!["file", "rollup", "system"],
+            "no feature entry points in this fixture, so \"feature\" is omitted, not zeroed"
+        );
+        let file_kind = coverage.by_kind.iter().find(|b| b.kind == "file").unwrap();
+        assert_eq!(file_kind.missing, 3);
+        assert_eq!(file_kind.total, 3);
+
+        let paths: Vec<&str> = coverage.by_module.iter().map(|b| b.path.as_str()).collect();
+        assert_eq!(paths, vec![".", "lib/email"]);
+        let email_module = coverage
+            .by_module
+            .iter()
+            .find(|b| b.path == "lib/email")
+            .unwrap();
+        assert_eq!(
+            email_module.total, 3,
+            "the two files plus their own rollup, bucketed together"
+        );
+        assert_eq!(email_module.missing, 3);
+
+        // Every by_kind/by_module bucket's generations_remaining must sum
+        // back to the same total the flat top-level field reports -- two
+        // different groupings over the same underlying items.
+        let by_kind_total: usize = coverage
+            .by_kind
+            .iter()
+            .map(|b| b.generations_remaining)
+            .sum();
+        assert_eq!(by_kind_total, coverage.generations_remaining);
     }
 
     #[tokio::test]
