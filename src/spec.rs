@@ -2855,6 +2855,19 @@ fn find_orphaned_files_and_rollups(
         if scope.is_some_and(|s| !within_scope(source_path, s)) {
             continue;
         }
+        // Only treat this as a generated file spec if it actually parses
+        // as one. A hand-authored doc that happens to live directly under
+        // docs/specs/ (e.g. STYLE.md, a convention guide with no
+        // frontmatter at all) is not a spec CodeOwl ever wrote, so its
+        // "absence" from the graph means nothing — flagging it as orphaned
+        // is a real false positive, not a conservative-but-harmless one:
+        // it tells a human to delete a document they authored by hand.
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if parse(&content).is_err() {
+            continue;
+        }
         if !live_files.contains(source_path) {
             orphans.push(OrphanedSpec {
                 id: source_path.to_string(),
@@ -4285,6 +4298,46 @@ impl Counter {\n\
         assert!(
             !orphans.iter().any(|o| o.id == "lib/math.ts::add"),
             "add is still live and should never be reported as orphaned: {orphans:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_orphaned_specs_ignores_a_hand_authored_doc_living_under_docs_specs() {
+        // Real bug found running this against CodeOwl's own repo:
+        // docs/specs/STYLE.md is a hand-written style guide, not a
+        // generated file spec -- it has no frontmatter at all, and there
+        // is no source file literally named "STYLE". The old
+        // implementation treated *any* .md file under docs/specs/ (other
+        // than _index.md/_features/) as an implied file spec purely from
+        // its path, so it wrongly flagged STYLE as an orphan of a
+        // nonexistent "STYLE" source file.
+        let (graph, dir) = build_feature_fixture(
+            &[("lib/db.ts", "export function query(): void {}\n")],
+            "orphan-hand-authored-doc",
+        );
+        submit(
+            &graph,
+            &dir,
+            "lib/db.ts::query",
+            "### Summary\nRuns a database query.\n### Behavior\nReturns the query results.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "lib/db.ts", "A small database helper module.").unwrap();
+
+        let style_path = dir.join("docs/specs/STYLE.md");
+        std::fs::create_dir_all(style_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &style_path,
+            "# Spec style for this repo\n\nNo frontmatter here -- this is a hand-written convention doc, not a generated spec.\n",
+        )
+        .unwrap();
+
+        let orphans = find_orphaned_specs(&graph, &dir, None).unwrap();
+        assert!(
+            orphans.is_empty(),
+            "a hand-authored doc with no spec frontmatter must never be treated as an orphaned file spec: {orphans:?}"
         );
 
         std::fs::remove_dir_all(&dir).ok();
