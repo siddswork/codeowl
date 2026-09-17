@@ -740,3 +740,119 @@ fn http_and_kafka_slugs_never_collide_on_the_same_bare_word() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn scheduled_jobs_are_entry_points_keyed_on_method_name_with_distinct_details() {
+    // Real shape: quarkus-quickstarts/scheduler-quickstart's CounterBean --
+    // three `@Scheduled` methods on one class, one interval-based
+    // (`every`), two cron-based (one hardcoded, one a config placeholder
+    // -- both still just a string to surface, not something to resolve
+    // further). No path/channel-equivalent identity exists for this kind,
+    // so the method name itself is what has to make the id unique.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-scheduled",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/CounterBean.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import io.quarkus.scheduler.Scheduled;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class CounterBean {\n\
+         \x20   @Scheduled(every = \"10s\")\n\
+         \x20   void increment() {\n\
+         \x20   }\n\
+         \n\
+         \x20   @Scheduled(cron = \"0 15 10 * * ?\")\n\
+         \x20   void cronJob() {\n\
+         \x20   }\n\
+         \n\
+         \x20   @Scheduled(cron = \"{cron.expr}\")\n\
+         \x20   void cronJobWithExpressionInConfig() {\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let mut eps = fm.enumerate_entry_points(&graph);
+    eps.sort_by(|a, b| a.id.cmp(&b.id));
+
+    assert_eq!(eps.len(), 3, "{eps:?}");
+    assert!(eps.iter().all(|e| e.kind == "scheduled"), "{eps:?}");
+
+    let ids: Vec<&str> = eps.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "scheduled-cronjob",
+            "scheduled-cronjobwithexpressioninconfig",
+            "scheduled-increment",
+        ],
+        "method name keeps three same-schedule-shape jobs apart: {eps:?}"
+    );
+
+    let increment = eps.iter().find(|e| e.id == "scheduled-increment").unwrap();
+    assert!(
+        increment.title.contains("10s"),
+        "the interval should surface in the title: {:?}",
+        increment.title
+    );
+    let cron_job = eps.iter().find(|e| e.id == "scheduled-cronjob").unwrap();
+    assert!(
+        cron_job.title.contains("0 15 10 * * ?"),
+        "the cron expression should surface in the title: {:?}",
+        cron_job.title
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_scheduled_fixed_rate_bare_numeric_attribute_parses_without_quotes() {
+    // Real shape: quarkus-quickstarts/spring-scheduled-quickstart's
+    // CounterBean, demonstrating Quarkus's Spring-scheduling
+    // compatibility layer -- `fixedRate = 1000` is a bare numeric
+    // literal, not a quoted string, unlike every other `@Scheduled`
+    // attribute this pack has seen so far.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-scheduled-fixedrate",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/CounterBean.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import org.springframework.scheduling.annotation.Scheduled;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class CounterBean {\n\
+         \x20   @Scheduled(fixedRate = 1000)\n\
+         \x20   void jobAtFixedRate() {\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert_eq!(eps.len(), 1, "{eps:?}");
+    assert_eq!(eps[0].kind, "scheduled");
+    assert_eq!(eps[0].id, "scheduled-jobatfixedrate");
+    assert!(
+        eps[0].title.contains("1000"),
+        "the bare numeric fixedRate should still surface in the title: {:?}",
+        eps[0].title
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

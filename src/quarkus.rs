@@ -94,8 +94,26 @@
 //! parameter-level `@Channel` is invisible to `markers` in the first
 //! place — confirmed by a real-shaped regression test, not assumed.
 //!
-//! **Not yet (later M18 commits):** `@Scheduled`/gRPC entry points —
-//! same incremental pattern M17 used.
+//! **`@Scheduled` jobs (M18, commit 3).** No path/channel-equivalent
+//! identity exists for a scheduled method, so the entry-point id is keyed
+//! on the method's own name (`scheduled-{name}`) rather than on the
+//! schedule expression itself — two methods can share an identical
+//! interval or cron string (real `quarkus-quickstarts` shape:
+//! `scheduler-quickstart`'s `CounterBean` has three `@Scheduled` methods,
+//! none of them path-shaped). The schedule detail (`cron=…` / `every=…` /
+//! `fixedRate=…`) still enriches the *title*, tried in that priority
+//! order via `scheduled_detail`. Bare annotation-name matching again
+//! deliberately doesn't check imports: `quarkus-quickstarts`'s
+//! `spring-scheduled-quickstart` demonstrates Quarkus's Spring-scheduling
+//! compatibility layer with Spring's own `@Scheduled`
+//! (`fixedRate`/`fixedRateString`, no quotes — a bare numeric literal,
+//! unlike every Quarkus-native attribute) — still Quarkus underneath, and
+//! treating both vocabularies uniformly is correct here, not a gap (see
+//! `ARCHITECTURE.md` open question 11 on annotation vocabularies more
+//! generally).
+//!
+//! **Not yet (later M18 commits):** gRPC entry points — same incremental
+//! pattern M17 used.
 
 use std::collections::HashMap;
 
@@ -151,23 +169,36 @@ impl FeatureModel for QuarkusFeatureModel {
                 }
                 let incoming = s.markers.iter().find_map(|m| incoming_channel(m));
                 let outgoing = s.markers.iter().find_map(|m| outgoing_channel(m));
-                if incoming.is_none() && outgoing.is_none() {
-                    return None;
+                if incoming.is_some() || outgoing.is_some() {
+                    let incoming_name = incoming.map(|a| resolve_channel_name(graph, parent_id, a));
+                    let outgoing_name = outgoing.map(|a| resolve_channel_name(graph, parent_id, a));
+                    let (primary, title) = match (&incoming_name, &outgoing_name) {
+                        (Some(i), Some(o)) => (i.clone(), format!("Kafka: {i} -> {o}")),
+                        (Some(i), None) => (i.clone(), format!("Kafka: {i}")),
+                        (None, Some(o)) => (o.clone(), format!("Kafka: {o} (produced)")),
+                        (None, None) => unreachable!("checked above"),
+                    };
+                    return Some(EntryPoint {
+                        kind: "kafka".to_string(),
+                        id: kafka_slug(&primary),
+                        title,
+                        file: s.file.clone(),
+                    });
                 }
-                let incoming_name = incoming.map(|a| resolve_channel_name(graph, parent_id, a));
-                let outgoing_name = outgoing.map(|a| resolve_channel_name(graph, parent_id, a));
-                let (primary, title) = match (&incoming_name, &outgoing_name) {
-                    (Some(i), Some(o)) => (i.clone(), format!("Kafka: {i} -> {o}")),
-                    (Some(i), None) => (i.clone(), format!("Kafka: {i}")),
-                    (None, Some(o)) => (o.clone(), format!("Kafka: {o} (produced)")),
-                    (None, None) => unreachable!("checked above"),
-                };
-                Some(EntryPoint {
-                    kind: "kafka".to_string(),
-                    id: kafka_slug(&primary),
-                    title,
-                    file: s.file.clone(),
-                })
+                if let Some(sched) = s.markers.iter().find(|m| is_scheduled_annotation(m)) {
+                    let method_name = s.id.rsplit("::").next().unwrap_or(s.id.as_str());
+                    let title = match scheduled_detail(sched) {
+                        Some(detail) => format!("Scheduled: {method_name} ({detail})"),
+                        None => format!("Scheduled: {method_name}"),
+                    };
+                    return Some(EntryPoint {
+                        kind: "scheduled".to_string(),
+                        id: scheduled_slug(method_name),
+                        title,
+                        file: s.file.clone(),
+                    });
+                }
+                None
             })
             .collect();
         out.sort_by(|a, b| (a.id.as_str(), a.file.as_str()).cmp(&(b.id.as_str(), b.file.as_str())));
@@ -308,6 +339,90 @@ fn kafka_slug(channel: &str) -> String {
     } else {
         format!("kafka-{}", words.join("-"))
     }
+}
+
+/// `"job"` -> `"scheduled-job"`. Same kind-prefix rule as the other two
+/// kinds, keyed on the method name -- a `@Scheduled` method has no
+/// path/channel-equivalent identity of its own (`ROADMAP.md`'s "cron
+/// expr" is title material, not a stable, collision-safe id: two methods
+/// can share an identical schedule).
+fn scheduled_slug(method_name: &str) -> String {
+    let words = ascii_words(method_name);
+    if words.is_empty() {
+        "scheduled-job".to_string()
+    } else {
+        format!("scheduled-{}", words.join("-"))
+    }
+}
+
+fn is_scheduled_annotation(marker: &str) -> bool {
+    crate::java::bare_annotation_name(marker) == "Scheduled"
+}
+
+/// The single value bound to `attr` inside `marker`'s parens (e.g.
+/// `attr_value("@Scheduled(every = \"10s\")", "every")` -> `Some("10s")`),
+/// whether the value is a quoted string or a bare token (Quarkus's own
+/// `@Scheduled` always quotes; the real Spring-interop shape in
+/// `quarkus-quickstarts/spring-scheduled-quickstart` does not —
+/// `fixedRate = 1000` is a bare integer literal). `None` if `attr` isn't
+/// one of the annotation's arguments.
+fn attr_value(marker: &str, attr: &str) -> Option<String> {
+    let m = marker.trim_start();
+    let start = m.find('(')?;
+    let end = m.rfind(')')?;
+    if end <= start {
+        return None;
+    }
+    for part in split_top_level_commas(&m[start + 1..end]) {
+        let (name, value) = part.split_once('=')?;
+        if name.trim() != attr {
+            continue;
+        }
+        let value = value.trim();
+        if let Some(lit) = first_string_literal(value) {
+            return Some(lit);
+        }
+        return Some(value.to_string());
+    }
+    None
+}
+
+/// Split `s` on top-level commas only -- one inside a `"…"` string
+/// literal (a cron expression can itself contain commas, e.g.
+/// `"0 0 12 * * MON,WED,FRI"`) is never a split point. Deliberately not a
+/// general expression parser: `@Scheduled`'s argument list is flat name
+/// `=` value pairs, never nested annotations or parens.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut in_quotes = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => {
+                parts.push(&s[start..i]);
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+/// The most human-readable scheduling detail off a `@Scheduled(...)`
+/// marker, tried in priority order (a cron expression is the most
+/// informative; a bare `fixedRate`/`fixedRateString` the least). `None`
+/// if none of the known attribute names appear — the entry point is
+/// still created off `is_scheduled_annotation` alone (see the call
+/// site), just with a plainer title.
+fn scheduled_detail(marker: &str) -> Option<String> {
+    for attr in ["cron", "every", "fixedRate", "fixedRateString"] {
+        if let Some(v) = attr_value(marker, attr) {
+            return Some(format!("{attr}={v}"));
+        }
+    }
+    None
 }
 
 /// A `@Incoming`/`@Outgoing` annotation argument, before resolution: an
@@ -504,5 +619,66 @@ mod tests {
     fn kafka_slugs_are_kind_prefixed_and_lowercased() {
         assert_eq!(kafka_slug("fights"), "kafka-fights");
         assert_eq!(kafka_slug("winner-stats"), "kafka-winner-stats");
+    }
+
+    #[test]
+    fn scheduled_annotations_are_matched_exactly() {
+        assert!(is_scheduled_annotation("@Scheduled(every = \"10s\")"));
+        assert!(is_scheduled_annotation("@Scheduled"));
+        assert!(!is_scheduled_annotation("@Incoming(\"prices\")"));
+    }
+
+    #[test]
+    fn attr_value_extracts_quoted_and_bare_values_by_name() {
+        assert_eq!(
+            attr_value(
+                "@Scheduled(every = \"10s\", identity = \"task-job\")",
+                "every"
+            ),
+            Some("10s".to_string())
+        );
+        assert_eq!(
+            attr_value(
+                "@Scheduled(every = \"10s\", identity = \"task-job\")",
+                "identity"
+            ),
+            Some("task-job".to_string())
+        );
+        assert_eq!(
+            attr_value("@Scheduled(fixedRate = 1000)", "fixedRate"),
+            Some("1000".to_string())
+        );
+        assert_eq!(attr_value("@Scheduled(every = \"10s\")", "cron"), None);
+    }
+
+    #[test]
+    fn split_top_level_commas_never_splits_inside_a_quoted_cron_expression() {
+        assert_eq!(
+            split_top_level_commas("cron = \"0 0 12 * * MON,WED,FRI\", identity = \"x\""),
+            vec!["cron = \"0 0 12 * * MON,WED,FRI\"", " identity = \"x\"",]
+        );
+    }
+
+    #[test]
+    fn scheduled_detail_prefers_cron_over_every_over_fixed_rate() {
+        assert_eq!(
+            scheduled_detail("@Scheduled(cron = \"0 15 10 * * ?\")"),
+            Some("cron=0 15 10 * * ?".to_string())
+        );
+        assert_eq!(
+            scheduled_detail("@Scheduled(every = \"10s\")"),
+            Some("every=10s".to_string())
+        );
+        assert_eq!(
+            scheduled_detail("@Scheduled(fixedRate = 1000)"),
+            Some("fixedRate=1000".to_string())
+        );
+        assert_eq!(scheduled_detail("@Scheduled(identity = \"x\")"), None);
+    }
+
+    #[test]
+    fn scheduled_slugs_are_kind_prefixed_and_lowercased() {
+        assert_eq!(scheduled_slug("increment"), "scheduled-increment");
+        assert_eq!(scheduled_slug("cronJob"), "scheduled-cronjob");
     }
 }
