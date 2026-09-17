@@ -363,7 +363,7 @@ impl StackPack for JavaStack {
         // injected repository as a `core`-worthy CDI/data-access type.
         sym.raw == "class"
             && (sym.markers.iter().any(|m| is_entity_annotation(m))
-                || sym.signature.contains("PanacheEntity"))
+                || extends_panache_entity(&sym.signature))
     }
 }
 
@@ -372,6 +372,51 @@ impl StackPack for JavaStack {
 /// `is_admitting_annotation` convention.
 fn is_entity_annotation(marker: &str) -> bool {
     crate::java::bare_annotation_name(marker) == "Entity"
+}
+
+/// Does `signature`'s own `extends` clause name `PanacheEntity` or
+/// `PanacheEntityBase` (Panache's two active-record bases — `starts_with`
+/// deliberately covers both)? Code-review finding: a plain
+/// `signature.contains("PanacheEntity")` over the *whole* signature
+/// false-positives on an unrelated class whose generic type-parameter
+/// bound merely mentions the name (`class Foo<T extends
+/// PanacheEntityBase> extends UtilityBase`) — the exact "name matched
+/// inside unrelated text" bug class this project's M17 review already
+/// found and fixed once for `kwarg_string_literal`. Fixed by stripping
+/// every balanced `<...>` span first (a generic parameter's bound always
+/// sits inside one, before the real `extends` clause even starts), then
+/// reading the single token right after the first remaining `extends`.
+fn extends_panache_entity(signature: &str) -> bool {
+    let stripped = strip_angle_bracket_groups(signature);
+    let mut words = stripped.split_whitespace();
+    while let Some(w) = words.next() {
+        if w == "extends" {
+            return words
+                .next()
+                .is_some_and(|next| next.starts_with("PanacheEntity"));
+        }
+    }
+    false
+}
+
+/// Remove every balanced `<...>` span from `s` (Java generic type
+/// parameters/arguments), e.g. `"Foo<T extends Bar>"` -> `"Foo"`. Not a
+/// general parser: assumes `<`/`>` only ever mean generics here, true
+/// for a class *signature* (`java.rs::signature_before_body`'s output,
+/// which never includes a method body where `<`/`>` could be comparison
+/// operators instead).
+fn strip_angle_bracket_groups(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The Python stack (M17): `tree-sitter-python` extraction + dotted-module
@@ -707,5 +752,33 @@ mod tests {
         )));
         // An ordinary, unannotated class is not a table.
         assert!(!pack.is_schema_symbol(&mk("public class SlugFormatter", &[])));
+        // Code-review finding: a generic type parameter's own bound
+        // merely mentioning PanacheEntityBase must never be mistaken for
+        // the class's own `extends` clause -- Foo's real superclass here
+        // is UtilityBase, unrelated to persistence entirely.
+        assert!(!pack.is_schema_symbol(&mk(
+            "public class Foo<T extends PanacheEntityBase> extends UtilityBase",
+            &[]
+        )));
+    }
+
+    #[test]
+    fn extends_panache_entity_ignores_a_generic_bound_and_finds_the_real_superclass() {
+        assert!(extends_panache_entity(
+            "public class Fruit extends PanacheEntity"
+        ));
+        assert!(extends_panache_entity(
+            "public class Fruit extends PanacheEntityBase"
+        ));
+        assert!(extends_panache_entity(
+            "public class Fruit extends PanacheEntity<Fruit>"
+        ));
+        assert!(!extends_panache_entity(
+            "public class Foo<T extends PanacheEntityBase> extends UtilityBase"
+        ));
+        assert!(!extends_panache_entity(
+            "public class FruitRepository implements PanacheRepository<Fruit>"
+        ));
+        assert!(!extends_panache_entity("public class SlugFormatter"));
     }
 }

@@ -489,7 +489,7 @@ fn is_public_signature(signature: &str) -> bool {
         let after_name =
             after_at.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '.');
         rest = match after_name.strip_prefix('(') {
-            Some(after_paren) => match after_paren.find(')') {
+            Some(after_paren) => match matching_close_paren(after_paren) {
                 Some(idx) => &after_paren[idx + 1..],
                 None => after_name,
             },
@@ -498,6 +498,31 @@ fn is_public_signature(signature: &str) -> bool {
         .trim_start();
     }
     rest.starts_with("public")
+}
+
+/// The index in `s` of the `)` matching an already-consumed opening `(`
+/// — quote-aware (a string-literal annotation argument can itself
+/// contain a `)`, e.g. `@Counted(description = "calls (per request)")`,
+/// the real code-review-caught bug: a naive `find(')')` stops inside the
+/// literal) and paren-depth-aware (Java allows a nested annotation as an
+/// attribute value, `@Foo(@Bar(1))`). `None` if unbalanced.
+fn matching_close_paren(s: &str) -> Option<usize> {
+    let mut depth: i32 = 0;
+    let mut in_quotes = false;
+    for (i, c) in s.char_indices() {
+        match c {
+            '"' => in_quotes = !in_quotes,
+            '(' if !in_quotes => depth += 1,
+            ')' if !in_quotes => {
+                if depth == 0 {
+                    return Some(i);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// `"sayHello"` -> `"grpc-sayhello"`. Same kind-prefix rule as the other
@@ -784,6 +809,19 @@ mod tests {
         assert!(is_public_signature(
             "@Blocking @Transactional\n    public void store(int priceInUsd)"
         ));
+    }
+
+    #[test]
+    fn is_public_signature_handles_a_closing_paren_inside_an_annotation_string_argument() {
+        // Code-review finding: a naive "find the first `)`" skip stops
+        // inside a string literal that itself contains a `)`, leaving
+        // stray characters in place of `public` -- a realistic
+        // MicroProfile Metrics annotation shape.
+        assert!(is_public_signature(
+            "@Counted(description = \"calls (per request)\")\n    public Uni<HelloReply> sayHello(HelloRequest request)"
+        ));
+        // Also covers a nested annotation attribute value.
+        assert!(is_public_signature("@Foo(@Bar(1))\n    public void go()"));
     }
 
     #[test]
