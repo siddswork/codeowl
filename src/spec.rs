@@ -2581,6 +2581,69 @@ impl CoverageSummary {
     pub fn total(&self) -> usize {
         self.current + self.stale + self.missing
     }
+
+    /// Of the specs that *exist* (current or stale), what fraction still
+    /// match the code — deliberately excludes `missing`: "no spec yet" and
+    /// "spec exists but is wrong" are different failure modes needing
+    /// different fixes (write one vs. regenerate one), and collapsing them
+    /// into a single score hides which one a repo actually has. `1.0` when
+    /// nothing has ever been generated — vacuously fresh, since there's
+    /// nothing stale to report yet (see `coverage_ratio` for the other
+    /// half of that same repo's story).
+    pub fn freshness(&self) -> f64 {
+        let documented = self.current + self.stale;
+        if documented == 0 {
+            1.0
+        } else {
+            self.current as f64 / documented as f64
+        }
+    }
+
+    /// What fraction of eligible nodes have *any* spec at all, current or
+    /// stale — the other axis from `freshness`. A repo can be 100% covered
+    /// and 60% fresh (everything's been written once, a lot of it needs
+    /// re-running) or 60% covered and 100% fresh (nothing documented is
+    /// wrong, there's just more left to write) — two different problems
+    /// with two different fixes, which is why this is a separate number
+    /// rather than folded into `freshness`.
+    pub fn coverage_ratio(&self) -> f64 {
+        let total = self.total();
+        if total == 0 {
+            1.0
+        } else {
+            (self.current + self.stale) as f64 / total as f64
+        }
+    }
+}
+
+/// `freshness`, but weighted by blast radius (import fan-in) instead of by
+/// item count — a stale leaf utility matters far less than a stale file
+/// forty others import. Scoped to `kind == "file"` items with a spec that
+/// actually exists (`status != "missing"`), matching `freshness`'s own
+/// "missing is coverage's problem, not freshness's" exclusion — a
+/// high-fan-in file that simply has no spec yet shouldn't drag this number
+/// down, that's what `coverage_ratio` is for. Falls back to the plain,
+/// unweighted freshness over that same subset when every item's `fan_in` is
+/// 0 (nothing to weight by, and 0/0 would otherwise need its own case).
+pub fn weighted_freshness(items: &[CoverageItem]) -> f64 {
+    let documented: Vec<&CoverageItem> = items
+        .iter()
+        .filter(|i| i.kind == "file" && i.status != "missing")
+        .collect();
+    let total_fan_in: usize = documented.iter().map(|i| i.fan_in).sum();
+    if total_fan_in == 0 {
+        if documented.is_empty() {
+            return 1.0;
+        }
+        let current = documented.iter().filter(|i| i.status == "current").count();
+        return current as f64 / documented.len() as f64;
+    }
+    let weighted_current: usize = documented
+        .iter()
+        .filter(|i| i.status == "current")
+        .map(|i| i.fan_in)
+        .sum();
+    weighted_current as f64 / total_fan_in as f64
 }
 
 /// The canonical kind order a caller should render `by_kind` in — matches
@@ -4641,6 +4704,116 @@ impl Counter {\n\
         assert_eq!(email.current, 1);
         assert_eq!(email.stale, 1);
         assert_eq!(email.missing, 1);
+    }
+
+    #[test]
+    fn freshness_ignores_missing_entirely() {
+        // 1 current, 1 stale, 5 missing -- freshness is about the specs
+        // that exist, not about how much of the repo is documented yet.
+        let summary = CoverageSummary {
+            current: 1,
+            stale: 1,
+            missing: 5,
+            ..CoverageSummary::default()
+        };
+        assert_eq!(summary.freshness(), 0.5);
+    }
+
+    #[test]
+    fn freshness_is_vacuously_full_when_nothing_documented_yet() {
+        let summary = CoverageSummary {
+            missing: 10,
+            ..CoverageSummary::default()
+        };
+        assert_eq!(
+            summary.freshness(),
+            1.0,
+            "nothing stale to report -- undocumented is coverage's problem, not freshness's"
+        );
+    }
+
+    #[test]
+    fn coverage_ratio_counts_stale_as_covered() {
+        // A stale spec still means "something was generated for this" --
+        // coverage and freshness are deliberately different axes.
+        let summary = CoverageSummary {
+            current: 1,
+            stale: 1,
+            missing: 2,
+            ..CoverageSummary::default()
+        };
+        assert_eq!(summary.coverage_ratio(), 0.5);
+    }
+
+    #[test]
+    fn coverage_ratio_is_vacuously_full_when_nothing_is_eligible() {
+        assert_eq!(CoverageSummary::default().coverage_ratio(), 1.0);
+    }
+
+    #[test]
+    fn weighted_freshness_weights_by_fan_in_not_item_count() {
+        fn item(id: &str, status: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: "file".into(),
+                status: status.into(),
+                fan_in,
+                smells: Vec::new(),
+                generations: usize::from(status != "current"),
+            }
+        }
+        // One stale file with huge fan-in, nine current leaf files with
+        // none -- by item count this reads 90% fresh; weighted by blast
+        // radius, the busy stale file dominates.
+        let mut items = vec![item("lib/db.ts", "stale", 40)];
+        for i in 0..9 {
+            items.push(item(&format!("leaf{i}.ts"), "current", 0));
+        }
+        assert_eq!(weighted_freshness(&items), 0.0);
+    }
+
+    #[test]
+    fn weighted_freshness_falls_back_to_unweighted_when_nothing_has_fan_in() {
+        fn item(id: &str, status: &str) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: "file".into(),
+                status: status.into(),
+                fan_in: 0,
+                smells: Vec::new(),
+                generations: usize::from(status != "current"),
+            }
+        }
+        let items = vec![
+            item("a.ts", "current"),
+            item("b.ts", "current"),
+            item("c.ts", "stale"),
+        ];
+        assert_eq!(weighted_freshness(&items), 2.0 / 3.0);
+    }
+
+    #[test]
+    fn weighted_freshness_ignores_missing_and_non_file_items() {
+        fn item(id: &str, kind: &str, status: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: kind.into(),
+                status: status.into(),
+                fan_in,
+                smells: Vec::new(),
+                generations: usize::from(status != "current"),
+            }
+        }
+        let items = vec![
+            item("a.ts", "file", "current", 5),
+            item("b.ts", "file", "missing", 99), // no spec yet -- excluded
+            item("rollup:lib", "rollup", "stale", 0), // not a file -- excluded
+        ];
+        assert_eq!(
+            weighted_freshness(&items),
+            1.0,
+            "only a.ts is an eligible (file, non-missing) item, and it's current"
+        );
     }
 
     #[test]

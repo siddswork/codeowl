@@ -74,7 +74,7 @@ pub struct CoverageItemResponse {
 /// The same `current`/`stale`/`missing`/`smelly`/`generations_remaining`
 /// shape `CoverageResponse`'s top level carries, scoped to one `kind`
 /// (`"file"`/`"rollup"`/`"feature"`/`"system"`) — see `by_kind`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct KindBreakdown {
     pub kind: String,
     pub current: usize,
@@ -85,6 +85,11 @@ pub struct KindBreakdown {
     /// `current + stale + missing` — e.g. `by_kind`'s `"feature"` row's
     /// `total` directly answers "how many feature specs will exist."
     pub total: usize,
+    /// `current / (current + stale)` within this kind alone — see the
+    /// top-level `freshness` field's doc comment for what this axis means.
+    pub freshness: f64,
+    /// `(current + stale) / total` within this kind alone.
+    pub coverage: f64,
 }
 
 /// The same breakdown as [`KindBreakdown`], scoped to one directory instead
@@ -93,7 +98,7 @@ pub struct KindBreakdown {
 /// land under `"lib/email"`), so a bucket answers "what's left in this
 /// module" as one number, not two. Features and the system spec have no
 /// directory and never appear here.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct ModuleBreakdown {
     pub path: String,
     pub current: usize,
@@ -102,6 +107,10 @@ pub struct ModuleBreakdown {
     pub smelly: usize,
     pub generations_remaining: usize,
     pub total: usize,
+    /// `current / (current + stale)` within this directory alone.
+    pub freshness: f64,
+    /// `(current + stale) / total` within this directory alone.
+    pub coverage: f64,
 }
 
 impl From<(String, crate::spec::CoverageSummary)> for KindBreakdown {
@@ -114,6 +123,8 @@ impl From<(String, crate::spec::CoverageSummary)> for KindBreakdown {
             smelly: s.smelly,
             generations_remaining: s.generations_remaining,
             total: s.total(),
+            freshness: s.freshness(),
+            coverage: s.coverage_ratio(),
         }
     }
 }
@@ -128,11 +139,13 @@ impl From<(String, crate::spec::CoverageSummary)> for ModuleBreakdown {
             smelly: s.smelly,
             generations_remaining: s.generations_remaining,
             total: s.total(),
+            freshness: s.freshness(),
+            coverage: s.coverage_ratio(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct CoverageResponse {
     pub current: usize,
     pub stale: usize,
@@ -146,6 +159,29 @@ pub struct CoverageResponse {
     /// document's `generations`, so it counts uncovered symbols, not just
     /// files (`missing: 15` files can be 240+ generations).
     pub generations_remaining: usize,
+    /// Of the specs that *exist* (current or stale), what fraction still
+    /// match the code — `current / (current + stale)`, ignoring `missing`
+    /// entirely. `1.0` when nothing has ever been generated (vacuously
+    /// fresh — see `coverage` for "how much of the repo is documented at
+    /// all"). Deliberately a separate number from `coverage`: "no spec
+    /// yet" and "spec exists but is wrong" are different problems that
+    /// need different fixes, and collapsing them hides which one a repo
+    /// actually has.
+    pub freshness: f64,
+    /// What fraction of eligible nodes have *any* spec at all, current or
+    /// stale — `(current + stale) / total`. The other axis from
+    /// `freshness`: 100% coverage + 60% freshness means "everything's been
+    /// written once, a lot needs re-running"; 60% coverage + 100%
+    /// freshness means "nothing documented is wrong, there's just more
+    /// left to write."
+    pub coverage: f64,
+    /// `freshness`, weighted by import fan-in instead of by item count — a
+    /// stale file forty others import drags this down far more than a
+    /// stale leaf utility does. Scoped to file-kind documents that
+    /// actually have a spec (missing files don't count against it, same
+    /// exclusion as `freshness`); falls back to the unweighted freshness
+    /// over that same subset if nothing in scope has any fan-in at all.
+    pub weighted_freshness: f64,
     /// The same counts as above, broken down by document kind — in
     /// `"file"`, `"rollup"`, `"feature"`, `"system"` order, omitting any
     /// kind with nothing in this scope. `by_kind`'s `"feature"` row's
@@ -1129,7 +1165,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share. `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility. `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -1139,6 +1175,7 @@ impl CodeOwlServer {
         let items = crate::spec::coverage(&graph, &self.root, req.scope.as_deref())
             .map_err(|e| e.to_string())?;
         let summary = crate::spec::summarize(&items);
+        let weighted_freshness = crate::spec::weighted_freshness(&items);
         let by_kind = crate::spec::by_kind(&items)
             .into_iter()
             .map(KindBreakdown::from)
@@ -1164,6 +1201,9 @@ impl CodeOwlServer {
             missing: summary.missing,
             smelly: summary.smelly,
             generations_remaining: summary.generations_remaining,
+            freshness: summary.freshness(),
+            coverage: summary.coverage_ratio(),
+            weighted_freshness,
             by_kind,
             by_module,
             pending,
@@ -1606,6 +1646,87 @@ mod tests {
             .map(|b| b.generations_remaining)
             .sum();
         assert_eq!(by_kind_total, coverage.generations_remaining);
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_reports_coverage_and_freshness_as_two_separate_axes() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-freshness-{}-1", std::process::id()));
+        let v1 = "export function add(a: number, b: number): number {\n  return a + b;\n}\n";
+        let server = rebuild_server(
+            dir.clone(),
+            &[("a.ts", v1), ("b.ts", "export function noop(): void {}\n")],
+        );
+
+        // Nothing generated yet: coverage is 0 (nothing documented), but
+        // freshness and weighted_freshness are vacuously 1.0 -- there's
+        // nothing stale to report when nothing exists yet.
+        let before = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: Some(String::new()),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(before.coverage, 0.0);
+        assert_eq!(before.freshness, 1.0);
+        assert_eq!(before.weighted_freshness, 1.0);
+
+        // Fully generate a.ts only.
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts::add".to_string(),
+                content: "### Summary\nAdds together two given numbers.\n### Behavior\nReturns the sum of its two arguments.\n"
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts".to_string(),
+                content: "A small numeric addition helper module.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let after_one_current = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: Some(String::new()),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(after_one_current.coverage, 0.5, "1 of 2 files documented");
+        assert_eq!(
+            after_one_current.freshness, 1.0,
+            "the only spec that exists is current"
+        );
+        assert_eq!(after_one_current.weighted_freshness, 1.0);
+
+        // Now edit a.ts's source without regenerating -- its spec is still
+        // "documented" (coverage unaffected) but no longer matches the code
+        // (freshness must drop; coverage must not).
+        let v2 = "export function add(a: number, b: number, c: number): number {\n  return a + b + c;\n}\n";
+        let server = rebuild_server(dir.clone(), &[("a.ts", v2)]);
+
+        let after_stale = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: Some(String::new()),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(
+            after_stale.coverage, 0.5,
+            "still 1 of 2 files documented -- a stale spec is still a spec"
+        );
+        assert_eq!(
+            after_stale.freshness, 0.0,
+            "the one spec that exists no longer matches its code"
+        );
+        assert_eq!(after_stale.weighted_freshness, 0.0);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
