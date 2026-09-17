@@ -578,6 +578,25 @@ pub fn assemble_participants(
     // the same crud module) is only ever judged once (code-review
     // finding: FastAPI's admits_to_core does a full graph scan per call).
     let mut admits_to_core_cache: HashMap<String, bool> = HashMap::new();
+    // Every file that declares at least one `Schema` symbol -- computed
+    // once, not per candidate. A schema-bearing file's role in a feature
+    // is fully represented by the `data` tier (one entry per table); it
+    // must never *also* become a `core` file just because one of its
+    // other, non-table siblings (a request/response schema class sharing
+    // `app/models.py` with a `table=True` one, say) happens to get
+    // imported somewhere admits_to_core would otherwise admit. Found via
+    // `a_fastapi_route_becomes_a_feature_with_its_table_in_data` going red
+    // when the symbol-target promotion below was added: `ItemPublic`
+    // (not a table) shares `app/models.py` with `Item` (a table), and
+    // FastAPI's own `file_touches_schema` trivially says yes for that
+    // file since `Item` lives there -- which would otherwise promote the
+    // whole models file to `core` and, via the dedup guard below, mask
+    // `Item` out of `data` entirely.
+    let schema_files: HashSet<&str> = graph
+        .symbols()
+        .filter(|s| s.kind == crate::symbol::SymbolKind::Schema)
+        .map(|s| s.file.as_str())
+        .collect();
 
     while let Some(file) = queue.pop_front() {
         if !seen.insert(file.clone()) {
@@ -585,25 +604,53 @@ pub fn assemble_participants(
         }
         core.push(file.clone());
 
-        // Two ways a file can pull another *file* into `core`, both gated
-        // by `fm.admits_to_core`:
+        // Three ways a file can pull another *file* into `core`, all
+        // gated by `fm.admits_to_core`:
         //   1. a flow edge into a file node (the pilot's route-literal /
         //      rendered-component edges; M17's `Depends()` / param-type
-        //      edges), and
+        //      edges),
         //   2. an import that resolves to a file node — a module import
-        //      like Python's `from app import crud` (M17; a named symbol
-        //      import resolves to a symbol and is handled in the
-        //      `dependencies` tier below, never here).
+        //      like Python's `from app import crud`, and
+        //   3. an import or flow edge that resolves to a *symbol* whose
+        //      own containing file might still qualify — a named import
+        //      (`from app.crud import create_item`) or, for a language
+        //      with no whole-module import concept at all (Java: every
+        //      `@Inject` names a specific class, never a file), *every*
+        //      import. See `ARCHITECTURE.md`'s "Feature specs" section
+        //      for the full writeup. Fixed 2026-09-15: this used to skip
+        //      straight past `admits_to_core`
+        //      for a symbol target, so writing the identical dependency
+        //      two different ways ("import the module" vs "import one
+        //      name from it") put it in two different participant tiers —
+        //      the same family of bug the M17 code review already fixed
+        //      once for the `data` tier (`f0ba9e4`). Any schema-bearing
+        //      file (`schema_files` above) is excluded here regardless of
+        //      which of its symbols is the actual target — it belongs in
+        //      `data` via its table symbol(s) (handled below), never
+        //      duplicated into `core`.
         let flow_targets = flow_edges_from(&file).filter_map(|e| match e.target {
             FlowTarget::Node(t) => Some(t),
             FlowTarget::Unresolved => None,
         });
         let import_targets = imports_from(&file).filter_map(|i| i.target);
         for target in flow_targets.chain(import_targets) {
-            if graph.get_file(target).is_none() {
-                continue; // an edge into a symbol (a table) — not `core`
+            // Normalize to a plain file path first, whichever kind of
+            // target this is, then apply the schema_files exclusion once
+            // uniformly -- code-review finding: this used to be
+            // duplicated verbatim across both match arms, one edit away
+            // from a future third target-resolution shape forgetting it.
+            let target_file = match graph.get_file(target) {
+                Some(_) => graph.string_id(target).to_string(),
+                None => {
+                    let Some(sym) = graph.get_symbol(target) else {
+                        continue;
+                    };
+                    sym.file.clone()
+                }
+            };
+            if schema_files.contains(target_file.as_str()) {
+                continue;
             }
-            let target_file = graph.string_id(target).to_string();
             if seen.contains(&target_file) {
                 continue;
             }
@@ -624,14 +671,26 @@ pub fn assemble_participants(
     // A symbol target reached from a `core` file — by import or by flow
     // edge — lands in `data` if it's a table (an in-language ORM model,
     // M17's `is_schema_symbol`, or the TS+SQL pack's `.from("table")`
-    // flow edge target) and `dependencies` otherwise. Shared by both
-    // passes below so an import and a flow edge to the same kind of
-    // symbol are classified identically.
+    // flow edge target) and `dependencies` otherwise, UNLESS its own
+    // containing file already joined `core` above (the BFS's new symbol-
+    // target promotion path, or the file being the entry point itself) —
+    // that content is already fully source-tracked as `core`, so it must
+    // never also appear as a one-hop `dependencies`/`data` stub for the
+    // same file. Shared by both passes below so an import and a flow edge
+    // to the same kind of symbol are classified identically.
     let mut classify_symbol_target = |id: String, target: SymbolId| {
-        if graph
-            .get_symbol(target)
-            .is_some_and(|s| s.kind == crate::symbol::SymbolKind::Schema)
-        {
+        let Some(sym) = graph.get_symbol(target) else {
+            return;
+        };
+        // `seen` has identical membership to `core` at this point (the
+        // BFS above is the only thing that ever inserts into either, and
+        // it's finished) but is a `HashSet` -- O(1) here instead of an
+        // O(core.len()) linear scan per dependency/data symbol
+        // (code-review finding).
+        if seen.contains(&sym.file) {
+            return;
+        }
+        if sym.kind == crate::symbol::SymbolKind::Schema {
             if seen_data.insert(id.clone()) {
                 data.push(id);
             }
@@ -651,10 +710,13 @@ pub fn assemble_participants(
             if graph.get_file(target).is_some() {
                 continue;
             }
+            // (Code-review finding: this loop used to also check
+            // `core.contains(&id)` here, but `id` is a full symbol id
+            // ("file::Symbol") which can never match any entry of `core`
+            // -- a Vec of plain file paths -- so it was always false,
+            // dead code shadowing the real guard already inside
+            // `classify_symbol_target`.)
             let id = graph.string_id(target).to_string();
-            if core.contains(&id) {
-                continue;
-            }
             classify_symbol_target(id, target);
         }
     }

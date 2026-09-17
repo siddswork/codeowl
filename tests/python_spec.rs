@@ -399,3 +399,164 @@ fn colliding_route_slugs_are_disambiguated_not_dropped() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_named_import_of_a_crud_function_promotes_its_file_to_core_like_a_module_import_does() {
+    // M18 finding: `assemble_participants`'s core-BFS only ever offered
+    // `admits_to_core` a *file*-target edge (a module import like `from
+    // app import crud`, or a flow edge into a file) -- a *symbol*-target
+    // import (`from app.crud import create_item`, naming one function)
+    // was routed straight to `dependencies`/`data`, with no chance for
+    // `admits_to_core` to promote its file at all. That's an asymmetry in
+    // the same family the M17 code review already fixed once for the
+    // `data` tier (see `f0ba9e4`): writing the identical dependency two
+    // different ways ("import the module" vs "import one name from it")
+    // must not put it in two different participant tiers. A language
+    // with no whole-module import concept at all (Java: every `@Inject`
+    // names a specific class) needs this fixed generically, not
+    // Java-specifically -- this fixture happens to be Python only
+    // because it's the simplest existing pack to reproduce the shape
+    // with.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-py-spec-{}-named-crud-import",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/crud.py"),
+        "from app.models import Item\n\n\ndef create_item(session, data):\n    return Item(**data)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app.crud import create_item\n\nrouter = APIRouter(prefix=\"/items\")\n\n\n@router.post(\"/\")\ndef create(session, data):\n    return create_item(session, data)\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).unwrap();
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-post-items")
+        .expect("the POST /items route");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+    assert!(
+        p.core.contains(&"app/crud.py".to_string()),
+        "a named import of one crud.py function joins core exactly like `from app import crud` does: {p:?}"
+    );
+    assert!(
+        !p.dependencies
+            .iter()
+            .any(|d| d.starts_with("app/crud.py::")),
+        "a symbol whose own file is core must not also appear as a one-hop dependency stub: {p:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_named_import_of_a_table_symbol_still_lands_in_data_not_core() {
+    // Guards the double-classification risk the fix above introduces: a
+    // `Schema` symbol target must never trigger file-level core
+    // promotion (its file is the schema/models file, which belongs in
+    // `data` via the table symbol itself, not duplicated into `core`).
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-py-spec-{}-named-table-import",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app.models import Item\n\nrouter = APIRouter(prefix=\"/items\")\n\n\n@router.get(\"/\")\ndef list_items(session):\n    return session.exec(select(Item)).all()\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).unwrap();
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-get-items")
+        .expect("the GET /items route");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+    assert!(
+        p.data.contains(&"app/models.py::Item".to_string()),
+        "the table symbol is still data: {p:?}"
+    );
+    assert!(
+        !p.core.contains(&"app/models.py".to_string()),
+        "a table's own file must never be promoted to core just because it was imported: {p:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_module_import_of_a_schema_only_file_still_lands_in_data_not_core() {
+    // Code-review finding: the fix two tests above only guards the
+    // *symbol*-target resolution arm of the core-BFS (a named import
+    // like `from app.models import Item`) -- the pre-existing
+    // *file*-target arm (a module import like `from app import models`,
+    // which resolves directly to a file node with no symbol in between)
+    // had no schema_files check at all. A schema-only file imported by
+    // its module name -- not by naming a table inside it -- still slips
+    // into `core`, and once there the `core.contains(&sym.file)` guard
+    // silently drops its table out of `data` for any other core file
+    // that named-imports it. Same masking bug, different import style.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-py-spec-{}-module-import-of-schema-file",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/crud.py"),
+        "from app.models import Item\n\n\ndef create_item(session, data):\n    return Item(**data)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app import models\nfrom app.crud import create_item\n\nrouter = APIRouter(prefix=\"/items\")\n\n\n@router.post(\"/\")\ndef create(session, data):\n    return create_item(session, data)\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).unwrap();
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-post-items")
+        .expect("the POST /items route");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+    assert!(
+        !p.core.contains(&"app/models.py".to_string()),
+        "a schema-only file must never be promoted to core, module-import style included: {p:?}"
+    );
+    assert!(
+        p.data.contains(&"app/models.py::Item".to_string()),
+        "the table symbol must still surface as data through crud.py's named import of it: {p:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

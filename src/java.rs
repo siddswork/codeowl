@@ -382,6 +382,21 @@ fn annotations(node: Node, source: &str) -> Vec<String> {
         .collect()
 }
 
+/// `"@ApplicationScoped"` / `"@Path(\"x\")"` / `"@Entity"` -> its bare
+/// name (`"ApplicationScoped"` / `"Path"` / `"Entity"`), stripping the
+/// leading `@` and anything from the first `(` or space onward.
+/// Duplicated three ways before this (code review): `stack.rs`'s
+/// `is_entity_annotation`, and `quarkus.rs`'s `is_admitting_annotation`
+/// and `is_register_rest_client`. All three markers only ever come from
+/// this same pack's `ExtractedSymbol::markers` / `Symbol::markers`, so
+/// sharing this here doesn't cross the "each pack owns its own parsing"
+/// line (design decision 5) — that's about not sharing between packs
+/// (e.g. Java vs. Python), not within one.
+pub(crate) fn bare_annotation_name(marker: &str) -> &str {
+    let name = marker.trim_start().trim_start_matches('@');
+    name.split(['(', ' ']).next().unwrap_or(name)
+}
+
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
     node.child_by_field_name(field).map(|n| text(n, source))
 }
@@ -552,10 +567,20 @@ fn same_package_edges(
     sorted_files: &[(&String, &FileImports)],
     graph: &Graph,
 ) -> Vec<ResolvedImport> {
-    // (simple name, id, file) for every top-level container in the graph.
+    // (simple name, id, file) for every top-level container in the graph
+    // -- `Schema` included: an `@Entity`/Panache-entity class is retagged
+    // from `Container` to `Schema` by the generic pipeline (M18's
+    // `is_schema_symbol`) *before* this runs, and a same-package
+    // reference with no explicit `import` (`FruitRepository implements
+    // PanacheRepository<Fruit>`, both in `org.acme...repository` with no
+    // `import ...Fruit;` -- the real `hibernate-orm-panache-quickstart`
+    // shape) must resolve exactly like an explicit-import reference to
+    // the same symbol already does (`resolve_explicit` below is kind-
+    // agnostic). Bug surfaced by M18's first real schema-symbol case;
+    // harmless before it since M16 never retagged anything.
     let containers: Vec<(&str, SymbolId, &str)> = graph
         .symbols()
-        .filter(|s| matches!(s.kind, SymbolKind::Container))
+        .filter(|s| matches!(s.kind, SymbolKind::Container | SymbolKind::Schema))
         .filter_map(|s| {
             let rest = s.id.strip_prefix(&format!("{}::", s.file))?;
             if rest.contains("::") {

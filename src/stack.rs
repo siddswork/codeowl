@@ -285,16 +285,16 @@ impl StackPack for RustStack {
     }
 }
 
-/// The Java stack (M16): `tree-sitter-java` over `.java`, exercised on
-/// Apache commons-lang. Plain classic Java — no framework, so
-/// `feature_model()` takes the trait default `None` (a utility library has
-/// no runtime entry surface; its public API is already covered by symbol /
-/// file / rollup specs). `import`s resolve by the `src/main/java` package
-/// layout, not `pom.xml`, so Gradle works too (`java::resolve_imports`);
-/// same-package references with no `import` are picked up by a source scan.
+/// The Java stack (M16 core + M18 feature layer): `tree-sitter-java` over
+/// `.java`, exercised on Apache commons-lang (M16, `feature_model() ->
+/// None` — a utility library has no runtime entry surface) and Quarkus
+/// (M18, `QuarkusFeatureModel` — JAX-RS `@Path`-annotated resources).
+/// `import`s resolve by the `src/main/java` package layout, not
+/// `pom.xml`, so Gradle works too (`java::resolve_imports`); same-package
+/// references with no `import` are picked up by a source scan.
 /// `extract_flow_edges` is empty — a Java call graph is deferred like the
-/// Rust one. M17 (Quarkus) is where a Java `feature_model()` and
-/// annotation-driven flow edges arrive.
+/// Rust one (M18's `@RegisterRestClient` cross-service edges are a later
+/// commit, not general call-graph analysis).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct JavaStack;
 
@@ -344,6 +344,79 @@ impl StackPack for JavaStack {
     fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
         FlowTarget::Unresolved
     }
+
+    fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
+        Some(&crate::quarkus::QuarkusFeatureModel)
+    }
+
+    fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {
+        // The second `is_schema_symbol` implementation (M17 did SQLModel /
+        // SQLAlchemy) — a JPA `@Entity`, or the Panache active-record base
+        // (which already implies the entity mapping, annotated or not).
+        // Deliberately **not** `implements PanacheRepository<...>` despite
+        // ROADMAP.md's original wording listing it as a signal too: a
+        // repository is the DAO/service layer *around* a table, not the
+        // table itself (no columns to report via `get_symbol`), and
+        // tagging it Schema would exclude its file from ever joining a
+        // feature's `core` via `admits_to_core`'s `schema_files` guard —
+        // see `quarkus.rs`'s `is_cdi_managed`, which already treats an
+        // injected repository as a `core`-worthy CDI/data-access type.
+        sym.raw == "class"
+            && (sym.markers.iter().any(|m| is_entity_annotation(m))
+                || extends_panache_entity(&sym.signature))
+    }
+}
+
+/// `@Entity` / `@Entity(name = "…")` -> true. Exact match on the
+/// annotation name, not a prefix check, matching `quarkus.rs`'s
+/// `is_admitting_annotation` convention.
+fn is_entity_annotation(marker: &str) -> bool {
+    crate::java::bare_annotation_name(marker) == "Entity"
+}
+
+/// Does `signature`'s own `extends` clause name `PanacheEntity` or
+/// `PanacheEntityBase` (Panache's two active-record bases — `starts_with`
+/// deliberately covers both)? Code-review finding: a plain
+/// `signature.contains("PanacheEntity")` over the *whole* signature
+/// false-positives on an unrelated class whose generic type-parameter
+/// bound merely mentions the name (`class Foo<T extends
+/// PanacheEntityBase> extends UtilityBase`) — the exact "name matched
+/// inside unrelated text" bug class this project's M17 review already
+/// found and fixed once for `kwarg_string_literal`. Fixed by stripping
+/// every balanced `<...>` span first (a generic parameter's bound always
+/// sits inside one, before the real `extends` clause even starts), then
+/// reading the single token right after the first remaining `extends`.
+fn extends_panache_entity(signature: &str) -> bool {
+    let stripped = strip_angle_bracket_groups(signature);
+    let mut words = stripped.split_whitespace();
+    while let Some(w) = words.next() {
+        if w == "extends" {
+            return words
+                .next()
+                .is_some_and(|next| next.starts_with("PanacheEntity"));
+        }
+    }
+    false
+}
+
+/// Remove every balanced `<...>` span from `s` (Java generic type
+/// parameters/arguments), e.g. `"Foo<T extends Bar>"` -> `"Foo"`. Not a
+/// general parser: assumes `<`/`>` only ever mean generics here, true
+/// for a class *signature* (`java.rs::signature_before_body`'s output,
+/// which never includes a method body where `<`/`>` could be comparison
+/// operators instead).
+fn strip_angle_bracket_groups(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '<' => depth += 1,
+            '>' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// The Python stack (M17): `tree-sitter-python` extraction + dotted-module
@@ -508,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn java_pack_reads_java_and_has_no_feature_model() {
+    fn java_pack_reads_java_and_has_a_quarkus_feature_model() {
         let pack = JavaStack;
         assert_eq!(pack.name(), "java");
         assert_eq!(
@@ -529,8 +602,11 @@ mod tests {
             pack.classify("target/generated-sources/foo/Gen.java"),
             FileRole::Generated
         );
-        // commons-lang is a library — the trait's `None` default stands (exp-02).
-        assert!(pack.feature_model().is_none());
+        // A plain library with no `@Path`-annotated classes (commons-lang)
+        // enumerates zero entry points through this model rather than
+        // taking the trait's `None` default — see `quarkus.rs`'s module
+        // doc comment and `ARCHITECTURE.md` open question 10.
+        assert!(pack.feature_model().is_some());
 
         let syms = pack.extract_symbols("A.java", "public class A { void m() {} }\n");
         assert_eq!(syms[0].raw, "class");
@@ -628,5 +704,81 @@ mod tests {
         let mut with_method = mk("class Item(SQLModel, table=True)");
         with_method.children = vec!["m.py::Item::save".into()];
         assert!(!pack.is_schema_symbol(&with_method));
+    }
+
+    #[test]
+    fn java_is_schema_symbol_keys_on_entity_annotation_or_a_panache_entity_base() {
+        let pack = JavaStack;
+        let mk = |sig: &str, markers: &[&str]| ExtractedSymbol {
+            id: "org/acme/X.java::X".into(),
+            kind: crate::symbol::SymbolKind::Container,
+            raw: "class".into(),
+            file: "org/acme/X.java".into(),
+            lines: [1, 1],
+            signature: sig.into(),
+            docstring: None,
+            is_exported: true,
+            source_hash: String::new(),
+            interface_hash: None,
+            markers: markers.iter().map(|m| m.to_string()).collect(),
+            parent: None,
+            children: vec!["org/acme/X.java::X::name".into()],
+        };
+        // A plain JPA `@Entity` (repository style, no Panache base) is a table.
+        assert!(pack.is_schema_symbol(&mk("public class Fruit", &["@Entity"])));
+        assert!(pack.is_schema_symbol(&mk("public class Fruit", &["@Entity(name = \"fruit\")"])));
+        // Active-record style: `extends PanacheEntity`, annotated or not (the
+        // active-record base already implies the entity mapping).
+        assert!(pack.is_schema_symbol(&mk(
+            "public class FruitEntity extends PanacheEntity",
+            &["@Entity"]
+        )));
+        assert!(pack.is_schema_symbol(&mk(
+            "public class FruitEntity extends PanacheEntityBase",
+            &[]
+        )));
+        // A Panache *repository* is not itself a table -- it's the
+        // service/DAO layer that operates on one (ROADMAP.md's literal
+        // wording listed `implements PanacheRepository<...>` as a schema
+        // signal too, but a repository has no columns to report via
+        // `get_symbol` and, more concretely, tagging it Schema would
+        // exclude its file from ever joining a feature's `core` via
+        // `admits_to_core`'s `schema_files` guard -- regressing the real,
+        // tested case of an injected repository belonging in `core`
+        // (`quarkus.rs`'s `is_cdi_managed`). Stays a plain Container.
+        assert!(!pack.is_schema_symbol(&mk(
+            "public class FruitRepository implements PanacheRepository<Fruit>",
+            &[]
+        )));
+        // An ordinary, unannotated class is not a table.
+        assert!(!pack.is_schema_symbol(&mk("public class SlugFormatter", &[])));
+        // Code-review finding: a generic type parameter's own bound
+        // merely mentioning PanacheEntityBase must never be mistaken for
+        // the class's own `extends` clause -- Foo's real superclass here
+        // is UtilityBase, unrelated to persistence entirely.
+        assert!(!pack.is_schema_symbol(&mk(
+            "public class Foo<T extends PanacheEntityBase> extends UtilityBase",
+            &[]
+        )));
+    }
+
+    #[test]
+    fn extends_panache_entity_ignores_a_generic_bound_and_finds_the_real_superclass() {
+        assert!(extends_panache_entity(
+            "public class Fruit extends PanacheEntity"
+        ));
+        assert!(extends_panache_entity(
+            "public class Fruit extends PanacheEntityBase"
+        ));
+        assert!(extends_panache_entity(
+            "public class Fruit extends PanacheEntity<Fruit>"
+        ));
+        assert!(!extends_panache_entity(
+            "public class Foo<T extends PanacheEntityBase> extends UtilityBase"
+        ));
+        assert!(!extends_panache_entity(
+            "public class FruitRepository implements PanacheRepository<Fruit>"
+        ));
+        assert!(!extends_panache_entity("public class SlugFormatter"));
     }
 }
