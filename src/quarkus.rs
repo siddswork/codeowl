@@ -112,8 +112,21 @@
 //! `ARCHITECTURE.md` open question 11 on annotation vocabularies more
 //! generally).
 //!
-//! **Not yet (later M18 commits):** gRPC entry points — same incremental
-//! pattern M17 used.
+//! **`@GrpcService` methods (M18, commit 4 — the last entry-point kind).**
+//! Structurally the odd one out: the annotation lives only on the
+//! *class* (`quarkus-quickstarts/grpc-plain-text-quickstart`'s
+//! `HelloWorldService`), never on a method, because the actual RPC
+//! method shapes come from a generated proto interface (`Greeter`, from
+//! a `.proto` file — out of scope, no grammar registered for it here).
+//! Every `public` method on an already-`@GrpcService` class is treated
+//! as an entry point, deliberately without requiring the interface's own
+//! `@Override` marker — this project has already declined to walk
+//! interface hierarchies for inherited annotations
+//! (`ARCHITECTURE.md` open question 11). A member has no visibility
+//! field of its own (`ExtractedSymbol.is_exported` is file-level only),
+//! so `is_public_signature` reads the `public` modifier straight out of
+//! `signature`'s own text — skipping past any leading annotations first,
+//! since `@Override` always precedes the modifiers there.
 
 use std::collections::HashMap;
 
@@ -142,6 +155,10 @@ impl FeatureModel for QuarkusFeatureModel {
         // `HeroRestClient` in `quarkus-super-heroes` is the real case.
         // Same per-class memoization as the path cache above.
         let mut is_rest_client_cache: HashMap<SymbolId, bool> = HashMap::new();
+        // Same per-class memoization again: `@GrpcService` lives on the
+        // class, not the method, so every public method on the same
+        // class shares this one answer.
+        let mut is_grpc_service_cache: HashMap<SymbolId, bool> = HashMap::new();
         let mut out: Vec<EntryPoint> = graph
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
@@ -197,6 +214,20 @@ impl FeatureModel for QuarkusFeatureModel {
                         title,
                         file: s.file.clone(),
                     });
+                }
+                if s.raw == "method" && is_public_signature(&s.signature) {
+                    let is_grpc = *is_grpc_service_cache
+                        .entry(parent_id)
+                        .or_insert_with(|| is_grpc_service_class(graph, parent_id));
+                    if is_grpc {
+                        let method_name = s.id.rsplit("::").next().unwrap_or(s.id.as_str());
+                        return Some(EntryPoint {
+                            kind: "grpc".to_string(),
+                            id: grpc_slug(method_name),
+                            title: format!("gRPC: {method_name}"),
+                            file: s.file.clone(),
+                        });
+                    }
                 }
                 None
             })
@@ -423,6 +454,62 @@ fn scheduled_detail(marker: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Does `class_id` carry a class-level `@GrpcService`? Unlike JAX-RS and
+/// Kafka, gRPC's own annotation lives only on the class (the generated
+/// proto interface -- `Greeter` here, from a `.proto` file this project
+/// doesn't parse at all -- is what actually shapes the RPC methods); a
+/// `@GrpcService` class's public methods are what `enumerate_entry_points`
+/// treats as entry points, without requiring the interface's own
+/// `@Override` marker (this project has already declined to walk
+/// interface hierarchies for inherited annotations).
+fn is_grpc_service_class(graph: &Graph, class_id: SymbolId) -> bool {
+    let Some(sym) = graph.get_symbol(class_id) else {
+        return false;
+    };
+    sym.markers
+        .iter()
+        .any(|m| crate::java::bare_annotation_name(m) == "GrpcService")
+}
+
+/// A member has no `is_exported`/visibility field of its own (M13 design
+/// decision 9's `ExtractedSymbol.is_exported` is deliberately
+/// file-level-only — see `java.rs::push_named_leaf`), but `signature` is
+/// the declaration's own source text up to its body, so the `public`
+/// modifier is right there to check textually — same "read what's
+/// already captured" spirit as `sym.signature.contains("PanacheRepository")`
+/// in `is_cdi_managed`. Any leading annotations (the real
+/// `@Override public Uni<HelloReply> sayHello(...)` shape — `@Override`
+/// always comes first in `signature`, before the modifiers) are skipped
+/// first, so `public` is found regardless of how many markers precede it.
+fn is_public_signature(signature: &str) -> bool {
+    let mut rest = signature.trim_start();
+    while let Some(after_at) = rest.strip_prefix('@') {
+        let after_name =
+            after_at.trim_start_matches(|c: char| c.is_alphanumeric() || c == '_' || c == '.');
+        rest = match after_name.strip_prefix('(') {
+            Some(after_paren) => match after_paren.find(')') {
+                Some(idx) => &after_paren[idx + 1..],
+                None => after_name,
+            },
+            None => after_name,
+        }
+        .trim_start();
+    }
+    rest.starts_with("public")
+}
+
+/// `"sayHello"` -> `"grpc-sayhello"`. Same kind-prefix rule as the other
+/// three kinds, keyed on the method name — gRPC has no path/channel-
+/// equivalent identity either, same reasoning as `scheduled_slug`.
+fn grpc_slug(method_name: &str) -> String {
+    let words = ascii_words(method_name);
+    if words.is_empty() {
+        "grpc-method".to_string()
+    } else {
+        format!("grpc-{}", words.join("-"))
+    }
 }
 
 /// A `@Incoming`/`@Outgoing` annotation argument, before resolution: an
@@ -680,5 +767,27 @@ mod tests {
     fn scheduled_slugs_are_kind_prefixed_and_lowercased() {
         assert_eq!(scheduled_slug("increment"), "scheduled-increment");
         assert_eq!(scheduled_slug("cronJob"), "scheduled-cronjob");
+    }
+
+    #[test]
+    fn is_public_signature_skips_leading_annotations() {
+        assert!(is_public_signature(
+            "@Override\n    public Uni<HelloReply> sayHello(HelloRequest request)"
+        ));
+        assert!(is_public_signature("public String greet(String name)"));
+        assert!(!is_public_signature(
+            "private Uni<HelloReply> format(String name)"
+        ));
+        assert!(!is_public_signature(
+            "@Blocking\n    void store(int priceInUsd)"
+        ));
+        assert!(is_public_signature(
+            "@Blocking @Transactional\n    public void store(int priceInUsd)"
+        ));
+    }
+
+    #[test]
+    fn grpc_slugs_are_kind_prefixed_and_lowercased() {
+        assert_eq!(grpc_slug("sayHello"), "grpc-sayhello");
     }
 }

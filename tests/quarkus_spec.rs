@@ -856,3 +856,127 @@ fn a_scheduled_fixed_rate_bare_numeric_attribute_parses_without_quotes() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_grpc_services_public_method_is_a_grpc_entry_point() {
+    // Real shape: quarkus-quickstarts/grpc-plain-text-quickstart's
+    // HelloWorldService -- a class-level `@GrpcService` marker (never a
+    // method-level one) implementing a generated proto interface
+    // (`Greeter`, from `helloworld.proto` -- `.proto` files aren't
+    // parsed at all, out of scope). `sayHello` is `@Override`d, but
+    // entry-point detection deliberately doesn't require that marker --
+    // this project has already declined to walk interface hierarchies
+    // for inherited annotations (`ARCHITECTURE.md` open question 11) --
+    // it keys on the method being `public` on an already-`@GrpcService`
+    // class instead.
+    let dir =
+        std::env::temp_dir().join(format!("codeowl-quarkus-spec-{}-grpc", std::process::id()));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/HelloWorldService.java"),
+        "package org.acme;\n\
+         \n\
+         import io.quarkus.grpc.GrpcService;\n\
+         import io.smallrye.mutiny.Uni;\n\
+         \n\
+         @GrpcService\n\
+         public class HelloWorldService implements Greeter {\n\
+         \n\
+         \x20   @Override\n\
+         \x20   public Uni<HelloReply> sayHello(HelloRequest request) {\n\
+         \x20       return null;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert_eq!(eps.len(), 1, "{eps:?}");
+    assert_eq!(eps[0].kind, "grpc");
+    assert_eq!(eps[0].id, "grpc-sayhello");
+    assert!(eps[0].title.contains("sayHello"), "{:?}", eps[0].title);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_grpc_services_private_helper_method_is_not_an_entry_point() {
+    // A `@GrpcService` class can still have ordinary non-RPC helper
+    // methods alongside its public RPC ones -- only the public methods
+    // are real entry points (a private helper is never invoked by the
+    // gRPC runtime directly).
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-grpc-private-helper",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/HelloWorldService.java"),
+        "package org.acme;\n\
+         \n\
+         import io.quarkus.grpc.GrpcService;\n\
+         import io.smallrye.mutiny.Uni;\n\
+         \n\
+         @GrpcService\n\
+         public class HelloWorldService implements Greeter {\n\
+         \n\
+         \x20   @Override\n\
+         \x20   public Uni<HelloReply> sayHello(HelloRequest request) {\n\
+         \x20       return format(request.getName());\n\
+         \x20   }\n\
+         \n\
+         \x20   private Uni<HelloReply> format(String name) {\n\
+         \x20       return null;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert_eq!(
+        eps.len(),
+        1,
+        "the private helper must not also become an entry point: {eps:?}"
+    );
+    assert_eq!(eps[0].id, "grpc-sayhello");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_non_grpc_classs_public_methods_are_not_grpc_entry_points() {
+    // A plain public class with public methods and no `@GrpcService`
+    // marker at all must enumerate zero entry points -- confirms the
+    // class-level gate actually gates, not just the method's own
+    // visibility.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-grpc-not-a-service",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/PlainHelper.java"),
+        "package org.acme;\n\
+         \n\
+         public class PlainHelper {\n\
+         \x20   public String greet(String name) {\n\
+         \x20       return \"hi \" + name;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert!(eps.is_empty(), "{eps:?}");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
