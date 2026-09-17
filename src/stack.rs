@@ -371,9 +371,7 @@ impl StackPack for JavaStack {
 /// annotation name, not a prefix check, matching `quarkus.rs`'s
 /// `is_admitting_annotation` convention.
 fn is_entity_annotation(marker: &str) -> bool {
-    let name = marker.trim_start().trim_start_matches('@');
-    let name = name.split(['(', ' ']).next().unwrap_or(name);
-    name == "Entity"
+    crate::java::bare_annotation_name(marker) == "Entity"
 }
 
 /// The Python stack (M17): `tree-sitter-python` extraction + dotted-module

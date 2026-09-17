@@ -635,7 +635,13 @@ pub fn assemble_participants(
         let import_targets = imports_from(&file).filter_map(|i| i.target);
         for target in flow_targets.chain(import_targets) {
             let target_file = match graph.get_file(target) {
-                Some(_) => graph.string_id(target).to_string(),
+                Some(_) => {
+                    let f = graph.string_id(target).to_string();
+                    if schema_files.contains(f.as_str()) {
+                        continue;
+                    }
+                    f
+                }
                 None => {
                     let Some(sym) = graph.get_symbol(target) else {
                         continue;

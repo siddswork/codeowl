@@ -139,9 +139,10 @@ fn is_cdi_managed(sym: &crate::symbol::Symbol) -> bool {
 }
 
 fn is_admitting_annotation(marker: &str) -> bool {
-    let name = marker.trim_start().trim_start_matches('@');
-    let name = name.split(['(', ' ']).next().unwrap_or(name);
-    matches!(name, "ApplicationScoped" | "Singleton")
+    matches!(
+        crate::java::bare_annotation_name(marker),
+        "ApplicationScoped" | "Singleton"
+    )
 }
 
 /// `@GET` / `@POST` / … -> its lowercase verb name. Exact match only (not
@@ -196,11 +197,9 @@ fn is_register_rest_client(graph: &Graph, class_id: SymbolId) -> bool {
     let Some(sym) = graph.get_symbol(class_id) else {
         return false;
     };
-    sym.markers.iter().any(|m| {
-        let name = m.trim_start().trim_start_matches('@');
-        let name = name.split(['(', ' ']).next().unwrap_or(name);
-        name == "RegisterRestClient"
-    })
+    sym.markers
+        .iter()
+        .any(|m| crate::java::bare_annotation_name(m) == "RegisterRestClient")
 }
 
 /// Join a class-level `@Path` and an optional method-level `@Path` the

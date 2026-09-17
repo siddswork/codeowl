@@ -505,3 +505,58 @@ fn a_named_import_of_a_table_symbol_still_lands_in_data_not_core() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_module_import_of_a_schema_only_file_still_lands_in_data_not_core() {
+    // Code-review finding: the fix two tests above only guards the
+    // *symbol*-target resolution arm of the core-BFS (a named import
+    // like `from app.models import Item`) -- the pre-existing
+    // *file*-target arm (a module import like `from app import models`,
+    // which resolves directly to a file node with no symbol in between)
+    // had no schema_files check at all. A schema-only file imported by
+    // its module name -- not by naming a table inside it -- still slips
+    // into `core`, and once there the `core.contains(&sym.file)` guard
+    // silently drops its table out of `data` for any other core file
+    // that named-imports it. Same masking bug, different import style.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-py-spec-{}-module-import-of-schema-file",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("app/api/routes")).unwrap();
+    std::fs::write(
+        dir.join("app/models.py"),
+        "class Item(SQLModel, table=True):\n    id: int\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/crud.py"),
+        "from app.models import Item\n\n\ndef create_item(session, data):\n    return Item(**data)\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("app/api/routes/items.py"),
+        "from app import models\nfrom app.crud import create_item\n\nrouter = APIRouter(prefix=\"/items\")\n\n\n@router.post(\"/\")\ndef create(session, data):\n    return create_item(session, data)\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("pyproject.toml"), "[project]\nname = \"x\"\n").unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).unwrap();
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-post-items")
+        .expect("the POST /items route");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+    assert!(
+        !p.core.contains(&"app/models.py".to_string()),
+        "a schema-only file must never be promoted to core, module-import style included: {p:?}"
+    );
+    assert!(
+        p.data.contains(&"app/models.py::Item".to_string()),
+        "the table symbol must still surface as data through crud.py's named import of it: {p:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
