@@ -42,6 +42,19 @@ pub struct CoverageRequest {
     pub scope: Option<String>,
 }
 
+impl From<crate::spec::CoverageItem> for CoverageItemResponse {
+    fn from(i: crate::spec::CoverageItem) -> Self {
+        CoverageItemResponse {
+            id: i.id,
+            kind: i.kind,
+            status: i.status,
+            fan_in: i.fan_in,
+            smells: i.smells,
+            generations: i.generations,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct CoverageItemResponse {
     /// Pass straight to `get_next_spec_task`/`get_spec` — a repo-relative
@@ -193,6 +206,13 @@ pub struct CoverageResponse {
     /// by path. A directory's own rollup and the files inside it share one
     /// row — see `ModuleBreakdown`.
     pub by_module: Vec<ModuleBreakdown>,
+    /// The 5 file-kind documents most worth regenerating, ranked by import
+    /// fan-in (blast radius) rather than by `pending`'s generate-order
+    /// tiering — "which stale documents would hurt the most if left wrong"
+    /// rather than "which order to spend a budget on." Same "needs
+    /// attention" criterion as `pending` (non-current, or current but
+    /// smelly); rollups/features/system never appear here, only files.
+    pub top_stale_by_impact: Vec<CoverageItemResponse>,
     /// Every document still needing attention — non-current, or
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
     /// "Generation priority" and "Quality smells".
@@ -1165,7 +1185,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility. `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -1184,16 +1204,13 @@ impl CodeOwlServer {
             .into_iter()
             .map(ModuleBreakdown::from)
             .collect();
+        let top_stale_by_impact = crate::spec::top_stale_by_impact(&items, 5)
+            .into_iter()
+            .map(CoverageItemResponse::from)
+            .collect();
         let pending = crate::spec::prioritize(items, &graph)
             .into_iter()
-            .map(|i| CoverageItemResponse {
-                id: i.id,
-                kind: i.kind,
-                status: i.status,
-                fan_in: i.fan_in,
-                smells: i.smells,
-                generations: i.generations,
-            })
+            .map(CoverageItemResponse::from)
             .collect();
         Ok(Json(CoverageResponse {
             current: summary.current,
@@ -1206,6 +1223,7 @@ impl CodeOwlServer {
             weighted_freshness,
             by_kind,
             by_module,
+            top_stale_by_impact,
             pending,
         }))
     }
@@ -1727,6 +1745,40 @@ mod tests {
         assert_eq!(after_stale.weighted_freshness, 0.0);
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_ranks_top_stale_by_impact_by_fan_in() {
+        let server = test_server(&[
+            ("util.ts", "export function helper(): void {}\n"),
+            (
+                "a.ts",
+                "import { helper } from './util';\nexport function useA() {\n  helper();\n}\n",
+            ),
+            (
+                "b.ts",
+                "import { helper } from './util';\nexport function useB() {\n  helper();\n}\n",
+            ),
+        ]);
+
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: Some(String::new()),
+            }))
+            .await
+            .unwrap()
+            .0;
+        let ids: Vec<&str> = coverage
+            .top_stale_by_impact
+            .iter()
+            .map(|i| i.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["util.ts", "a.ts", "b.ts"],
+            "util.ts has the highest fan-in (imported by both a.ts and b.ts)"
+        );
+        assert_eq!(coverage.top_stale_by_impact[0].fan_in, 2);
     }
 
     #[tokio::test]

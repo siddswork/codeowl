@@ -2646,6 +2646,24 @@ pub fn weighted_freshness(items: &[CoverageItem]) -> f64 {
     weighted_current as f64 / total_fan_in as f64
 }
 
+/// The `n` file-kind items most worth regenerating, ranked by blast radius
+/// (`fan_in`) rather than by `prioritize`'s generate-order tiering — "which
+/// stale documents would hurt the most if left wrong" instead of "which
+/// order should a budgeted run spend on." Same "needs attention" criterion
+/// as `pending` (non-current, or current but smelly); only `kind == "file"`
+/// carries real fan-in (see `CoverageItem::fan_in`), so rollups/features/
+/// system never appear here even if stale.
+pub fn top_stale_by_impact(items: &[CoverageItem], n: usize) -> Vec<CoverageItem> {
+    let mut candidates: Vec<CoverageItem> = items
+        .iter()
+        .filter(|i| i.kind == "file" && (i.status != "current" || !i.smells.is_empty()))
+        .cloned()
+        .collect();
+    candidates.sort_by_key(|i| std::cmp::Reverse(i.fan_in));
+    candidates.truncate(n);
+    candidates
+}
+
 /// The canonical kind order a caller should render `by_kind` in — matches
 /// `prioritize`'s own file/rollup/feature/system tiering, so "coverage
 /// broken down by kind" reads in the same order a generate run would work
@@ -4814,6 +4832,82 @@ impl Counter {\n\
             1.0,
             "only a.ts is an eligible (file, non-missing) item, and it's current"
         );
+    }
+
+    #[test]
+    fn top_stale_by_impact_ranks_file_items_by_fan_in_descending() {
+        fn item(id: &str, status: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: "file".into(),
+                status: status.into(),
+                fan_in,
+                smells: Vec::new(),
+                generations: usize::from(status != "current"),
+            }
+        }
+        let items = vec![
+            item("quiet.ts", "stale", 1),
+            item("db.ts", "stale", 40),
+            item("mid.ts", "missing", 10),
+            item("clean.ts", "current", 99), // clean -- not "needing attention"
+        ];
+        let top = top_stale_by_impact(&items, 5);
+        let ids: Vec<&str> = top.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["db.ts", "mid.ts", "quiet.ts"],
+            "highest fan-in first; a clean current item never qualifies regardless of fan-in"
+        );
+    }
+
+    #[test]
+    fn top_stale_by_impact_truncates_to_n() {
+        fn item(id: &str, fan_in: usize) -> CoverageItem {
+            CoverageItem {
+                id: id.into(),
+                kind: "file".into(),
+                status: "stale".into(),
+                fan_in,
+                smells: Vec::new(),
+                generations: 1,
+            }
+        }
+        let items: Vec<CoverageItem> = (0..10).map(|i| item(&format!("f{i}.ts"), i)).collect();
+        assert_eq!(top_stale_by_impact(&items, 3).len(), 3);
+        assert_eq!(top_stale_by_impact(&items, 3)[0].id, "f9.ts");
+    }
+
+    #[test]
+    fn top_stale_by_impact_includes_current_but_smelly_items() {
+        let smelly_current = CoverageItem {
+            id: "smelly.ts".into(),
+            kind: "file".into(),
+            status: "current".into(),
+            fan_in: 7,
+            smells: vec!["cop_out_phrase".to_string()],
+            generations: 1,
+        };
+        let top = top_stale_by_impact(&[smelly_current], 5);
+        let ids: Vec<&str> = top.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["smelly.ts"],
+            "current but smelly still needs attention, same as pending's own criterion"
+        );
+    }
+
+    #[test]
+    fn top_stale_by_impact_excludes_non_file_kinds() {
+        let feature = CoverageItem {
+            id: "feature:checkout".into(),
+            kind: "feature".into(),
+            status: "stale".into(),
+            fan_in: 0,
+            smells: Vec::new(),
+            generations: 1,
+        };
+        assert!(top_stale_by_impact(&[feature], 5).is_empty());
     }
 
     #[test]
