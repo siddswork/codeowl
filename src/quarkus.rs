@@ -159,6 +159,29 @@ impl FeatureModel for QuarkusFeatureModel {
         // class, not the method, so every public method on the same
         // class shares this one answer.
         let mut is_grpc_service_cache: HashMap<SymbolId, bool> = HashMap::new();
+        // Per-class memoization for `resolve_channel_name`'s constant
+        // lookups -- see its own doc comment.
+        let mut channel_constants_cache: HashMap<SymbolId, Vec<&crate::symbol::Symbol>> =
+            HashMap::new();
+        // Deliberately first-match-wins across kinds (http, then kafka,
+        // then scheduled, then grpc), not "detect every kind a method's
+        // markers could match." Code-review finding: a method combining
+        // e.g. `@Incoming` with `@Scheduled` would only ever report as
+        // kafka. Considered and declined, for two reasons: (1) no
+        // occurrence of any two entry-point-kind markers on one method
+        // exists in either real test repo (`quarkus-quickstarts` or
+        // `quarkus-super-heroes`) -- this project's "wait for real
+        // evidence" policy applies; (2) `@Incoming` (message-triggered)
+        // and `@Scheduled` (timer-triggered) are two different invocation
+        // mechanisms for the same method, which is arguably semantically
+        // incoherent, not just rare -- a method can't genuinely be
+        // invoked both ways. Restructuring this into "detect all kinds
+        // independently" would also introduce a real regression: the
+        // grpc branch's condition (any `public` method on a
+        // `@GrpcService` class) is far more permissive than the other
+        // three, so removing this exclusivity would make it double-fire
+        // on an http/kafka/scheduled method that happens to sit in a
+        // `@GrpcService`-annotated class.
         let mut out: Vec<EntryPoint> = graph
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
@@ -187,8 +210,12 @@ impl FeatureModel for QuarkusFeatureModel {
                 let incoming = s.markers.iter().find_map(|m| incoming_channel(m));
                 let outgoing = s.markers.iter().find_map(|m| outgoing_channel(m));
                 if incoming.is_some() || outgoing.is_some() {
-                    let incoming_name = incoming.map(|a| resolve_channel_name(graph, parent_id, a));
-                    let outgoing_name = outgoing.map(|a| resolve_channel_name(graph, parent_id, a));
+                    let incoming_name = incoming.map(|a| {
+                        resolve_channel_name(graph, parent_id, a, &mut channel_constants_cache)
+                    });
+                    let outgoing_name = outgoing.map(|a| {
+                        resolve_channel_name(graph, parent_id, a, &mut channel_constants_cache)
+                    });
                     let (primary, title) = match (&incoming_name, &outgoing_name) {
                         (Some(i), Some(o)) => (i.clone(), format!("Kafka: {i} -> {o}")),
                         (Some(i), None) => (i.clone(), format!("Kafka: {i}")),
@@ -347,43 +374,40 @@ fn ascii_words(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// The one kind-prefixed-slug rule behind all four entry-point kinds:
+/// split `words_source` into alphanumeric words, lowercase, join with
+/// `-`, prefixed by `kind` — or `kind-{empty_fallback}` if there were no
+/// words at all (`ROADMAP.md` M18 flags `http-fights` vs `kafka-fights`
+/// as a real future collision, hence the prefix). Code-review finding:
+/// this used to be four near-identical 7-line functions, differing only
+/// in their prefix string and empty-input fallback — exactly the drift
+/// risk `ascii_words`'s own doc comment already worried about, just one
+/// layer up.
+fn kind_slug(kind: &str, words_source: &str, empty_fallback: &str) -> String {
+    let words = ascii_words(words_source);
+    if words.is_empty() {
+        format!("{kind}-{empty_fallback}")
+    } else {
+        format!("{kind}-{}", words.join("-"))
+    }
+}
+
 /// `("get", "/entity/fruits/{id}")` -> `"http-get-entity-fruits-id"`.
-/// Kind-prefixed from the start (`ROADMAP.md` M18 flags `http-fights` vs
-/// `kafka-fights` as a real future collision) even though this commit
-/// only ever produces `"http"` — cheaper to bake in now than retrofit
-/// once a second kind exists.
 fn route_slug(verb: &str, path: &str) -> String {
-    let words = ascii_words(path);
-    if words.is_empty() {
-        format!("http-{verb}-root")
-    } else {
-        format!("http-{verb}-{}", words.join("-"))
-    }
+    kind_slug(&format!("http-{verb}"), path, "root")
 }
 
-/// `"fights"` -> `"kafka-fights"`. Same kind-prefix rule as `route_slug`,
-/// keyed on the resolved channel name rather than a verb+path pair.
+/// `"fights"` -> `"kafka-fights"`.
 fn kafka_slug(channel: &str) -> String {
-    let words = ascii_words(channel);
-    if words.is_empty() {
-        "kafka-channel".to_string()
-    } else {
-        format!("kafka-{}", words.join("-"))
-    }
+    kind_slug("kafka", channel, "channel")
 }
 
-/// `"job"` -> `"scheduled-job"`. Same kind-prefix rule as the other two
-/// kinds, keyed on the method name -- a `@Scheduled` method has no
-/// path/channel-equivalent identity of its own (`ROADMAP.md`'s "cron
-/// expr" is title material, not a stable, collision-safe id: two methods
-/// can share an identical schedule).
+/// `"increment"` -> `"scheduled-increment"`. Keyed on the method name --
+/// a `@Scheduled` method has no path/channel-equivalent identity of its
+/// own (`ROADMAP.md`'s "cron expr" is title material, not a stable,
+/// collision-safe id: two methods can share an identical schedule).
 fn scheduled_slug(method_name: &str) -> String {
-    let words = ascii_words(method_name);
-    if words.is_empty() {
-        "scheduled-job".to_string()
-    } else {
-        format!("scheduled-{}", words.join("-"))
-    }
+    kind_slug("scheduled", method_name, "job")
 }
 
 fn is_scheduled_annotation(marker: &str) -> bool {
@@ -529,12 +553,7 @@ fn matching_close_paren(s: &str) -> Option<usize> {
 /// three kinds, keyed on the method name — gRPC has no path/channel-
 /// equivalent identity either, same reasoning as `scheduled_slug`.
 fn grpc_slug(method_name: &str) -> String {
-    let words = ascii_words(method_name);
-    if words.is_empty() {
-        "grpc-method".to_string()
-    } else {
-        format!("grpc-{}", words.join("-"))
-    }
+    kind_slug("grpc", method_name, "method")
 }
 
 /// A `@Incoming`/`@Outgoing` annotation argument, before resolution: an
@@ -595,15 +614,33 @@ fn outgoing_channel(marker: &str) -> Option<ChannelArg> {
 /// file follow. Falls back to the raw identifier if no matching constant
 /// is found, so an entry point is never silently dropped over an
 /// unresolved reference — just less nicely named.
-fn resolve_channel_name(graph: &Graph, class_id: SymbolId, arg: ChannelArg) -> String {
+fn resolve_channel_name<'g>(
+    graph: &'g Graph,
+    class_id: SymbolId,
+    arg: ChannelArg,
+    class_constants_cache: &mut HashMap<SymbolId, Vec<&'g crate::symbol::Symbol>>,
+) -> String {
     match arg {
         ChannelArg::Literal(s) => s,
-        ChannelArg::ConstantName(name) => graph
-            .symbols()
-            .filter(|s| s.parent == Some(class_id) && s.kind == SymbolKind::Value)
-            .find(|s| s.id.ends_with(&format!("::{name}")))
-            .and_then(|s| first_string_literal(&s.signature))
-            .unwrap_or(name),
+        ChannelArg::ConstantName(name) => {
+            // Same per-class memoization as `class_path_cache` /
+            // `is_rest_client_cache` / `is_grpc_service_cache` above --
+            // code-review finding: this used to re-scan every symbol in
+            // the graph on every call instead of caching a class's own
+            // constants once, inconsistent with this file's otherwise
+            // uniform caching discipline.
+            let constants = class_constants_cache.entry(class_id).or_insert_with(|| {
+                graph
+                    .symbols()
+                    .filter(|s| s.parent == Some(class_id) && s.kind == SymbolKind::Value)
+                    .collect()
+            });
+            constants
+                .iter()
+                .find(|s| s.id.ends_with(&format!("::{name}")))
+                .and_then(|s| first_string_literal(&s.signature))
+                .unwrap_or(name)
+        }
     }
 }
 

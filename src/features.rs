@@ -634,24 +634,23 @@ pub fn assemble_participants(
         });
         let import_targets = imports_from(&file).filter_map(|i| i.target);
         for target in flow_targets.chain(import_targets) {
+            // Normalize to a plain file path first, whichever kind of
+            // target this is, then apply the schema_files exclusion once
+            // uniformly -- code-review finding: this used to be
+            // duplicated verbatim across both match arms, one edit away
+            // from a future third target-resolution shape forgetting it.
             let target_file = match graph.get_file(target) {
-                Some(_) => {
-                    let f = graph.string_id(target).to_string();
-                    if schema_files.contains(f.as_str()) {
-                        continue;
-                    }
-                    f
-                }
+                Some(_) => graph.string_id(target).to_string(),
                 None => {
                     let Some(sym) = graph.get_symbol(target) else {
                         continue;
                     };
-                    if schema_files.contains(sym.file.as_str()) {
-                        continue;
-                    }
                     sym.file.clone()
                 }
             };
+            if schema_files.contains(target_file.as_str()) {
+                continue;
+            }
             if seen.contains(&target_file) {
                 continue;
             }
@@ -683,7 +682,12 @@ pub fn assemble_participants(
         let Some(sym) = graph.get_symbol(target) else {
             return;
         };
-        if core.contains(&sym.file) {
+        // `seen` has identical membership to `core` at this point (the
+        // BFS above is the only thing that ever inserts into either, and
+        // it's finished) but is a `HashSet` -- O(1) here instead of an
+        // O(core.len()) linear scan per dependency/data symbol
+        // (code-review finding).
+        if seen.contains(&sym.file) {
             return;
         }
         if sym.kind == crate::symbol::SymbolKind::Schema {
@@ -706,10 +710,13 @@ pub fn assemble_participants(
             if graph.get_file(target).is_some() {
                 continue;
             }
+            // (Code-review finding: this loop used to also check
+            // `core.contains(&id)` here, but `id` is a full symbol id
+            // ("file::Symbol") which can never match any entry of `core`
+            // -- a Vec of plain file paths -- so it was always false,
+            // dead code shadowing the real guard already inside
+            // `classify_symbol_target`.)
             let id = graph.string_id(target).to_string();
-            if core.contains(&id) {
-                continue;
-            }
             classify_symbol_target(id, target);
         }
     }
