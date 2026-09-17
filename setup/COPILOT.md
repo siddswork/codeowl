@@ -147,13 +147,35 @@ CodeOwl was built and tuned against Claude Code. The read tools
 `get_spec_coverage`, `search_code`) work the same anywhere. The
 **generation loop** has two Copilot-specific frictions:
 
-1. **Large-file tool output.** `get_next_spec_task` returns a symbol's
-   full source. For a large file (a multi-thousand-line utility class) the
-   payload can exceed VS Code's tool-result size limit and get truncated —
-   Claude Code spills it to a file instead. Until CodeOwl trims that
-   payload (a planned change), generation of the biggest files may be
-   unreliable in Copilot; everything else, and all the read tools, are
-   fine.
+1. **Large-file tool output — fixed by default, tunable if it still
+   happens.** `get_next_spec_task` used to return a symbol's full source
+   unconditionally. Copilot Chat spills anything larger than its own
+   (undocumented) inline-context limit to a `content.json` temp file and
+   asks the agent to `read_file` it back, which fails outright if
+   `read_file` isn't enabled for the session — a documented Copilot
+   limitation, confirmed on GitHub's own Copilot community discussion
+   board, not a CodeOwl/`rmcp`/transport bug. CodeOwl now protects against
+   this with two `codeowl serve` flags, both with defaults tuned to have
+   margin against every case seen so far:
+
+   - **`--large-class-bytes`** (default **4,000**) — above this many
+     bytes, a class with many methods gets reduced to member signatures +
+     docstrings instead of full bodies. This is the "nicer" fix: it keeps
+     as much real content as it safely can, tried first.
+   - **`--max-spec-task-bytes`** (default **8,000**) — a hard ceiling
+     applied *after* that reduction, to *any* generation-task response
+     (a class, or a plain large file with no single big class — the
+     latter had no protection at all before this). This is the actual
+     guarantee: nothing CodeOwl returns from `get_next_spec_task` can
+     exceed this many bytes, full stop.
+
+   If your setup still spills a `content.json` at the defaults, lower
+   `--max-spec-task-bytes` below whatever size you saw it happen at —
+   add it to the `args` array in `.vscode/mcp.json`:
+
+   ```json
+   "args": ["serve", "${workspaceFolder}", "--max-spec-task-bytes", "5000"]
+   ```
 
 2. **The prompt is Claude-tuned.** Copilot's agent may not follow the
    multi-step loop as faithfully — reading *every* `core_sources` file,

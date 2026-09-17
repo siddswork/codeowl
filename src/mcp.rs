@@ -335,8 +335,8 @@ pub struct CodeOwlServer {
     /// rather than ambient process state — and so every existing test
     /// that builds a `CodeOwlServer` via `::new` keeps compiling
     /// unchanged, since these just default here.
-    large_container_bytes: usize,
-    max_generation_bytes: usize,
+    large_class_bytes: usize,
+    max_spec_task_bytes: usize,
 }
 
 impl CodeOwlServer {
@@ -345,26 +345,26 @@ impl CodeOwlServer {
             graph: Arc::new(ArcSwap::from_pointee(graph)),
             root: Arc::new(root),
             tool_router: Self::tool_router(),
-            large_container_bytes: crate::spec::LARGE_CONTAINER_BYTES_DEFAULT,
-            max_generation_bytes: crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
+            large_class_bytes: crate::spec::LARGE_CONTAINER_BYTES_DEFAULT,
+            max_spec_task_bytes: crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
         }
     }
 
     /// Override the two `get_next_spec_task` size knobs from their
-    /// compiled-in defaults — `codeowl serve`'s `--large-container-bytes`
-    /// / `--max-generation-bytes` flags call this. `None` leaves the
+    /// compiled-in defaults — `codeowl serve`'s `--large-class-bytes`
+    /// / `--max-spec-task-bytes` flags call this. `None` leaves the
     /// corresponding default in place, so a caller only needs to specify
     /// the one it actually wants to change.
     pub fn with_generation_limits(
         mut self,
-        large_container_bytes: Option<usize>,
-        max_generation_bytes: Option<usize>,
+        large_class_bytes: Option<usize>,
+        max_spec_task_bytes: Option<usize>,
     ) -> Self {
-        if let Some(v) = large_container_bytes {
-            self.large_container_bytes = v;
+        if let Some(v) = large_class_bytes {
+            self.large_class_bytes = v;
         }
-        if let Some(v) = max_generation_bytes {
-            self.max_generation_bytes = v;
+        if let Some(v) = max_spec_task_bytes {
+            self.max_spec_task_bytes = v;
         }
         self
     }
@@ -581,16 +581,16 @@ impl CodeOwlServer {
                 // agent is reduced for a God-class Container (M18,
                 // M16's headline finding), then hard-capped regardless
                 // (a real MCP client's overflow threshold isn't known
-                // precisely -- see `self.large_container_bytes` /
-                // `self.max_generation_bytes`, both overridable via
+                // precisely -- see `self.large_class_bytes` /
+                // `self.max_spec_task_bytes`, both overridable via
                 // `with_generation_limits`).
                 let source = crate::spec::maybe_reduce_container_source(
                     sym,
                     graph,
                     source,
-                    self.large_container_bytes,
+                    self.large_class_bytes,
                 );
-                let source = crate::spec::cap_generation_text(source, self.max_generation_bytes);
+                let source = crate::spec::cap_generation_text(source, self.max_spec_task_bytes);
                 SpecTaskResponse::Symbol {
                     id,
                     signature,
@@ -607,7 +607,7 @@ impl CodeOwlServer {
                 // A `File` task had no size handling at all before this --
                 // a large flat file with no single big class was
                 // completely unprotected even after the Container fix.
-                let source = crate::spec::cap_generation_text(source, self.max_generation_bytes);
+                let source = crate::spec::cap_generation_text(source, self.max_spec_task_bytes);
                 SpecTaskResponse::File { id, source, prior }
             }
         })
@@ -1778,8 +1778,8 @@ mod tests {
             panic!("expected the file task next");
         };
         assert!(
-            source.len() <= crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 200,
-            "a large flat file's task source must be capped: {} bytes",
+            source.len() <= crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
+            "a large flat file's task source must be capped, marker included: {} bytes",
             source.len()
         );
         assert!(
@@ -1793,7 +1793,7 @@ mod tests {
     #[tokio::test]
     async fn with_generation_limits_overrides_the_compiled_in_defaults() {
         // The actual configurability this whole fix is for: a caller
-        // (`codeowl serve --max-generation-bytes N`) can tighten the cap
+        // (`codeowl serve --max-spec-task-bytes N`) can tighten the cap
         // below the compiled-in default for a client whose real overflow
         // threshold is smaller -- proven here with a tiny override that
         // truncates even a normally-small file.
@@ -1813,9 +1813,9 @@ mod tests {
             panic!("expected the symbol task");
         };
         assert!(
-            source.len() <= 20 + 200,
-            "a caller-supplied max_generation_bytes must actually take effect, \
-             even on a file the compiled-in default would never touch: {} bytes",
+            source.len() <= 20,
+            "a caller-supplied max_spec_task_bytes must actually take effect, \
+             marker included, even on a file the compiled-in default would never touch: {} bytes",
             source.len()
         );
         assert!(source.contains("truncated"));

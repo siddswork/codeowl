@@ -407,7 +407,7 @@ pub(crate) fn symbol_span_text(
 /// absurdly large" (the two cases above), not "what's actually safe for
 /// a real client" — those are different questions, and only the second
 /// one matters here. Lowered well under the observed failure; see
-/// [`MAX_GENERATION_TASK_TEXT_BYTES`] below for the hard backstop that
+/// [`MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT`] below for the hard backstop that
 /// doesn't depend on this number being right, since Copilot's exact
 /// ceiling still isn't known — only that it's ≤ 11,498.
 ///
@@ -417,12 +417,12 @@ pub(crate) fn symbol_span_text(
 /// still open) — a laptop-scale heuristic constant, in the same spirit
 /// as `SHARED_CODE_MAX_FILES`, not a measured limit. Overridable per
 /// server instance (`mcp.rs::CodeOwlServer::with_generation_limits`,
-/// wired to `codeowl serve`'s `--large-container-bytes` flag) since no
+/// wired to `codeowl serve`'s `--large-class-bytes` flag) since no
 /// single number is right for every MCP client, and guessing wrong once
 /// already shipped a bug — an explicit parameter, not an env var read,
 /// so the value is visible in one place (the CLI invocation) and every
 /// call site stays a pure function with no hidden global state.
-pub(crate) const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
+pub const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
 
 /// A hard ceiling on any single generation-task text field
 /// (`SpecTaskResponse::Symbol::source` or `::File::source`), applied
@@ -437,29 +437,53 @@ pub(crate) const LARGE_CONTAINER_BYTES_DEFAULT: usize = 4_000;
 /// size handling at all before this — a large flat file with no single
 /// big class was completely unprotected even after the Container fix.
 /// Overridable the same way as `LARGE_CONTAINER_BYTES_DEFAULT` (the
-/// `--max-generation-bytes` flag) — different MCP clients have different
+/// `--max-spec-task-bytes` flag) — different MCP clients have different
 /// real ceilings, and this codebase can't know all of them.
-pub(crate) const MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT: usize = 8_000;
+pub const MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT: usize = 8_000;
 
-/// Truncate `text` to at most `max_bytes`, cutting at a `char` boundary
-/// (never splitting a multi-byte UTF-8 sequence) and appending a visible
-/// marker so truncation is never silent — an agent that gets a
-/// suspiciously neat cutoff with no note would have no way to know the
-/// class continues past what it can see. Returns `text` unchanged if
-/// it's already within the cap.
+/// The visible truncation notice [`cap_generation_text`] appends — pulled
+/// out to a constant so its own byte length can be reserved against
+/// `max_bytes` rather than added on top of it.
+const TRUNCATION_MARKER: &str = "\n\n[... truncated: this content exceeded the generation-task \
+    size limit. Use get_symbol / search_code / get_callers for the parts not shown here.]";
+
+/// Truncate `text` to at most `max_bytes` *total, marker included* —
+/// cutting at a `char` boundary (never splitting a multi-byte UTF-8
+/// sequence) and appending a visible marker so truncation is never silent
+/// (an agent that gets a suspiciously neat cutoff with no note would have
+/// no way to know the class continues past what it can see). Returns
+/// `text` unchanged if it's already within the cap.
+///
+/// Code-review finding: this used to truncate the *text* to `max_bytes`
+/// and then append the marker on top, so the real returned length was
+/// `max_bytes` plus the marker's own ~145 bytes — silently breaking the
+/// "nothing this crate hands back can ever exceed this many bytes, full
+/// stop" guarantee `MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT`'s doc comment
+/// makes, in exactly the scenario this whole mechanism exists for (a real
+/// MCP client's true ceiling sitting close to the configured cap). Fixed
+/// by reserving the marker's length out of the budget *before* cutting
+/// the text, then fitting the marker itself into whatever's left — if
+/// `max_bytes` is smaller than the marker alone (an unreasonably tight
+/// cap), the marker gets truncated too rather than the guarantee being
+/// broken; an honest, cut-off notice is worth more than exact wording
+/// once the budget is that tight.
 pub(crate) fn cap_generation_text(text: String, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text;
     }
-    let mut cut = max_bytes;
+    let text_budget = max_bytes.saturating_sub(TRUNCATION_MARKER.len());
+    let mut cut = text_budget.min(text.len());
     while cut > 0 && !text.is_char_boundary(cut) {
         cut -= 1;
     }
     let mut out = text[..cut].to_string();
-    out.push_str(
-        "\n\n[... truncated: this content exceeded the generation-task size limit. \
-        Use get_symbol / search_code / get_callers for the parts not shown here.]",
-    );
+
+    let marker_budget = max_bytes - out.len();
+    let mut marker_cut = marker_budget.min(TRUNCATION_MARKER.len());
+    while marker_cut > 0 && !TRUNCATION_MARKER.is_char_boundary(marker_cut) {
+        marker_cut -= 1;
+    }
+    out.push_str(&TRUNCATION_MARKER[..marker_cut]);
     out
 }
 
@@ -3043,7 +3067,39 @@ impl Counter {\n\
         // point -- a naive byte-index slice would panic mid-character.
         let text = "☃".repeat(MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT); // well over the byte cap
         let capped = cap_generation_text(text, MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT); // must not panic
-        assert!(capped.len() <= MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 200);
+        assert!(capped.len() <= MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT);
+    }
+
+    #[test]
+    fn cap_generation_text_honors_max_bytes_including_the_marker_itself() {
+        // Code-review finding: the function truncated the *text* to
+        // max_bytes, then unconditionally appended the truncation marker
+        // on top -- so the real returned length was max_bytes + the
+        // marker's own ~145 bytes, contradicting the doc comment's "full
+        // stop" guarantee. The exact scenario this whole fix exists for
+        // (a real MCP client's ceiling sitting close to the configured
+        // cap) means that overrun matters, not just in theory.
+        let text = "x".repeat(1000);
+        let capped = cap_generation_text(text, 50);
+        assert!(
+            capped.len() <= 50,
+            "the total returned length, marker included, must never exceed max_bytes: {} bytes",
+            capped.len()
+        );
+        assert!(
+            capped.contains("truncated"),
+            "still must visibly mark truncation even under a tight budget: {capped}"
+        );
+    }
+
+    #[test]
+    fn cap_generation_text_survives_a_budget_smaller_than_the_marker_itself() {
+        // An unreasonably tight cap (smaller than the ~145-byte marker
+        // text) -- must not panic or underflow, and the guarantee still
+        // holds: whatever comes back never exceeds max_bytes.
+        let text = "x".repeat(1000);
+        let capped = cap_generation_text(text, 10);
+        assert!(capped.len() <= 10, "must still fit: {} bytes", capped.len());
     }
 
     #[test]
