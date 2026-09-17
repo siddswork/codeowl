@@ -2661,11 +2661,15 @@ pub struct OrphanedSpec {
     /// prefix) — this is what no longer exists, not what to pass to
     /// `get_next_spec_task` (there's nothing left for it to generate).
     pub id: String,
-    /// One of `"file"` | `"rollup"` | `"feature"`. The system spec is never
-    /// orphanable — it always has a root to summarize.
+    /// One of `"file"` | `"rollup"` | `"feature"` | `"symbol"`. The system
+    /// spec is never orphanable — it always has a root to summarize.
     pub kind: String,
-    /// The orphaned `.md` file's own path, relative to `root` — what a
-    /// caller would actually delete.
+    /// For `"file"`/`"rollup"`/`"feature"`, the orphaned `.md` document's
+    /// own path, relative to `root` — what a caller would delete outright.
+    /// For `"symbol"`, the *containing file's* spec path instead — there's
+    /// no separate file to delete, only a section inside a still-valid
+    /// document to prune (which happens automatically on that file's next
+    /// write, via `reorder_symbols`).
     pub path: String,
 }
 
@@ -2741,7 +2745,54 @@ pub fn find_orphaned_specs(
         &mut orphans,
     )?;
 
+    find_orphaned_symbol_sections(graph, root, scope, &mut orphans)?;
+
     Ok(orphans)
+}
+
+/// The one case `find_orphaned_files_and_rollups` can't see: a symbol
+/// deleted from a file that *itself* still exists. `file_status` only ever
+/// walks a file's *current* symbols when deciding hash-currency (see its
+/// own doc comment), so a stored `FileSpec.symbols` entry whose id no
+/// longer appears among `spec_bearing_children` never surfaces any other
+/// way — the file can read `"current"` while quietly carrying a dead
+/// section for a function that no longer exists, until the next unrelated
+/// write to that file prunes it via `reorder_symbols`. Scoped to files
+/// still live in the graph (a deleted file's sections are already covered
+/// by its own whole-file orphan entry, above — no need to double-report).
+fn find_orphaned_symbol_sections(
+    graph: &Graph,
+    root: &Path,
+    scope: Option<&str>,
+    orphans: &mut Vec<OrphanedSpec>,
+) -> Result<()> {
+    let mut file_ids: Vec<SymbolId> = graph.files().filter_map(|f| graph.find(&f.id)).collect();
+    file_ids.sort_by_key(|&id| graph.string_id(id).to_string());
+
+    for file_id in file_ids {
+        let path = graph.string_id(file_id).to_string();
+        if scope.is_some_and(|s| !within_scope(&path, s)) {
+            continue;
+        }
+        let Some(spec) = read_file_spec(root, &path)? else {
+            continue;
+        };
+        let current_ids: std::collections::HashSet<&str> = spec_bearing_children(graph, file_id)
+            .iter()
+            .filter_map(|&id| graph.get_symbol(id))
+            .map(|s| s.id.as_str())
+            .collect();
+        for (stored_id, _) in &spec.symbols {
+            if !current_ids.contains(stored_id.as_str()) {
+                orphans.push(OrphanedSpec {
+                    id: stored_id.clone(),
+                    kind: "symbol".to_string(),
+                    path: format!("docs/specs/{path}.md"),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The file/rollup half of `find_orphaned_specs` — recurses through
@@ -4169,6 +4220,72 @@ impl Counter {\n\
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].kind, "file");
         assert_eq!(scoped[0].id, "lib/db.ts");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn find_orphaned_specs_reports_a_deleted_symbols_lingering_section() {
+        let (graph, dir) = build_feature_fixture(
+            &[(
+                "lib/math.ts",
+                "export function add(a: number, b: number): number {\n  return a + b;\n}\nexport function sub(a: number, b: number): number {\n  return a - b;\n}\n",
+            )],
+            "orphan-symbol",
+        );
+        submit(
+            &graph,
+            &dir,
+            "lib/math.ts::add",
+            "### Summary\nAdds two numbers together.\n### Behavior\nReturns the sum of the two arguments.\n",
+        )
+        .unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/math.ts::sub",
+            "### Summary\nSubtracts one number from another.\n### Behavior\nReturns the difference of the two arguments.\n",
+        )
+        .unwrap();
+        submit(
+            &graph,
+            &dir,
+            "lib/math.ts",
+            "Small arithmetic helper functions.",
+        )
+        .unwrap();
+
+        // Remove `sub` from the source but keep the file itself -- the
+        // file is still current for `add`, so it must not be reported as
+        // an orphaned *file*; only `sub`'s now-dangling section should be
+        // flagged.
+        std::fs::write(
+            dir.join("lib/math.ts"),
+            "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
+        )
+        .unwrap();
+        let graph_after = crate::index::RepoIndex::build(&dir)
+            .unwrap()
+            .rebuild()
+            .unwrap();
+
+        let orphans = find_orphaned_specs(&graph_after, &dir, None).unwrap();
+        assert!(
+            orphans.contains(&OrphanedSpec {
+                id: "lib/math.ts::sub".to_string(),
+                kind: "symbol".to_string(),
+                path: "docs/specs/lib/math.ts.md".to_string(),
+            }),
+            "sub's dangling section should be flagged: {orphans:?}"
+        );
+        assert!(
+            !orphans.iter().any(|o| o.id == "lib/math.ts"),
+            "the file itself still exists and is current for `add` -- it must not be reported as a whole-file orphan: {orphans:?}"
+        );
+        assert!(
+            !orphans.iter().any(|o| o.id == "lib/math.ts::add"),
+            "add is still live and should never be reported as orphaned: {orphans:?}"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
