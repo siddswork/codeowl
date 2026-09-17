@@ -42,6 +42,28 @@ pub struct CoverageRequest {
     pub scope: Option<String>,
 }
 
+/// One spec on disk whose target no longer exists in the graph at all —
+/// see `crate::spec::OrphanedSpec`. Distinct from a `pending` entry: a
+/// `pending` item still has something in the graph to regenerate against,
+/// an orphan does not, and it's the caller's job to delete these, not
+/// `/codeowl generate`'s.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct OrphanedSpecResponse {
+    pub id: String,
+    pub kind: String,
+    pub path: String,
+}
+
+impl From<crate::spec::OrphanedSpec> for OrphanedSpecResponse {
+    fn from(o: crate::spec::OrphanedSpec) -> Self {
+        OrphanedSpecResponse {
+            id: o.id,
+            kind: o.kind,
+            path: o.path,
+        }
+    }
+}
+
 impl From<crate::spec::CoverageItem> for CoverageItemResponse {
     fn from(i: crate::spec::CoverageItem) -> Self {
         CoverageItemResponse {
@@ -213,6 +235,14 @@ pub struct CoverageResponse {
     /// attention" criterion as `pending` (non-current, or current but
     /// smelly); rollups/features/system never appear here, only files.
     pub top_stale_by_impact: Vec<CoverageItemResponse>,
+    /// Spec documents on disk whose target no longer exists in the graph at
+    /// all — a deleted file, a directory that dropped below the rollup
+    /// threshold, a removed feature entry point. Not counted in `coverage`/
+    /// `freshness`/`total` at all (there's no eligible node left to score),
+    /// and never appears in `pending` either — there's nothing for
+    /// `/codeowl generate` to regenerate against. This is dead weight to
+    /// delete, a genuinely different problem from "stale."
+    pub orphaned: Vec<OrphanedSpecResponse>,
     /// Every document still needing attention — non-current, or
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
     /// "Generation priority" and "Quality smells".
@@ -1185,7 +1215,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `orphaned` lists spec documents whose target no longer exists in the graph at all (a deleted file, a directory that dropped below the rollup threshold, a removed feature entry point) -- these are NOT counted in coverage/freshness/total and never appear in `pending`, since there's nothing left for `/codeowl generate` to regenerate; they're dead weight to delete. `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
     )]
     async fn get_spec_coverage(
         &self,
@@ -1208,6 +1238,11 @@ impl CodeOwlServer {
             .into_iter()
             .map(CoverageItemResponse::from)
             .collect();
+        let orphaned = crate::spec::find_orphaned_specs(&graph, &self.root, req.scope.as_deref())
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(OrphanedSpecResponse::from)
+            .collect();
         let pending = crate::spec::prioritize(items, &graph)
             .into_iter()
             .map(CoverageItemResponse::from)
@@ -1224,6 +1259,7 @@ impl CodeOwlServer {
             by_kind,
             by_module,
             top_stale_by_impact,
+            orphaned,
             pending,
         }))
     }
@@ -1779,6 +1815,62 @@ mod tests {
             "util.ts has the highest fan-in (imported by both a.ts and b.ts)"
         );
         assert_eq!(coverage.top_stale_by_impact[0].fan_in, 2);
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_reports_a_deleted_files_lingering_spec_as_orphaned() {
+        let dir = std::env::temp_dir().join(format!("codeowl-mcp-orphan-{}-1", std::process::id()));
+        let server = rebuild_server(
+            dir.clone(),
+            &[
+                ("a.ts", "export function one(): void {}\n"),
+                ("b.ts", "export function two(): void {}\n"),
+            ],
+        );
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts::one".to_string(),
+                content: "### Summary\nDoes a small, specific job.\n### Behavior\nRuns without side effects.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts".to_string(),
+                content: "A small file with one exported helper.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Delete a.ts entirely and rebuild -- its spec is now dead weight,
+        // not merely stale (there's nothing left in the graph to
+        // regenerate it against).
+        std::fs::remove_file(dir.join("a.ts")).unwrap();
+        let server = rebuild_server(dir.clone(), &[]);
+
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(
+            coverage.orphaned,
+            vec![OrphanedSpecResponse {
+                id: "a.ts".to_string(),
+                kind: "file".to_string(),
+                path: "docs/specs/a.ts.md".to_string(),
+            }]
+        );
+        assert!(
+            coverage.pending.iter().all(|i| i.id != "a.ts"),
+            "an orphan must never appear in pending -- there's nothing to generate"
+        );
+        // b.ts and the (never-submitted) system spec are both "missing" --
+        // not orphaned, since both are still real, eligible graph entries.
+        // Neither the orphan count nor `missing` overlap with the other.
+        assert_eq!(coverage.missing, 2);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
