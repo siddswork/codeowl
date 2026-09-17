@@ -1,10 +1,10 @@
-//! The Quarkus feature model (M18, commit 1) — the second Java
-//! `FeatureModel` implementation and the first non-web one; also the
-//! first with more than one entry-point *kind* on the roadmap (HTTP now,
-//! `@Incoming`/`@Scheduled`/`@GrpcService` in later commits — see
-//! `ROADMAP.md`'s M18 section). This commit is HTTP resources only:
-//! JAX-RS `@Path` (class-level prefix, optional per-method sub-path) +
-//! a verb annotation (`@GET`/`@POST`/…).
+//! The Quarkus feature model (M18) — the second Java `FeatureModel`
+//! implementation and the first non-web one; also the first with more
+//! than one entry-point *kind* on the roadmap (see `ROADMAP.md`'s M18
+//! section). Built incrementally, one kind per commit: HTTP resources
+//! first (JAX-RS `@Path`, class-level prefix + optional per-method
+//! sub-path, plus a verb annotation `@GET`/`@POST`/…), then Kafka
+//! `@Incoming`/`@Outgoing` listeners (below).
 //!
 //! Returned unconditionally by `JavaStack::feature_model()`, same as
 //! `PythonStack` → `FastApiFeatureModel` — a plain library with no
@@ -59,8 +59,43 @@
 //! new mechanism; whether that's actually sufficient is a question for
 //! this milestone's dogfood validation, not something to guess at now.
 //!
-//! **Not yet (later M18 commits):** Kafka/`@Scheduled`/gRPC entry
-//! points — same incremental pattern M17 used.
+//! **Kafka `@Incoming`/`@Outgoing` listeners (M18, commit 2).** Real-
+//! repo census before building anything: `quarkus-super-heroes` (the
+//! milestone's actual corpus) has 0 `@Scheduled` and 0 `@GrpcService`
+//! but 4 real reactive-messaging usages; `quarkus-quickstarts` has all
+//! three (12 `@Incoming`/`@Outgoing`, 3 `@Scheduled`, 2 `@GrpcService`),
+//! confirming Kafka is the higher-priority kind to build first. Three
+//! real shapes, all handled: a pure `@Incoming`-only consumer
+//! (`kafka-panache-quickstart`'s `PriceStorage`), a pure `@Outgoing`-only
+//! *declarative* producer with no injected emitter anywhere
+//! (`PriceGenerator` — invoked by the reactive-messaging runtime's own
+//! ticker, not application code, so it's a genuine entry point exactly
+//! like `@Scheduled` will be), and a method carrying **both** annotations
+//! at once (`quarkus-super-heroes`'s `SuperStats.processFight`, which
+//! consumes one channel and republishes to another) — one entry point,
+//! keyed on the incoming/triggering channel, not two.
+//!
+//! **Channel names aren't always inline literals.** `SuperStats` names
+//! its channels via same-class `static final String` constants
+//! (`@Incoming(FIGHTS_CHANNEL_NAME)`), not `@Incoming("fights")` —
+//! `resolve_channel_name` resolves this the same "textual scan within
+//! known scope" way `same_package_edges` resolves an implicit same-
+//! package reference: no cross-file interpretation, just a same-class
+//! constant lookup, falling back to the raw identifier (slugified) if
+//! nothing matches so an entry point is never silently dropped.
+//!
+//! **A `@Channel`-annotated constructor/field parameter is never its own
+//! entry point** (the real `FightService(@Channel("fights") MutinyEmitter
+//! emitter, …)` shape — dependency injection of an emitter for a later
+//! imperative `.send()` call from *inside* an already-modeled entry
+//! point, not something the framework invokes on its own). This falls
+//! out of extraction with no special-casing at all: `annotations()` only
+//! captures a node's own modifiers, never a parameter's, so a
+//! parameter-level `@Channel` is invisible to `markers` in the first
+//! place — confirmed by a real-shaped regression test, not assumed.
+//!
+//! **Not yet (later M18 commits):** `@Scheduled`/gRPC entry points —
+//! same incremental pattern M17 used.
 
 use std::collections::HashMap;
 
@@ -93,8 +128,6 @@ impl FeatureModel for QuarkusFeatureModel {
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
             .filter_map(|s| {
-                let verb = s.markers.iter().find_map(|m| parse_verb(m))?;
-                let method_path = s.markers.iter().find_map(|m| parse_path_annotation(m));
                 let parent_id = s.parent?;
                 let is_rest_client = *is_rest_client_cache
                     .entry(parent_id)
@@ -102,15 +135,37 @@ impl FeatureModel for QuarkusFeatureModel {
                 if is_rest_client {
                     return None;
                 }
-                let class_path = class_path_cache
-                    .entry(parent_id)
-                    .or_insert_with(|| class_path_for(graph, parent_id))
-                    .clone();
-                let full = join_jaxrs_path(class_path.as_deref(), method_path.as_deref());
+                if let Some(verb) = s.markers.iter().find_map(|m| parse_verb(m)) {
+                    let method_path = s.markers.iter().find_map(|m| parse_path_annotation(m));
+                    let class_path = class_path_cache
+                        .entry(parent_id)
+                        .or_insert_with(|| class_path_for(graph, parent_id))
+                        .clone();
+                    let full = join_jaxrs_path(class_path.as_deref(), method_path.as_deref());
+                    return Some(EntryPoint {
+                        kind: "http".to_string(),
+                        id: route_slug(&verb, &full),
+                        title: format!("{} {full}", verb.to_uppercase()),
+                        file: s.file.clone(),
+                    });
+                }
+                let incoming = s.markers.iter().find_map(|m| incoming_channel(m));
+                let outgoing = s.markers.iter().find_map(|m| outgoing_channel(m));
+                if incoming.is_none() && outgoing.is_none() {
+                    return None;
+                }
+                let incoming_name = incoming.map(|a| resolve_channel_name(graph, parent_id, a));
+                let outgoing_name = outgoing.map(|a| resolve_channel_name(graph, parent_id, a));
+                let (primary, title) = match (&incoming_name, &outgoing_name) {
+                    (Some(i), Some(o)) => (i.clone(), format!("Kafka: {i} -> {o}")),
+                    (Some(i), None) => (i.clone(), format!("Kafka: {i}")),
+                    (None, Some(o)) => (o.clone(), format!("Kafka: {o} (produced)")),
+                    (None, None) => unreachable!("checked above"),
+                };
                 Some(EntryPoint {
-                    kind: "http".to_string(),
-                    id: route_slug(&verb, &full),
-                    title: format!("{} {full}", verb.to_uppercase()),
+                    kind: "kafka".to_string(),
+                    id: kafka_slug(&primary),
+                    title,
                     file: s.file.clone(),
                 })
             })
@@ -219,22 +274,109 @@ fn join_jaxrs_path(class_path: Option<&str>, method_path: Option<&str>) -> Strin
     }
 }
 
+/// Split `s` on every non-alphanumeric-ASCII run and lowercase what's
+/// left — the shared slug-word step behind both `route_slug` and
+/// `kafka_slug` (kept as one helper so a future third kind's slug rule
+/// can't drift from the first two).
+fn ascii_words(s: &str) -> Vec<String> {
+    s.split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|seg| !seg.is_empty())
+        .map(str::to_ascii_lowercase)
+        .collect()
+}
+
 /// `("get", "/entity/fruits/{id}")` -> `"http-get-entity-fruits-id"`.
 /// Kind-prefixed from the start (`ROADMAP.md` M18 flags `http-fights` vs
 /// `kafka-fights` as a real future collision) even though this commit
 /// only ever produces `"http"` — cheaper to bake in now than retrofit
 /// once a second kind exists.
 fn route_slug(verb: &str, path: &str) -> String {
-    let path_part = path
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|seg| !seg.is_empty())
-        .map(str::to_ascii_lowercase)
-        .collect::<Vec<_>>()
-        .join("-");
-    if path_part.is_empty() {
+    let words = ascii_words(path);
+    if words.is_empty() {
         format!("http-{verb}-root")
     } else {
-        format!("http-{verb}-{path_part}")
+        format!("http-{verb}-{}", words.join("-"))
+    }
+}
+
+/// `"fights"` -> `"kafka-fights"`. Same kind-prefix rule as `route_slug`,
+/// keyed on the resolved channel name rather than a verb+path pair.
+fn kafka_slug(channel: &str) -> String {
+    let words = ascii_words(channel);
+    if words.is_empty() {
+        "kafka-channel".to_string()
+    } else {
+        format!("kafka-{}", words.join("-"))
+    }
+}
+
+/// A `@Incoming`/`@Outgoing` annotation argument, before resolution: an
+/// inline string literal is already the answer, but a bare identifier
+/// (`@Incoming(FIGHTS_CHANNEL_NAME)`, the real `quarkus-super-heroes`
+/// shape) names a same-class constant that `resolve_channel_name` still
+/// has to look up.
+#[derive(Debug, PartialEq)]
+enum ChannelArg {
+    Literal(String),
+    ConstantName(String),
+}
+
+/// The single argument inside `marker`'s parens, classified as a literal
+/// or a bare constant reference. `None` for a no-arg or malformed
+/// annotation.
+fn channel_arg(marker: &str) -> Option<ChannelArg> {
+    let m = marker.trim_start();
+    let start = m.find('(')?;
+    let end = m.rfind(')')?;
+    if end <= start {
+        return None;
+    }
+    let inner = m[start + 1..end].trim();
+    if inner.is_empty() {
+        return None;
+    }
+    if let Some(lit) = first_string_literal(inner) {
+        return Some(ChannelArg::Literal(lit));
+    }
+    Some(ChannelArg::ConstantName(inner.to_string()))
+}
+
+/// `marker` if it's a bare `@Incoming(...)`, else `None`.
+fn incoming_channel(marker: &str) -> Option<ChannelArg> {
+    if crate::java::bare_annotation_name(marker) != "Incoming" {
+        return None;
+    }
+    channel_arg(marker)
+}
+
+/// `marker` if it's a bare `@Outgoing(...)`, else `None`.
+fn outgoing_channel(marker: &str) -> Option<ChannelArg> {
+    if crate::java::bare_annotation_name(marker) != "Outgoing" {
+        return None;
+    }
+    channel_arg(marker)
+}
+
+/// Resolve a Kafka channel-name annotation argument to its actual string
+/// value. A literal resolves to itself; a constant reference is looked
+/// up among `class_id`'s own `Value`-kind members for one whose name
+/// matches, extracting the first string literal out of *that* symbol's
+/// `signature` (a field's signature is its whole declaration text,
+/// initializer included — see `java.rs::signature_before_body`). Same
+/// "textual scan within known scope" pattern as `same_package_edges`,
+/// deliberately not a general interpreter: same class only, no cross-
+/// file follow. Falls back to the raw identifier if no matching constant
+/// is found, so an entry point is never silently dropped over an
+/// unresolved reference — just less nicely named.
+fn resolve_channel_name(graph: &Graph, class_id: SymbolId, arg: ChannelArg) -> String {
+    match arg {
+        ChannelArg::Literal(s) => s,
+        ChannelArg::ConstantName(name) => graph
+            .symbols()
+            .filter(|s| s.parent == Some(class_id) && s.kind == SymbolKind::Value)
+            .find(|s| s.id.ends_with(&format!("::{name}")))
+            .and_then(|s| first_string_literal(&s.signature))
+            .unwrap_or(name),
     }
 }
 
@@ -327,5 +469,40 @@ mod tests {
         assert!(!is_admitting_annotation("@RequestScoped"));
         assert!(!is_admitting_annotation("@Path(\"/x\")"));
         assert!(!is_admitting_annotation("@Override"));
+    }
+
+    #[test]
+    fn channel_arg_distinguishes_literals_from_bare_constant_references() {
+        assert_eq!(
+            channel_arg("@Incoming(\"prices\")"),
+            Some(ChannelArg::Literal("prices".to_string()))
+        );
+        assert_eq!(
+            channel_arg("@Incoming(FIGHTS_CHANNEL_NAME)"),
+            Some(ChannelArg::ConstantName("FIGHTS_CHANNEL_NAME".to_string()))
+        );
+        assert_eq!(channel_arg("@Incoming()"), None);
+        assert_eq!(channel_arg("@Incoming"), None, "no parens at all");
+    }
+
+    #[test]
+    fn incoming_and_outgoing_channel_only_match_their_own_annotation() {
+        assert_eq!(
+            incoming_channel("@Incoming(\"prices\")"),
+            Some(ChannelArg::Literal("prices".to_string()))
+        );
+        assert_eq!(incoming_channel("@Outgoing(\"prices\")"), None);
+        assert_eq!(
+            outgoing_channel("@Outgoing(\"generated-price\")"),
+            Some(ChannelArg::Literal("generated-price".to_string()))
+        );
+        assert_eq!(outgoing_channel("@Incoming(\"prices\")"), None);
+        assert_eq!(incoming_channel("@Blocking"), None);
+    }
+
+    #[test]
+    fn kafka_slugs_are_kind_prefixed_and_lowercased() {
+        assert_eq!(kafka_slug("fights"), "kafka-fights");
+        assert_eq!(kafka_slug("winner-stats"), "kafka-winner-stats");
     }
 }

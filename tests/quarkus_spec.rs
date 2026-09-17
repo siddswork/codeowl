@@ -1,16 +1,26 @@
-//! Integration (M18, commit 1): the Quarkus feature model's entry-point
-//! layer — `enumerate_entry_points` recognizing JAX-RS `@Path` + verb
-//! (`@GET`/`@POST`/…) annotations end to end through `RepoIndex` (real
-//! `detect()` → `JavaStack` → `QuarkusFeatureModel`), not just the unit
-//! tests on the parsing helpers themselves (see `src/quarkus.rs`).
+//! Integration (M18): the Quarkus feature model's entry-point layer —
+//! `enumerate_entry_points` recognizing JAX-RS `@Path` + verb
+//! (`@GET`/`@POST`/…) and Kafka `@Incoming`/`@Outgoing` annotations end
+//! to end through `RepoIndex` (real `detect()` → `JavaStack` →
+//! `QuarkusFeatureModel`), not just the unit tests on the parsing
+//! helpers themselves (see `src/quarkus.rs`).
 //!
-//! Fixtures are drawn from real `quarkus-quickstarts` shapes (M18's chosen
-//! test repo — see `ARCHITECTURE.md` open question 11 for why
+//! HTTP fixtures are drawn from real `quarkus-quickstarts` shapes (M18's
+//! chosen test repo — see `ARCHITECTURE.md` open question 11 for why
 //! `quarkus-super-heroes` was set aside for this specific piece): a plain
 //! `@Path("/hello")` resource with a method-level sub-path
 //! (`getting-started/GreetingResource`), and a CRUD resource whose class
 //! path has no leading slash and whose methods mix bare verbs with
 //! `@Path("{id}")` (`hibernate-orm-panache-quickstart/FruitEntityResource`).
+//!
+//! Kafka fixtures are drawn from real shapes in **both** test repos: a
+//! pure `@Incoming`-only consumer and a pure `@Outgoing`-only declarative
+//! producer (`quarkus-quickstarts/kafka-panache-quickstart`'s
+//! `PriceStorage`/`PriceGenerator`), and a method carrying **both**
+//! annotations at once plus same-class constant channel names
+//! (`quarkus-super-heroes/event-statistics`'s `SuperStats.processFight`,
+//! the actual milestone corpus's shape) — real evidence census in
+//! `src/quarkus.rs`'s module doc comment.
 
 use codeowl::index::RepoIndex;
 
@@ -488,6 +498,245 @@ fn a_register_rest_client_interface_is_not_an_entry_point() {
         "only the real server resource remains: {eps:?}"
     );
     assert_eq!(eps[0].id, "http-get-hello");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_incoming_only_consumer_method_is_a_kafka_entry_point() {
+    // Real shape: quarkus-quickstarts/kafka-panache-quickstart's
+    // PriceStorage -- a plain `@Incoming("prices")` consumer, inline
+    // string literal, no `@Outgoing` counterpart.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-kafka-incoming-only",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/PriceStorage.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import org.eclipse.microprofile.reactive.messaging.Incoming;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class PriceStorage {\n\
+         \x20   @Incoming(\"prices\")\n\
+         \x20   public void store(int priceInUsd) {\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert_eq!(eps.len(), 1, "{eps:?}");
+    assert_eq!(eps[0].kind, "kafka");
+    assert_eq!(eps[0].id, "kafka-prices");
+    assert!(eps[0].title.contains("prices"), "{:?}", eps[0].title);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn an_outgoing_only_producer_method_is_a_kafka_entry_point() {
+    // Real shape: kafka-panache-quickstart's PriceGenerator -- a pure
+    // declarative producer, invoked by the reactive-messaging runtime's
+    // own ticker, no injected `@Channel` emitter anywhere in sight.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-kafka-outgoing-only",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/PriceGenerator.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import org.eclipse.microprofile.reactive.messaging.Outgoing;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class PriceGenerator {\n\
+         \x20   @Outgoing(\"generated-price\")\n\
+         \x20   public int generate() {\n\
+         \x20       return 42;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert_eq!(eps.len(), 1, "{eps:?}");
+    assert_eq!(eps[0].kind, "kafka");
+    assert_eq!(eps[0].id, "kafka-generated-price");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_combined_incoming_and_outgoing_method_resolves_same_class_constants_into_one_entry_point() {
+    // Real shape: quarkus-super-heroes/event-statistics's SuperStats --
+    // the actual milestone corpus's Kafka listener. `processFight`
+    // carries BOTH `@Incoming` and `@Outgoing` on the same method (it
+    // consumes one channel and republishes to another), and neither
+    // annotation uses an inline literal -- both name a same-class
+    // `static final String` constant instead. Must be exactly one entry
+    // point (keyed on the incoming/triggering channel), with both
+    // constants resolved by name, not left as the raw identifiers.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-kafka-combined",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/SuperStats.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import org.eclipse.microprofile.reactive.messaging.Incoming;\n\
+         import org.eclipse.microprofile.reactive.messaging.Outgoing;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class SuperStats {\n\
+         \x20   static final String FIGHTS_CHANNEL_NAME = \"fights\";\n\
+         \x20   static final String TOP_WINNERS_CHANNEL_NAME = \"winner-stats\";\n\
+         \n\
+         \x20   @Incoming(FIGHTS_CHANNEL_NAME)\n\
+         \x20   @Outgoing(TOP_WINNERS_CHANNEL_NAME)\n\
+         \x20   public String processFight(String fight) {\n\
+         \x20       return fight;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert_eq!(
+        eps.len(),
+        1,
+        "@Incoming + @Outgoing on the same method is one entry point, not two: {eps:?}"
+    );
+    assert_eq!(eps[0].kind, "kafka");
+    assert_eq!(
+        eps[0].id, "kafka-fights",
+        "keyed on the incoming/triggering channel, constant resolved: {eps:?}"
+    );
+    assert!(
+        eps[0].title.contains("fights") && eps[0].title.contains("winner-stats"),
+        "both resolved channel names should be visible in the title: {:?}",
+        eps[0].title
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_channel_annotated_constructor_param_is_not_its_own_entry_point() {
+    // Real shape: quarkus-super-heroes/rest-fights's FightService -- a
+    // `@Channel("fights") MutinyEmitter<...>` constructor parameter is
+    // dependency injection of an emitter for later imperative `.send()`
+    // calls, not something the framework invokes on its own. Annotations
+    // on a *parameter* are never captured in a symbol's `markers` in the
+    // first place (only class/method-level modifiers are), so this
+    // should already just fall out of extraction with no special-casing
+    // -- this test locks that behavior in as a real, checked case rather
+    // than an assumption.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-kafka-emitter-param",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/FightService.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import org.eclipse.microprofile.reactive.messaging.Channel;\n\
+         import io.smallrye.reactive.messaging.MutinyEmitter;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class FightService {\n\
+         \x20   private final MutinyEmitter<String> emitter;\n\
+         \n\
+         \x20   public FightService(@Channel(\"fights\") MutinyEmitter<String> emitter) {\n\
+         \x20       this.emitter = emitter;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert!(
+        eps.is_empty(),
+        "an injected emitter's constructor param must never become its own entry point: {eps:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn http_and_kafka_slugs_never_collide_on_the_same_bare_word() {
+    // ROADMAP.md's explicit flagged risk: `GET /fights` and a Kafka
+    // consumer on channel `fights` would both slug to `fights` with no
+    // kind prefix (`docs/specs/_features/fights.md` collision). Confirms
+    // the kind prefix actually keeps them apart end to end.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-kind-prefix-collision",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/FightResource.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.ws.rs.GET;\n\
+         import jakarta.ws.rs.Path;\n\
+         \n\
+         @Path(\"/fights\")\n\
+         public class FightResource {\n\
+         \x20   @GET\n\
+         \x20   public String list() { return \"[]\"; }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/FightConsumer.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.enterprise.context.ApplicationScoped;\n\
+         import org.eclipse.microprofile.reactive.messaging.Incoming;\n\
+         \n\
+         @ApplicationScoped\n\
+         public class FightConsumer {\n\
+         \x20   @Incoming(\"fights\")\n\
+         \x20   public void consume(String fight) {\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let mut eps = fm.enumerate_entry_points(&graph);
+    eps.sort_by(|a, b| a.id.cmp(&b.id));
+
+    let ids: Vec<&str> = eps.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["http-get-fights", "kafka-fights"],
+        "the kind prefix must keep these apart, no silent collision: {eps:?}"
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
