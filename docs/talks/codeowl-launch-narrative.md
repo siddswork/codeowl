@@ -1,7 +1,7 @@
 # CodeOwl — Launch Talk Narrative
 
-> First public reveal of CodeOwl to the org. Format: **5 slides + a live demo**,
-> ~10 minutes of talking plus demo, then Q&A. Audience: ~90% devs/technical,
+> First public reveal of CodeOwl to the org. Format: **6 slides + a live demo**,
+> ~12 minutes of talking plus demo, then Q&A. Audience: ~90% devs/technical,
 > ~10% senior management — so every slide carries one line a manager can repeat
 > in a hallway, but the meat is written for engineers who've never touched
 > compiler theory and shouldn't need to.
@@ -323,6 +323,70 @@ read. If it's wrong, it says so instead of lying to you."*
 
 **One line for management:** *"It already works on four real stacks today —
 this is a maturity and coverage roadmap, not a research bet."*
+
+---
+
+## Slide 6 — "Isn't this just Graphify?"
+
+**Say this:**
+> "A few of you have already asked me this, so let's address it head-on
+> instead of leaving it for Q&A: how is this different from Graphify? Short
+> answer — Graphify maps your codebase. CodeOwl writes and maintains its
+> documentation. Those sound similar but they're different jobs. Graphify
+> builds a graph and tags every connection as confirmed or inferred — that's
+> genuinely useful, and it's honest about what it knows versus guesses. But
+> nothing about that graph persists an *answer*. If you ask 'how does
+> artwork submission work end to end,' Graphify hands you a subgraph and you
+> read it yourself, every single time you ask — its own generated report is
+> a whole-repo highlights reel, not a per-feature write-up. CodeOwl's
+> feature spec *is* that write-up: a real document that exists whether or
+> not anyone's currently asking, checked against the code, so the next
+> person who asks the same question gets an instant, verified answer
+> instead of redoing the reading. One more precise point, because I don't
+> want to overclaim: Graphify's own code parsing is also local, no LLM,
+> same as us — that's not the difference. The real one is narrower and
+> still true: CodeOwl never calls an LLM for anything, at all, ever.
+> Graphify does, for its docs/PDF/image passes. We're not trying to out-build
+> a funded platform at everything it does. We're solving the one thing it
+> doesn't."
+
+**Slide bullets:**
+- **Graphify maps. CodeOwl documents.** A graph of confirmed/inferred
+  connections is genuinely useful — but nobody's written down the *answer*
+  to "how does this work," so you re-derive it from the subgraph every time
+  you ask. A feature spec is that answer, persisted, checked against the
+  code, ready before anyone asks.
+- **Not a feature fight.** Graphify is broader on purpose — 40+ languages,
+  docs/PDFs/video, PR triage, community detection. CodeOwl isn't trying to
+  match that surface. It's narrower and deeper on one specific problem:
+  documentation that doesn't rot.
+- **A precise privacy claim, not an inflated one.** Graphify's code
+  extraction is local too — that's not the distinction. The real one:
+  CodeOwl never calls an LLM for *anything*, ever; Graphify does for its
+  non-code passes.
+
+**Diagram — same question, two different answers:**
+
+```
+ "How does artwork submission work, end to end?"
+
+ Graphify:                                 CodeOwl:
+ ┌─────────────────────────────┐           ┌─────────────────────────────┐
+ │ returns a subgraph:          │           │ returns a feature spec:      │
+ │  Page --uses--> Form          │           │  "Artwork submission" (.md)  │
+ │  Form --EXTRACTED--> Route    │           │  a written, numbered         │
+ │  Route --INFERRED--> Table    │           │  narrative -- persisted,     │
+ │                                │           │  checked against the code,   │
+ │ you read it and write the      │           │  existed before you asked    │
+ │ narrative yourself, again      │           │                               │
+ └─────────────────────────────┘           └─────────────────────────────┘
+      re-derived, every time                    written once, reused, verified
+```
+
+**One line for management:** *"We're not trying to out-build a funded
+platform at everything it does. We're solving the one thing it doesn't:
+documentation a human can trust and an agent can act on, that never goes
+silently out of date."*
 
 ---
 
