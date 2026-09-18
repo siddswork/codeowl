@@ -103,7 +103,10 @@ deterministic graph.
 - **No LLM in the loop, ever.** CodeOwl holds no API keys and makes no
   model calls. It's a deterministic index; the calling agent writes spec
   text through `get_next_spec_task` → `submit_spec`. Nothing to hallucinate
-  in the parts CodeOwl owns.
+  in the parts CodeOwl owns — and no new privacy exposure either: CodeOwl
+  itself never sends your source anywhere. Whatever your coding agent
+  already sends its own model to write spec prose is a trust relationship
+  you already have; CodeOwl doesn't add a second one.
 - **Sees what grep can't.** Framework conventions become real edges — a
   `fetch("/api/x")` resolves to its route file, a `.from("payments")`
   resolves to the `CREATE TABLE`, a `<Form/>` resolves to its component.
