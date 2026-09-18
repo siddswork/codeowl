@@ -89,6 +89,11 @@ deterministic graph.
   graph — a symbol's signature hash, its resolved dependencies' interface
   hashes — never from the prose. Change the code and the specs it touches
   flip to `stale` immediately, naming exactly what moved.
+- **Bootstrap once, not forever.** Spec-driven development assumes your
+  code already has good specs — a brownfield repo doesn't. Run `--all`
+  once to write the whole corpus; after that, a change only regenerates
+  the specs it actually invalidates, never the whole repo. Ongoing cost is
+  upkeep, not a recurring LLM tax.
 - **One artifact, two readers.** A feature spec is a numbered,
   BA-followable narrative of a capability end to end; the same document
   gives an agent the exact files, dependencies, and tables it needs
