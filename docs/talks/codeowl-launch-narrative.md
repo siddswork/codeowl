@@ -80,14 +80,20 @@ faster."*
 > which, which button click actually reaches which database table. That part
 > is pure fact-checking: no AI involved, no guessing, just parsing. Second,
 > on top of that map, it generates plain-English write-ups — specs — at every
-> level: this function, this file, this whole feature, the whole system. Any
-> AI assistant, or any human, can ask CodeOwl a question instead of
-> re-exploring the repo."
+> level: this function, this file, this whole directory, this whole feature,
+> the whole system. Any AI assistant, or any human, can ask CodeOwl a
+> question instead of re-exploring the repo. One exception worth naming: a
+> pure library or CLI never gets feature specs — there's no user-facing
+> route to hang one off — so it just gets function/file/directory/system
+> specs instead, and that's expected, not a gap."
 
 **Slide bullets:**
 - Two layers: a **structural graph** (deterministic facts, extracted by
   parsing — never guessed) and **prose specs** (LLM-written English,
-  layered on top of the graph, one per function/file/feature/system).
+  layered on top of the graph, one per function/file/directory/feature/system).
+- Not every codebase gets every level — a pure library or CLI has no
+  feature specs at all (no user-facing route to hang one off), just
+  function/file/directory/system.
 - Specs are **committed to git** — reviewable in a pull request, browsable on
   GitHub, versioned right alongside the code they describe.
 - Served over **MCP** (Model Context Protocol — the same plumbing Claude
