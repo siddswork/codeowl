@@ -143,7 +143,7 @@ adoption doesn't require anyone to learn a new tool."*
 > functions, classes, database tables — the same first step a compiler takes
 > before it runs your code, except CodeOwl stops right there; it never
 > executes anything. Step two, it connects the dots: normal imports, but also
-> the *hidden* connections — a frontend doing `fetch('/api/submit')` has no
+> the *hidden* connections — a frontend doing `fetch('/api/checkout')` has no
 > import statement linking it to the backend route that handles it, but
 > that's a real connection a developer cares about, and CodeOwl finds it by
 > matching the string. Step three, an AI fills in the plain-English
@@ -262,17 +262,17 @@ top of facts CodeOwl has already verified."*
 **Diagram — a connection plain text search misses, that CodeOwl catches:**
 
 ```
- frontend/SubmitForm.tsx                    backend/routes/submit.ts
+ frontend/CheckoutForm.tsx                   backend/routes/checkout.ts
  ┌─────────────────────────┐                ┌─────────────────────────┐
- │ fetch("/api/submit")    │── (string, ───►│ export async function    │
+ │ fetch("/api/checkout")  │── (string, ───►│ export async function    │
  │                          │   no import     │   POST(...) { ... }      │
  └─────────────────────────┘   statement)    └────────────┬─────────────┘
-                                                            │ .from("submissions")
+                                                            │ .from("orders")
                                                             │  (also a string!)
                                                             v
                                                  ┌─────────────────────┐
                                                  │ CREATE TABLE          │
-                                                 │  submissions ( ... )  │
+                                                 │  orders ( ... )       │
                                                  └─────────────────────┘
 
  grep across these 3 files: sees no connection at all.
@@ -336,7 +336,7 @@ this is a maturity and coverage roadmap, not a research bet."*
 > builds a graph and tags every connection as confirmed or inferred — that's
 > genuinely useful, and it's honest about what it knows versus guesses. But
 > nothing about that graph persists an *answer*. If you ask 'how does
-> artwork submission work end to end,' Graphify hands you a subgraph and you
+> checkout work end to end,' Graphify hands you a subgraph and you
 > read it yourself, every single time you ask — its own generated report is
 > a whole-repo highlights reel, not a per-feature write-up. CodeOwl's
 > feature spec *is* that write-up: a real document that exists whether or
@@ -368,12 +368,12 @@ this is a maturity and coverage roadmap, not a research bet."*
 **Diagram — same question, two different answers:**
 
 ```
- "How does artwork submission work, end to end?"
+ "How does checkout work, end to end?"
 
  Graphify:                                 CodeOwl:
  ┌─────────────────────────────┐           ┌─────────────────────────────┐
  │ returns a subgraph:          │           │ returns a feature spec:      │
- │  Page --uses--> Form          │           │  "Artwork submission" (.md)  │
+ │  Page --uses--> Form          │           │  "Checkout" (.md)            │
  │  Form --EXTRACTED--> Route    │           │  a written, numbered         │
  │  Route --INFERRED--> Table    │           │  narrative -- persisted,     │
  │                                │           │  checked against the code,   │
