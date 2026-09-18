@@ -229,10 +229,16 @@ target loop above:
    kind — *N feature specs, M file specs, K rollups, system spec: yes/no*.
    If `--stale` was in effect, say so and note how many `"missing"`
    documents were deliberately skipped. If budget-capped, call
-   `get_spec_coverage` once more and tell the user what's still pending
-   (again by kind), so they know whether to run another batch or target
-   something specific. If the system spec is the only thing left, say so
-   and suggest `/codeowl-generate system`.
+   `get_spec_coverage` once more and read its `by_kind` breakdown directly
+   for what's still pending (current/stale/missing per kind) rather than
+   re-deriving it from `pending` yourself, so the user knows whether to
+   run another batch or target something specific. If that same call's
+   `orphaned` list is non-empty, say so — those are spec documents whose
+   target no longer exists in the graph at all (a deleted file, a
+   collapsed rollup, a removed feature entry point), dead weight to
+   delete, not something another generate run will ever pick up. If the
+   system spec is the only thing left, say so and suggest
+   `/codeowl-generate system`.
 
 ## Termination and reporting
 

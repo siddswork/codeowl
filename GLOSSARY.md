@@ -427,6 +427,54 @@ each document:
     source" cop-out, or it's too short to be a real description. A document
     can be `current` *and* `smelly` at the same time.
 
+**Coverage**
+: What fraction of eligible (spec-bearing) nodes have *any* spec at all —
+  `current` or `stale`, doesn't matter which. `(current + stale) / total`.
+
+  Answers "how much of the repo is documented," and nothing about whether
+  that documentation is still correct — that's **freshness**, below.
+  `get_spec_coverage` reports `coverage` at the top level and again per
+  `by_kind`/`by_module` row.
+
+**Freshness**
+: Of the specs that actually exist, what fraction still match the code —
+  `current / (current + stale)`, ignoring `missing` entirely.
+
+  Deliberately kept separate from **coverage**: a repo can be 100% covered
+  and 60% fresh ("everything's been written once, a lot of it needs
+  re-running") or 60% covered and 100% fresh ("nothing documented is wrong,
+  there's just more left to write") — collapsing the two into one score
+  would hide which problem a repo actually has. `1.0` when nothing has ever
+  been generated (vacuously fresh — there's nothing stale to report yet).
+  See "Reference-edge propagation is deliberately one hop" in
+  `ARCHITECTURE.md` for exactly what "still matches the code" checks.
+
+**Weighted freshness**
+: Freshness weighted by import fan-in instead of by document count — a
+  stale file forty others import drags this down far more than a stale
+  leaf utility does. The same blast-radius idea **fan-in** already drives
+  for generation ordering, applied to the freshness read-out instead.
+  `top_stale_by_impact` (the `get_spec_coverage` field, not a glossary
+  term of its own) is the top 5 documents that same weighting says matter
+  most right now.
+
+**Orphaned spec**
+: A spec document on disk whose target no longer exists in the graph at
+  all — a deleted file, a directory that dropped below the two-file
+  rollup threshold, a removed feature entry point, or a single symbol
+  deleted from a file that's otherwise still current.
+
+  Distinct from `stale`: a stale spec's target still exists, an input just
+  moved, so there's something to regenerate against. An orphaned spec's
+  target is simply gone — there's nothing left to regenerate, only
+  something to delete. `find_orphaned_specs` is the one place CodeOwl
+  checks spec → graph instead of graph → spec (everywhere else, coverage
+  is computed by walking the graph outward looking for specs, so a spec
+  whose target was deleted entirely, not just edited, would otherwise be
+  invisible). Orphaned entries are never counted in `coverage`/`freshness`
+  and never appear in `pending` — `/codeowl generate` has nothing to do
+  with one.
+
 ---
 
 ## Stacks and the pluggability work (Phase 2)
