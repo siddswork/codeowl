@@ -290,39 +290,44 @@ read. If it's wrong, it says so instead of lying to you."*
 
 **Say this:**
 > "This isn't a concept — it's a working tool, self-hosted, written in Rust
-> as a single binary. It already understands TypeScript/Next.js, Rust, Java,
-> and Python/FastAPI codebases end to end, including database schemas. It's
-> already running against real repos, including CodeOwl's own source code —
-> we used it to document itself. What's next is broadening it: a Java
-> framework called Quarkus, then support for repos that mix languages, like
-> a Python backend next to a React frontend in the same repo, which is
-> extremely common here. I'm looking for a couple of real teams to pilot
-> this against their own repos next."
+> as a single binary. It already understands TypeScript/Next.js, Rust,
+> Java — plain libraries and now full Quarkus microservices, HTTP routes,
+> Kafka, scheduled jobs, gRPC, all of it — and Python/FastAPI codebases end
+> to end, including database schemas. It's already running against real
+> repos, including CodeOwl's own source code — we used it to document
+> itself. What's next is repos that mix languages, like a Python backend
+> next to a React frontend in the same repo, which is extremely common
+> here. I'm looking for a couple of real teams to pilot this against their
+> own repos next."
 
 **Slide bullets:**
-- **Live today:** TypeScript/Next.js, Rust, Java, Python/FastAPI — including
-  each stack's database layer, resolved down to real table columns.
+- **Live today:** TypeScript/Next.js, Rust, Java (including Quarkus
+  microservices — HTTP, Kafka, scheduled jobs, gRPC), Python/FastAPI —
+  including each stack's database layer, resolved down to real table
+  columns.
 - **Proven on a real corpus**, not a toy demo — including dogfooding it on
   CodeOwl's own codebase.
-- **Next up:** a Java framework (Quarkus), then repos that mix more than one
-  language in one place — a very common real-world shape here.
+- **Next up:** repos that mix more than one language in one place — a very
+  common real-world shape here.
 - **The ask:** pilot teams. Point it at a real repo, generate specs for one
   feature end to end, tell us where it's wrong.
 
 **Diagram — coverage today, and what's next:**
 
 ```
-   SHIPPED                                           IN PROGRESS   NEXT
- ┌───────────┬───────────┬───────────┬───────────┐  ┌───────────┐ ┌──────────┐
- │TypeScript │   Rust     │   Java    │  Python +  │  │  Java +    │ │ Repos that│
- │+ Next.js  │           │           │  FastAPI   │  │  Quarkus   │ │ mix multi-│
- │(+ SQL     │           │           │  (+ schema │  │            │ │ ple stacks│
- │ schema)   │           │           │   models)  │  │            │ │ in one    │
- └───────────┴───────────┴───────────┴───────────┘  └───────────┘ └──────────┘
+   SHIPPED                                                          NEXT
+ ┌───────────┬───────────┬─────────────────────┬───────────┐      ┌──────────┐
+ │TypeScript │   Rust    │        Java          │  Python + │      │Repos that │
+ │+ Next.js  │           │  (+ Quarkus micro-   │  FastAPI  │      │mix multi- │
+ │(+ SQL     │           │   services: HTTP,    │  (+ schema│      │ple stacks │
+ │ schema)   │           │   Kafka, scheduled,  │   models) │      │in one     │
+ │           │           │   gRPC)              │           │      │place      │
+ └───────────┴───────────┴─────────────────────┴───────────┘      └──────────┘
 ```
 
 **One line for management:** *"It already works on four real stacks today —
-this is a maturity and coverage roadmap, not a research bet."*
+including full microservice support for Java — this is a maturity and
+coverage roadmap, not a research bet."*
 
 ---
 
@@ -435,8 +440,9 @@ the demo is the trust story in Slide 4, not a flawless live query.
   of the real code on every read; if the code moved, the spec says so
   immediately instead of quietly going wrong.
 - **"What languages does it support today?"** TypeScript/Next.js, Rust,
-  Java, and Python/FastAPI, each including their database-schema layer.
-  Quarkus and multi-language repos are actively being built next.
+  Java (including Quarkus microservices — HTTP, Kafka, scheduled jobs,
+  gRPC), and Python/FastAPI, each including their database-schema layer.
+  Repos that mix more than one language in one place are being built next.
 - **"What's the catch?"** It's a young, actively developed tool — coverage
   is real but still growing stack by stack, and generation still needs an
   AI assistant in the loop to actually write the prose (CodeOwl won't do
