@@ -149,25 +149,21 @@ impl RepoIndex {
         let root = &canonical_root(root);
         let pack = crate::lang::detect(root)?;
         let mut files = BTreeMap::new();
-        for entry in ignore::WalkBuilder::new(root)
-            .build()
-            .chain(generated_source_entries(root, pack.as_ref()))
-        {
+        // Directory entries the primary walk visits anyway (it just skips
+        // them right below) doubled as the candidate module roots M19's
+        // generated-source walk needs — see `generated_source_entries`.
+        // No second full-repo traversal to rediscover the same boundaries.
+        let mut dirs_seen: Vec<PathBuf> = Vec::new();
+        for entry in ignore::WalkBuilder::new(root).build() {
             let entry = entry.context("walking repo")?;
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                continue;
+            if entry.file_type().is_some_and(|t| t.is_dir()) {
+                dirs_seen.push(entry.path().to_path_buf());
             }
-            let path = entry.path();
-            if pack.source_kind(path).is_none() {
-                continue;
-            }
-            let source = std::fs::read_to_string(path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            let rel = rel_path(root, path);
-            files.insert(
-                rel.clone(),
-                FileInputs::extract(pack.as_ref(), &rel, &source),
-            );
+            ingest_build_entry(&mut files, root, pack.as_ref(), &entry)?;
+        }
+        for entry in generated_source_entries(&dirs_seen, pack.as_ref()) {
+            let entry = entry.context("walking a generated-source directory")?;
+            ingest_build_entry(&mut files, root, pack.as_ref(), &entry)?;
         }
         Ok(Self {
             format_version: crate::graph::FORMAT_VERSION,
@@ -232,39 +228,25 @@ impl RepoIndex {
     fn rescan(&mut self) -> Result<CatchUp> {
         let mut seen = HashSet::new();
         let mut caught = CatchUp::default();
-        for entry in ignore::WalkBuilder::new(&self.root)
-            .build()
-            .chain(generated_source_entries(&self.root, self.pack.as_ref()))
-        {
+        // Same reasoning as `build`: reuse the primary walk's own directory
+        // entries as candidate module roots instead of a second full walk.
+        let mut dirs_seen: Vec<PathBuf> = Vec::new();
+        for entry in ignore::WalkBuilder::new(&self.root).build() {
             let entry = entry.context("walking repo")?;
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                continue;
+            if entry.file_type().is_some_and(|t| t.is_dir()) {
+                dirs_seen.push(entry.path().to_path_buf());
             }
-            let path = entry.path();
-            if self.pack.source_kind(path).is_none() {
-                continue;
-            }
-            let rel = rel_path(&self.root, path);
-            seen.insert(rel.clone());
-            let source = std::fs::read_to_string(path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            match self.files.get(&rel) {
-                Some(existing) if existing.source_hash == hash_text(&source) => {}
-                Some(_) => {
-                    self.files.insert(
-                        rel.clone(),
-                        FileInputs::extract(self.pack.as_ref(), &rel, &source),
-                    );
-                    caught.modified.push(rel);
-                }
-                None => {
-                    self.files.insert(
-                        rel.clone(),
-                        FileInputs::extract(self.pack.as_ref(), &rel, &source),
-                    );
-                    caught.added.push(rel);
-                }
-            }
+            self.rescan_entry(&entry, &mut seen, &mut caught)?;
+        }
+        // Collected up front, not iterated lazily: the iterator itself
+        // borrows `self.pack`, which would otherwise conflict with
+        // `rescan_entry`'s `&mut self` on every loop turn. This walk only
+        // ever covers a pack-declared generated-source subtree, never the
+        // whole repo, so materializing it costs nothing meaningful.
+        let generated: Vec<_> = generated_source_entries(&dirs_seen, self.pack.as_ref()).collect();
+        for entry in generated {
+            let entry = entry.context("walking a generated-source directory")?;
+            self.rescan_entry(&entry, &mut seen, &mut caught)?;
         }
         let removed: Vec<String> = self
             .files
@@ -277,6 +259,46 @@ impl RepoIndex {
         }
         caught.removed = removed;
         Ok(caught.sorted())
+    }
+
+    /// One file entry's share of [`rescan`](Self::rescan)'s body — pulled
+    /// out so both the primary walk and the generated-source walk drive it
+    /// identically, rather than duplicating the diff-against-cache logic.
+    fn rescan_entry(
+        &mut self,
+        entry: &ignore::DirEntry,
+        seen: &mut HashSet<String>,
+        caught: &mut CatchUp,
+    ) -> Result<()> {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            return Ok(());
+        }
+        let path = entry.path();
+        if self.pack.source_kind(path).is_none() {
+            return Ok(());
+        }
+        let rel = rel_path(&self.root, path);
+        seen.insert(rel.clone());
+        let source =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        match self.files.get(&rel) {
+            Some(existing) if existing.source_hash == hash_text(&source) => {}
+            Some(_) => {
+                self.files.insert(
+                    rel.clone(),
+                    FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                );
+                caught.modified.push(rel);
+            }
+            None => {
+                self.files.insert(
+                    rel.clone(),
+                    FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                );
+                caught.added.push(rel);
+            }
+        }
+        Ok(())
     }
 
     /// Watcher-driven incremental update: `paths` are absolute paths the
@@ -454,49 +476,61 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-/// Entries under `root`'s pack-declared generated-source directories
-/// (M19; [`StackPack::generated_source_dirs`]) — read unconditionally,
-/// gitignore filtering off, since a real repo's own `.gitignore` is
-/// exactly what excludes `target/`/`build/` and this is the one place
-/// CodeOwl deliberately reads through that. Chained onto the ordinary
-/// gitignore-respecting walk in both [`RepoIndex::build`] and
-/// [`RepoIndex::rescan`] so a generated interface is visible on the
+/// [`RepoIndex::build`]'s share of processing one walked entry, factored
+/// out so the primary walk and the generated-source walk drive it
+/// identically instead of duplicating the extract-and-insert logic.
+fn ingest_build_entry(
+    files: &mut BTreeMap<String, FileInputs>,
+    root: &Path,
+    pack: &dyn StackPack,
+    entry: &ignore::DirEntry,
+) -> Result<()> {
+    if !entry.file_type().is_some_and(|t| t.is_file()) {
+        return Ok(());
+    }
+    let path = entry.path();
+    if pack.source_kind(path).is_none() {
+        return Ok(());
+    }
+    let source =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let rel = rel_path(root, path);
+    files.insert(rel.clone(), FileInputs::extract(pack, &rel, &source));
+    Ok(())
+}
+
+/// Entries under any of `candidate_roots`' pack-declared generated-source
+/// directories (M19; [`StackPack::generated_source_dirs`]) — read
+/// unconditionally, gitignore filtering off, since a real repo's own
+/// `.gitignore` is exactly what excludes `target/`/`build/` and this is
+/// the one place CodeOwl deliberately reads through that. Walked
+/// separately, right after the primary walk, in both [`RepoIndex::build`]
+/// and [`RepoIndex::rescan`] so a generated interface is visible on the
 /// cold-start path and the incremental one alike. A directory that
 /// doesn't exist yet (the common case — the repo hasn't been built
 /// locally) is silently skipped, not an error.
 ///
-/// **Checked at the repo root *and* under every directory the ordinary
-/// walk can see** — not just the root. A real Maven reactor
+/// **`candidate_roots` is the caller's own primary walk's directory
+/// entries, not rediscovered here** — a real Maven reactor
 /// (`quarkus-super-heroes`) has its build output per module
 /// (`rest-heroes/target/generated-sources`, `event-statistics/target/
-/// generated-sources`, …), never once at the repo root; checking only
-/// `root.join(dir)` (the first version of this function) silently finds
-/// nothing on every real multi-module repo. No `pom.xml`/reactor parsing
-/// needed: a module's own directory is never itself gitignored (only its
-/// build output beneath it is), so the plain gitignore-respecting walk
-/// already enumerates every legitimate candidate "module root" cheaply —
-/// it never descends into `target/`/`build/`/`.git` in the first place,
-/// so this costs one ordinary directory walk, not a scan of compiled
-/// build output.
+/// generated-sources`, …), never once at the repo root, so checking only
+/// the repo root (the first version of this function) silently found
+/// nothing on every real multi-module repo. The fix isn't a second
+/// full-repo walk to rediscover module boundaries, though — the caller's
+/// own primary walk already visits every directory (it just skips them
+/// right after, to get to files); passing those entries in here reuses
+/// that work instead of walking the tree twice, and — since each
+/// directory is visited exactly once by that single walk — never checks
+/// the repo root's own `target/generated-sources` twice either, the way
+/// an earlier version of this function did by also prepending `root`
+/// itself onto a fresh, separate enumeration.
 fn generated_source_entries<'a>(
-    root: &'a Path,
+    candidate_roots: &'a [PathBuf],
     pack: &'a dyn StackPack,
 ) -> impl Iterator<Item = Result<ignore::DirEntry, ignore::Error>> + 'a {
     let dirs = pack.generated_source_dirs();
-    let candidate_roots: Vec<PathBuf> = if dirs.is_empty() {
-        Vec::new()
-    } else {
-        std::iter::once(root.to_path_buf())
-            .chain(
-                ignore::WalkBuilder::new(root)
-                    .build()
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().is_some_and(|t| t.is_dir()))
-                    .map(|e| e.path().to_path_buf()),
-            )
-            .collect()
-    };
-    candidate_roots.into_iter().flat_map(move |base| {
+    candidate_roots.iter().flat_map(move |base| {
         dirs.iter()
             .map(move |dir| base.join(dir))
             .filter(|dir_path| dir_path.is_dir())
