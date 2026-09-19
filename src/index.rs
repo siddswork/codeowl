@@ -149,7 +149,10 @@ impl RepoIndex {
         let root = &canonical_root(root);
         let pack = crate::lang::detect(root)?;
         let mut files = BTreeMap::new();
-        for entry in ignore::WalkBuilder::new(root).build() {
+        for entry in ignore::WalkBuilder::new(root)
+            .build()
+            .chain(generated_source_entries(root, pack.as_ref()))
+        {
             let entry = entry.context("walking repo")?;
             if !entry.file_type().is_some_and(|t| t.is_file()) {
                 continue;
@@ -229,7 +232,10 @@ impl RepoIndex {
     fn rescan(&mut self) -> Result<CatchUp> {
         let mut seen = HashSet::new();
         let mut caught = CatchUp::default();
-        for entry in ignore::WalkBuilder::new(&self.root).build() {
+        for entry in ignore::WalkBuilder::new(&self.root)
+            .build()
+            .chain(generated_source_entries(&self.root, self.pack.as_ref()))
+        {
             let entry = entry.context("walking repo")?;
             if !entry.file_type().is_some_and(|t| t.is_file()) {
                 continue;
@@ -448,6 +454,33 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// Entries under `root`'s pack-declared generated-source directories
+/// (M19; [`StackPack::generated_source_dirs`]) — read unconditionally,
+/// gitignore filtering off, since a real repo's own `.gitignore` is
+/// exactly what excludes `target/`/`build/` and this is the one place
+/// CodeOwl deliberately reads through that. Chained onto the ordinary
+/// gitignore-respecting walk in both [`RepoIndex::build`] and
+/// [`RepoIndex::rescan`] so a generated interface is visible on the
+/// cold-start path and the incremental one alike. A directory that
+/// doesn't exist yet (the common case — the repo hasn't been built
+/// locally) is silently skipped, not an error: `ignore::Walk` yields a
+/// single `Err` for a missing root rather than an empty iterator, and
+/// that's exactly the everyday case this must not fail on.
+fn generated_source_entries(
+    root: &Path,
+    pack: &dyn StackPack,
+) -> impl Iterator<Item = Result<ignore::DirEntry, ignore::Error>> {
+    pack.generated_source_dirs()
+        .iter()
+        .map(|dir| root.join(dir))
+        .filter(|dir_path| dir_path.is_dir())
+        .flat_map(|dir_path| {
+            ignore::WalkBuilder::new(dir_path)
+                .standard_filters(false)
+                .build()
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +508,83 @@ mod tests {
             .collect();
         out.sort();
         out
+    }
+
+    #[test]
+    fn build_reads_a_known_generated_source_dir_despite_gitignore() {
+        // M19: `target/` is exactly what a real Maven repo's `.gitignore`
+        // excludes -- the whole point of this milestone is reading through
+        // that for a pack-declared generated-source directory. `ignore`
+        // only honors `.gitignore` inside an actual git repo by default
+        // (`require_git`), so a bare `.git/` dir is needed for this test
+        // to reproduce the real-world bug at all -- confirmed empirically
+        // while writing this test: without it, the plain walk already
+        // finds the file and this assertion passes for the wrong reason.
+        let dir = tempdir("generated-sources");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "target/\n");
+        write(
+            &dir,
+            "src/main/java/com/example/App.java",
+            "package com.example;\npublic class App {}\n",
+        );
+        write(
+            &dir,
+            "target/generated-sources/quarkus-openapi-generator-server/\
+             com/example/HeroesResource.java",
+            "package com.example;\npublic interface HeroesResource {}\n",
+        );
+
+        let index = RepoIndex::build(&dir).unwrap();
+
+        assert!(
+            index.files.contains_key(
+                "target/generated-sources/quarkus-openapi-generator-server/\
+                 com/example/HeroesResource.java"
+            ),
+            "a pack-declared generated-source directory must be walked even \
+             though a normal .gitignore excludes target/ -- found: {:?}",
+            index.files.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn rescan_picks_up_a_generated_source_dir_created_after_first_open() {
+        // The realistic order of events: `codeowl serve` starts before
+        // `mvn compile` ever ran, then the developer builds the project in
+        // the same session -- the incremental path must catch up too, not
+        // just the cold-start `build`.
+        let dir = tempdir("generated-sources-rescan");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "target/\n");
+        write(
+            &dir,
+            "src/main/java/com/example/App.java",
+            "package com.example;\npublic class App {}\n",
+        );
+
+        // First open: repo not built yet, no generated-sources dir exists.
+        RepoIndex::open(&dir).unwrap();
+
+        // Simulate `mvn compile` happening between sessions.
+        write(
+            &dir,
+            "target/generated-sources/quarkus-openapi-generator-server/\
+             com/example/HeroesResource.java",
+            "package com.example;\npublic interface HeroesResource {}\n",
+        );
+
+        let (_index, _graph, caught) = RepoIndex::open(&dir).unwrap();
+
+        assert_eq!(
+            caught.added,
+            vec![
+                "target/generated-sources/quarkus-openapi-generator-server/\
+                 com/example/HeroesResource.java"
+            ],
+            "rescan must pick up a generated-source file that appeared \
+             since the last run"
+        );
     }
 
     #[test]

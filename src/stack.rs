@@ -107,6 +107,21 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     fn is_schema_symbol(&self, _sym: &ExtractedSymbol) -> bool {
         false
     }
+
+    /// Repo-relative, forward-slash build-output directories this pack
+    /// knows can hold real source-language files generated from a
+    /// declarative contract (an OpenAPI spec, a `.proto`, a GraphQL SDL) —
+    /// Maven's `target/generated-sources`, Gradle's `build/generated`, for
+    /// `JavaStack`. Default: no known convention. `index.rs`'s walk reads
+    /// through these unconditionally, gitignore filtering off, since
+    /// they're exactly what a normal `.gitignore` excludes (M19;
+    /// `ARCHITECTURE.md` open question 11's "annotation-on-generated-
+    /// interface" manifestation). A repo that's never been built locally
+    /// simply has nothing there yet — not an error, see the open
+    /// question's own "honest caveat".
+    fn generated_source_dirs(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 /// The Phase 1 stack: TypeScript / TSX + SQL schema files, Next.js App
@@ -365,6 +380,10 @@ impl StackPack for JavaStack {
             && (sym.markers.iter().any(|m| is_entity_annotation(m))
                 || extends_panache_entity(&sym.signature))
     }
+
+    fn generated_source_dirs(&self) -> &'static [&'static str] {
+        &["target/generated-sources", "build/generated"]
+    }
 }
 
 /// `@Entity` / `@Entity(name = "…")` -> true. Exact match on the
@@ -567,6 +586,9 @@ mod tests {
         // M14 Rust is a library/CLI — no runtime entry surface, so the
         // trait's `None` default stands (exp-02).
         assert!(pack.feature_model().is_none());
+        // No known build-generated-source convention either — the trait's
+        // default `&[]` stands (M19 is Java-only so far).
+        assert!(pack.generated_source_dirs().is_empty());
 
         let syms = pack.extract_symbols("src/x.rs", "pub fn go() {}\npub struct S;\n");
         assert_eq!(syms.len(), 2);
@@ -601,6 +623,10 @@ mod tests {
         assert_eq!(
             pack.classify("target/generated-sources/foo/Gen.java"),
             FileRole::Generated
+        );
+        assert_eq!(
+            pack.generated_source_dirs(),
+            ["target/generated-sources", "build/generated"]
         );
         // A plain library with no `@Path`-annotated classes (commons-lang)
         // enumerates zero entry points through this model rather than
