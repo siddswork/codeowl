@@ -78,6 +78,53 @@ fn a_class_path_plus_method_path_join_into_one_http_entry_point() {
 }
 
 #[test]
+fn fully_qualified_annotations_with_no_imports_are_still_recognized() {
+    // Real shape confirmed against an actual `mvn compile` of
+    // quarkus-super-heroes (M19 dogfooding, 2026-09-19): OpenAPI-codegen'd
+    // interfaces carry zero imports and write every annotation fully
+    // qualified (`@jakarta.ws.rs.Path(...)`, `@jakarta.ws.rs.GET`) rather
+    // than the bare `@Path`/`@GET` every hand-written class in this
+    // project's other test repos uses -- generated code has no reason to
+    // import anything a human will never read. `bare_annotation_name`
+    // (java.rs) and `parse_verb`/`parse_path_annotation`'s own inline
+    // `@`-stripping (quarkus.rs) both missed this: they stopped at
+    // stripping the leading `@`, so `@jakarta.ws.rs.Path(...)` never
+    // matched a bare `"Path"` comparison anywhere in this file. This is
+    // exactly the shape M19 commit 3's generated-interface lookup will
+    // hand these functions, so it must be fixed before that lands, not
+    // discovered after.
+    let dir =
+        std::env::temp_dir().join(format!("codeowl-quarkus-spec-{}-fqcn", std::process::id()));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/HeroesResource.java"),
+        "package org.acme;\n\
+         \n\
+         @jakarta.ws.rs.Path(\"/api/heroes\")\n\
+         public interface HeroesResource {\n\
+         \n\
+         \x20   @jakarta.ws.rs.GET\n\
+         \x20   @jakarta.ws.rs.Path(\"/random\")\n\
+         \x20   public Object getRandomHero();\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    let ep = eps
+        .iter()
+        .find(|e| e.title == "GET /api/heroes/random")
+        .expect("a fully-qualified @Path/@GET pair must still be recognized as an entry point");
+    assert_eq!(ep.kind, "http");
+    assert_eq!(ep.file, "src/main/java/org/acme/HeroesResource.java");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve() {
     // FruitEntityResource's real shape: `@Path("entity/fruits")` (no
     // leading slash), a bare `@GET`, a `@GET @Path("{id}")`, a `@POST`

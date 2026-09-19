@@ -289,29 +289,30 @@ fn is_admitting_annotation(marker: &str) -> bool {
     )
 }
 
-/// `@GET` / `@POST` / … -> its lowercase verb name. Exact match only (not
-/// a prefix check) so a hypothetical `@GetSomething`-style custom
-/// annotation is never mistaken for a real JAX-RS verb -- see
-/// `ARCHITECTURE.md` open question 11 on annotation vocabularies.
+/// `@GET` / `@POST` / … (bare or fully qualified — M19; see
+/// `bare_annotation_name`'s own doc comment) -> its lowercase verb name.
+/// Exact match only (not a prefix check) so a hypothetical
+/// `@GetSomething`-style custom annotation is never mistaken for a real
+/// JAX-RS verb -- see `ARCHITECTURE.md` open question 11 on annotation
+/// vocabularies.
 fn parse_verb(marker: &str) -> Option<String> {
-    let name = marker.trim_start().trim_start_matches('@');
+    let name = crate::java::bare_annotation_name(marker);
     HTTP_VERBS
         .iter()
         .find(|&&v| name == v)
         .map(|v| v.to_ascii_lowercase())
 }
 
-/// `@Path("entity/fruits")` -> `"entity/fruits"`. `None` for any other
-/// annotation, or a `@Path` with no string literal (shouldn't happen —
-/// JAX-RS requires an argument — but a malformed annotation just yields
-/// no method-level path rather than panicking).
+/// `@Path("entity/fruits")` (bare or fully qualified, e.g.
+/// `@jakarta.ws.rs.Path(...)` — M19) -> `"entity/fruits"`. `None` for any
+/// other annotation, or a `@Path` with no string literal (shouldn't
+/// happen — JAX-RS requires an argument — but a malformed annotation
+/// just yields no method-level path rather than panicking).
 fn parse_path_annotation(marker: &str) -> Option<String> {
-    let m = marker.trim_start();
-    let rest = m.strip_prefix("@Path")?.trim_start();
-    if !rest.starts_with('(') {
+    if crate::java::bare_annotation_name(marker) != "Path" {
         return None;
     }
-    first_string_literal(rest)
+    first_string_literal(marker)
 }
 
 /// The first `"…"` literal in `s`. Same trick as `fastapi.rs`'s helper of
