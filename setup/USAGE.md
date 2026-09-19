@@ -32,9 +32,9 @@ Once your repo's `CLAUDE.md` has the line from `README.md` step 5, the
 agent queries CodeOwl on its own. You just ask normal questions and it
 reaches for the index instead of grepping:
 
-- *"How does artwork submission work end to end?"* → `get_spec feature:<slug>`
-- *"What breaks if I change `getSupabase`'s signature?"* → `get_callers`
-- *"What writes to the `payments` table?"* → `get_callers` on the table node
+- *"How does checkout work end to end?"* → `get_spec feature:<slug>`
+- *"What breaks if I change `getStripeClient`'s signature?"* → `get_callers`
+- *"What writes to the `orders` table?"* → `get_callers` on the table node
 - *"Where's the retry logic for X?"* → `get_spec` / `search_code`
 
 If a spec exists and is current, the agent gets an accurate answer without
@@ -49,10 +49,11 @@ get_spec_coverage"*, *"search_code for `TODO`"*.
 The *"how does X work?"* questions above are **reading** questions, asked
 of specs that already exist. They are not how you generate — see below.
 
-### How the structural tools actually behave
+### How the tools actually behave
 
-The four read tools are a thin layer over the resolved graph — precise,
-but Phase-1 literal. Worth knowing before you rely on an answer:
+CodeOwl's 8 MCP tools are a thin layer over the resolved graph and the
+persisted spec store — precise, but Phase-1 literal. Worth knowing before
+you rely on an answer:
 
 - **`get_symbol(id)`** — one symbol's record: signature, line range,
   docstring, `kind`/`raw`, and (for a type/class) every method it
@@ -68,6 +69,25 @@ but Phase-1 literal. Worth knowing before you rely on an answer:
   File-level, not per-symbol: naming any symbol in `spec.rs` returns
   `spec.rs`'s whole import list. `resolved_id` is set for intra-repo
   targets, null for external packages.
+- **`get_spec(id)`** — the spec for a symbol id, file id, `feature:<slug>`,
+  `rollup:<dir_path>`, or `system`. A **pure read** — never triggers
+  generation, that's `/codeowl-generate`'s job. `status` is `missing`
+  (nothing generated yet), `current`, or `stale` (last-known-good content
+  returned, plus `changed` naming what moved). `smells` flags weak prose
+  independent of `status`.
+- **`get_spec_coverage(scope?)`** — the repo's spec inventory,
+  current/stale/missing/smelly, plus `coverage` (what fraction has *any*
+  spec) and `freshness` (of what exists, what fraction still matches the
+  code) as two separate axes. Returns `pending`, the priority-ordered
+  worklist `--all` spends down, and `generations_remaining`, the real
+  `--budget=N` a full run would cost. `scope` narrows the file/rollup
+  portion to a directory prefix.
+- **`get_next_spec_task(target)`** / **`submit_spec(id, content)`** — the
+  generation loop's two halves: the first hands back the next uncovered
+  unit with its source and dependency specs pre-assembled, the second
+  persists what your agent wrote. `/codeowl-generate` drives both — see
+  "How generation works" below; call them yourself only if you're
+  building your own generation client.
 - **`search_code(query)`** — plain regex over every tracked file
   (`.gitignore`-respecting, capped, no index). The same as running `rg`
   yourself.
@@ -101,8 +121,8 @@ What CodeOwl enumerates:
 - **Features** — discovered from your stack's entry-point convention, not
   from you. For the Next.js pack: every `app/**/page.tsx`, plus every
   `app/api/**/route.ts` that no `fetch("/api/...")` call reaches (webhooks,
-  cron targets). Each gets a mechanical slug (`app/submit/page.tsx` →
-  `submit`); the human-readable title is written by the agent. A feature
+  cron targets). Each gets a mechanical slug (`app/checkout/page.tsx` →
+  `checkout`); the human-readable title is written by the agent. A feature
   is written once its entry point's file spec is done. **A CLI/library
   stack has no feature layer** — this list is empty and that's expected.
 - **System** — one whole-repo spec, written last, composed from every
@@ -111,9 +131,9 @@ What CodeOwl enumerates:
 
 A CodeOwl "feature" is **route-shaped** — one entry point plus whatever it
 reaches through a `fetch()` literal. A capability you'd name in
-conversation ("artwork evaluation") may span several pages and routes, so
-it can end up as several feature specs, tied together by the directory
-rollups and the system spec.
+conversation ("checkout") may span several pages and routes, so it can
+end up as several feature specs, tied together by the directory rollups
+and the system spec.
 
 **`--all` order — you don't need to know the repo.** CodeOwl computes it
 from the import graph. `get_spec_coverage` returns everything still
@@ -143,9 +163,9 @@ specs within the first batch or two. Target something directly only when
 you want to jump ahead:
 
 ```
-/codeowl-generate lib/supabase.ts       # one file and its symbols
-/codeowl-generate app/register/page.tsx # one feature + its entry file
-/codeowl-generate feature:register      # the same, by coverage id
+/codeowl-generate lib/stripe.ts         # one file and its symbols
+/codeowl-generate app/checkout/page.tsx # one feature + its entry file
+/codeowl-generate feature:checkout      # the same, by coverage id
 /codeowl-generate system                # the final capstone
 ```
 
@@ -270,10 +290,10 @@ Two places, with opposite lifecycles:
   languages get no symbols.
 - **The feature layer is stack-specific, and optional.** The Next.js pack
   assumes App Router (`app/**/page.tsx`, `app/**/route.ts`); FastAPI
-  assumes route decorators and `Depends()`. Rust and plain Java have no
-  feature layer at all — a library has no routes to enumerate. Quarkus
-  (heterogeneous entry points — HTTP, Kafka, scheduled jobs, gRPC — on the
-  Java pack) is in progress.
+  assumes route decorators and `Depends()`; the Java pack recognizes
+  Quarkus's heterogeneous entry points (JAX-RS `@Path`, Kafka, `@Scheduled`,
+  gRPC) when they're there. Rust and a plain Java library have no feature
+  layer at all — a library has no routes to enumerate.
 - **`get_callers` is import-edge, not call-graph** — see "How the
   structural tools actually behave" above.
 - **`search_code` is plain regex** — no semantic / embedding search.
