@@ -463,22 +463,49 @@ fn rel_path(root: &Path, path: &Path) -> String {
 /// [`RepoIndex::rescan`] so a generated interface is visible on the
 /// cold-start path and the incremental one alike. A directory that
 /// doesn't exist yet (the common case — the repo hasn't been built
-/// locally) is silently skipped, not an error: `ignore::Walk` yields a
-/// single `Err` for a missing root rather than an empty iterator, and
-/// that's exactly the everyday case this must not fail on.
-fn generated_source_entries(
-    root: &Path,
-    pack: &dyn StackPack,
-) -> impl Iterator<Item = Result<ignore::DirEntry, ignore::Error>> {
-    pack.generated_source_dirs()
-        .iter()
-        .map(|dir| root.join(dir))
-        .filter(|dir_path| dir_path.is_dir())
-        .flat_map(|dir_path| {
-            ignore::WalkBuilder::new(dir_path)
-                .standard_filters(false)
-                .build()
-        })
+/// locally) is silently skipped, not an error.
+///
+/// **Checked at the repo root *and* under every directory the ordinary
+/// walk can see** — not just the root. A real Maven reactor
+/// (`quarkus-super-heroes`) has its build output per module
+/// (`rest-heroes/target/generated-sources`, `event-statistics/target/
+/// generated-sources`, …), never once at the repo root; checking only
+/// `root.join(dir)` (the first version of this function) silently finds
+/// nothing on every real multi-module repo. No `pom.xml`/reactor parsing
+/// needed: a module's own directory is never itself gitignored (only its
+/// build output beneath it is), so the plain gitignore-respecting walk
+/// already enumerates every legitimate candidate "module root" cheaply —
+/// it never descends into `target/`/`build/`/`.git` in the first place,
+/// so this costs one ordinary directory walk, not a scan of compiled
+/// build output.
+fn generated_source_entries<'a>(
+    root: &'a Path,
+    pack: &'a dyn StackPack,
+) -> impl Iterator<Item = Result<ignore::DirEntry, ignore::Error>> + 'a {
+    let dirs = pack.generated_source_dirs();
+    let candidate_roots: Vec<PathBuf> = if dirs.is_empty() {
+        Vec::new()
+    } else {
+        std::iter::once(root.to_path_buf())
+            .chain(
+                ignore::WalkBuilder::new(root)
+                    .build()
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_some_and(|t| t.is_dir()))
+                    .map(|e| e.path().to_path_buf()),
+            )
+            .collect()
+    };
+    candidate_roots.into_iter().flat_map(move |base| {
+        dirs.iter()
+            .map(move |dir| base.join(dir))
+            .filter(|dir_path| dir_path.is_dir())
+            .flat_map(|dir_path| {
+                ignore::WalkBuilder::new(dir_path)
+                    .standard_filters(false)
+                    .build()
+            })
+    })
 }
 
 #[cfg(test)]
@@ -584,6 +611,45 @@ mod tests {
             ],
             "rescan must pick up a generated-source file that appeared \
              since the last run"
+        );
+    }
+
+    #[test]
+    fn build_finds_a_generated_source_dir_inside_a_maven_reactor_module() {
+        // Real-repo finding (quarkus-super-heroes, a flat 7-module Maven
+        // reactor): each module has its OWN target/generated-sources under
+        // the module directory, not one under the repo root. Checking only
+        // `root.join("target/generated-sources")` -- what the first version
+        // of this feature did -- silently finds nothing on every real
+        // multi-module repo, which is the exact shape M18/M19's own test
+        // repo has. Confirmed empirically by planting a file under
+        // quarkus-super-heroes/rest-heroes/target/generated-sources and
+        // re-running `codeowl extract`: 0 found.
+        let dir = tempdir("generated-sources-reactor");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "target/\n");
+        write(
+            &dir,
+            "rest-heroes/src/main/java/com/example/HeroResource.java",
+            "package com.example;\npublic class HeroResource {}\n",
+        );
+        write(
+            &dir,
+            "rest-heroes/target/generated-sources/quarkus-openapi-generator-server/\
+             com/example/HeroesResource.java",
+            "package com.example;\npublic interface HeroesResource {}\n",
+        );
+
+        let index = RepoIndex::build(&dir).unwrap();
+
+        assert!(
+            index.files.contains_key(
+                "rest-heroes/target/generated-sources/quarkus-openapi-generator-server/\
+                 com/example/HeroesResource.java"
+            ),
+            "a generated-source directory nested under a module directory \
+             (not the repo root) must still be found -- found: {:?}",
+            index.files.keys().collect::<Vec<_>>()
         );
     }
 
