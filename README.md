@@ -123,16 +123,13 @@ automatically.
 | **TypeScript / TSX** | functions, classes, methods, consts; `import`/re-export resolution via `oxc_resolver`; Next.js App Router features (`app/**/page.tsx`, orphan API routes); `fetch("/api/…")` → route, Supabase `.from("table")` → schema, React `<Component/>` → file flow edges |
 | **SQL schema** | `CREATE TABLE` → table nodes with column lists, resolved against the app code that queries them |
 | **Rust** | `fn` / `struct` / `enum` / `trait` / `impl` / `mod` / `const` / `macro_rules!`; `use crate::…` / `super::` / `pub use` module-tree resolution; `///` + `//!` docs; `#[derive(…)]` / attribute markers. No feature layer — a library or CLI has no routes to enumerate. |
-| **Java** | `class` / `interface` / `enum` / `record` / `@interface` → containers, with their methods, constructors, and fields; Javadoc docstrings; `@Annotation` markers; `import a.b.C` resolved by path-suffix match (Maven, Gradle, or bare layout) plus same-package implicit references. No feature layer for a plain library. |
+| **Java** | `class` / `interface` / `enum` / `record` / `@interface` → containers, with their methods, constructors, and fields; Javadoc docstrings; `@Annotation` markers; `import a.b.C` resolved by path-suffix match (Maven, Gradle, or bare layout) plus same-package implicit references. No feature layer for a plain library; a **Quarkus** feature model when the service conventions are there — heterogeneous entry-point kinds coexisting in one service (JAX-RS `@Path` + verb, Kafka `@Incoming`/`@Outgoing`, `@Scheduled`, `@GrpcService`), CDI-shaped core admission, a JPA/Panache schema idiom, and cross-service flow edges carried by string (`@RegisterRestClient`). |
 | **Python** | `class` / `def` / module-level assignments; decorators captured verbatim (with arguments) as markers; `"""docstrings"""`; dotted-module and relative `import` resolution; a symbol-level schema seam (SQLModel / SQLAlchemy `table=True` → schema nodes); a **FastAPI** feature model (route enumeration, `APIRouter` prefix threading, `Depends()` → flow edges). No feature layer for a plain library. |
 
-**Quarkus** microservices are in progress (M18) — heterogeneous entry
-points (`@Path`, Kafka, `@Scheduled`, gRPC) coexisting in one service,
-cross-service edges carried by string (`@RegisterRestClient`), a second
-schema idiom (JPA / Panache). A polyglot mode (one primary stack plus
-secondary-language subtrees in the same repo — mix TypeScript, Rust,
-Java, and Python freely, not just one per repo) follows after. See
-`ROADMAP.md`.
+Next up: entry points hidden behind build-generated interfaces (OpenAPI
+codegen, `.proto` stubs), then a polyglot mode — one primary stack plus
+secondary-language subtrees in the same repo, mixing TypeScript, Rust,
+Java, and Python freely instead of just one per repo. See `ROADMAP.md`.
 
 ## Docs
 
