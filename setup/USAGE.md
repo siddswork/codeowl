@@ -30,12 +30,35 @@ spec leads with a `## Key flows` section instead.
 
 Once your repo's `CLAUDE.md` has the line from `README.md` step 5, the
 agent queries CodeOwl on its own. You just ask normal questions and it
-reaches for the index instead of grepping:
+reaches for the index instead of grepping. The questions below aren't
+hypothetical — they were run live against *this* repo's own MCP
+connection while writing this doc, so you can reproduce every one of
+them yourself right now:
 
-- *"How does checkout work end to end?"* → `get_spec feature:<slug>`
-- *"What breaks if I change `getStripeClient`'s signature?"* → `get_callers`
-- *"What writes to the `orders` table?"* → `get_callers` on the table node
-- *"Where's the retry logic for X?"* → `get_spec` / `search_code`
+- *"What's `Graph`'s shape before I touch it?"* → `get_symbol` — one
+  call: signature, all 24 methods, no file open.
+- *"What breaks if I change `Graph`'s public shape?"* → `get_callers` —
+  13 files import it directly. Ask the same on `Graph::build`, a
+  method instead of a type, and you get back `{"callers":[]}` — the
+  "not a call graph" caveat below, proven, not just asserted.
+- *"What does `graph.rs` itself depend on?"* → `get_callees` — its own
+  resolved imports, separate from who depends on it.
+- *"Can I trust this file's spec, or do I need to read the source
+  myself?"* → `get_spec` on the file id. Right now, on this repo:
+  `stale`, `changed: ["changed:source"]` — real drift, caught live.
+- *"New to `src/` — what's actually in here?"* → `get_spec
+  rollup:src` — a real directory narrative, not a file listing.
+- *"Where's the highest-leverage place to spend a documentation pass?"*
+  → `get_spec_coverage` — `top_stale_by_impact` names `graph.rs` first
+  here (fan-in 27): fix that one before the long tail.
+- *"Find every real implementation of X, not just mentions."* →
+  `search_code` — plain regex, but scoped to tracked source.
+- *"How does checkout work end to end?"* → `get_spec feature:<slug>` —
+  this repo has no feature layer (a CLI/library, not a routed service,
+  so there's no `feature:<slug>` to query here), but on any repo with
+  routes — API endpoints, pages, queue listeners — this is the
+  highest-value question CodeOwl answers in one call instead of a
+  hand-traced UI→API→DB walk.
 
 If a spec exists and is current, the agent gets an accurate answer without
 opening a file. If it's `missing` or `stale`, the agent falls back to
@@ -88,10 +111,17 @@ you rely on an answer:
   `/codeowl-generate`, the agent answering you decides how much of
   `pending` to show — a short summary (coverage %, top-impact files) is
   often the right call, but it should say when there's more beyond what
-  it's showing, not just quietly leave it out. Every other field
-  (`missing`, `by_kind`, `by_module`, `top_stale_by_impact`, `orphaned`)
-  is already whole-repo regardless of pagination — only `pending` itself
-  is paged.
+  it's showing, not just quietly leave it out. On a Java repo it also
+  returns `generated_sources` — `{checked_dirs, found}`, how many files
+  sit under a known build-generated-source directory (Maven's
+  `target/generated-sources`, Gradle's `build/generated`); `found: 0` is
+  the signal to run a real build (`mvn compile`, not `generate-sources`
+  alone — see `setup/codeowl-generate.md`) before generating, or entry
+  points hidden behind a build-generated interface won't be found. `null`
+  on every other stack. Every other field (`missing`, `by_kind`,
+  `by_module`, `top_stale_by_impact`, `orphaned`, `generated_sources`) is
+  already whole-repo regardless of pagination — only `pending` itself is
+  paged.
 - **`get_next_spec_task(target)`** / **`submit_spec(id, content)`** — the
   generation loop's two halves: the first hands back the next uncovered
   unit with its source and dependency specs pre-assembled, the second
@@ -296,7 +326,7 @@ Two places, with opposite lifecycles:
 - **Four stacks so far** — TypeScript + Next.js + SQL, Rust, Java, or
   Python + FastAPI. One per repo, auto-detected; a repo that looks like
   more than one is rejected rather than guessed (a polyglot mode — several
-  stacks in one repo, mixed freely — is planned, after Quarkus). Other
+  stacks in one repo, mixed freely — is planned, not yet started). Other
   languages get no symbols.
 - **The feature layer is stack-specific, and optional.** The Next.js pack
   assumes App Router (`app/**/page.tsx`, `app/**/route.ts`); FastAPI
