@@ -40,7 +40,24 @@ pub struct CoverageRequest {
     /// prefix (e.g. "lib"). Features and the system spec are always
     /// repo-wide, unaffected by scope. Omit for the whole repo.
     pub scope: Option<String>,
+    /// Where to resume `pending` from (M20) — pass back the previous
+    /// call's `next_cursor` verbatim. Omit, or `0`, for the first page.
+    /// Every other field in the response (`current`/`stale`/`missing`/
+    /// `by_kind`/`by_module`/`top_stale_by_impact`/`orphaned`/…) is
+    /// always computed over the *whole* repo regardless of `cursor` —
+    /// only `pending` itself is paginated, since it's the one field that
+    /// grows unboundedly with repo size (confirmed real: 626 files on
+    /// `commons-lang` serialized `pending` alone to 95 KB, over the MCP
+    /// result limit).
+    pub cursor: Option<usize>,
 }
+
+/// How many `pending` entries [`CodeOwlServer::get_spec_coverage`] returns
+/// per page. A conservative default (not yet a CLI flag, unlike
+/// `--max-spec-task-bytes`'s recalibration — this is sized from a
+/// measured real repo, not a specific reported client failure; revisit
+/// if one is ever reported the way the God-class payload size was).
+const COVERAGE_PENDING_PAGE_SIZE: usize = 50;
 
 /// One spec on disk whose target no longer exists in the graph at all —
 /// see `crate::spec::OrphanedSpec`. Distinct from a `pending` entry: a
@@ -253,8 +270,15 @@ pub struct CoverageResponse {
     pub orphaned: Vec<OrphanedSpecResponse>,
     /// Every document still needing attention — non-current, or
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
-    /// "Generation priority" and "Quality smells".
+    /// "Generation priority" and "Quality smells". **Paginated (M20)** at
+    /// [`COVERAGE_PENDING_PAGE_SIZE`] entries per call — see `next_cursor`.
     pub pending: Vec<CoverageItemResponse>,
+    /// `Some(cursor)` to pass back as `CoverageRequest::cursor` for the
+    /// next page of `pending`, if there is one; `None` once `pending` has
+    /// reached the end. Every other field in this response already covers
+    /// the whole repo (or the whole `scope`) regardless of pagination —
+    /// only `pending` itself is paged.
+    pub next_cursor: Option<usize>,
     /// How many files sit under a known build-generated-source directory
     /// (M19 — e.g. Maven's `target/generated-sources`), and which
     /// directories were checked. `None` for a pack with no such
@@ -262,8 +286,9 @@ pub struct CoverageResponse {
     /// apply there, so there's nothing honest to report. `found: 0` on a
     /// pack that *does* declare them is the actionable signal: this repo
     /// could have build-generated entry points and none were found — has
-    /// `mvn generate-sources` (or the Gradle equivalent) been run
-    /// locally? A full build isn't needed, just that.
+    /// `mvn compile` (not `mvn generate-sources` alone — confirmed to
+    /// produce nothing; the Gradle equivalent is unverified) been run
+    /// locally?
     pub generated_sources: Option<GeneratedSourcesResponse>,
 }
 
@@ -1248,7 +1273,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `orphaned` lists spec documents (or, for `kind: \"symbol\"`, sections within an otherwise-fine file spec) whose target no longer exists in the graph at all (a deleted file, a directory that dropped below the rollup threshold, a removed feature entry point, a deleted function whose file is still current) -- these are NOT counted in coverage/freshness/total and never appear in `pending`, since there's nothing left for `/codeowl generate` to regenerate; they're dead weight to delete (a `\"symbol\"` entry prunes itself automatically next time that file is regenerated for any other reason). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide. `generated_sources` (M19) reports how many files sit under a known build-generated-source directory (e.g. Maven's `target/generated-sources`) and which directories were checked -- `null` for a pack with no such convention (every pack but Java today), or `{checked_dirs, found}` for one that has it. `found: 0` is the actionable signal on a repo that could have build-generated entry points: has `mvn generate-sources` (or the Gradle equivalent) been run locally? A full build isn't needed, just that."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `orphaned` lists spec documents (or, for `kind: \"symbol\"`, sections within an otherwise-fine file spec) whose target no longer exists in the graph at all (a deleted file, a directory that dropped below the rollup threshold, a removed feature entry point, a deleted function whose file is still current) -- these are NOT counted in coverage/freshness/total and never appear in `pending`, since there's nothing left for `/codeowl generate` to regenerate; they're dead weight to delete (a `\"symbol\"` entry prunes itself automatically next time that file is regenerated for any other reason). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. `pending` is paginated (M20) -- up to 50 entries per call; if `next_cursor` comes back non-null, pass it as this call's `cursor` to fetch the next page, repeating until `next_cursor` is null. Every OTHER field (the counts, `by_kind`, `by_module`, `top_stale_by_impact`, `orphaned`) always covers the whole scope regardless of pagination -- only `pending` itself is paged, since it's the one field that grows unboundedly with repo size (confirmed real: 626 files on a real Java library serialized `pending` alone to 95 KB, over the MCP result limit). Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide. `generated_sources` (M19) reports how many files sit under a known build-generated-source directory (e.g. Maven's `target/generated-sources`) and which directories were checked -- `null` for a pack with no such convention (every pack but Java today), or `{checked_dirs, found}` for one that has it. `found: 0` is the actionable signal on a repo that could have build-generated entry points: has `mvn compile` (not `mvn generate-sources` alone -- confirmed to produce nothing; the Gradle equivalent is unverified) been run locally?"
     )]
     async fn get_spec_coverage(
         &self,
@@ -1276,8 +1301,15 @@ impl CodeOwlServer {
             .into_iter()
             .map(OrphanedSpecResponse::from)
             .collect();
-        let pending = crate::spec::prioritize(items, &graph)
+        let pending_all = crate::spec::prioritize(items, &graph);
+        let total_pending = pending_all.len();
+        let cursor = req.cursor.unwrap_or(0).min(total_pending);
+        let next_cursor = (cursor + COVERAGE_PENDING_PAGE_SIZE < total_pending)
+            .then_some(cursor + COVERAGE_PENDING_PAGE_SIZE);
+        let pending = pending_all
             .into_iter()
+            .skip(cursor)
+            .take(COVERAGE_PENDING_PAGE_SIZE)
             .map(CoverageItemResponse::from)
             .collect();
         let generated_sources =
@@ -1296,6 +1328,7 @@ impl CodeOwlServer {
             top_stale_by_impact,
             orphaned,
             pending,
+            next_cursor,
             generated_sources,
         }))
     }
@@ -1565,7 +1598,10 @@ mod tests {
         assert_eq!(spec.0.smells, vec!["cop_out_phrase"]);
 
         let coverage = server
-            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
             .await
             .unwrap();
         let item = coverage
@@ -1602,6 +1638,7 @@ mod tests {
         let coverage = server
             .get_spec_coverage(Parameters(CoverageRequest {
                 scope: Some(String::new()),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -1671,6 +1708,7 @@ mod tests {
         let after = server
             .get_spec_coverage(Parameters(CoverageRequest {
                 scope: Some(String::new()),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -1697,7 +1735,10 @@ mod tests {
         ]);
 
         let coverage = server
-            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
             .await
             .unwrap()
             .0;
@@ -1742,7 +1783,10 @@ mod tests {
     async fn get_spec_coverage_reports_generated_sources_for_java_only() {
         let server = test_server(&[("src/main/java/org/acme/App.java", "public class App {}\n")]);
         let coverage = server
-            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
             .await
             .unwrap()
             .0;
@@ -1766,7 +1810,10 @@ mod tests {
             ),
         ]);
         let coverage = server
-            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
             .await
             .unwrap()
             .0;
@@ -1777,7 +1824,10 @@ mod tests {
     async fn get_spec_coverage_omits_generated_sources_for_a_non_java_pack() {
         let server = test_server(&[("a.ts", "export function f(): void {}\n")]);
         let coverage = server
-            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
             .await
             .unwrap()
             .0;
@@ -1800,6 +1850,7 @@ mod tests {
         let before = server
             .get_spec_coverage(Parameters(CoverageRequest {
                 scope: Some(String::new()),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -1828,6 +1879,7 @@ mod tests {
         let after_one_current = server
             .get_spec_coverage(Parameters(CoverageRequest {
                 scope: Some(String::new()),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -1848,6 +1900,7 @@ mod tests {
         let after_stale = server
             .get_spec_coverage(Parameters(CoverageRequest {
                 scope: Some(String::new()),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -1882,6 +1935,7 @@ mod tests {
         let coverage = server
             .get_spec_coverage(Parameters(CoverageRequest {
                 scope: Some(String::new()),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -1897,6 +1951,81 @@ mod tests {
             "util.ts has the highest fan-in (imported by both a.ts and b.ts)"
         );
         assert_eq!(coverage.top_stale_by_impact[0].fan_in, 2);
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_paginates_pending_and_a_cursor_reaches_the_rest() {
+        // M20: `pending` on a large repo (626 files on real commons-lang)
+        // serializes to 95 KB, over the MCP result limit -- confirmed real,
+        // not hypothetical. Build enough files to span two pages of
+        // COVERAGE_PENDING_PAGE_SIZE and walk the cursor to the end.
+        let file_count = COVERAGE_PENDING_PAGE_SIZE + 7;
+        let owned: Vec<(String, String)> = (0..file_count)
+            .map(|i| {
+                (
+                    format!("f{i:03}.ts"),
+                    format!("export function f{i:03}(): void {{}}\n"),
+                )
+            })
+            .collect();
+        let files: Vec<(&str, &str)> = owned
+            .iter()
+            .map(|(p, s)| (p.as_str(), s.as_str()))
+            .collect();
+        let server = test_server(&files);
+
+        let first = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
+            .await
+            .unwrap()
+            .0;
+        // +1 throughout: the always-present "system" entry (missing until
+        // anything is generated) is itself one more pending item beyond
+        // the file_count files -- confirmed via the by_kind breakdown
+        // elsewhere in this test module, not assumed.
+        let total_pending = file_count + 1;
+        assert_eq!(first.pending.len(), COVERAGE_PENDING_PAGE_SIZE);
+        assert_eq!(first.next_cursor, Some(COVERAGE_PENDING_PAGE_SIZE));
+        // Every other field already covers the whole repo, unaffected by
+        // pagination -- the one thing this feature must not do is make
+        // the counts look like only the first page exists.
+        assert_eq!(first.missing, total_pending);
+
+        let second = server
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: first.next_cursor,
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(
+            second.pending.len(),
+            total_pending - COVERAGE_PENDING_PAGE_SIZE
+        );
+        assert_eq!(second.next_cursor, None, "the last page reports no more");
+        assert_eq!(
+            second.missing, total_pending,
+            "unpaginated fields stay whole-repo on every page, not just the first"
+        );
+
+        // No id repeated across pages, and together they cover everything.
+        let mut all_ids: Vec<&str> = first
+            .pending
+            .iter()
+            .chain(&second.pending)
+            .map(|i| i.id.as_str())
+            .collect();
+        all_ids.sort_unstable();
+        all_ids.dedup();
+        assert_eq!(
+            all_ids.len(),
+            total_pending,
+            "every pending document appears exactly once across pages"
+        );
     }
 
     #[tokio::test]
@@ -1931,7 +2060,10 @@ mod tests {
         let server = rebuild_server(dir.clone(), &[]);
 
         let coverage = server
-            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .get_spec_coverage(Parameters(CoverageRequest {
+                scope: None,
+                cursor: None,
+            }))
             .await
             .unwrap()
             .0;
