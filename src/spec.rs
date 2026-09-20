@@ -31,7 +31,7 @@ use crate::symbol::{Symbol, SymbolKind};
 /// the JS conventions. Replaces the direct `lang::classify` call so
 /// prioritisation isn't hard-wired to one stack.
 fn classify_in(graph: &Graph, path: &str) -> FileRole {
-    crate::stack::for_name(graph.pack_name()).classify(path)
+    graph.file_role(path)
 }
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
@@ -3083,9 +3083,17 @@ pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> 
                 return match classify_in(graph, &item.id) {
                     FileRole::Test => 5,
                     FileRole::Domain if item.fan_in >= shared_cutoff => 0,
-                    // Below the fan-in cutoff, or a primitive/generated
-                    // file at any fan-in: the long tail, after features.
-                    FileRole::Domain | FileRole::Primitive | FileRole::Generated => 2,
+                    // Below the fan-in cutoff, or a primitive file at any
+                    // fan-in: the long tail, after features.
+                    FileRole::Domain | FileRole::Primitive => 2,
+                    // Unreachable in practice, kept as its own arm rather
+                    // than folded into the tier above (code review,
+                    // 2026-09-20): `file_is_spec_bearing` (M19 commit 2)
+                    // excludes every `FileRole::Generated` file before it
+                    // can ever reach the coverage inventory this sort
+                    // runs over, so a reader must not infer from this
+                    // match that a generated file is still prioritized.
+                    FileRole::Generated => 2,
                 };
             }
             match item.kind.as_str() {

@@ -132,6 +132,7 @@ use std::collections::HashMap;
 
 use crate::features::{EntryPoint, FeatureModel};
 use crate::graph::Graph;
+use crate::lang::FileRole;
 use crate::symbol::{SymbolId, SymbolKind};
 
 const HTTP_VERBS: &[&str] = &["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
@@ -185,6 +186,21 @@ impl FeatureModel for QuarkusFeatureModel {
         let mut out: Vec<EntryPoint> = graph
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
+            // A build-generated interface's own annotations must never
+            // independently produce an entry point (code review, M19,
+            // 2026-09-20): once the M19 walk pulls target/generated-
+            // sources into the graph, and bare_annotation_name makes its
+            // fully-qualified annotations matchable, this method would
+            // otherwise report `HeroesResource.getRandomHero` itself as
+            // an entry point -- attributed to a read-only, body-less
+            // file with no calls to any service/repository, which is
+            // silently worse than finding nothing (M19's own validation
+            // criterion). The real fix is a one-hop lookup FROM the
+            // hand-written implementing class TO this interface's
+            // annotations (M19 commit 3, not yet built); until then, a
+            // generated interface produces no entry point at all, the
+            // same honest gap M19 started from.
+            .filter(|s| graph.file_role(&s.file) != FileRole::Generated)
             .filter_map(|s| {
                 let parent_id = s.parent?;
                 let is_rest_client = *is_rest_client_cache

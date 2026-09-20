@@ -125,6 +125,64 @@ fn fully_qualified_annotations_with_no_imports_are_still_recognized() {
 }
 
 #[test]
+fn a_generated_interfaces_own_annotations_never_produce_an_entry_point_directly() {
+    // Code-review finding (M19, 2026-09-20): once commit 1's walk pulls
+    // target/generated-sources into the graph, and bare_annotation_name
+    // makes fully-qualified annotations matchable, enumerate_entry_points
+    // -- which has no FileRole::Generated guard -- would otherwise report
+    // the generated interface itself as an entry point, attributed to a
+    // read-only, body-less file with no calls to any service/repository.
+    // That's silently worse than finding nothing at all (M19's own
+    // validation criterion): a feature spec built from it would come back
+    // structurally empty, and it would look like a working answer rather
+    // than an obvious gap. The real fix (commit 3, not yet built) is a
+    // one-hop lookup FROM the hand-written implementing class TO this
+    // interface's annotations -- the interface itself must never
+    // independently produce its own entry point, which is exactly what
+    // this test pins: a repo with a generated interface and no
+    // hand-written implementor at all (matching commit 3's not-yet-built
+    // state) must report zero entry points from it, not a false one.
+    let dir =
+        std::env::temp_dir().join(format!("codeowl-quarkus-spec-{}-genep", std::process::id()));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/App.java"),
+        "package org.acme;\npublic class App {}\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(
+        dir.join("target/generated-sources/quarkus-openapi-generator-server/org/acme"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(
+            "target/generated-sources/quarkus-openapi-generator-server/org/acme/HeroesResource.java",
+        ),
+        "package org.acme;\n\
+         \n\
+         @jakarta.ws.rs.Path(\"/api/heroes\")\n\
+         public interface HeroesResource {\n\
+         \n\
+         \x20   @jakarta.ws.rs.GET\n\
+         \x20   @jakarta.ws.rs.Path(\"/random\")\n\
+         \x20   public Object getRandomHero();\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert!(
+        eps.iter().all(|e| !e.file.contains("generated-sources")),
+        "a generated interface must never itself produce an entry point: {eps:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve() {
     // FruitEntityResource's real shape: `@Path("entity/fruits")` (no
     // leading slash), a bare `@GET`, a `@GET @Path("{id}")`, a `@POST`
