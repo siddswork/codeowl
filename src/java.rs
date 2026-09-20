@@ -384,7 +384,8 @@ fn annotations(node: Node, source: &str) -> Vec<String> {
 
 /// `"@ApplicationScoped"` / `"@Path(\"x\")"` / `"@Entity"` -> its bare
 /// name (`"ApplicationScoped"` / `"Path"` / `"Entity"`), stripping the
-/// leading `@` and anything from the first `(` or space onward.
+/// leading `@`, any package qualification, and anything from the first
+/// `(` or space onward.
 /// Duplicated three ways before this (code review): `stack.rs`'s
 /// `is_entity_annotation`, and `quarkus.rs`'s `is_admitting_annotation`
 /// and `is_register_rest_client`. All three markers only ever come from
@@ -392,9 +393,23 @@ fn annotations(node: Node, source: &str) -> Vec<String> {
 /// sharing this here doesn't cross the "each pack owns its own parsing"
 /// line (design decision 5) — that's about not sharing between packs
 /// (e.g. Java vs. Python), not within one.
+///
+/// **Strips package qualification too (M19), not just the leading `@`.**
+/// Hand-written source always uses a bare, imported name (`@Path`), which
+/// is all this originally handled — but a build-generated interface (the
+/// M19 case this project exists to read) has no reason to import
+/// anything a human will never read, so its annotations come back fully
+/// qualified: `@jakarta.ws.rs.Path(...)`. Confirmed against a real `mvn
+/// compile` of `quarkus-super-heroes`'s OpenAPI-generated
+/// `HeroesResource` — every one of its annotations is written this way.
+/// Without this, every caller's bare-name comparison (`"Path"`, `"GET"`,
+/// `"ApplicationScoped"`, …) would silently never match a generated
+/// interface's own annotations, defeating M19's whole point one layer
+/// downstream of the file-discovery walk.
 pub(crate) fn bare_annotation_name(marker: &str) -> &str {
     let name = marker.trim_start().trim_start_matches('@');
-    name.split(['(', ' ']).next().unwrap_or(name)
+    let name = name.split(['(', ' ']).next().unwrap_or(name);
+    name.rsplit('.').next().unwrap_or(name)
 }
 
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
@@ -659,6 +674,27 @@ fn mentions_identifier(text: &str, name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_annotation_name_strips_package_qualification_too() {
+        assert_eq!(bare_annotation_name("@Path(\"x\")"), "Path");
+        assert_eq!(
+            bare_annotation_name("@ApplicationScoped"),
+            "ApplicationScoped"
+        );
+        // M19: a build-generated interface has no imports, so its
+        // annotations come back fully qualified — confirmed against a
+        // real `mvn compile` of quarkus-super-heroes.
+        assert_eq!(
+            bare_annotation_name("@jakarta.ws.rs.Path(\"/api/heroes\")"),
+            "Path"
+        );
+        assert_eq!(bare_annotation_name("@jakarta.ws.rs.GET"), "GET");
+        assert_eq!(
+            bare_annotation_name("@jakarta.enterprise.context.ApplicationScoped"),
+            "ApplicationScoped"
+        );
+    }
 
     #[test]
     fn extracts_a_public_class_with_static_methods() {

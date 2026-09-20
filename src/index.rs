@@ -149,22 +149,21 @@ impl RepoIndex {
         let root = &canonical_root(root);
         let pack = crate::lang::detect(root)?;
         let mut files = BTreeMap::new();
+        // Directory entries the primary walk visits anyway (it just skips
+        // them right below) doubled as the candidate module roots M19's
+        // generated-source walk needs — see `generated_source_entries`.
+        // No second full-repo traversal to rediscover the same boundaries.
+        let mut dirs_seen: Vec<PathBuf> = Vec::new();
         for entry in ignore::WalkBuilder::new(root).build() {
             let entry = entry.context("walking repo")?;
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                continue;
+            if entry.file_type().is_some_and(|t| t.is_dir()) {
+                dirs_seen.push(entry.path().to_path_buf());
             }
-            let path = entry.path();
-            if pack.source_kind(path).is_none() {
-                continue;
-            }
-            let source = std::fs::read_to_string(path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            let rel = rel_path(root, path);
-            files.insert(
-                rel.clone(),
-                FileInputs::extract(pack.as_ref(), &rel, &source),
-            );
+            ingest_build_entry(&mut files, root, pack.as_ref(), &entry)?;
+        }
+        for entry in generated_source_entries(&dirs_seen, pack.as_ref()) {
+            let entry = entry.context("walking a generated-source directory")?;
+            ingest_build_entry(&mut files, root, pack.as_ref(), &entry)?;
         }
         Ok(Self {
             format_version: crate::graph::FORMAT_VERSION,
@@ -229,36 +228,25 @@ impl RepoIndex {
     fn rescan(&mut self) -> Result<CatchUp> {
         let mut seen = HashSet::new();
         let mut caught = CatchUp::default();
+        // Same reasoning as `build`: reuse the primary walk's own directory
+        // entries as candidate module roots instead of a second full walk.
+        let mut dirs_seen: Vec<PathBuf> = Vec::new();
         for entry in ignore::WalkBuilder::new(&self.root).build() {
             let entry = entry.context("walking repo")?;
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                continue;
+            if entry.file_type().is_some_and(|t| t.is_dir()) {
+                dirs_seen.push(entry.path().to_path_buf());
             }
-            let path = entry.path();
-            if self.pack.source_kind(path).is_none() {
-                continue;
-            }
-            let rel = rel_path(&self.root, path);
-            seen.insert(rel.clone());
-            let source = std::fs::read_to_string(path)
-                .with_context(|| format!("reading {}", path.display()))?;
-            match self.files.get(&rel) {
-                Some(existing) if existing.source_hash == hash_text(&source) => {}
-                Some(_) => {
-                    self.files.insert(
-                        rel.clone(),
-                        FileInputs::extract(self.pack.as_ref(), &rel, &source),
-                    );
-                    caught.modified.push(rel);
-                }
-                None => {
-                    self.files.insert(
-                        rel.clone(),
-                        FileInputs::extract(self.pack.as_ref(), &rel, &source),
-                    );
-                    caught.added.push(rel);
-                }
-            }
+            self.rescan_entry(&entry, &mut seen, &mut caught)?;
+        }
+        // Collected up front, not iterated lazily: the iterator itself
+        // borrows `self.pack`, which would otherwise conflict with
+        // `rescan_entry`'s `&mut self` on every loop turn. This walk only
+        // ever covers a pack-declared generated-source subtree, never the
+        // whole repo, so materializing it costs nothing meaningful.
+        let generated: Vec<_> = generated_source_entries(&dirs_seen, self.pack.as_ref()).collect();
+        for entry in generated {
+            let entry = entry.context("walking a generated-source directory")?;
+            self.rescan_entry(&entry, &mut seen, &mut caught)?;
         }
         let removed: Vec<String> = self
             .files
@@ -271,6 +259,46 @@ impl RepoIndex {
         }
         caught.removed = removed;
         Ok(caught.sorted())
+    }
+
+    /// One file entry's share of [`rescan`](Self::rescan)'s body — pulled
+    /// out so both the primary walk and the generated-source walk drive it
+    /// identically, rather than duplicating the diff-against-cache logic.
+    fn rescan_entry(
+        &mut self,
+        entry: &ignore::DirEntry,
+        seen: &mut HashSet<String>,
+        caught: &mut CatchUp,
+    ) -> Result<()> {
+        if !entry.file_type().is_some_and(|t| t.is_file()) {
+            return Ok(());
+        }
+        let path = entry.path();
+        if self.pack.source_kind(path).is_none() {
+            return Ok(());
+        }
+        let rel = rel_path(&self.root, path);
+        seen.insert(rel.clone());
+        let source =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        match self.files.get(&rel) {
+            Some(existing) if existing.source_hash == hash_text(&source) => {}
+            Some(_) => {
+                self.files.insert(
+                    rel.clone(),
+                    FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                );
+                caught.modified.push(rel);
+            }
+            None => {
+                self.files.insert(
+                    rel.clone(),
+                    FileInputs::extract(self.pack.as_ref(), &rel, &source),
+                );
+                caught.added.push(rel);
+            }
+        }
+        Ok(())
     }
 
     /// Watcher-driven incremental update: `paths` are absolute paths the
@@ -448,6 +476,72 @@ fn rel_path(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+/// [`RepoIndex::build`]'s share of processing one walked entry, factored
+/// out so the primary walk and the generated-source walk drive it
+/// identically instead of duplicating the extract-and-insert logic.
+fn ingest_build_entry(
+    files: &mut BTreeMap<String, FileInputs>,
+    root: &Path,
+    pack: &dyn StackPack,
+    entry: &ignore::DirEntry,
+) -> Result<()> {
+    if !entry.file_type().is_some_and(|t| t.is_file()) {
+        return Ok(());
+    }
+    let path = entry.path();
+    if pack.source_kind(path).is_none() {
+        return Ok(());
+    }
+    let source =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let rel = rel_path(root, path);
+    files.insert(rel.clone(), FileInputs::extract(pack, &rel, &source));
+    Ok(())
+}
+
+/// Entries under any of `candidate_roots`' pack-declared generated-source
+/// directories (M19; [`StackPack::generated_source_dirs`]) — read
+/// unconditionally, gitignore filtering off, since a real repo's own
+/// `.gitignore` is exactly what excludes `target/`/`build/` and this is
+/// the one place CodeOwl deliberately reads through that. Walked
+/// separately, right after the primary walk, in both [`RepoIndex::build`]
+/// and [`RepoIndex::rescan`] so a generated interface is visible on the
+/// cold-start path and the incremental one alike. A directory that
+/// doesn't exist yet (the common case — the repo hasn't been built
+/// locally) is silently skipped, not an error.
+///
+/// **`candidate_roots` is the caller's own primary walk's directory
+/// entries, not rediscovered here** — a real Maven reactor
+/// (`quarkus-super-heroes`) has its build output per module
+/// (`rest-heroes/target/generated-sources`, `event-statistics/target/
+/// generated-sources`, …), never once at the repo root, so checking only
+/// the repo root (the first version of this function) silently found
+/// nothing on every real multi-module repo. The fix isn't a second
+/// full-repo walk to rediscover module boundaries, though — the caller's
+/// own primary walk already visits every directory (it just skips them
+/// right after, to get to files); passing those entries in here reuses
+/// that work instead of walking the tree twice, and — since each
+/// directory is visited exactly once by that single walk — never checks
+/// the repo root's own `target/generated-sources` twice either, the way
+/// an earlier version of this function did by also prepending `root`
+/// itself onto a fresh, separate enumeration.
+fn generated_source_entries<'a>(
+    candidate_roots: &'a [PathBuf],
+    pack: &'a dyn StackPack,
+) -> impl Iterator<Item = Result<ignore::DirEntry, ignore::Error>> + 'a {
+    let dirs = pack.generated_source_dirs();
+    candidate_roots.iter().flat_map(move |base| {
+        dirs.iter()
+            .map(move |dir| base.join(dir))
+            .filter(|dir_path| dir_path.is_dir())
+            .flat_map(|dir_path| {
+                ignore::WalkBuilder::new(dir_path)
+                    .standard_filters(false)
+                    .build()
+            })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +569,122 @@ mod tests {
             .collect();
         out.sort();
         out
+    }
+
+    #[test]
+    fn build_reads_a_known_generated_source_dir_despite_gitignore() {
+        // M19: `target/` is exactly what a real Maven repo's `.gitignore`
+        // excludes -- the whole point of this milestone is reading through
+        // that for a pack-declared generated-source directory. `ignore`
+        // only honors `.gitignore` inside an actual git repo by default
+        // (`require_git`), so a bare `.git/` dir is needed for this test
+        // to reproduce the real-world bug at all -- confirmed empirically
+        // while writing this test: without it, the plain walk already
+        // finds the file and this assertion passes for the wrong reason.
+        let dir = tempdir("generated-sources");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "target/\n");
+        write(
+            &dir,
+            "src/main/java/com/example/App.java",
+            "package com.example;\npublic class App {}\n",
+        );
+        write(
+            &dir,
+            "target/generated-sources/quarkus-openapi-generator-server/\
+             com/example/HeroesResource.java",
+            "package com.example;\npublic interface HeroesResource {}\n",
+        );
+
+        let index = RepoIndex::build(&dir).unwrap();
+
+        assert!(
+            index.files.contains_key(
+                "target/generated-sources/quarkus-openapi-generator-server/\
+                 com/example/HeroesResource.java"
+            ),
+            "a pack-declared generated-source directory must be walked even \
+             though a normal .gitignore excludes target/ -- found: {:?}",
+            index.files.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn rescan_picks_up_a_generated_source_dir_created_after_first_open() {
+        // The realistic order of events: `codeowl serve` starts before
+        // `mvn compile` ever ran, then the developer builds the project in
+        // the same session -- the incremental path must catch up too, not
+        // just the cold-start `build`.
+        let dir = tempdir("generated-sources-rescan");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "target/\n");
+        write(
+            &dir,
+            "src/main/java/com/example/App.java",
+            "package com.example;\npublic class App {}\n",
+        );
+
+        // First open: repo not built yet, no generated-sources dir exists.
+        RepoIndex::open(&dir).unwrap();
+
+        // Simulate `mvn compile` happening between sessions.
+        write(
+            &dir,
+            "target/generated-sources/quarkus-openapi-generator-server/\
+             com/example/HeroesResource.java",
+            "package com.example;\npublic interface HeroesResource {}\n",
+        );
+
+        let (_index, _graph, caught) = RepoIndex::open(&dir).unwrap();
+
+        assert_eq!(
+            caught.added,
+            vec![
+                "target/generated-sources/quarkus-openapi-generator-server/\
+                 com/example/HeroesResource.java"
+            ],
+            "rescan must pick up a generated-source file that appeared \
+             since the last run"
+        );
+    }
+
+    #[test]
+    fn build_finds_a_generated_source_dir_inside_a_maven_reactor_module() {
+        // Real-repo finding (quarkus-super-heroes, a flat 7-module Maven
+        // reactor): each module has its OWN target/generated-sources under
+        // the module directory, not one under the repo root. Checking only
+        // `root.join("target/generated-sources")` -- what the first version
+        // of this feature did -- silently finds nothing on every real
+        // multi-module repo, which is the exact shape M18/M19's own test
+        // repo has. Confirmed empirically by planting a file under
+        // quarkus-super-heroes/rest-heroes/target/generated-sources and
+        // re-running `codeowl extract`: 0 found.
+        let dir = tempdir("generated-sources-reactor");
+        std::fs::create_dir_all(dir.join(".git")).unwrap();
+        write(&dir, ".gitignore", "target/\n");
+        write(
+            &dir,
+            "rest-heroes/src/main/java/com/example/HeroResource.java",
+            "package com.example;\npublic class HeroResource {}\n",
+        );
+        write(
+            &dir,
+            "rest-heroes/target/generated-sources/quarkus-openapi-generator-server/\
+             com/example/HeroesResource.java",
+            "package com.example;\npublic interface HeroesResource {}\n",
+        );
+
+        let index = RepoIndex::build(&dir).unwrap();
+
+        assert!(
+            index.files.contains_key(
+                "rest-heroes/target/generated-sources/quarkus-openapi-generator-server/\
+                 com/example/HeroesResource.java"
+            ),
+            "a generated-source directory nested under a module directory \
+             (not the repo root) must still be found -- found: {:?}",
+            index.files.keys().collect::<Vec<_>>()
+        );
     }
 
     #[test]

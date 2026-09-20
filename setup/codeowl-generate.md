@@ -211,6 +211,25 @@ target loop above:
      quality check distrusts, which is a different problem from code
      drift — are also skipped; target those separately if you want them.
      The priority order of what remains is unchanged.
+   - **If `generated_sources` is present and `found` is `0`**, tell the
+     user before generating anything else: this pack (e.g. Quarkus) knows
+     a build-generated-source convention exists, but nothing was found
+     there, so real entry points defined only on a build-generated
+     interface (an OpenAPI-codegen'd JAX-RS resource, a `.proto` stub)
+     won't be visible yet. For Maven, tell them to run a real `mvn
+     compile` locally (not `mvn generate-sources` alone — confirmed to
+     produce nothing — and not `mvn quarkus:generate-code` in isolation
+     either, which silently generates from a placeholder spec instead of
+     the project's real one; a `compile` failing afterward at an
+     unrelated `javac`/toolchain step is fine, the generated sources are
+     already written by then and nothing cleans them up), then re-running
+     this command. **The Gradle equivalent is unverified** — say so rather
+     than naming a specific command, since the Maven case already showed
+     the "obviously right" command can be wrong. State this as the
+     observed fact it is (`found: 0`), not a diagnosis — `generated_sources`
+     doesn't know *why* it's zero, only that it is. Say nothing if the
+     field is absent entirely (the pack has no such convention) or `found`
+     is above `0`.
 2. If `--budget=N` was given, you have `N` **generations** to spend —
    count every `get_next_spec_task` call that returns a real task (`kind`
    is not `"done"`) toward that budget, not every item in `pending` (a

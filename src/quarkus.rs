@@ -132,6 +132,7 @@ use std::collections::HashMap;
 
 use crate::features::{EntryPoint, FeatureModel};
 use crate::graph::Graph;
+use crate::lang::FileRole;
 use crate::symbol::{SymbolId, SymbolKind};
 
 const HTTP_VERBS: &[&str] = &["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
@@ -163,6 +164,12 @@ impl FeatureModel for QuarkusFeatureModel {
         // lookups -- see its own doc comment.
         let mut channel_constants_cache: HashMap<SymbolId, Vec<&crate::symbol::Symbol>> =
             HashMap::new();
+        // Per-class memoization for the M19 one-hop generated-interface
+        // lookup (code review finding): `generated_interface_for` parses
+        // a class's signature and scans the whole `graph.imports()` list
+        // -- without this cache it reran per *method*, not per class,
+        // unlike every other lookup in this function.
+        let mut generated_interface_cache: HashMap<SymbolId, Option<SymbolId>> = HashMap::new();
         // Deliberately first-match-wins across kinds (http, then kafka,
         // then scheduled, then grpc), not "detect every kind a method's
         // markers could match." Code-review finding: a method combining
@@ -185,6 +192,24 @@ impl FeatureModel for QuarkusFeatureModel {
         let mut out: Vec<EntryPoint> = graph
             .symbols()
             .filter(|s| s.kind == SymbolKind::Callable)
+            // A build-generated interface's own annotations must never
+            // independently produce an entry point (code review, M19,
+            // 2026-09-20): once the M19 walk pulls target/generated-
+            // sources into the graph, and bare_annotation_name makes its
+            // fully-qualified annotations matchable, this method would
+            // otherwise report `HeroesResource.getRandomHero` itself as
+            // an entry point -- attributed to a read-only, body-less
+            // file with no calls to any service/repository, which is
+            // silently worse than finding nothing (M19's own validation
+            // criterion). The real fix — a one-hop lookup FROM the
+            // hand-written implementing class TO this interface's
+            // annotations — is the `inherited_method` fallback a few
+            // lines below (M19 commit 3); this filter still has to stay,
+            // though: it's what stops the interface's own file from
+            // *also* independently producing a duplicate/false entry
+            // point for the same endpoint once its annotations are
+            // matchable.
+            .filter(|s| graph.file_role(&s.file) != FileRole::Generated)
             .filter_map(|s| {
                 let parent_id = s.parent?;
                 let is_rest_client = *is_rest_client_cache
@@ -193,8 +218,45 @@ impl FeatureModel for QuarkusFeatureModel {
                 if is_rest_client {
                     return None;
                 }
-                if let Some(verb) = s.markers.iter().find_map(|m| parse_verb(m)) {
-                    let method_path = s.markers.iter().find_map(|m| parse_path_annotation(m));
+                // M19 commit 3: `s`'s own markers first; if they carry no
+                // verb, fall back to the matching method on whatever
+                // generated interface `s`'s class implements (if any) --
+                // the real shape, where every JAX-RS annotation lives on
+                // the interface and the hand-written override carries
+                // none at all. `file` stays `s.file` regardless of which
+                // side the annotations came from: the entry point is
+                // always attributed to the hand-written class, never the
+                // generated interface (which never independently
+                // produces one at all — see the filter above).
+                //
+                // Verb and path fall back **independently** (code review
+                // finding): a hand-written override redeclaring `@GET`
+                // but omitting `@Path` -- a real, plausible copy-paste
+                // shape, not just hypothetical -- must still inherit the
+                // interface method's path, not silently drop it just
+                // because `s` already answered the verb half. Picking one
+                // whole `marker_source` (the first version of this fix)
+                // got this wrong: any verb on `s` pinned *both* lookups
+                // to `s`, even when only the verb was actually present.
+                let interface_id = *generated_interface_cache
+                    .entry(parent_id)
+                    .or_insert_with(|| generated_interface_for(graph, parent_id));
+                let method_name = s.id.rsplit("::").next().unwrap_or(s.id.as_str());
+                let inherited_method = interface_method_by_name(graph, interface_id, method_name)
+                    .and_then(|id| graph.get_symbol(id));
+                let verb = s.markers.iter().find_map(|m| parse_verb(m)).or_else(|| {
+                    inherited_method.and_then(|m| m.markers.iter().find_map(|mk| parse_verb(mk)))
+                });
+                if let Some(verb) = verb {
+                    let method_path = s
+                        .markers
+                        .iter()
+                        .find_map(|m| parse_path_annotation(m))
+                        .or_else(|| {
+                            inherited_method.and_then(|m| {
+                                m.markers.iter().find_map(|mk| parse_path_annotation(mk))
+                            })
+                        });
                     let class_path = class_path_cache
                         .entry(parent_id)
                         .or_insert_with(|| class_path_for(graph, parent_id))
@@ -289,29 +351,30 @@ fn is_admitting_annotation(marker: &str) -> bool {
     )
 }
 
-/// `@GET` / `@POST` / … -> its lowercase verb name. Exact match only (not
-/// a prefix check) so a hypothetical `@GetSomething`-style custom
-/// annotation is never mistaken for a real JAX-RS verb -- see
-/// `ARCHITECTURE.md` open question 11 on annotation vocabularies.
+/// `@GET` / `@POST` / … (bare or fully qualified — M19; see
+/// `bare_annotation_name`'s own doc comment) -> its lowercase verb name.
+/// Exact match only (not a prefix check) so a hypothetical
+/// `@GetSomething`-style custom annotation is never mistaken for a real
+/// JAX-RS verb -- see `ARCHITECTURE.md` open question 11 on annotation
+/// vocabularies.
 fn parse_verb(marker: &str) -> Option<String> {
-    let name = marker.trim_start().trim_start_matches('@');
+    let name = crate::java::bare_annotation_name(marker);
     HTTP_VERBS
         .iter()
         .find(|&&v| name == v)
         .map(|v| v.to_ascii_lowercase())
 }
 
-/// `@Path("entity/fruits")` -> `"entity/fruits"`. `None` for any other
-/// annotation, or a `@Path` with no string literal (shouldn't happen —
-/// JAX-RS requires an argument — but a malformed annotation just yields
-/// no method-level path rather than panicking).
+/// `@Path("entity/fruits")` (bare or fully qualified, e.g.
+/// `@jakarta.ws.rs.Path(...)` — M19) -> `"entity/fruits"`. `None` for any
+/// other annotation, or a `@Path` with no string literal (shouldn't
+/// happen — JAX-RS requires an argument — but a malformed annotation
+/// just yields no method-level path rather than panicking).
 fn parse_path_annotation(marker: &str) -> Option<String> {
-    let m = marker.trim_start();
-    let rest = m.strip_prefix("@Path")?.trim_start();
-    if !rest.starts_with('(') {
+    if crate::java::bare_annotation_name(marker) != "Path" {
         return None;
     }
-    first_string_literal(rest)
+    first_string_literal(marker)
 }
 
 /// The first `"…"` literal in `s`. Same trick as `fastapi.rs`'s helper of
@@ -325,13 +388,133 @@ fn first_string_literal(s: &str) -> Option<String> {
     Some(s[start + 1..start + 1 + rel_end].to_string())
 }
 
-/// `class_id`'s own `@Path`, if it has one. A resolved `Symbol::parent` is
-/// already a `SymbolId` (unlike `ExtractedSymbol::parent`, which is a
-/// pre-arena string — see `symbol.rs`), so this is a direct arena lookup,
-/// no `graph.find` round-trip through a string id needed.
+/// `class_id`'s own `@Path`, if it has one — or, if it has none and it
+/// `implements` a generated interface (M19 commit 3), that interface's
+/// own `@Path` instead. The real shape: `HeroResource implements
+/// HeroesResource` carries zero annotations of its own at all, class or
+/// method level; every one lives on `HeroesResource`. A resolved
+/// `Symbol::parent` is already a `SymbolId` (unlike
+/// `ExtractedSymbol::parent`, which is a pre-arena string — see
+/// `symbol.rs`), so this is a direct arena lookup, no `graph.find`
+/// round-trip through a string id needed for the class's own check.
 fn class_path_for(graph: &Graph, class_id: SymbolId) -> Option<String> {
     let sym = graph.get_symbol(class_id)?;
-    sym.markers.iter().find_map(|m| parse_path_annotation(m))
+    sym.markers
+        .iter()
+        .find_map(|m| parse_path_annotation(m))
+        .or_else(|| {
+            let interface_id = generated_interface_for(graph, class_id)?;
+            graph
+                .get_symbol(interface_id)?
+                .markers
+                .iter()
+                .find_map(|m| parse_path_annotation(m))
+        })
+}
+
+/// The interface `class_id` `implements`, if that interface's file is
+/// `FileRole::Generated` — resolved via the same import graph
+/// `resolve_imports` already builds (an explicit `import`, confirmed
+/// against the real `quarkus-super-heroes` shape — `HeroResource` and
+/// `HeroesResource` sit in different packages, so this is a genuine
+/// resolved import, not the same-package implicit case), no new
+/// resolution mechanism. One hop only: does not walk further ancestors.
+/// Tries every name in the `implements` clause in declaration order (a
+/// class implementing more than one interface, with the generated one
+/// not listed first, is real Java, even if this project's test repos
+/// happen not to exercise it) and returns the first that resolves to a
+/// `FileRole::Generated` file — `None` if it implements only hand-written
+/// interfaces, or none at all.
+fn generated_interface_for(graph: &Graph, class_id: SymbolId) -> Option<SymbolId> {
+    let sym = graph.get_symbol(class_id)?;
+    implemented_interface_names(&sym.signature)
+        .into_iter()
+        .find_map(|name| resolve_interface_name(graph, &sym.file, &name))
+}
+
+/// `name` (as extracted by [`implemented_interface_names`]) -> its
+/// `SymbolId`, if it resolves to a `FileRole::Generated` file.
+fn resolve_interface_name(graph: &Graph, from_file: &str, name: &str) -> Option<SymbolId> {
+    // A dotted name is a fully-qualified reference written out inline --
+    // a real shape found dogfooding rest-narration: the hand-written
+    // class shares its simple name with the interface it implements
+    // (`NarrationResource implements
+    // ...narration.api.resources.NarrationResource`), which forces
+    // Java's own naming rules to spell the interface out fully qualified
+    // right there — an `import` of the same simple name would collide
+    // with the enclosing class. No `ResolvedImport` exists to look up in
+    // this case at all; resolve the FQN directly by the same
+    // path-suffix convention `java::resolve_imports`'s `fqn_to_file`
+    // uses (kept as its own copy here rather than shared across modules,
+    // matching this project's "each pack owns its own parsing" stance —
+    // design decision 5). A bare, unqualified name is the ordinary case,
+    // resolved through the already-built import graph instead.
+    let target = if let Some((_, simple)) = name.rsplit_once('.') {
+        let suffix = format!("/{}.java", name.replace('.', "/"));
+        let file = graph
+            .files()
+            .map(|f| f.id.as_str())
+            .find(|f| f.ends_with(&suffix))?;
+        graph.find(&format!("{file}::{simple}"))?
+    } else {
+        graph
+            .imports()
+            .iter()
+            .find(|imp| imp.from_file == from_file && imp.imported_name == name)?
+            .target?
+    };
+    let target_file = &graph.get_symbol(target)?.file;
+    (graph.file_role(target_file) == FileRole::Generated).then_some(target)
+}
+
+/// Every name in a class's `implements` clause, in declaration order.
+/// Cheap and textual, matching this project's other annotation/signature
+/// parsing (no general type-hierarchy resolution, per `ARCHITECTURE.md`
+/// open question 11's "why not build general hierarchy navigation now")
+/// — but uses the same word-boundary technique `stack.rs::
+/// extends_panache_entity` was reviewed and fixed to use for the
+/// identical bug class: a plain substring search for `"implements"`
+/// would false-positive on a leading annotation argument that happens to
+/// contain that text (`@Operation(description = "implements paging")`).
+/// Generics are stripped first via `strip_angle_bracket_groups` (shared
+/// with `extends_panache_entity`, not duplicated), then `implements` is
+/// matched as a whole whitespace-delimited word, never a substring.
+fn implemented_interface_names(signature: &str) -> Vec<String> {
+    let stripped = crate::stack::strip_angle_bracket_groups(signature);
+    let mut words = stripped.split_whitespace();
+    if words.find(|w| *w == "implements").is_none() {
+        return Vec::new();
+    }
+    let rest = words.collect::<Vec<_>>().join(" ");
+    rest.split('{')
+        .next()
+        .unwrap_or(&rest)
+        .split(',')
+        .map(str::trim)
+        .filter(|w| !w.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The method on `interface_id` (already resolved by
+/// [`generated_interface_for`] — takes the resolved id directly, not
+/// `class_id`, so a caller that's already memoized that lookup per class
+/// doesn't re-trigger it per method) sharing `method_name` — `None` if
+/// `interface_id` is `None`, or that interface declares no method of the
+/// same name. **Not disambiguated by parameter list**: two overloaded
+/// methods of the same name on the interface collide on one id (a
+/// pre-existing `java.rs` id-scheme limitation this is the first call
+/// site to resolve *across files* purely by that colliding name —
+/// logged, not fixed, since OpenAPI-generated interfaces don't produce
+/// overloaded methods in any real corpus this project has dogfooded; see
+/// `ARCHITECTURE.md` open question 11).
+fn interface_method_by_name(
+    graph: &Graph,
+    interface_id: Option<SymbolId>,
+    method_name: &str,
+) -> Option<SymbolId> {
+    let interface_sym = graph.get_symbol(interface_id?)?;
+    graph.find(&format!("{}::{method_name}", interface_sym.id))
 }
 
 /// Does `class_id`'s own declaration carry `@RegisterRestClient`? The

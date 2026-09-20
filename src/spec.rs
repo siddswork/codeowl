@@ -31,7 +31,7 @@ use crate::symbol::{Symbol, SymbolKind};
 /// the JS conventions. Replaces the direct `lang::classify` call so
 /// prioritisation isn't hard-wired to one stack.
 fn classify_in(graph: &Graph, path: &str) -> FileRole {
-    crate::stack::for_name(graph.pack_name()).classify(path)
+    graph.file_role(path)
 }
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
@@ -58,11 +58,58 @@ pub fn is_test_path(graph: &Graph, path: &str) -> bool {
 /// or `Container` among its top-level symbols — barrel files, const-only
 /// route config, and metadata-only boilerplate get no document (see
 /// `ARCHITECTURE.md`'s granularity rules).
+///
+/// **`FileRole::Generated` is never spec-bearing, regardless of what it
+/// exports (M19).** A build-generated interface (an OpenAPI-codegen'd
+/// JAX-RS resource, a `.proto` stub) can export plenty of real methods —
+/// confirmed against a real `mvn generate-sources` run, `HeroesResource`
+/// alone has 8 — but it's read-only structural reference, never the
+/// hand-written code a spec describes, per the "only spec the
+/// hand-written code" principle `ARCHITECTURE.md` open question 11
+/// states. Checked first so it short-circuits before the exported-symbol
+/// scan below runs at all.
 pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool {
+    if matches!(
+        classify_in(graph, graph.string_id(file_id)),
+        FileRole::Generated
+    ) {
+        return false;
+    }
     graph.children_ids(file_id).iter().any(|&id| {
         graph.get_symbol(id).is_some_and(|s| {
             s.is_exported && matches!(s.kind, SymbolKind::Callable | SymbolKind::Container)
         })
+    })
+}
+
+/// How many of `graph`'s files sit under the active pack's declared
+/// generated-source directories (M19), for `get_spec_coverage` to surface
+/// to the driving LLM. `None` for any pack whose `generated_source_dirs()`
+/// is empty (every pack but Java today) — the concept doesn't apply, so
+/// there's nothing honest to report, not a zero. `found: 0` for a pack
+/// that *does* declare them is the actionable signal: this could be a
+/// Quarkus-shaped service with build-generated entry points, and none
+/// were found — has `mvn generate-sources` (or the Gradle equivalent)
+/// been run locally? A full build isn't needed, just that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedSourcesSummary {
+    pub checked_dirs: Vec<String>,
+    pub found: usize,
+}
+
+pub fn generated_sources_summary(graph: &Graph) -> Option<GeneratedSourcesSummary> {
+    let pack = crate::stack::for_name(graph.pack_name());
+    let dirs = pack.generated_source_dirs();
+    if dirs.is_empty() {
+        return None;
+    }
+    let found = graph
+        .files()
+        .filter(|f| matches!(classify_in(graph, &f.id), FileRole::Generated))
+        .count();
+    Some(GeneratedSourcesSummary {
+        checked_dirs: dirs.iter().map(|d| d.to_string()).collect(),
+        found,
     })
 }
 
@@ -3036,9 +3083,17 @@ pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> 
                 return match classify_in(graph, &item.id) {
                     FileRole::Test => 5,
                     FileRole::Domain if item.fan_in >= shared_cutoff => 0,
-                    // Below the fan-in cutoff, or a primitive/generated
-                    // file at any fan-in: the long tail, after features.
-                    FileRole::Domain | FileRole::Primitive | FileRole::Generated => 2,
+                    // Below the fan-in cutoff, or a primitive file at any
+                    // fan-in: the long tail, after features.
+                    FileRole::Domain | FileRole::Primitive => 2,
+                    // Unreachable in practice, kept as its own arm rather
+                    // than folded into the tier above (code review,
+                    // 2026-09-20): `file_is_spec_bearing` (M19 commit 2)
+                    // excludes every `FileRole::Generated` file before it
+                    // can ever reach the coverage inventory this sort
+                    // runs over, so a reader must not infer from this
+                    // match that a generated file is still prioritized.
+                    FileRole::Generated => 2,
                 };
             }
             match item.kind.as_str() {
@@ -3084,6 +3139,55 @@ mod tests {
         let graph = build_graph_from_sources(&[("a.ts", "export function double(x: number) {}\n")]);
         let file_id = graph.find("a.ts").unwrap();
         assert!(file_is_spec_bearing(&graph, file_id));
+    }
+
+    #[test]
+    fn a_generated_file_is_never_spec_bearing_even_with_exported_symbols() {
+        // M19: FileRole::Generated must exclude a file from spec
+        // generation regardless of what it exports -- a real
+        // build-generated JAX-RS interface (quarkus-openapi-generator-
+        // server output) has plenty of exported methods but must stay
+        // reference-only, per the "only spec the hand-written code"
+        // principle. `classify_in` reads the graph's own `pack_name`, so
+        // this sets it to "java" directly rather than re-deriving it
+        // through `lang::detect` on a throwaway fixture repo.
+        let path = "target/generated-sources/foo/HeroesResource.java";
+        let mut graph =
+            build_graph_from_sources(&[(path, "export function getAllHeroes(): void {}\n")]);
+        graph.set_pack_name("java");
+        let file_id = graph.find(path).unwrap();
+        assert!(!file_is_spec_bearing(&graph, file_id));
+    }
+
+    #[test]
+    fn generated_sources_summary_counts_java_generated_files_only() {
+        let mut graph = build_graph_from_sources(&[
+            (
+                "src/main/java/org/acme/App.java",
+                "export function ignored(): void {}\n",
+            ),
+            (
+                "target/generated-sources/foo/HeroesResource.java",
+                "export function getAllHeroes(): void {}\n",
+            ),
+        ]);
+        graph.set_pack_name("java");
+
+        let summary = generated_sources_summary(&graph).expect("Java declares generated dirs");
+        assert_eq!(
+            summary.checked_dirs,
+            vec!["target/generated-sources", "build/generated"]
+        );
+        assert_eq!(
+            summary.found, 1,
+            "only the file under a generated dir counts"
+        );
+    }
+
+    #[test]
+    fn generated_sources_summary_is_none_for_a_pack_with_no_generated_dir_convention() {
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        assert_eq!(generated_sources_summary(&graph), None);
     }
 
     #[test]
@@ -3566,6 +3670,28 @@ impl Counter {\n\
 
         let graph = build_graph_from_sources(&[("a.ts", "export { Foo } from './foo';\n")]);
         let file_id = graph.find("a.ts").unwrap();
+
+        assert_eq!(next_task(&graph, &dir, file_id).unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn next_task_is_none_for_a_generated_file_with_a_real_uncovered_symbol() {
+        // M19: get_next_spec_task targeting a generated file directly
+        // must report nothing to do, even though it has a genuinely
+        // uncovered exported symbol -- the same "kind: done" outcome a
+        // barrel file gets, for a different reason (reference-only, not
+        // "nothing to say").
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-gen", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = "target/generated-sources/foo/HeroesResource.java";
+        let mut graph =
+            build_graph_from_sources(&[(path, "export function getAllHeroes(): void {}\n")]);
+        graph.set_pack_name("java");
+        let file_id = graph.find(path).unwrap();
 
         assert_eq!(next_task(&graph, &dir, file_id).unwrap(), None);
 
@@ -4787,6 +4913,34 @@ impl Counter {\n\
         assert_eq!(summary.missing, 0);
         assert_eq!(summary.generations_remaining, 0);
         assert!(prioritize(items, &graph).is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn coverage_never_counts_a_generated_file_as_missing_or_pending() {
+        // M19: a generated interface with real exported methods must not
+        // inflate get_spec_coverage's missing count or appear in its
+        // pending worklist -- it's reference-only, never spec-bearing,
+        // regardless of how many methods it exports.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-gen2", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let path = "target/generated-sources/foo/HeroesResource.java";
+        let mut graph = build_graph_from_sources(&[(
+            path,
+            "export function getAllHeroes(): void {}\n\
+             export function getRandomHero(): void {}\n",
+        )]);
+        graph.set_pack_name("java");
+
+        let items = coverage(&graph, &dir, None).unwrap();
+        let pending = prioritize(items, &graph);
+        assert!(
+            !pending.iter().any(|i| i.kind == "file"),
+            "the generated file must never appear as a pending file document: {pending:?}"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }
