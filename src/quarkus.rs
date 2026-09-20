@@ -209,8 +209,33 @@ impl FeatureModel for QuarkusFeatureModel {
                 if is_rest_client {
                     return None;
                 }
-                if let Some(verb) = s.markers.iter().find_map(|m| parse_verb(m)) {
-                    let method_path = s.markers.iter().find_map(|m| parse_path_annotation(m));
+                // M19 commit 3: `s`'s own markers first; if they carry no
+                // verb, fall back to the matching method on whatever
+                // generated interface `s`'s class implements (if any) --
+                // the real shape, where every JAX-RS annotation lives on
+                // the interface and the hand-written override carries
+                // none at all. `file` stays `s.file` regardless of which
+                // side the annotations came from: the entry point is
+                // always attributed to the hand-written class, never the
+                // generated interface (which never independently
+                // produces one at all — see the filter above).
+                let method_name = s.id.rsplit("::").next().unwrap_or(s.id.as_str());
+                let inherited = generated_interface_method(graph, parent_id, method_name)
+                    .and_then(|id| graph.get_symbol(id));
+                let marker_source = if s.markers.iter().any(|m| parse_verb(m).is_some()) {
+                    s
+                } else {
+                    inherited
+                        .filter(|iface_method| {
+                            iface_method.markers.iter().any(|m| parse_verb(m).is_some())
+                        })
+                        .unwrap_or(s)
+                };
+                if let Some(verb) = marker_source.markers.iter().find_map(|m| parse_verb(m)) {
+                    let method_path = marker_source
+                        .markers
+                        .iter()
+                        .find_map(|m| parse_path_annotation(m));
                     let class_path = class_path_cache
                         .entry(parent_id)
                         .or_insert_with(|| class_path_for(graph, parent_id))
@@ -342,13 +367,75 @@ fn first_string_literal(s: &str) -> Option<String> {
     Some(s[start + 1..start + 1 + rel_end].to_string())
 }
 
-/// `class_id`'s own `@Path`, if it has one. A resolved `Symbol::parent` is
-/// already a `SymbolId` (unlike `ExtractedSymbol::parent`, which is a
-/// pre-arena string — see `symbol.rs`), so this is a direct arena lookup,
-/// no `graph.find` round-trip through a string id needed.
+/// `class_id`'s own `@Path`, if it has one — or, if it has none and it
+/// `implements` a generated interface (M19 commit 3), that interface's
+/// own `@Path` instead. The real shape: `HeroResource implements
+/// HeroesResource` carries zero annotations of its own at all, class or
+/// method level; every one lives on `HeroesResource`. A resolved
+/// `Symbol::parent` is already a `SymbolId` (unlike
+/// `ExtractedSymbol::parent`, which is a pre-arena string — see
+/// `symbol.rs`), so this is a direct arena lookup, no `graph.find`
+/// round-trip through a string id needed for the class's own check.
 fn class_path_for(graph: &Graph, class_id: SymbolId) -> Option<String> {
     let sym = graph.get_symbol(class_id)?;
-    sym.markers.iter().find_map(|m| parse_path_annotation(m))
+    sym.markers
+        .iter()
+        .find_map(|m| parse_path_annotation(m))
+        .or_else(|| {
+            let interface_id = generated_interface_for(graph, class_id)?;
+            graph
+                .get_symbol(interface_id)?
+                .markers
+                .iter()
+                .find_map(|m| parse_path_annotation(m))
+        })
+}
+
+/// The interface `class_id` `implements`, if that interface's file is
+/// `FileRole::Generated` — resolved via the same import graph
+/// `resolve_imports` already builds (an explicit `import`, confirmed
+/// against the real `quarkus-super-heroes` shape — `HeroResource` and
+/// `HeroesResource` sit in different packages, so this is a genuine
+/// resolved import, not the same-package implicit case), no new
+/// resolution mechanism. One hop only: does not walk further ancestors,
+/// and `None` for a class implementing a hand-written interface, several
+/// interfaces (only the first name after `implements` is considered — no
+/// real evidence of more than one JAX-RS-relevant interface per resource
+/// class), or nothing at all.
+fn generated_interface_for(graph: &Graph, class_id: SymbolId) -> Option<SymbolId> {
+    let sym = graph.get_symbol(class_id)?;
+    let name = implemented_interface_name(&sym.signature)?;
+    let target = graph
+        .imports()
+        .iter()
+        .find(|imp| imp.from_file == sym.file && imp.imported_name == name)?
+        .target?;
+    let target_file = &graph.get_symbol(target)?.file;
+    (graph.file_role(target_file) == FileRole::Generated).then_some(target)
+}
+
+/// The first name after `implements` in a class's own signature text —
+/// cheap and textual, matching this project's other annotation/signature
+/// parsing (no general type-hierarchy resolution, per `ARCHITECTURE.md`
+/// open question 11's "why not build general hierarchy navigation now").
+fn implemented_interface_name(signature: &str) -> Option<&str> {
+    let rest = signature.split("implements").nth(1)?;
+    let name = rest.split([',', '{']).next()?.trim();
+    let name = name.split('<').next().unwrap_or(name).trim();
+    (!name.is_empty()).then_some(name)
+}
+
+/// The method on `class_id`'s generated interface (if any) sharing
+/// `method_name` — `None` if `class_id` implements no generated
+/// interface, or that interface declares no method of the same name.
+fn generated_interface_method(
+    graph: &Graph,
+    class_id: SymbolId,
+    method_name: &str,
+) -> Option<SymbolId> {
+    let interface_id = generated_interface_for(graph, class_id)?;
+    let interface_sym = graph.get_symbol(interface_id)?;
+    graph.find(&format!("{}::{method_name}", interface_sym.id))
 }
 
 /// Does `class_id`'s own declaration carry `@RegisterRestClient`? The

@@ -183,6 +183,69 @@ fn a_generated_interfaces_own_annotations_never_produce_an_entry_point_directly(
 }
 
 #[test]
+fn a_hand_written_class_inherits_its_generated_interfaces_entry_point() {
+    // M19 commit 3, the one genuinely new capability: the real
+    // quarkus-super-heroes shape is HeroResource implements HeroesResource,
+    // where every JAX-RS annotation lives on the generated interface and
+    // HeroResource itself carries none at all -- just @Override. Confirmed
+    // against the real repo (2026-09-19): HeroResource.java has a real
+    // `import ...HeroesResource;` (different packages, not same-package
+    // implicit resolution), which the existing resolve_explicit already
+    // handles with no new resolution mechanism. The entry point must be
+    // attributed to HeroResource.java (the hand-written file a spec should
+    // actually describe), not the generated interface.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-onehop",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/HeroResource.java"),
+        "package org.acme;\n\
+         \n\
+         import org.acme.generated.HeroesResource;\n\
+         \n\
+         public class HeroResource implements HeroesResource {\n\
+         \x20   @Override\n\
+         \x20   public Object getRandomHero() {\n\
+         \x20       return null;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("target/generated-sources/foo/org/acme/generated")).unwrap();
+    std::fs::write(
+        dir.join("target/generated-sources/foo/org/acme/generated/HeroesResource.java"),
+        "package org.acme.generated;\n\
+         \n\
+         @jakarta.ws.rs.Path(\"/api/heroes\")\n\
+         public interface HeroesResource {\n\
+         \n\
+         \x20   @jakarta.ws.rs.GET\n\
+         \x20   @jakarta.ws.rs.Path(\"/random\")\n\
+         \x20   public Object getRandomHero();\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    let ep = eps
+        .iter()
+        .find(|e| e.title == "GET /api/heroes/random")
+        .expect("HeroResource must inherit its generated interface's entry point");
+    assert_eq!(ep.kind, "http");
+    assert_eq!(
+        ep.file, "src/main/java/org/acme/HeroResource.java",
+        "attributed to the hand-written implementor, never the generated interface"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve() {
     // FruitEntityResource's real shape: `@Path("entity/fruits")` (no
     // leading slash), a bare `@GET`, a `@GET @Path("{id}")`, a `@POST`
