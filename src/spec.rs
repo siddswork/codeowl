@@ -62,7 +62,7 @@ pub fn is_test_path(graph: &Graph, path: &str) -> bool {
 /// **`FileRole::Generated` is never spec-bearing, regardless of what it
 /// exports (M19).** A build-generated interface (an OpenAPI-codegen'd
 /// JAX-RS resource, a `.proto` stub) can export plenty of real methods —
-/// confirmed against a real `mvn generate-sources` run, `HeroesResource`
+/// confirmed against a real `mvn compile` run, `HeroesResource`
 /// alone has 8 — but it's read-only structural reference, never the
 /// hand-written code a spec describes, per the "only spec the
 /// hand-written code" principle `ARCHITECTURE.md` open question 11
@@ -89,8 +89,9 @@ pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool {
 /// there's nothing honest to report, not a zero. `found: 0` for a pack
 /// that *does* declare them is the actionable signal: this could be a
 /// Quarkus-shaped service with build-generated entry points, and none
-/// were found — has `mvn generate-sources` (or the Gradle equivalent)
-/// been run locally? A full build isn't needed, just that.
+/// were found — has `mvn compile` (or equivalent) been run locally? See
+/// `setup/codeowl-generate.md` for why `mvn generate-sources` alone
+/// isn't enough.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedSourcesSummary {
     pub checked_dirs: Vec<String>,
