@@ -423,8 +423,12 @@ fn extends_panache_entity(signature: &str) -> bool {
 /// general parser: assumes `<`/`>` only ever mean generics here, true
 /// for a class *signature* (`java.rs::signature_before_body`'s output,
 /// which never includes a method body where `<`/`>` could be comparison
-/// operators instead).
-fn strip_angle_bracket_groups(s: &str) -> String {
+/// operators instead). `pub(crate)`, not private: `quarkus.rs`'s
+/// `implemented_interface_names` reuses it for the identical
+/// `implements`-clause parsing job `extends_panache_entity` already does
+/// for `extends` (M19 code review — was hand-rolled there, duplicating
+/// this).
+pub(crate) fn strip_angle_bracket_groups(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut depth = 0i32;
     for c in s.chars() {

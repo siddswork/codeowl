@@ -246,6 +246,184 @@ fn a_hand_written_class_inherits_its_generated_interfaces_entry_point() {
 }
 
 #[test]
+fn implements_clause_names_the_interface_fully_qualified_inline_with_no_import() {
+    // Real shape found dogfooding against quarkus-super-heroes's
+    // rest-narration module (2026-09-20, after mvn generate-sources):
+    // the hand-written class shares its simple name with the interface
+    // it implements (NarrationResource implements ...NarrationResource),
+    // which forces Java's own naming rules to write the interface fully
+    // qualified inline -- `import ...NarrationResource;` would collide
+    // with the enclosing class's own name. There is no ResolvedImport
+    // entry to look up in this case at all, unlike HeroResource's plain
+    // `implements HeroesResource` (a real, separately-imported name).
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-fqn-implements",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme/rest")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/rest/NarrationResource.java"),
+        "package org.acme.rest;\n\
+         \n\
+         public class NarrationResource implements org.acme.api.resources.NarrationResource {\n\
+         \x20   @Override\n\
+         \x20   public String narrate(Object fight) {\n\
+         \x20       return null;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("target/generated-sources/foo/org/acme/api/resources"))
+        .unwrap();
+    std::fs::write(
+        dir.join("target/generated-sources/foo/org/acme/api/resources/NarrationResource.java"),
+        "package org.acme.api.resources;\n\
+         \n\
+         @jakarta.ws.rs.Path(\"/api/narration\")\n\
+         public interface NarrationResource {\n\
+         \n\
+         \x20   @jakarta.ws.rs.POST\n\
+         \x20   public String narrate(Object fight);\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    let ep = eps
+        .iter()
+        .find(|e| e.title == "POST /api/narration")
+        .expect(
+            "an implements clause naming the interface fully qualified inline (no import) \
+             must still resolve",
+        );
+    assert_eq!(
+        ep.file, "src/main/java/org/acme/rest/NarrationResource.java",
+        "attributed to the hand-written implementor, never the generated interface"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_generated_interface_is_found_even_when_not_the_first_implements_name() {
+    // Code-review finding: implemented_interface_name (the first version
+    // of this fix) only ever considered the first name after
+    // `implements`, so `implements Serializable, HeroesResource` would
+    // silently miss HeroesResource entirely -- real, valid Java, even
+    // though no test repo this project has dogfooded happens to order it
+    // this way.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-multi-iface",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/HeroResource.java"),
+        "package org.acme;\n\
+         \n\
+         import org.acme.generated.HeroesResource;\n\
+         \n\
+         public class HeroResource implements java.io.Serializable, HeroesResource {\n\
+         \x20   @Override\n\
+         \x20   public Object getRandomHero() {\n\
+         \x20       return null;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("target/generated-sources/foo/org/acme/generated")).unwrap();
+    std::fs::write(
+        dir.join("target/generated-sources/foo/org/acme/generated/HeroesResource.java"),
+        "package org.acme.generated;\n\
+         \n\
+         @jakarta.ws.rs.Path(\"/api/heroes\")\n\
+         public interface HeroesResource {\n\
+         \n\
+         \x20   @jakarta.ws.rs.GET\n\
+         \x20   @jakarta.ws.rs.Path(\"/random\")\n\
+         \x20   public Object getRandomHero();\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    assert!(
+        eps.iter().any(|e| e.title == "GET /api/heroes/random"),
+        "HeroesResource must still be found when it's the second name in \
+         `implements Serializable, HeroesResource`: {eps:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn method_path_is_inherited_independently_of_an_own_verb_marker() {
+    // Code-review finding: the first version of this fix picked one
+    // whole "marker source" (either `s` or the inherited interface
+    // method) based only on whether `s` had a verb -- so a hand-written
+    // override redeclaring `@GET` but omitting `@Path` (a real,
+    // plausible copy-paste shape) got `s`'s own markers for *both*
+    // checks, silently dropping the inherited `/random` path instead of
+    // falling back to it independently.
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-quarkus-spec-{}-partial-override",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/HeroResource.java"),
+        "package org.acme;\n\
+         \n\
+         import org.acme.generated.HeroesResource;\n\
+         \n\
+         public class HeroResource implements HeroesResource {\n\
+         \x20   @Override\n\
+         \x20   @jakarta.ws.rs.GET\n\
+         \x20   public Object getRandomHero() {\n\
+         \x20       return null;\n\
+         \x20   }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("target/generated-sources/foo/org/acme/generated")).unwrap();
+    std::fs::write(
+        dir.join("target/generated-sources/foo/org/acme/generated/HeroesResource.java"),
+        "package org.acme.generated;\n\
+         \n\
+         @jakarta.ws.rs.Path(\"/api/heroes\")\n\
+         public interface HeroesResource {\n\
+         \n\
+         \x20   @jakarta.ws.rs.GET\n\
+         \x20   @jakarta.ws.rs.Path(\"/random\")\n\
+         \x20   public Object getRandomHero();\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let eps = fm.enumerate_entry_points(&graph);
+
+    let ep = eps
+        .iter()
+        .find(|e| e.file == "src/main/java/org/acme/HeroResource.java")
+        .expect("HeroResource's own @GET must still produce an entry point");
+    assert_eq!(
+        ep.title, "GET /api/heroes/random",
+        "the /random path must be inherited from the interface's matching method even \
+         though HeroResource's own @GET already answered the verb: {eps:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve() {
     // FruitEntityResource's real shape: `@Path("entity/fruits")` (no
     // leading slash), a bare `@GET`, a `@GET @Path("{id}")`, a `@POST`
