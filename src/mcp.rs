@@ -255,6 +255,31 @@ pub struct CoverageResponse {
     /// current-but-smelly — in priority order. See `ARCHITECTURE.md`'s
     /// "Generation priority" and "Quality smells".
     pub pending: Vec<CoverageItemResponse>,
+    /// How many files sit under a known build-generated-source directory
+    /// (M19 — e.g. Maven's `target/generated-sources`), and which
+    /// directories were checked. `None` for a pack with no such
+    /// convention (every pack but Java today) — the concept doesn't
+    /// apply there, so there's nothing honest to report. `found: 0` on a
+    /// pack that *does* declare them is the actionable signal: this repo
+    /// could have build-generated entry points and none were found — has
+    /// `mvn generate-sources` (or the Gradle equivalent) been run
+    /// locally? A full build isn't needed, just that.
+    pub generated_sources: Option<GeneratedSourcesResponse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct GeneratedSourcesResponse {
+    pub checked_dirs: Vec<String>,
+    pub found: usize,
+}
+
+impl From<crate::spec::GeneratedSourcesSummary> for GeneratedSourcesResponse {
+    fn from(s: crate::spec::GeneratedSourcesSummary) -> Self {
+        GeneratedSourcesResponse {
+            checked_dirs: s.checked_dirs,
+            found: s.found,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -1223,7 +1248,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `orphaned` lists spec documents (or, for `kind: \"symbol\"`, sections within an otherwise-fine file spec) whose target no longer exists in the graph at all (a deleted file, a directory that dropped below the rollup threshold, a removed feature entry point, a deleted function whose file is still current) -- these are NOT counted in coverage/freshness/total and never appear in `pending`, since there's nothing left for `/codeowl generate` to regenerate; they're dead weight to delete (a `\"symbol\"` entry prunes itself automatically next time that file is regenerated for any other reason). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide."
+        description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `orphaned` lists spec documents (or, for `kind: \"symbol\"`, sections within an otherwise-fine file spec) whose target no longer exists in the graph at all (a deleted file, a directory that dropped below the rollup threshold, a removed feature entry point, a deleted function whose file is still current) -- these are NOT counted in coverage/freshness/total and never appear in `pending`, since there's nothing left for `/codeowl generate` to regenerate; they're dead weight to delete (a `\"symbol\"` entry prunes itself automatically next time that file is regenerated for any other reason). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. Optionally narrow the file/rollup portion to a directory prefix via `scope` -- features and the system spec are always repo-wide. `generated_sources` (M19) reports how many files sit under a known build-generated-source directory (e.g. Maven's `target/generated-sources`) and which directories were checked -- `null` for a pack with no such convention (every pack but Java today), or `{checked_dirs, found}` for one that has it. `found: 0` is the actionable signal on a repo that could have build-generated entry points: has `mvn generate-sources` (or the Gradle equivalent) been run locally? A full build isn't needed, just that."
     )]
     async fn get_spec_coverage(
         &self,
@@ -1255,6 +1280,8 @@ impl CodeOwlServer {
             .into_iter()
             .map(CoverageItemResponse::from)
             .collect();
+        let generated_sources =
+            crate::spec::generated_sources_summary(&graph).map(GeneratedSourcesResponse::from);
         Ok(Json(CoverageResponse {
             current: summary.current,
             stale: summary.stale,
@@ -1269,6 +1296,7 @@ impl CodeOwlServer {
             top_stale_by_impact,
             orphaned,
             pending,
+            generated_sources,
         }))
     }
 }
@@ -1708,6 +1736,52 @@ mod tests {
             .map(|b| b.generations_remaining)
             .sum();
         assert_eq!(by_kind_total, coverage.generations_remaining);
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_reports_generated_sources_for_java_only() {
+        let server = test_server(&[("src/main/java/org/acme/App.java", "public class App {}\n")]);
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(
+            coverage.generated_sources,
+            Some(GeneratedSourcesResponse {
+                checked_dirs: vec![
+                    "target/generated-sources".to_string(),
+                    "build/generated".to_string()
+                ],
+                found: 0,
+            }),
+            "no generated files present, but Java always declares the convention"
+        );
+
+        let server = test_server(&[
+            ("src/main/java/org/acme/App.java", "public class App {}\n"),
+            (
+                "target/generated-sources/foo/HeroesResource.java",
+                "public interface HeroesResource { void getAllHeroes(); }\n",
+            ),
+        ]);
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(coverage.generated_sources.unwrap().found, 1);
+    }
+
+    #[tokio::test]
+    async fn get_spec_coverage_omits_generated_sources_for_a_non_java_pack() {
+        let server = test_server(&[("a.ts", "export function f(): void {}\n")]);
+        let coverage = server
+            .get_spec_coverage(Parameters(CoverageRequest { scope: None }))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(coverage.generated_sources, None);
     }
 
     #[tokio::test]
