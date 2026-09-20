@@ -201,9 +201,23 @@ target loop above:
    budgeted run should spend on — high-fan-in files first (their
    summaries feed every dependent spec), then feature specs, then the
    long tail of files, then rollups, then test-code file specs, then the
-   system spec last. Each entry's `id` is ready to use as-is: a file
-   path, `feature:<slug>`, `rollup:<dir>`, or `system` —
-   `get_next_spec_task` accepts all of them.
+   system spec last. **`pending` is paginated (M20) — 50 entries per
+   call.** If the response's `next_cursor` is non-null, call
+   `get_spec_coverage` again with `cursor` set to that value, and repeat
+   until `next_cursor` comes back null, concatenating every page's
+   `pending` in order — do this *before* anything below, since the rest
+   of this algorithm assumes it has the whole prioritized list. Stopping
+   after one page on a repo with more than 50 pending documents means
+   silently treating a small slice as the entire backlog and reporting
+   "done" while most of it sits unprocessed — a real failure mode, not a
+   hypothetical one, on any repo past ~50 uncovered documents (confirmed
+   real on `commons-lang`: 622 pending items, 13 pages). Every other
+   field in the response (`missing`, `by_kind`, `by_module`,
+   `top_stale_by_impact`, `orphaned`, `generated_sources`) is already
+   whole-repo on every page — only `pending` needs this walk. Each
+   entry's `id` is ready to use as-is: a file path, `feature:<slug>`,
+   `rollup:<dir>`, or `system` — `get_next_spec_task` accepts all of
+   them.
    - **If `--stale` was given**, drop every `pending` item whose `status`
      is `"missing"` — keep only `"stale"` ones (a spec that exists but
      the code moved underneath it). This *refreshes* the corpus without

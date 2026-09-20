@@ -606,7 +606,7 @@ fn same_package_edges(
         .collect();
 
     let mut out = Vec::new();
-    for (from_file, _) in sorted_files {
+    for (from_file, file_imports) in sorted_files {
         let dir = dir_of(from_file);
         let siblings: Vec<&(&str, SymbolId, &str)> = containers
             .iter()
@@ -619,6 +619,22 @@ fn same_package_edges(
             continue; // file gone (mid-watch delete) or unreadable — skip
         };
         for (name, id, _) in siblings {
+            // An explicit import for this exact simple name shadows the
+            // same-package guess (M16 dogfood finding, commons-lang):
+            // `lang3.Streams` and `lang3.stream.Streams` are two distinct
+            // classes sharing a simple name, so a file that explicitly
+            // imports the *other* one must not also get a same-package
+            // edge to this package's own same-named sibling just because
+            // the bare word appears in its source too — Java's own
+            // resolution rules let an explicit import shadow a
+            // same-package reference unconditionally.
+            if file_imports
+                .imports
+                .iter()
+                .any(|imp| imp.imported_name == *name)
+            {
+                continue;
+            }
             if mentions_identifier(&src, name) {
                 out.push(ResolvedImport {
                     from_file: (*from_file).clone(),
@@ -1026,6 +1042,67 @@ public interface Sized {\n\
                 .iter()
                 .any(|e| e.from_file.ends_with("ObjectUtils.java")
                     && e.imported_name == "StringUtils")
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_explicit_import_shadows_a_same_package_sibling_of_the_same_name() {
+        // Real commons-lang shape (M16 dogfood): lang3.Streams and
+        // lang3.stream.Streams are two distinct classes sharing a simple
+        // name. A file in `com.ex` (standing in for `lang3`) that
+        // explicitly imports the *other* one (`com.ex.stream.Streams`)
+        // and writes `Streams.of(...)` must resolve to that import alone
+        // -- not *also* pick up a same-package implicit edge to this
+        // package's own `Streams`, just because the bare word appears in
+        // its source too.
+        let dir = std::env::temp_dir().join(format!("codeowl-java-shadow-{}", std::process::id()));
+        let pkg = dir.join("src/main/java/com/ex");
+        let subpkg = pkg.join("stream");
+        std::fs::create_dir_all(&subpkg).unwrap();
+
+        let sibling_streams = "package com.ex;\n\
+             public class Streams {\n\
+             static Object of(Object o) { return o; }\n\
+             }\n";
+        let real_streams = "package com.ex.stream;\n\
+             public class Streams {\n\
+             public static Object of(Object o) { return o; }\n\
+             }\n";
+        let caller = "package com.ex;\n\
+             import com.ex.stream.Streams;\n\
+             public class Caller {\n\
+             Object go() { return Streams.of(1); }\n\
+             }\n";
+        std::fs::write(pkg.join("Streams.java"), sibling_streams).unwrap();
+        std::fs::write(subpkg.join("Streams.java"), real_streams).unwrap();
+        std::fs::write(pkg.join("Caller.java"), caller).unwrap();
+
+        let (graph, edges) = resolved(
+            &dir,
+            &[
+                ("src/main/java/com/ex/Streams.java", sibling_streams),
+                ("src/main/java/com/ex/stream/Streams.java", real_streams),
+                ("src/main/java/com/ex/Caller.java", caller),
+            ],
+        );
+
+        let streams_edges: Vec<&ResolvedImport> = edges
+            .iter()
+            .filter(|e| {
+                e.from_file == "src/main/java/com/ex/Caller.java" && e.imported_name == "Streams"
+            })
+            .collect();
+        assert_eq!(
+            streams_edges.len(),
+            1,
+            "an explicit import must fully shadow the same-package guess, not add a second edge: {streams_edges:?}"
+        );
+        assert_eq!(
+            streams_edges[0].target,
+            graph.find("src/main/java/com/ex/stream/Streams.java::Streams"),
+            "the one edge that exists must point to the explicitly-imported Streams, not the same-package sibling"
         );
 
         std::fs::remove_dir_all(&dir).ok();

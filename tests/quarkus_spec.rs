@@ -248,7 +248,7 @@ fn a_hand_written_class_inherits_its_generated_interfaces_entry_point() {
 #[test]
 fn implements_clause_names_the_interface_fully_qualified_inline_with_no_import() {
     // Real shape found dogfooding against quarkus-super-heroes's
-    // rest-narration module (2026-09-20, after mvn generate-sources):
+    // rest-narration module (2026-09-20, after a real mvn compile):
     // the hand-written class shares its simple name with the interface
     // it implements (NarrationResource implements ...NarrationResource),
     // which forces Java's own naming rules to write the interface fully

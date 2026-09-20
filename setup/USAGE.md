@@ -75,13 +75,23 @@ you rely on an answer:
   (nothing generated yet), `current`, or `stale` (last-known-good content
   returned, plus `changed` naming what moved). `smells` flags weak prose
   independent of `status`.
-- **`get_spec_coverage(scope?)`** — the repo's spec inventory,
+- **`get_spec_coverage(scope?, cursor?)`** — the repo's spec inventory,
   current/stale/missing/smelly, plus `coverage` (what fraction has *any*
   spec) and `freshness` (of what exists, what fraction still matches the
   code) as two separate axes. Returns `pending`, the priority-ordered
   worklist `--all` spends down, and `generations_remaining`, the real
   `--budget=N` a full run would cost. `scope` narrows the file/rollup
-  portion to a directory prefix.
+  portion to a directory prefix. **`pending` is paginated** — 50 entries
+  per call; `next_cursor` (non-null when there's more) is what you pass
+  back as `cursor` for the next page. If you ask conversationally ("call
+  `get_spec_coverage`", "what's the coverage") rather than running
+  `/codeowl-generate`, the agent answering you decides how much of
+  `pending` to show — a short summary (coverage %, top-impact files) is
+  often the right call, but it should say when there's more beyond what
+  it's showing, not just quietly leave it out. Every other field
+  (`missing`, `by_kind`, `by_module`, `top_stale_by_impact`, `orphaned`)
+  is already whole-repo regardless of pagination — only `pending` itself
+  is paged.
 - **`get_next_spec_task(target)`** / **`submit_spec(id, content)`** — the
   generation loop's two halves: the first hands back the next uncovered
   unit with its source and dependency specs pre-assembled, the second
