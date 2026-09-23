@@ -321,6 +321,58 @@ Two places, with opposite lifecycles:
 
 ---
 
+## Frequently asked questions
+
+- **How does the graph know when I change code — is it on a timer, or does
+  it rescan on every question?** Neither. An in-process file watcher
+  reindexes incrementally the moment a file changes on disk (the ~1s figure
+  above), plus a one-time catch-up pass on server start that hash-checks
+  everything against `.codeowl/index` to cover changes made while nothing
+  was running. The *graph* updates live; *specs* don't — regenerating is
+  always the explicit `/codeowl-generate` step, never a side effect of
+  reading.
+- **If I hand-edit a spec, does the next regeneration overwrite my fix?**
+  No. Each spec carries two hashes — one for the source it describes, one
+  for CodeOwl's own last-written prose. A mismatch on only the second means
+  a human touched the text and the code didn't move, so the edit simply
+  becomes the current spec. If the code changed too, your edit is fed back
+  to the agent as the prior version to preserve and adjust, not silently
+  discarded.
+- **Does this hold up on a large monorepo?** Phase 1 is scoped to
+  laptop-scale — a fresh clone hash-checks and parses once, then every
+  later change is incremental (see "What CodeOwl stores" above). A
+  heavier, shared-instance mode (index a whole org's repo centrally, update
+  on push/merge) is a later phase, not something Phase 1 pretends to
+  already be.
+- **How does `smelly` actually get caught, beyond hashes matching?** A
+  deterministic, non-LLM check (`prose_smells`) — a denylist of cop-out
+  phrases ("see the source") plus a word-count floor — runs on both ends:
+  reading a spec surfaces it as `smells` independent of `status`, and
+  `submit_spec` runs the same check as a write gate, so a resubmission loop
+  of equally-thin prose is rejected outright.
+- **Can CodeOwl hallucinate a signature or dependency list?** No,
+  structurally — neither is LLM output. The signature comes from
+  extraction, the dependency list from resolved graph edges; CodeOwl writes
+  both into the document itself. The agent only ever writes
+  purpose/behavior/side-effects/failure-mode prose, which is also why the
+  staleness hash covers only that prose, never the deterministic lines.
+- **If I delete a file, does its old spec just sit there looking current?**
+  No — that's a third bucket, `orphaned`, distinct from `stale`. A spec
+  goes `stale` when its target still exists but moved; it becomes
+  `orphaned` when the target is gone entirely (a deleted file, a removed
+  route). Orphaned specs are excluded from `coverage`/`freshness`/`pending`
+  — flagged as dead weight, never mistaken for a real gap.
+- **If I change one widely-shared utility, does that cascade into
+  regenerating half the repo?** No — invalidation propagates exactly one
+  hop, keyed on a symbol's public shape (`interface_hash`), not its
+  implementation. Changing what a function *does* invalidates nothing
+  downstream unless its signature also changed, and even then only its
+  direct importers go stale, not theirs in turn. `/codeowl-generate` also
+  enforces a hard cap on how many nodes one run will regenerate before it
+  stops and reports instead of continuing silently.
+
+---
+
 ## What Phase 1 does *not* do
 
 - **Four stacks so far** — TypeScript + Next.js + SQL, Rust, Java, or
