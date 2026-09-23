@@ -333,6 +333,37 @@ Two places, with opposite lifecycles:
   *graph* updates live; *specs* don't — regenerating is always the
   explicit `/codeowl-generate` step, never a side effect of reading.
 
+- **What does `.codeowl/index` actually do — isn't `.codeowl/graph`
+  enough on its own?**
+
+  `.codeowl/index` is the raw, per-file parse cache the graph gets
+  rebuilt from every time — not a second copy of the graph. One entry
+  per file, keyed by its relative path:
+
+  | field | what it holds |
+  |---|---|
+  | `source_hash` | a hash of that file's raw text — the diff key |
+  | `symbols` | the file's parsed symbols, before cross-file resolution |
+  | `imports` | the file's raw import statements, not yet resolved to a target |
+  | `flow_edges` | raw, unresolved flow-edge strings (a `fetch(...)`, a `.from(...)`) |
+
+  On a fresh server start, CodeOwl hash-checks every file on disk against
+  the cached `source_hash` and re-parses only what's new or changed —
+  an unchanged file reuses its cached symbols/imports/flow-edges, no
+  re-parsing at all. The in-session file watcher does the same
+  hash-check-and-re-extract, driven by filesystem events instead of a
+  walk.
+
+  `.codeowl/graph`, by contrast, is never diffed incrementally — it's
+  thrown away and rebuilt from scratch out of whatever's currently in
+  the index, every time. That's cheap because resolving imports and
+  flow edges across already-parsed files is fast; it's the parsing
+  itself (walking raw source) that's expensive. So only the index needs
+  hash-diffing logic — the graph doesn't, because it's disposable and
+  trivially regenerable from the index. Same safety net as the graph: a
+  format or stack-pack mismatch discards the cache and falls back to a
+  full walk, rather than trusting a partially-compatible one.
+
 - **If I hand-edit a spec, does the next regeneration overwrite my fix?**
 
   No. Each spec carries two hashes — one for the source it describes, one
