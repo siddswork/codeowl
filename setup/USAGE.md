@@ -400,72 +400,34 @@ Two places, with opposite lifecycles:
   `jq '.nodes | map(keys[0]) | unique' .codeowl/graph` returns
   `["File", "Symbol"]`.
 
-  A **File** entry is deliberately thin:
+  A **File** entry is deliberately thin — just three fields:
 
-  ```
-  File {
-    id            the file's path, relative to the repo root
-                    example: "src/graph.rs"
-    source_hash   a hash of the file's whole raw text — moves if even
-                  one character changes
-                    example: changes the instant you save any edit to
-                    this file, no matter how small
-    children      the top-level symbols this file declares, in the
-                  order they appear
-                    example: ["src/graph.rs::Graph", "src/graph.rs::FileNode"]
-  }
-  ```
+  | field | what it means | example |
+  |---|---|---|
+  | `id` | the file's path, relative to the repo root | `"src/graph.rs"` |
+  | `source_hash` | a hash of the file's whole raw text — moves if even one character changes | changes the instant you save any edit to this file, no matter how small |
+  | `children` | the top-level symbols this file declares, in the order they appear | `["src/graph.rs::Graph", "src/graph.rs::FileNode"]` |
 
   No signature, no docstring, no export flag — a file doesn't have any
   of those on its own.
 
   A **Symbol** entry carries the full record:
 
-  ```
-  Symbol {
-    id              this symbol's stable, permanent name
-                      example: "src/graph.rs::Graph::build"
-    kind            which of 4 generic buckets it falls into —
-                    Container, Callable, Value, or Schema
-                      example: "Callable", since build is a function
-    raw             the exact keyword the parser actually saw, kept
-                    only for display
-                      example: "fn" in Rust, "class" in TypeScript/Java
-    file            which file this symbol lives in
-                      example: "src/graph.rs"
-    lines           the start and end line numbers it occupies
-                      example: [45, 62]
-    signature       its parameter list and return type (for a
-                    function), or its declared shape (for a type)
-                      example: "fn build(files: Vec<FileExtraction>) -> Self"
-    docstring       the doc comment written directly above it, if any
-                      example: "Builds a Graph from every file's symbols."
-    is_exported     whether code outside this file could ever import
-                    it — always false for a method
-                      example: true for a public struct, false for a
-                      private helper function
-    source_hash     a hash of this symbol's own text — for a class,
-                    folded together with every method's hash too
-                      example: moves the moment you edit so much as a
-                      comment inside the function body
-    interface_hash  a hash of just the public shape — the signature
-                    only, never the body; empty if is_exported is false
-                      example: stays the same if you rename a local
-                      variable inside the function, changes if you add
-                      a parameter
-    markers         any annotations on the declaration, kept as plain
-                    text
-                      example: ["@Path(\"/users\")"] for a Java
-                      endpoint, or empty for a plain function with none
-    parent          which symbol directly contains this one — its
-                    class, or its file if it's top-level
-                      example: the CheckoutHandler class this method
-                      belongs to
-    children        the symbols this one directly contains
-                      example: a class's list of methods; empty for a
-                      plain function
-  }
-  ```
+  | field | what it means | example |
+  |---|---|---|
+  | `id` | this symbol's stable, permanent name | `"src/graph.rs::Graph::build"` |
+  | `kind` | which of 4 generic buckets it falls into — `Container`, `Callable`, `Value`, or `Schema` | `Callable`, since `build` is a function |
+  | `raw` | the exact keyword the parser actually saw, kept only for display | `"fn"` in Rust, `"class"` in TypeScript/Java |
+  | `file` | which file this symbol lives in | `"src/graph.rs"` |
+  | `lines` | the start and end line numbers it occupies | `[45, 62]` |
+  | `signature` | its parameter list and return type (for a function), or its declared shape (for a type) | `"fn build(files: Vec<FileExtraction>) -> Self"` |
+  | `docstring` | the doc comment written directly above it, if any | `"Builds a Graph from every file's symbols."` |
+  | `is_exported` | whether code outside this file could ever import it — always `false` for a method | `true` for a public struct, `false` for a private helper function |
+  | `source_hash` | a hash of this symbol's own text — for a class, folded together with every method's hash too | moves the moment you edit so much as a comment inside the function body |
+  | `interface_hash` | a hash of just the public shape — the signature only, never the body; empty if `is_exported` is false | stays the same if you rename a local variable inside the function, changes if you add a parameter |
+  | `markers` | any annotations on the declaration, kept as plain text | `["@Path(\"/users\")"]` for a Java endpoint, or empty for a plain function with none |
+  | `parent` | which symbol directly contains this one — its class, or its file if it's top-level | the `CheckoutHandler` class this method belongs to |
+  | `children` | the symbols this one directly contains | a class's list of methods; empty for a plain function |
 
   Within `Symbol` entries there's a second, lighter distinction —
   `kind` is just a tag, not a different shape. The 4 values:
