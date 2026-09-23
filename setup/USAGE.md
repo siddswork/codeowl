@@ -540,9 +540,12 @@ Two places, with opposite lifecycles:
 
   That's the whole trick — this "sticker" is `source_hash`, and a
   change anywhere inside ripples upward through every container above
-  it, one level at a time. It's why CodeOwl can answer "did anything
-  change under here?" by checking one hash instead of opening every
-  method individually — the same trick Git uses for its tree objects.
+  it, one level at a time. CodeOwl's own name for this is a **Merkle
+  fold** (also called a rollup hash — see `GLOSSARY.md`), after Ralph
+  Merkle's 1979 "Merkle tree": the same construction Git uses for its
+  tree objects and Bitcoin uses for a block's transactions. It's why
+  CodeOwl can answer "did anything change under here?" by checking one
+  hash instead of opening every method individually.
 
   **Order counts too.** Reorder `addItem` and `removeItem` with zero
   logic changes — each method's own sticker is identical, but the
