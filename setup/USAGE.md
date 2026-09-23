@@ -457,35 +457,6 @@ Two places, with opposite lifecycles:
   many nodes one run will regenerate before it stops and reports instead
   of continuing silently.
 
-- **A container's `source_hash` "folds in" its members — what does that
-  actually mean, and does `interface_hash` work the same way?**
-
-  It's a Merkle-style rollup: a class's `source_hash` isn't a hash of
-  just its own signature — it's a hash of that signature *plus every
-  member's `source_hash`, concatenated in declaration order*. So an edit
-  anywhere inside a method moves that method's hash, which moves the
-  class's hash too, all the way up the containment tree — the same trick
-  Git uses for tree objects, letting one hash comparison at the top
-  stand in for checking every descendant. Order matters too: reordering
-  two methods without touching either one still moves the class's
-  `source_hash`.
-
-  `interface_hash` deliberately does **not** fold this way — a class's
-  `interface_hash` only reflects the class's own declared shape, never
-  its members' bodies or signatures, because nothing yet resolves at
-  method-call granularity to need that (only file-to-file import edges
-  are resolved today). So adding a method, or editing deep inside one,
-  moves the class's `source_hash` but leaves its `interface_hash`
-  untouched — which is exactly why a caller only ever goes stale on a
-  real signature change, never an internal one.
-
-  One thing worth flagging rather than assuming: `ARCHITECTURE.md`'s
-  design notes also describe a *second*, file-level Merkle fold — a
-  file's `interface_hash` as the hash of its exported children's
-  `interface_hash`es. That one isn't actually implemented; a file node
-  has no `interface_hash` field at all. The real, shipped fold is
-  `source_hash`-only, at the class→method level.
-
 - **Are all nodes in the graph the same shape, or are there different
   types?**
 
@@ -538,6 +509,64 @@ Two places, with opposite lifecycles:
   Rust `struct` and a Java `class` both land as `kind: Container` with
   a different `raw` — the pipeline only ever branches on `kind`, never
   `raw`.
+
+- **A container's `source_hash` "folds in" its members — what does that
+  actually mean, and does `interface_hash` work the same way?**
+
+  Picture a big box labeled `ShoppingCart` containing three smaller
+  boxes: `addItem`, `removeItem`, `checkout`. Each small box has a
+  sticker — a fingerprint of what's inside it. The big box's own
+  sticker isn't just about its own wrapping paper; it's computed by
+  gluing the three small boxes' stickers together and fingerprinting
+  *that*:
+
+  ```
+  addItem's sticker:    A1
+  removeItem's sticker: B2
+  checkout's sticker:   C3
+  ShoppingCart's sticker = fingerprint("A1" + "B2" + "C3")  →  X9
+  ```
+
+  Edit `checkout()`'s body (say, add a discount calculation) and its
+  own sticker changes — `C3` becomes `C3-NEW`. Nobody touched `addItem`
+  or `removeItem`, so their stickers stay the same. But `ShoppingCart`'s
+  sticker was glued together *from* all three — one ingredient just
+  changed, so `ShoppingCart`'s sticker changes too, even though its own
+  outer code never moved:
+
+  ```
+  ShoppingCart's sticker = fingerprint("A1" + "B2" + "C3-NEW")  →  X9-NEW
+  ```
+
+  That's the whole trick — this "sticker" is `source_hash`, and a
+  change anywhere inside ripples upward through every container above
+  it, one level at a time. It's why CodeOwl can answer "did anything
+  change under here?" by checking one hash instead of opening every
+  method individually — the same trick Git uses for its tree objects.
+
+  **Order counts too.** Reorder `addItem` and `removeItem` with zero
+  logic changes — each method's own sticker is identical, but the
+  *glued-together order* is different (`"B2"+"A1"+"C3"` instead of
+  `"A1"+"B2"+"C3"`), so `ShoppingCart`'s sticker still changes.
+
+  **`interface_hash` is a different sticker that deliberately skips
+  this.** `source_hash` asks *"did anything change at all, even
+  something invisible from outside the box?"*; `interface_hash` asks
+  *"did what this box promises to the outside world change?"* — only
+  the box's own label (what `checkout()` accepts and returns), never
+  what's inside the smaller boxes. Rewrite `checkout()`'s internals
+  without touching its parameters or return type, and `source_hash`
+  moves but `interface_hash` doesn't — which is exactly why a function
+  calling `ShoppingCart.checkout()` never goes stale over an internal
+  rewrite; it only cares about the promise, and the promise didn't
+  change.
+
+  One thing worth flagging rather than assuming: `ARCHITECTURE.md`'s
+  design notes also describe a *second*, file-level fold — a file's
+  `interface_hash` as the hash of its exported children's
+  `interface_hash`es. That one isn't actually implemented; a file node
+  has no `interface_hash` field at all. The real, shipped fold is
+  `source_hash`-only, at the class→method level.
 
 ---
 
