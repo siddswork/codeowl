@@ -321,6 +321,258 @@ Two places, with opposite lifecycles:
 
 ---
 
+## Frequently asked questions
+
+- **How does the graph know when I change code — is it on a timer, or does
+  it rescan on every question?**
+
+  Neither. An in-process file watcher reindexes incrementally the moment a
+  file changes on disk (the ~1s figure above), plus a one-time catch-up
+  pass on server start that hash-checks everything against
+  `.codeowl/index` to cover changes made while nothing was running. The
+  *graph* updates live; *specs* don't — regenerating is always the
+  explicit `/codeowl-generate` step, never a side effect of reading.
+
+- **What does `.codeowl/index` actually do — isn't `.codeowl/graph`
+  enough on its own?**
+
+  `.codeowl/index` is the raw, per-file parse cache the graph gets
+  rebuilt from every time — not a second copy of the graph. One entry
+  per file, keyed by its relative path:
+
+  | field | what it holds |
+  |---|---|
+  | `source_hash` | a hash of that file's raw text — the diff key |
+  | `symbols` | the file's parsed symbols, before cross-file resolution |
+  | `imports` | the file's raw import statements, not yet resolved to a target |
+  | `flow_edges` | raw, unresolved flow-edge strings (a `fetch(...)`, a `.from(...)`) |
+
+  On a fresh server start, CodeOwl hash-checks every file on disk against
+  the cached `source_hash` and re-parses only what's new or changed —
+  an unchanged file reuses its cached symbols/imports/flow-edges, no
+  re-parsing at all. The in-session file watcher does the same
+  hash-check-and-re-extract, driven by filesystem events instead of a
+  walk.
+
+  `.codeowl/graph`, by contrast, is never diffed incrementally — it's
+  thrown away and rebuilt from scratch out of whatever's currently in
+  the index, every time. That's cheap because resolving imports and
+  flow edges across already-parsed files is fast; it's the parsing
+  itself (walking raw source) that's expensive. So only the index needs
+  hash-diffing logic — the graph doesn't, because it's disposable and
+  trivially regenerable from the index. Same safety net as the graph: a
+  format or stack-pack mismatch discards the cache and falls back to a
+  full walk, rather than trusting a partially-compatible one.
+
+- **When several files change at once (e.g. a `git pull` while the
+  server's already running), does each file trigger its own rebuild?**
+
+  No — they're batched. The watcher collapses every filesystem event
+  that lands within 300ms of the last one into a single pass, so a
+  pull touching a dozen files becomes one rebuild, not a dozen. Within
+  that batch, only files whose on-disk hash actually differs from
+  what's cached get re-parsed; a file merely touched with identical
+  content is skipped entirely. If nothing in the whole batch actually
+  changed content, nothing happens — no rebuild, no write to disk.
+
+  When something *did* change, the rebuild re-persists **both** files,
+  not just the graph — `.codeowl/graph` and `.codeowl/index` are each
+  fully rewritten to disk on every rebuild, not only the graph. The
+  freshly rebuilt graph is also pushed into the running server's live
+  view through an atomic pointer swap (`ArcSwap`), so a tool call
+  that's already in flight — or arrives a moment later — always reads
+  either the fully-old or fully-new graph, never something
+  half-updated.
+
+- **Once the graph is fresh, how does CodeOwl actually decide a
+  *spec* has gone stale — against the graph, the index, or both?**
+
+  Just the graph — the index never enters a staleness check; its only
+  job is producing the graph, upstream of this. Every status check
+  compares two values, computed fresh, against two values recorded in
+  the spec's own frontmatter:
+
+  | | computed fresh, right now | recorded in the spec's frontmatter |
+  |---|---|---|
+  | own text | `source_hash`, read straight off the graph node | `source_hash` |
+  | dependencies | a hash walked over everything the symbol currently depends on, using their *current* `interface_hash` values | `deps_hash` |
+
+  `deps_hash` is never a stored graph field on either side — the
+  "current" side is recomputed from scratch on every single `get_spec`
+  or `get_spec_coverage` call; it only gets *persisted* once, into the
+  spec's frontmatter, when `submit_spec` last wrote it. So the real
+  mechanism isn't "compare two cached numbers" — it's "recompute two
+  values fresh from the current graph, and compare them against what
+  the spec last recorded."
+
+- **If I hand-edit a spec, does the next regeneration overwrite my fix?**
+
+  No. Each spec carries two hashes — one for the source it describes, one
+  for CodeOwl's own last-written prose. A mismatch on only the second
+  means a human touched the text and the code didn't move, so the edit
+  simply becomes the current spec. If the code changed too, your edit is
+  fed back to the agent as the prior version to preserve and adjust, not
+  silently discarded.
+
+- **Does this hold up on a large monorepo?**
+
+  Phase 1 is scoped to laptop-scale — a fresh clone hash-checks and
+  parses once, then every later change is incremental (see "What CodeOwl
+  stores" above). A heavier, shared-instance mode (index a whole org's
+  repo centrally, update on push/merge) is a later phase, not something
+  Phase 1 pretends to already be.
+
+- **How does `smelly` actually get caught, beyond hashes matching?**
+
+  A deterministic, non-LLM check (`prose_smells`) — a denylist of cop-out
+  phrases ("see the source") plus a word-count floor — runs on both ends:
+  reading a spec surfaces it as `smells` independent of `status`, and
+  `submit_spec` runs the same check as a write gate, so a resubmission
+  loop of equally-thin prose is rejected outright.
+
+- **Can CodeOwl hallucinate a signature or dependency list?**
+
+  No, structurally — neither is LLM output. The signature comes from
+  extraction, the dependency list from resolved graph edges; CodeOwl
+  writes both into the document itself. The agent only ever writes
+  purpose/behavior/side-effects/failure-mode prose, which is also why the
+  staleness hash covers only that prose, never the deterministic lines.
+
+- **If I delete a file, does its old spec just sit there looking current?**
+
+  No — that's a third bucket, `orphaned`, distinct from `stale`. A spec
+  goes `stale` when its target still exists but moved; it becomes
+  `orphaned` when the target is gone entirely (a deleted file, a removed
+  route). Orphaned specs are excluded from `coverage`/`freshness`/`pending`
+  — flagged as dead weight, never mistaken for a real gap.
+
+- **If I change one widely-shared utility, does that cascade into
+  regenerating half the repo?**
+
+  No — invalidation propagates exactly one hop, keyed on a symbol's
+  public shape (`interface_hash`), not its implementation. Changing what
+  a function *does* invalidates nothing downstream unless its signature
+  also changed, and even then only its direct importers go stale, not
+  theirs in turn. `/codeowl-generate` also enforces a hard cap on how
+  many nodes one run will regenerate before it stops and reports instead
+  of continuing silently.
+
+- **Are all nodes in the graph the same shape, or are there different
+  types?**
+
+  Two shapes, not one. Every entry in `.codeowl/graph`'s `nodes` array is
+  tagged as exactly one of two kinds — never both, never a third:
+
+  - **Symbol** — a class, function, method, database table, or anything
+    else actually declared in the code
+  - **File** — the file itself, a lighter entry that just anchors the
+    symbols inside it
+
+  You can see the split yourself:
+  `jq '.nodes | map(keys[0]) | unique' .codeowl/graph` returns
+  `["File", "Symbol"]`.
+
+  A **File** entry is deliberately thin — just three fields:
+
+  | field | what it means | example |
+  |---|---|---|
+  | `id` | the file's path, relative to the repo root | `"src/graph.rs"` |
+  | `source_hash` | a hash of the file's whole raw text — moves if even one character changes | changes the instant you save any edit to this file, no matter how small |
+  | `children` | the top-level symbols this file declares, in the order they appear | `["src/graph.rs::Graph", "src/graph.rs::FileNode"]` |
+
+  No signature, no docstring, no export flag — a file doesn't have any
+  of those on its own.
+
+  A **Symbol** entry carries the full record:
+
+  | field | what it means | example |
+  |---|---|---|
+  | `id` | this symbol's stable, permanent name | `"src/graph.rs::Graph::build"` |
+  | `kind` | which of 4 generic buckets it falls into — `Container`, `Callable`, `Value`, or `Schema` | `Callable`, since `build` is a function |
+  | `raw` | the exact keyword the parser actually saw, kept only for display | `"fn"` in Rust, `"class"` in TypeScript/Java |
+  | `file` | which file this symbol lives in | `"src/graph.rs"` |
+  | `lines` | the start and end line numbers it occupies | `[45, 62]` |
+  | `signature` | its parameter list and return type (for a function), or its declared shape (for a type) | `"fn build(files: Vec<FileExtraction>) -> Self"` |
+  | `docstring` | the doc comment written directly above it, if any | `"Builds a Graph from every file's symbols."` |
+  | `is_exported` | whether code outside this file could ever import it — always `false` for a method | `true` for a public struct, `false` for a private helper function |
+  | `source_hash` | a hash of this symbol's own text — for a class, folded together with every method's hash too | moves the moment you edit so much as a comment inside the function body |
+  | `interface_hash` | a hash of just the public shape — the signature only, never the body; empty if `is_exported` is false | stays the same if you rename a local variable inside the function, changes if you add a parameter |
+  | `markers` | any annotations on the declaration, kept as plain text | `["@Path(\"/users\")"]` for a Java endpoint, or empty for a plain function with none |
+  | `parent` | which symbol directly contains this one — its class, or its file if it's top-level | the `CheckoutHandler` class this method belongs to |
+  | `children` | the symbols this one directly contains | a class's list of methods; empty for a plain function |
+
+  Within `Symbol` entries there's a second, lighter distinction —
+  `kind` is just a tag, not a different shape. The 4 values:
+  **Container** (a class/struct/enum — has members), **Callable** (a
+  function or method), **Value** (a `const`/`static` — no spec of its
+  own), **Schema** (a SQL table — resolvable, never spec-bearing). A
+  Rust `struct` and a Java `class` both land as `kind: Container` with
+  a different `raw` — the pipeline only ever branches on `kind`, never
+  `raw`.
+
+- **A container's `source_hash` "folds in" its members — what does that
+  actually mean, and does `interface_hash` work the same way?**
+
+  Picture a big box labeled `ShoppingCart` containing three smaller
+  boxes: `addItem`, `removeItem`, `checkout`. Each small box has a
+  sticker — a fingerprint of what's inside it. The big box's own
+  sticker isn't just about its own wrapping paper; it's computed by
+  gluing the three small boxes' stickers together and fingerprinting
+  *that*:
+
+  ```
+  addItem's sticker:    A1
+  removeItem's sticker: B2
+  checkout's sticker:   C3
+  ShoppingCart's sticker = fingerprint("A1" + "B2" + "C3")  →  X9
+  ```
+
+  Edit `checkout()`'s body (say, add a discount calculation) and its
+  own sticker changes — `C3` becomes `C3-NEW`. Nobody touched `addItem`
+  or `removeItem`, so their stickers stay the same. But `ShoppingCart`'s
+  sticker was glued together *from* all three — one ingredient just
+  changed, so `ShoppingCart`'s sticker changes too, even though its own
+  outer code never moved:
+
+  ```
+  ShoppingCart's sticker = fingerprint("A1" + "B2" + "C3-NEW")  →  X9-NEW
+  ```
+
+  That's the whole trick — this "sticker" is `source_hash`, and a
+  change anywhere inside ripples upward through every container above
+  it, one level at a time. CodeOwl's own name for this is a **Merkle
+  fold** (also called a rollup hash — see `GLOSSARY.md`), after Ralph
+  Merkle's 1979 "Merkle tree": the same construction Git uses for its
+  tree objects and Bitcoin uses for a block's transactions. It's why
+  CodeOwl can answer "did anything change under here?" by checking one
+  hash instead of opening every method individually.
+
+  **Order counts too.** Reorder `addItem` and `removeItem` with zero
+  logic changes — each method's own sticker is identical, but the
+  *glued-together order* is different (`"B2"+"A1"+"C3"` instead of
+  `"A1"+"B2"+"C3"`), so `ShoppingCart`'s sticker still changes.
+
+  **`interface_hash` is a different sticker that deliberately skips
+  this.** `source_hash` asks *"did anything change at all, even
+  something invisible from outside the box?"*; `interface_hash` asks
+  *"did what this box promises to the outside world change?"* — only
+  the box's own label (what `checkout()` accepts and returns), never
+  what's inside the smaller boxes. Rewrite `checkout()`'s internals
+  without touching its parameters or return type, and `source_hash`
+  moves but `interface_hash` doesn't — which is exactly why a function
+  calling `ShoppingCart.checkout()` never goes stale over an internal
+  rewrite; it only cares about the promise, and the promise didn't
+  change.
+
+  One thing worth flagging rather than assuming: `ARCHITECTURE.md`'s
+  design notes also describe a *second*, file-level fold — a file's
+  `interface_hash` as the hash of its exported children's
+  `interface_hash`es. That one isn't actually implemented; a file node
+  has no `interface_hash` field at all. The real, shipped fold is
+  `source_hash`-only, at the class→method level.
+
+---
+
 ## What Phase 1 does *not* do
 
 - **Four stacks so far** — TypeScript + Next.js + SQL, Rust, Java, or
