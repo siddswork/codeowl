@@ -416,6 +416,35 @@ Two places, with opposite lifecycles:
   many nodes one run will regenerate before it stops and reports instead
   of continuing silently.
 
+- **A container's `source_hash` "folds in" its members — what does that
+  actually mean, and does `interface_hash` work the same way?**
+
+  It's a Merkle-style rollup: a class's `source_hash` isn't a hash of
+  just its own signature — it's a hash of that signature *plus every
+  member's `source_hash`, concatenated in declaration order*. So an edit
+  anywhere inside a method moves that method's hash, which moves the
+  class's hash too, all the way up the containment tree — the same trick
+  Git uses for tree objects, letting one hash comparison at the top
+  stand in for checking every descendant. Order matters too: reordering
+  two methods without touching either one still moves the class's
+  `source_hash`.
+
+  `interface_hash` deliberately does **not** fold this way — a class's
+  `interface_hash` only reflects the class's own declared shape, never
+  its members' bodies or signatures, because nothing yet resolves at
+  method-call granularity to need that (only file-to-file import edges
+  are resolved today). So adding a method, or editing deep inside one,
+  moves the class's `source_hash` but leaves its `interface_hash`
+  untouched — which is exactly why a caller only ever goes stale on a
+  real signature change, never an internal one.
+
+  One thing worth flagging rather than assuming: `ARCHITECTURE.md`'s
+  design notes also describe a *second*, file-level Merkle fold — a
+  file's `interface_hash` as the hash of its exported children's
+  `interface_hash`es. That one isn't actually implemented; a file node
+  has no `interface_hash` field at all. The real, shipped fold is
+  `source_hash`-only, at the class→method level.
+
 - **Are all nodes in the graph the same shape, or are there different
   types?**
 
