@@ -364,6 +364,47 @@ Two places, with opposite lifecycles:
   format or stack-pack mismatch discards the cache and falls back to a
   full walk, rather than trusting a partially-compatible one.
 
+- **When several files change at once (e.g. a `git pull` while the
+  server's already running), does each file trigger its own rebuild?**
+
+  No — they're batched. The watcher collapses every filesystem event
+  that lands within 300ms of the last one into a single pass, so a
+  pull touching a dozen files becomes one rebuild, not a dozen. Within
+  that batch, only files whose on-disk hash actually differs from
+  what's cached get re-parsed; a file merely touched with identical
+  content is skipped entirely. If nothing in the whole batch actually
+  changed content, nothing happens — no rebuild, no write to disk.
+
+  When something *did* change, the rebuild re-persists **both** files,
+  not just the graph — `.codeowl/graph` and `.codeowl/index` are each
+  fully rewritten to disk on every rebuild, not only the graph. The
+  freshly rebuilt graph is also pushed into the running server's live
+  view through an atomic pointer swap (`ArcSwap`), so a tool call
+  that's already in flight — or arrives a moment later — always reads
+  either the fully-old or fully-new graph, never something
+  half-updated.
+
+- **Once the graph is fresh, how does CodeOwl actually decide a
+  *spec* has gone stale — against the graph, the index, or both?**
+
+  Just the graph — the index never enters a staleness check; its only
+  job is producing the graph, upstream of this. Every status check
+  compares two values, computed fresh, against two values recorded in
+  the spec's own frontmatter:
+
+  | | computed fresh, right now | recorded in the spec's frontmatter |
+  |---|---|---|
+  | own text | `source_hash`, read straight off the graph node | `source_hash` |
+  | dependencies | a hash walked over everything the symbol currently depends on, using their *current* `interface_hash` values | `deps_hash` |
+
+  `deps_hash` is never a stored graph field on either side — the
+  "current" side is recomputed from scratch on every single `get_spec`
+  or `get_spec_coverage` call; it only gets *persisted* once, into the
+  spec's frontmatter, when `submit_spec` last wrote it. So the real
+  mechanism isn't "compare two cached numbers" — it's "recompute two
+  values fresh from the current graph, and compare them against what
+  the spec last recorded."
+
 - **If I hand-edit a spec, does the next regeneration overwrite my fix?**
 
   No. Each spec carries two hashes — one for the source it describes, one
