@@ -1,14 +1,14 @@
 # exp-04 — What makes a coding agent actually rely on CodeOwl
 
-**Status:** spike, on paper. Written before M21/M22 freeze any tool signature or extraction shape.
-**Feeds:** M21 (`get_source` + `search_code` ergonomics), M22 (member-level extraction), `ARCHITECTURE.md` open question 12, and the reframed `tantivy`/ONNX deferral in `ROADMAP.md`.
+**Status:** spike, on paper. Written before M20/M21 freeze any tool signature or extraction shape.
+**Feeds:** M20 (`get_source` + `search_code` ergonomics), M21 (member-level extraction), `ARCHITECTURE.md` open question 12, and the reframed `tantivy`/ONNX deferral in `ROADMAP.md`.
 **Not a decision doc** — its conclusions fold into `ARCHITECTURE.md` (§1, §4, §7, open question 12) and each milestone's own plan as it starts. Where this file and those disagree, they win.
 
 ---
 
 ## Why this spike exists
 
-Every milestone through M20 optimizes one loop: **generate a spec corpus, serve it to a reader.** That loop is built, validated, and working.
+Every milestone through M19 optimizes one loop: **generate a spec corpus, serve it to a reader.** That loop is built, validated, and working.
 
 This spike starts from the other end — not "is the corpus good" but **"when an agent is mid-task in a repo with CodeOwl connected and current, does it actually use it?"** — and the honest answer, observed directly rather than assumed, is: not much.
 
@@ -34,7 +34,7 @@ Not a survey — the real calls made in one working session, each classified by 
 
 A claim about a function's **behavior**, being checked before it got written into a document. `get_symbol` returns `signature` (the text *before* the body), `docstring`, `lines`, hashes, `children`. The body is not in the graph and no tool serves it. → `Read`.
 
-`get_spec` is not the substitute, and this is the distinction the whole of M21 turns on. A spec is LLM-written prose *about* a symbol — the right answer to *"explain this to me"*, the wrong answer to *"verify this before I assert it."* It may be `stale`. It may carry `smells`. It may be `missing`. Under any of the three, an agent that has to be **correct** about behavior cannot substitute the prose for the code — and it can't know in advance which of the three it's about to get.
+`get_spec` is not the substitute, and this is the distinction the whole of M20 turns on. A spec is LLM-written prose *about* a symbol — the right answer to *"explain this to me"*, the wrong answer to *"verify this before I assert it."* It may be `stale`. It may carry `smells`. It may be `missing`. Under any of the three, an agent that has to be **correct** about behavior cannot substitute the prose for the code — and it can't know in advance which of the three it's about to get.
 
 **2. "What fields does `FileNode` carry, and what does each field's doc comment say?"**
 
@@ -73,7 +73,7 @@ It extracts them in **one of four packs**:
 | Rust (`rust.rs`) | `struct_item`/`enum_item`/`union_item` go through a leaf push that never walks the body | no |
 | Python (`python.rs`) | module-level assignments → `Value`, `raw: "assignment"`, `parent: None` | no (class attributes) |
 
-**Why this changes the work.** "Build field extraction" is a feature request. "Three of four packs disagree with the fourth, and the disagreement makes `children: []` ambiguous" is a **defect report** — and it reframes M22's exit test from "fields appear" to "a caller can trust a negative answer."
+**Why this changes the work.** "Build field extraction" is a feature request. "Three of four packs disagree with the fourth, and the disagreement makes `children: []` ambiguous" is a **defect report** — and it reframes M21's exit test from "fields appear" to "a caller can trust a negative answer."
 
 It also means the `interface_hash` question (Q4 below) isn't hypothetical or future — Java has been extracting fields since M16, so whatever rule is in force is *already* being applied to a real corpus, just unnoticed.
 
@@ -91,7 +91,7 @@ But that same call surfaced something real — see Q3.
 
 Against committed spec prose — which this project's design produces by construction, one paragraph per line — a single line runs 1–3 KB. The live `search_code("Merkle")` call above returned roughly **15 KB for about 20 matches**, most of it `ROADMAP.md` and `docs/specs/*.md` paragraphs. A broader regex against a repo with a complete corpus returns hundreds of KB.
 
-M20's own ROADMAP entry had already called this and filed it as not-yet-urgent:
+M22's own ROADMAP entry had already called this and filed it as not-yet-urgent:
 
 > *"`search_code`'s `matches` on a broad regex across a big repo is a secondary candidate for the same treatment, still deferred — lower priority since it hasn't been observed failing yet."*
 
@@ -102,10 +102,10 @@ It has now been observed, by accident, on the first live call made in this spike
 | Instance | Shape | Fix |
 | --- | --- | --- |
 | God-class `get_next_spec_task` (PR #37) | one oversized **blob** | reduce + hard-cap |
-| `get_spec_coverage`'s `pending` (M20) | an oversized **list** | cursor + 50-item page |
-| `search_code`'s `matches` (M21) | oversized **lines** | per-line truncation + flag |
+| `get_spec_coverage`'s `pending` (shipped 2026-09-20) | an oversized **list** | cursor + 50-item page |
+| `search_code`'s `matches` (M20, not yet built) | oversized **lines** | per-line truncation + flag |
 
-Three different shapes, one root cause: **no MCP response in this codebase has a size budget by construction.** Each has been fixed reactively after a real failure. Worth considering, though not scoped into M21: a response-size assertion in the test harness, so the fourth instance is caught by CI rather than by a user.
+Three different shapes, one root cause: **no MCP response in this codebase has a size budget by construction.** Each has been fixed reactively after a real failure. Worth considering, though not scoped into M20: a response-size assertion in the test harness, so the fourth instance is caught by CI rather than by a user.
 
 ---
 
@@ -119,7 +119,7 @@ The one genuinely undecided question in the whole track. Promoted to `ARCHITECTU
 
 **Why it isn't simply fixed.** `interface_hash` moving is what propagates staleness across reference edges — deliberately one hop, never transitive. Widening what moves it widens how much of a corpus goes stale per edit. A struct whose fields churn routinely would invalidate every direct referrer every time, where today it invalidates none. Whether that is *correctness finally arriving* or *a `freshness` number rendered useless* is an empirical question about real repos, and nobody has measured the cascade.
 
-**Why M22 is the right moment.** It's the first point where exported fields exist in the graph at all, so the cascade can be measured on CodeOwl's own repo and the pilot instead of argued about. Logged now so it gets decided deliberately, rather than defaulted into by whichever way the extraction happens to get written.
+**Why M21 is the right moment.** It's the first point where exported fields exist in the graph at all, so the cascade can be measured on CodeOwl's own repo and the pilot instead of argued about. Logged now so it gets decided deliberately, rather than defaulted into by whichever way the extraction happens to get written.
 
 ---
 
@@ -154,7 +154,7 @@ search_specs(query) -> [ { spec_section, symbol_id, score } ]
 
 ### Sequencing
 
-Build M21 and M22 first: no new dependencies, no distribution cost, no model file. **Then measure** whether kind-3 lookups are still the observed gap before committing. That's the same "wait for real evidence" policy open questions 8, 10 and 11 each already apply — and this spike is itself evidence for why it's the right policy, since two of its own confident starting assumptions (Q2) turned out to be false when checked.
+Build M20 and M21 first: no new dependencies, no distribution cost, no model file. **Then measure** whether kind-3 lookups are still the observed gap before committing. That's the same "wait for real evidence" policy open questions 8, 10 and 11 each already apply — and this spike is itself evidence for why it's the right policy, since two of its own confident starting assumptions (Q2) turned out to be false when checked.
 
 ---
 
@@ -168,6 +168,6 @@ Build M21 and M22 first: no new dependencies, no distribution cost, no model fil
 
 ## Open, deliberately
 
-- **`interface_hash` and exported fields** (Q4) — decide during M22, with the cascade measurable rather than estimated. `ARCHITECTURE.md` open question 12.
-- **A response-size budget in the test harness** (Q3) — named here, not scoped into M21. The fourth instance should be caught by CI, not by a user.
-- **Whether `get_source` should ever return a *resolved* view** (a symbol plus its one-hop dependencies' signatures inline, one call instead of N) — not designed. Plausibly the next reliance gap once M21 lands, plausibly over-engineering; no evidence either way yet, so not guessed at here.
+- **`interface_hash` and exported fields** (Q4) — decide during M21, with the cascade measurable rather than estimated. `ARCHITECTURE.md` open question 12.
+- **A response-size budget in the test harness** (Q3) — named here, not scoped into M20. The fourth instance should be caught by CI, not by a user.
+- **Whether `get_source` should ever return a *resolved* view** (a symbol plus its one-hop dependencies' signatures inline, one call instead of N) — not designed. Plausibly the next reliance gap once M20 lands, plausibly over-engineering; no evidence either way yet, so not guessed at here.
