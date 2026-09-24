@@ -1,3 +1,12 @@
 /target
 /.codeowl
 __pycache__/
+
+# Local Claude Code session state (settings.local.json) and any stray
+# copy of a slash command under commands/ -- CodeOwl's own copy of
+# /codeowl-generate deliberately lives in setup/, not here (see the
+# aefdc42 commit message: "its honest home is the distributable guide,
+# as the single versioned source to copy into a target repo"). A repo
+# CodeOwl is installed *into* may legitimately track its own .claude/
+# commands/ -- that convention is unaffected; this is about this repo.
+/.claude
