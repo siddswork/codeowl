@@ -625,7 +625,7 @@ checking that the socket didn't have to change shape to fit them.
 **Agent reliance**
 : Whether a coding agent mid-task actually *reaches for* CodeOwl instead
   of falling back to `grep` and raw file reads — a different property from
-  coverage or freshness, and the one M21/M22 are scoped against.
+  coverage or freshness, and the one M20/M21 are scoped against.
 
   Named 2026-09-24, after observing that an agent working inside this repo,
   with the server connected and the graph current, kept using `grep`

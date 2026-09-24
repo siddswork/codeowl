@@ -1,6 +1,6 @@
 # exp-03 — Polyglot repos: one arena, many roots
 
-**Status:** spike, on paper. Written before the polyglot milestone (the "Planned insert" in `ROADMAP.md`, provisionally M18 — shifting Quarkus → M19, iterate → M20) freezes any trait or cache shape.
+**Status:** spike, on paper. Written before the polyglot milestone (the "Planned insert" in `ROADMAP.md`, provisionally M18 — shifting Quarkus → M19, iterate → M22) freezes any trait or cache shape.
 **Feeds:** the polyglot milestone plan; `ARCHITECTURE.md` open question 3 ("Secondary-language subtrees") and the "Language & stack coverage" scope decision in `REQUIREMENTS.md`.
 **Not a decision doc** — its conclusions fold into `ARCHITECTURE.md` and the milestone's own plan when it starts.
 
