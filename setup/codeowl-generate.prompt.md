@@ -208,7 +208,7 @@ single-target loop above:
    budgeted run should spend on — high-fan-in files first (their
    summaries feed every dependent spec), then feature specs, then the
    long tail of files, then rollups, then test-code file specs, then the
-   system spec last. **`pending` is paginated (M20) — 50 entries per
+   system spec last. **`pending` is paginated — 50 entries per
    call.** If the response's `next_cursor` is non-null, call
    `get_spec_coverage` again with `cursor` set to that value, and repeat
    until `next_cursor` comes back null, concatenating every page's
