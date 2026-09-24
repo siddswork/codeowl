@@ -1262,7 +1262,7 @@ impl CodeOwlServer {
 
     #[tool(
         name = "search_code",
-        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches in walk order -- not ranked by relevance."
+        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches in walk order -- not ranked by relevance. Each match's `text` is capped at 500 bytes with `truncated: true` set if it was cut -- a long line (e.g. committed prose) isn't dropped, just shortened from its end; re-read the file directly for the full line."
     )]
     async fn search(
         &self,
