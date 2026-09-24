@@ -1957,7 +1957,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_spec_coverage_paginates_pending_and_a_cursor_reaches_the_rest() {
-        // M20: `pending` on a large repo (626 files on real commons-lang)
+        // `pending` on a large repo (626 files on real commons-lang)
         // serializes to 95 KB, over the MCP result limit -- confirmed real,
         // not hypothetical. Build enough files to span two pages of
         // COVERAGE_PENDING_PAGE_SIZE and walk the cursor to the end.
