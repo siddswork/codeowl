@@ -85,6 +85,7 @@ This is a deliberate Rust learning project. When writing or reviewing Rust here,
 - **`.gitignore` from the first crate-scaffolding commit, not an afterthought.** `target/` and `.codeowl/` (the local gitignored cache — see ARCHITECTURE.md "Storage") must never land in git history, not even once.
 - **`clippy` + `rustfmt` run before every commit, not just in CI.** Catches idiom mistakes early — matters more here given this is a Rust-learning project.
 - **`utility/check.sh` bundles the whole gate** — `fmt --check` (or `--fix`), `clippy --all-targets -D warnings`, `cargo test`, and the staged-diff secret scan, in order, exiting on the first failure. Run it before every commit instead of the four commands separately. It's **debug-profile only**; `utility/release.sh` runs the same gate in `--release` plus `cargo build --release` (slower — for before a release or after touching perf/overflow-sensitive code, not every commit).
+- **Stage first, then run the gate: `git add -A && utility/check.sh && git commit`.** The secret scan reads the *staged* diff, so running the gate before `git add` silently checks an empty index — fmt/clippy/tests still run against the working tree, but the scan is a no-op. It used to print a confident "nothing secret-shaped staged" for that case; it now refuses with a non-zero exit unless you pass `--unstaged`, which runs fmt/clippy/tests and prints `SKIPPED` for the scan. Use `--unstaged` for mid-work checks, never as the pre-commit path.
 
 ## Pending decisions
 
