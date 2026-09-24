@@ -387,7 +387,7 @@ pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &s
     }
 }
 
-/// The raw source text that scopes a symbol's dependencies and feeds its
+/// The line spans that scope a symbol's dependencies and feed its
 /// generation task: `sym`'s own line span, plus the span of any direct
 /// child that lies *outside* it. For a TS class every method already sits
 /// inside the class braces, so this is just the class body; for a Rust
@@ -395,13 +395,14 @@ pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &s
 /// `rust::merge_inherent_impls`), the method spans live elsewhere in the
 /// file and are appended. Adjacent/overlapping spans are merged so the
 /// common case (a `struct` immediately followed by its `impl`) still reads
-/// as one contiguous block.
-pub(crate) fn symbol_span_text(
-    root: &Path,
-    graph: &Graph,
-    rel_path: &str,
-    sym: &Symbol,
-) -> Result<String> {
+/// as one contiguous block. Sorted by start line, so callers can rely on
+/// `.first()`/`.last()` for the outer envelope.
+///
+/// Split out from `symbol_span_text` (M20) so `get_source` (`mcp.rs`) can
+/// share the same span computation — and widen just the first/last span
+/// by its own `context_lines` — without duplicating this logic or its
+/// gap-merging rule.
+pub(crate) fn merged_symbol_spans(graph: &Graph, sym: &Symbol) -> Vec<[usize; 2]> {
     let mut spans: Vec<[usize; 2]> = vec![sym.lines];
     let [own_start, own_end] = sym.lines;
     for &child in &sym.children {
@@ -422,12 +423,19 @@ pub(crate) fn symbol_span_text(
             _ => merged.push(s),
         }
     }
+    merged
+}
 
-    let content = std::fs::read_to_string(root.join(rel_path))
-        .with_context(|| format!("reading {rel_path}"))?;
+/// Read `spans` (1-based, inclusive line ranges) out of already-read file
+/// `content`, joining non-adjacent blocks with a blank line — the actual
+/// slicing logic `symbol_span_text` and `get_source` (M20) both need once
+/// they have the file's current text in hand. Split out so a caller that
+/// also needs the raw content for another reason (`get_source`'s
+/// `graph_in_sync` hash check) reads the file once, not twice.
+pub(crate) fn render_spans(content: &str, spans: &[[usize; 2]]) -> String {
     let all: Vec<&str> = content.lines().collect();
     let mut out = String::new();
-    for (i, [start, end]) in merged.iter().enumerate() {
+    for (i, [start, end]) in spans.iter().enumerate() {
         if i > 0 {
             out.push_str("\n\n");
         }
@@ -435,7 +443,22 @@ pub(crate) fn symbol_span_text(
         let hi = (*end).min(all.len());
         out.push_str(&all[lo..hi].join("\n"));
     }
-    Ok(out)
+    out
+}
+
+/// The raw source text that scopes a symbol's dependencies and feeds its
+/// generation task — `merged_symbol_spans` read off disk and joined. See
+/// that function's doc comment for what "scope" means here.
+pub(crate) fn symbol_span_text(
+    root: &Path,
+    graph: &Graph,
+    rel_path: &str,
+    sym: &Symbol,
+) -> Result<String> {
+    let merged = merged_symbol_spans(graph, sym);
+    let content = std::fs::read_to_string(root.join(rel_path))
+        .with_context(|| format!("reading {rel_path}"))?;
+    Ok(render_spans(&content, &merged))
 }
 
 /// Above this many bytes, a Container's generation-task `source` is
@@ -533,6 +556,35 @@ pub(crate) fn cap_generation_text(text: String, max_bytes: usize) -> String {
     }
     out.push_str(&TRUNCATION_MARKER[..marker_cut]);
     out
+}
+
+/// `get_source`'s cap — deliberately larger than
+/// [`MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT`], since the two serve
+/// different purposes. That cap exists to keep a *generation task* small
+/// enough for an LLM to write prose against; this one exists so a
+/// *verification read* — an agent checking a claim about real behavior,
+/// `get_source`'s whole reason to exist (see `ARCHITECTURE.md` §7) —
+/// gets the real text rather than a prompt-sized fragment of it.
+/// Overridable the same way as the generation-task caps (`codeowl
+/// serve`'s `--max-source-bytes` flag, `mcp.rs::with_source_limit`).
+pub const MAX_SOURCE_TEXT_BYTES_DEFAULT: usize = 32_000;
+
+/// Cut `text` to at most `max_bytes`, on a `char` boundary, with **no**
+/// marker appended — unlike [`cap_generation_text`], whose marker text is
+/// meant to be read by an LLM assembling a prompt. `get_source` returns
+/// what's meant to be read *as* source code; splicing an English sentence
+/// into the middle of a function body would corrupt exactly the thing a
+/// caller is trying to verify. The signal is the returned `bool`, which
+/// `get_source`'s `truncated` field carries instead.
+pub(crate) fn cap_source_text(text: String, max_bytes: usize) -> (String, bool) {
+    if text.len() <= max_bytes {
+        return (text, false);
+    }
+    let mut cut = max_bytes.min(text.len());
+    while cut > 0 && !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    (text[..cut].to_string(), true)
 }
 
 /// `full_source` (the true full span from [`symbol_span_text`]) unless
@@ -3594,6 +3646,38 @@ impl Counter {\n\
         let text = "x".repeat(1000);
         let capped = cap_generation_text(text, 10);
         assert!(capped.len() <= 10, "must still fit: {} bytes", capped.len());
+    }
+
+    #[test]
+    fn cap_source_text_leaves_short_text_untouched_and_unflagged() {
+        let text = "hello world".to_string();
+        let (out, truncated) = cap_source_text(text.clone(), MAX_SOURCE_TEXT_BYTES_DEFAULT);
+        assert_eq!(out, text);
+        assert!(!truncated);
+    }
+
+    #[test]
+    fn cap_source_text_cuts_and_flags_but_never_appends_prose() {
+        // Unlike cap_generation_text, get_source's cap must never splice
+        // an English marker into what's meant to be read as real source
+        // code -- the `truncated` bool is the signal, not the text.
+        let text = "x".repeat(1000);
+        let (out, truncated) = cap_source_text(text, 50);
+        assert_eq!(out.len(), 50);
+        assert!(truncated);
+        assert!(
+            out.chars().all(|c| c == 'x'),
+            "no marker text should appear in the capped output: {out}"
+        );
+    }
+
+    #[test]
+    fn cap_source_text_never_splits_a_multi_byte_char() {
+        let text = "☃".repeat(1000); // 3 bytes each, well over any small cap
+        let (out, truncated) = cap_source_text(text, 50);
+        assert!(out.len() <= 50);
+        assert!(truncated);
+        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
     }
 
     #[test]
