@@ -75,6 +75,28 @@ pub struct SourceResponse {
 pub struct SearchRequest {
     /// A regex pattern to search for across the repo's source files.
     pub query: String,
+    /// Restrict matches to this file or directory (e.g. "src" or
+    /// "src/mcp.rs") — a true path boundary, not a bare string prefix:
+    /// "lib" matches "lib/foo.ts", never "library/foo.ts". Omit to
+    /// search the whole repo.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Case-insensitive matching. Omit or `false` for case-sensitive
+    /// (the default).
+    #[serde(default)]
+    pub ignore_case: Option<bool>,
+    /// Lines of surrounding context per match, each side — default 0,
+    /// capped at 5 regardless of what's asked for (a single call can
+    /// return many matches, each now carrying its own context, so an
+    /// unbounded per-match multiplier reintroduces the payload problem
+    /// the 500-byte-per-line cap on `text` already exists to fix).
+    #[serde(default)]
+    pub context_lines: Option<usize>,
+    /// Narrow the match cap below the default 200 — omit, or a value
+    /// above 200, leaves the default 200 in place; this can only make a
+    /// response smaller, never larger.
+    #[serde(default)]
+    pub max_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1386,13 +1408,19 @@ impl CodeOwlServer {
 
     #[tool(
         name = "search_code",
-        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches in walk order -- not ranked by relevance. Each match's `text` is capped at 500 bytes with `truncated: true` set if it was cut -- a long line (e.g. committed prose) isn't dropped, just shortened from its end; re-read the file directly for the full line."
+        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches (or `max_results` if lower) in walk order -- not ranked by relevance. Each match's `text` is capped at 500 bytes with `truncated: true` set if it was cut -- a long line (e.g. committed prose) isn't dropped, just shortened from its end; re-read the file directly for the full line. Optionally scope to `path` (a file or directory, true boundary not bare prefix), match case-insensitively with `ignore_case`, and pull `context_lines` (capped at 5) of surrounding text into `context_before`/`context_after` on each match."
     )]
     async fn search(
         &self,
         Parameters(req): Parameters<SearchRequest>,
     ) -> Result<Json<SearchResponse>, String> {
-        crate::search::search_code(&self.root, &req.query)
+        let opts = crate::search::SearchOptions {
+            path: req.path,
+            ignore_case: req.ignore_case.unwrap_or(false),
+            context_lines: req.context_lines.unwrap_or(0),
+            max_results: req.max_results,
+        };
+        crate::search::search_code(&self.root, &req.query, &opts)
             .map(|matches| Json(SearchResponse { matches }))
             .map_err(|e| e.to_string())
     }
@@ -3649,11 +3677,43 @@ mod tests {
         let result = server
             .search(Parameters(SearchRequest {
                 query: "findMe".to_string(),
+                path: None,
+                ignore_case: None,
+                context_lines: None,
+                max_results: None,
             }))
             .await
             .unwrap();
         assert_eq!(result.0.matches.len(), 1);
         assert_eq!(result.0.matches[0].file, "a.ts");
+    }
+
+    #[tokio::test]
+    async fn search_request_s_new_fields_actually_reach_search_options() {
+        // search.rs's own tests cover path/ignore_case/context_lines/
+        // max_results exhaustively at the SearchOptions level -- this is
+        // the one check that mcp.rs's glue actually wires SearchRequest's
+        // fields to the right SearchOptions fields, not e.g. swapped.
+        let server = test_server(&[
+            ("src/a.ts", "const TARGET = 1;\n"),
+            ("tests/a.ts", "const TARGET = 2;\n"),
+        ]);
+        let result = server
+            .search(Parameters(SearchRequest {
+                query: "target".to_string(),
+                path: Some("src".to_string()),
+                ignore_case: Some(true),
+                context_lines: Some(1),
+                max_results: Some(5),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.0.matches.len(), 1, "path filter should apply");
+        assert_eq!(result.0.matches[0].file, "src/a.ts");
+        assert!(
+            result.0.matches[0].text.contains("TARGET"),
+            "ignore_case should have matched the uppercase line"
+        );
     }
 
     // --- M20: get_source ------------------------------------------------

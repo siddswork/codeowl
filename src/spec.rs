@@ -2562,8 +2562,11 @@ fn system_status(graph: &Graph, root: &Path) -> Result<(String, Vec<String>)> {
 /// bare string-prefix match: `"lib/email"` must not also catch
 /// `"lib/email.ts"` or `"lib/email-utils/"`. An empty `scope` matches
 /// everything (files/rollups only — see `coverage`'s own doc comment on
-/// why an empty-but-`Some` scope still excludes features/system).
-fn within_scope(path: &str, scope: &str) -> bool {
+/// why an empty-but-`Some` scope still excludes features/system). Shared
+/// with `search_code`'s (M20) `path` filter (`search.rs`) — the same
+/// boundary discipline applies there for the same reason: a query scoped
+/// to `"lib"` shouldn't also match `"library/foo.ts"`.
+pub(crate) fn within_scope(path: &str, scope: &str) -> bool {
     scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/"))
 }
 
