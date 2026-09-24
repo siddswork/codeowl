@@ -636,10 +636,137 @@ These are the "how exactly" questions M13 has to answer as it builds the socket.
 - **Web viewer** — a graph + spec browser for BAs/QA/SREs. Lower priority now that committed specs render on GitHub; still wanted for cross-cutting navigation and non-git-native readers.
 - **Headless / scheduled spec generation** — a non-interactive runner (Claude Code SDK or `--print`, CI/git-hook triggered) driving the `get_next_spec_task → submit_spec` loop. CodeOwl still never calls an LLM itself.
 - **HTTP/SSE transport** — `rmcp` over HTTP instead of stdio.
-- **`tantivy` + ONNX embeddings** — the real search index deferred out of Phase 1.
+- **`tantivy` + ONNX embeddings — reframed 2026-09-24 as `search_specs`, and gated on measurement after M21/M22.** Still deferred, but the thing worth building is no longer "a search index over code." Working backwards from what actually sends a coding agent to `grep` (see "The agent-reliance track" below, and `experiments/exp-04-agent-reliance.md` Q5) splits repo lookups into three kinds, and only one of them needs semantics:
+  1. **"Show me this exact thing"** — the id is already in hand. `get_symbol` / `get_source` answer it. No search involved.
+  2. **"Where is the thing called X"** — a name or a distinctive literal. Regex already answers it, and at laptop scale speed is not the bottleneck, so what `tantivy` would really add is **ranking**, not throughput: ripgrep returns walk order, so a match inside a committed spec document outranks the actual definition purely by accident of directory order. That is a real quality gap — but the cheap fix is to rank on data CodeOwl already holds and `rg` structurally cannot see (`FileRole`: `Domain` before `Test` before `Generated`; prefer a line the graph knows is a symbol's declaration line), not to build an index.
+  3. **"Find the code that does X"** with no name to search for — "where do we handle the debounce", "what validates the order total". **Only semantics answers this**, and it is exactly the question an agent has when it is new to a repo, which is the moment CodeOwl is supposed to be most valuable.
+  So semantic search earns its place for one of three, and CodeOwl holds an asset for it that a generic code-embedding tool does not: **a corpus of LLM-written, hash-checked prose describing every symbol at several granularities.** Embeddings are good at prose and bad at raw source, so the higher-value build is `search_specs(query)` — semantic search over `docs/specs/**` returning spec sections **plus the symbol ids they describe**, which hands the agent an id to feed straight into `get_source`/`get_callers`/`get_spec`. The three tools compose into one workflow instead of duplicating each other.
+  Two things to carry into that decision rather than rediscover. **Coverage honesty:** results are only as good as corpus coverage, so the response must report what it searched ("340 specs, 61% of eligible nodes") rather than silently under-returning — the same tiered-degradation discipline `ARCHITECTURE.md` open question 8 applies to schema coverage. **Distribution cost:** `ort` plus a model file (~90 MB for all-MiniLM-L6-v2) cuts directly against the single-self-contained-binary property that `ARCHITECTURE.md` §9 names as the first reason CodeOwl is written in Rust at all — that tension is the actual decision, not the embedding quality. **Sequencing:** build M21 and M22 first (no new dependencies, no distribution cost), then measure whether kind-3 lookups are still the observed gap before committing — the same "wait for real evidence" policy open questions 8, 10 and 11 each already apply.
 - **Multi-repo namespacing** — per-repo index/graph/spec-cache in one shared process.
 - **Stub nodes + cross-team delegation** — the cross-repo dependency model.
 - **Auth/roles** — once multiple users share one hosted instance.
+
+---
+
+## The agent-reliance track (M21–M22)
+
+> Full design discussion, including the alternatives weighed, the two starting assumptions that turned out false when checked, and the semantic-search analysis: **`experiments/exp-04-agent-reliance.md`**. As with every `exp-NN` spike, that file holds the reasoning and this one holds the plan — where they disagree, this file and `ARCHITECTURE.md` win.
+
+**The problem these two milestones exist to solve.** Everything built through M20 optimizes one loop: *generate a spec corpus, serve it to a reader.* That loop works. But the other thing a coding agent does in a repo all day — **verify a claim about how the code behaves, mid-task** — falls through the tool surface, and the agent silently falls back to `grep`/file-reading instead. The MCP server's own instruction string already tells it not to ("reach for it before grep/file-reading on 'how is this wired' questions", `mcp.rs:1347`); the instruction is ignored not out of habit alone but because for a large class of real lookups there is genuinely no CodeOwl answer to reach for.
+
+Observed directly, in a real session working in this repo (2026-09-24), the lookups that sent an agent to `Read`/`grep` with CodeOwl connected and current:
+
+- *"Does `resolve_imports` ever resolve to a bare file, or only to a named symbol?"* — a claim about a function's **behavior**. `get_symbol` returns `signature` + `docstring`; the body is not in the graph and is not served by any tool. → `Read`.
+- *"What fields does `FileNode` carry, and what does each one's doc comment say?"* — a Rust `struct`'s fields aren't extracted at all, so `get_symbol` answers `children: []`. → `Read`.
+- *"Does `calledBy` appear anywhere in `src/`?"* — an existence sweep. `search_code` does this, and the agent used `Bash`+`rg` anyway, because `search_code` has no path filter, no case flag, no context lines. → `Bash`.
+
+The through-line: **an agent will not rely on a tool that answers some of its questions and silently under-answers the rest.** One `children: []` that means "this pack doesn't extract that" rather than "there are none" is enough to teach it to check the file directly every time — and once it does that, it does it for the queries CodeOwl *would* have answered well too. Reliance is all-or-nothing in a way coverage is not.
+
+These milestones are deliberately *not* about making the spec layer better. They're about making the **structural** layer complete enough that falling back to raw file reading becomes the exception it should be.
+
+---
+
+### M21 — `get_source` + `search_code` ergonomics
+**Size:** S · **Builds on:** M20
+
+The cheap half of the reliance track: no new dependencies, no cache invalidation, no change to any hashing or spec mechanism. Both items are pure additions to the read surface.
+
+#### Scope
+
+**1. `get_source(id, context_lines?)` — the body the graph never kept.**
+
+`get_symbol` returns a symbol's *declared shape*: `signature` (the text before the body), `docstring`, `lines`, the hashes, `children`. It never returns the body, so every question of the form "what does this actually *do*" — as opposed to "what shape does it declare" — has no CodeOwl answer today.
+
+`get_spec` is not that answer, and the distinction is worth stating rather than assuming. A spec is LLM-written prose *about* a symbol: the right response to "explain this to me," the wrong one to "verify this before I write a claim about it." It may be `stale`, it may carry `smells`, it may be `missing` entirely — and an agent that needs to be *correct* about behavior cannot substitute prose for the code under any of those three conditions. The spec layer and the source layer answer different questions; CodeOwl currently serves only the first, plus a signature.
+
+**The mechanism already exists and is already load-bearing.** `spec::symbol_span_text` (`spec.rs:399`) reads a symbol's span off disk and — per M15's follow-on — merges in the spans of folded members sitting outside the container's own line range (a Rust inherent `impl`'s method bodies). It's `pub(crate)`, called today only by the generation path. This work is that function behind a tool, plus a cap and a freshness flag; the new logic is small.
+
+Response shape:
+
+```
+get_source(id, context_lines?) -> {
+  id, file, lines: [start, end],
+  source: String,
+  truncated: bool,
+  graph_in_sync: bool,
+}
+```
+
+- **`id`** accepts a symbol id or a file path, matching `get_spec`'s existing polymorphism. A file id returns the whole file under the same cap.
+- **`context_lines`** — optional, default `0`, capped at 20. This is what makes it a real substitute for a targeted read rather than a strictly worse one: an agent verifying a behavioral claim usually wants the surrounding `use`/import lines or the enclosing match arm, and without it will open the file to get them.
+- **The cap** reuses `spec::cap_generation_text` plus a new `--max-source-bytes` flag, alongside the existing `--large-class-bytes` / `--max-spec-task-bytes` (PR #37's precedent: a configurable flag, explicitly not an env var, per the owner). The default should be **materially larger** than `max_spec_task_bytes`' 4,000/8,000 — that cap exists to keep a *generation task* small enough to author against, a different purpose from a verification read, which wants the real text. Proposed default: 32,000. `truncated: true` alongside the true `lines` lets the agent fall back to a file read for the remainder honestly, rather than reasoning over a silently-clipped body.
+- **`graph_in_sync`** — the design point worth building in rather than discovering. `lines` comes from the graph, which the watcher updates on a **300ms debounce** (`watch.rs`'s `DEBOUNCE`). An agent's edit-then-verify loop sits comfortably inside that window, so a naive implementation would read the *current* file at the *pre-edit* span and return the wrong lines with no indication anything was off. The check: hash the file's current text and compare against the recorded `FileNode.source_hash`. Note it must be the **file** hash — a container's own `source_hash` is a Merkle fold, not a hash of its span text, so re-hashing the span and comparing would never match for a container. This is the same "return the last-known-good, flagged" discipline `get_spec` already applies to staleness, one layer down.
+- **Invariant:** `get_source` is a pure disk read at the graph's recorded span. It never consults, produces, or invalidates a spec, and it never triggers a rebuild.
+
+**2. `search_code` ergonomics + a payload bug now actually observed.**
+
+`search_code(query)` takes exactly one parameter (`mcp.rs`'s `SearchRequest`). `rg` — which every coding agent already knows — has a path filter, a case-insensitivity flag, context lines, and match-count control. An agent that wants any of the four reaches for `Bash`, and having reached for `Bash` once, keeps reaching. Proposed: `search_code(query, path?, ignore_case?, context_lines?, max_results?)`, each mapping onto capability the `grep` crate already exposes.
+
+The bug, **observed live in this repo on 2026-09-24, not predicted**: `search.rs` pushes **whole untruncated lines** into `SearchMatch.text`. `MAX_RESULTS: usize = 200` caps the match *count*, not the response size. Against committed spec prose — which this project's whole design produces, one paragraph per line — single lines run 1–3 KB: a `search_code("Merkle")` call against this repo returned roughly 15 KB for about 20 matches, most of it `ROADMAP.md` and `docs/specs/*.md` paragraphs. A broader regex on a repo with a full corpus returns hundreds of KB.
+
+This is the third instance of one failure mode, and M20's own entry above already called it: *"`search_code`'s `matches` on a broad regex across a big repo is a secondary candidate for the same treatment, still deferred — lower priority since it hasn't been observed failing yet."* It has now been observed. Fix: per-line truncation with a `truncated` flag on the match, plus the `max_results` control above — the same shape as the God-class payload fix (PR #37), not the cursor-and-page shape `pending` needed, since the problem here is line *width*, not list length.
+
+#### Validation (TDD — the failing test first, per `CLAUDE.md`)
+
+Each part's test is written from the real lookup that failed, not a synthetic fixture:
+
+- `get_source("src/resolve.rs::resolve_imports")` returns text containing the actual `resolve_named` call — the exact verification that sent an agent to `Read` in the session above.
+- `get_source` on a Rust type with a folded inherent `impl` returns the method bodies (the `symbol_span_text` property M15 already tests, now reachable through the tool surface).
+- Edit a file, call `get_source` inside the debounce window: `graph_in_sync` is `false`.
+- A symbol larger than `--max-source-bytes` returns `truncated: true` with the full true `lines`.
+- `search_code` against a fixture line of 5 KB returns a truncated `text` with the flag set, and the same query with `path:` scoped returns strictly fewer files.
+
+---
+
+### M22 — Member-level extraction: fields as first-class symbols
+**Size:** M · **Builds on:** M21
+
+The half with real blast radius: this one moves every container's `source_hash` in three of four packs, forces a `FORMAT_VERSION` bump, and opens a genuine question about reference-edge invalidation. Separated from M21 for exactly that reason.
+
+#### The current state — measured per pack, not assumed
+
+This is not a missing capability. It is an **inconsistent** one, and the inconsistency is the bug:
+
+| Pack | Container members extracted | Fields? |
+| --- | --- | --- |
+| Java (`java.rs:112`) | methods **and** fields → `SymbolKind::Value`, `raw: "field"` / `"constant"`, one symbol per declared name (the `int a, b;` case is handled and tested) | yes |
+| TypeScript (`extract.rs:126`) | `class_body` members filtered to `method_definition` only | no |
+| Rust (`rust.rs:202`) | `struct_item`/`enum_item`/`union_item` go through `push_leaf`, which never walks a body | no |
+| Python (`python.rs:212`) | module-level assignments → `Value`, `raw: "assignment"`, `parent: None` | no (class attributes) |
+
+**The consequence, stated as the defect it is:** `get_symbol` on a Rust `struct` returns `children: []`. That is indistinguishable, to a caller, from "this type genuinely has no members." An agent cannot tell "CodeOwl checked and there are none" apart from "this pack doesn't look," and a tool that cannot distinguish those two is a tool whose negative answers can't be trusted — which, per this track's framing above, is what ends reliance for the positive answers too.
+
+It also means the single place where a Rust codebase writes its data contracts — per-field `///` doc comments on a struct — is unreachable through CodeOwl by any path.
+
+#### Scope
+
+**1. Bring TS, Rust, and Python up to Java's existing behavior.** Each pack's body walk gains a case for its own grammar's field node kind. No new `StackPack` trait method is needed: unlike `is_schema_symbol`, there's no judgement call about *whether* something is a field, so this is per-pack extraction detail, not a hook. What each emits is a shared convention:
+
+- `kind: SymbolKind::Value` (**not** `Container`/`Callable` — see invariant 1)
+- `raw`: the pack's own word — `"field"` (Rust/Java), `"property"` (TS), `"attribute"` (Python)
+- `parent`: the containing symbol; `children`: empty
+- `is_exported`: the language's own visibility rule — Rust `pub`, Java `public`, TS non-`private`, Python's `is_public_name` convention
+- `signature`: the field's declaration text; **`docstring`: the field's own doc comment** — the point of the whole exercise
+
+**2. Three invariants the implementation has to protect.**
+
+1. **Spec granularity must not move.** Design decision 1 above already says `Value` folds into its file's spec and never gets its own document. Verified, not assumed: `file_is_spec_bearing` (`spec.rs:78`) counts only `is_exported && (Callable | Container)`, so `Value` members can neither make a file spec-bearing nor become documents themselves. The corpus does not grow by one document per field. **This must have a regression test**, because it's the property that keeps this milestone from quietly multiplying `generations_remaining` across every repo.
+
+2. **The Merkle fold moves, deliberately and totally.** A container's `source_hash` folds in each direct member's `source_hash` in declaration order (`extract.rs:159` and each pack's equivalent). Adding fields as members therefore moves **every container's `source_hash` in every Rust/TS/Python repo** — a one-time, complete cache and spec invalidation. That is a `FORMAT_VERSION` bump and precisely what `FORMAT_VERSION` exists for. It's worth stating why the cheaper-looking alternative is wrong: excluding fields from the fold to avoid the churn would make a field reorder or a field type change invisible to `source_hash`, and in Rust a field reorder is a real, layout-affecting change while in a tuple struct it's caller-visible. Taking the invalidation is the correct answer; dodging it would introduce a hash that lies.
+
+3. **`interface_hash` raises a real question — to decide during the milestone, not guess now.** `extract.rs:159`'s comment records that a container's `interface_hash` deliberately does *not* fold member signatures, reasoned from M2's scope ("nothing watches a class's members"). Public **fields** put pressure on that: a `pub` field is public surface in the same sense a method signature is — changing its type breaks every consumer, exactly as a changed return type would — and reference-edge invalidation (`deps_hash` keyed on the target's `interface_hash`) would not notice. Folding exported fields into `interface_hash` is the arguably-correct fix and is also a change to **the most load-bearing mechanism in the project**, with a cascade profile nothing has measured. Logged as `ARCHITECTURE.md` open question 12; the milestone's job is to decide it with the extraction in hand, not to assume either way beforehand.
+
+**3. Measure the arena cost.** commons-lang is already 14,725 nodes *with* Java fields extracted, so the Java data point exists. Record node count and `.codeowl/graph` size before and after on CodeOwl's own repo and the pilot — arena size feeds both serialization and every full rebuild, and this is the first change that grows it by a large constant factor rather than incrementally.
+
+#### Validation (TDD — the failing test first)
+
+- `get_symbol("src/graph.rs::FileNode")` returns three children — `id`, `source_hash`, `children` — each carrying its own `docstring` from its `///` comment. This is verbatim the lookup that sent an agent to `Read` in the 2026-09-24 session; it is the milestone's real exit test.
+- `get_spec_coverage`'s `generations_remaining` on CodeOwl's own repo is **unchanged** before vs. after (invariant 1).
+- A Rust struct's `source_hash` moves when a field is reordered, and does not move when an unrelated line in the file is edited (invariant 2).
+- Every pack's field extraction has the multi-name / multi-declarator test Java already has where the grammar permits it.
+- The full existing suite passes after the `FORMAT_VERSION` bump, with a fresh `.codeowl/` on every test repo.
+
+---
 
 ## Provisional decisions this ordering makes
 
@@ -694,3 +821,5 @@ Two `/code-review` passes (high effort) on the branch found real gaps beyond wha
 Real validation, not just passing tests — a JDK 21 + Maven installed locally (`~/.local/opt`, no `sudo`, Eclipse Temurin + Apache Maven tarballs) specifically to run a real build against the real repo. `enumerate_entry_points` against the real `quarkus-super-heroes` reactor went **4 → 14 → 37 → 39**: 4 was M18's own recorded pre-M19 baseline; 14 after generating `rest-heroes` alone (all 9 real `HeroResource` endpoints, correctly attributed); 37 after generating all four business services (`rest-heroes`/`rest-villains`/`rest-fights`/`rest-narration`); 39 after the code-review fixes recovered `rest-narration`'s endpoints the FQN-inline bug had been silently dropping. Then the deeper validation this section's own M18 entry originally wanted and couldn't run: a real feature spec generated for `GET /api/fights/randomfighters` — `assemble_participants`'s real output read, `FightResource`/`FightService`/`HeroClient`/`HeroRestClient`/`VillainClient`/`FightConfig` all actually read, prose hand-written from that source (not templated), submitted through the real `submit_feature` function (not a hand-written file), which computed 34 real participant hashes and accepted it against CodeOwl's own automated quality gate — reads back `current`, zero smells. The document correctly narrates the asymmetric real chain (`FightResource → FightService → HeroClient → HeroRestClient`, a `@RegisterRestClient` interface, vs. `FightService → VillainClient`, which hand-builds its own `WebTarget` with no REST-client interface at all) — caught by actually reading `VillainClient.java` rather than assuming it mirrored `HeroClient`'s shape, which `assemble_participants`'s own output had already hinted at (no `VillainRestClient` ever appeared in `dependencies`). This finally answers the BA-style "how does *fights* call *heroes*" question M18's own dogfood pass could not even start, since `FightResource` was invisible to `enumerate_entry_points` before M19.
 
 Revised again 2026-09-20, **correcting this file's own claim about which Maven command actually works — asked directly, then verified, not just re-asserted.** Every mention above and in `ARCHITECTURE.md` open question 11 originally said `mvn generate-sources` alone was sufficient, reasoned from Maven's documented lifecycle-phase ordering (`generate-sources` runs before `compile`) rather than from an isolated empirical test — the one real test run that grounded the claim was always a full `mvn compile` on `rest-heroes`, never `generate-sources` alone. Checked properly this time, on a freshly cleaned module: `mvn generate-sources` alone produces **zero** files — the codegen goal isn't actually reachable at that phase in this repo's build, despite Quarkus naming it `generate-code`. Calling the plugin's own goal directly (`mvn quarkus:generate-code`, bypassing the lifecycle entirely) is worse than merely unhelpful: it exits `0` and writes files, but from a placeholder default spec (`org.acme.ApiResource`, `org.acme.beans.Hero`) instead of the project's real `openapi.yml` — the `copy-openapi-spec` step that stages the real spec (bound to the later `generate-resources` phase) hasn't run yet, so it silently generates *wrong* content rather than failing loudly, confirmed by comparing package names against a real `mvn compile` run side by side. Only running through `mvn compile` gets far enough for the real spec to be staged first; its own later failure at the `javac` step (the unrelated Java-25 mismatch) is harmless and irrelevant to CodeOwl, which never compiles or runs target code. Also checked, since it matters for a realistic workflow: nothing cleans up `target/generated-sources` afterward — `rest-villains`/`rest-fights`'s generated files, produced hours earlier in this same session, were still present and untouched after several unrelated builds ran against sibling modules in between; only an explicit `mvn clean` would remove them. **Gradle: still not verified at all** — no Gradle-based Quarkus repo has been dogfooded, so `ARCHITECTURE.md`'s and this file's every "(or the Gradle equivalent)" parenthetical was, and remains, an unchecked assumption, not a tested fact; given the two Maven traps just found (an obviously-named phase that does nothing, an obviously-right isolated goal that silently does the wrong thing), that assumption should not be trusted until a real Gradle repo is checked the same way. Next: PR #45 merge readiness, then **M20** — fold M17/M18/M19's findings back into the trait, finish doc neutralization, commit the Java corpora.
+
+Revised again 2026-09-24, **a new track planned from the other side of the tool surface: what makes a coding agent actually rely on CodeOwl.** Every milestone through M20 optimizes the generate-a-corpus / serve-the-corpus loop. This one starts from an observation made while working *in* this repo with CodeOwl connected and current: the agent kept reaching for `grep` and file reads anyway, and — checked case by case rather than written off as habit — mostly for good reason, because the lookups it was making had no CodeOwl answer to reach for. Three concrete misses drove the plan (a function's **body**, which the graph never keeps; a Rust `struct`'s **fields**, which three of four packs never extract; and `search_code`'s single-parameter surface, which is strictly poorer than the `rg` every agent already knows). Planned as **M21** (`get_source` + `search_code` ergonomics — no new dependencies, no invalidation) and **M22** (member-level extraction — a deliberate total `source_hash` invalidation and a `FORMAT_VERSION` bump), split so the zero-risk half isn't held hostage to the one with blast radius. Two findings of record came out of the grounding pass, both corrections to claims made earlier in the same session and both verified against source before being written here: **field extraction is not missing, it is inconsistent** — `java.rs:112` has extracted fields as `SymbolKind::Value` all along, including the `int a, b;` multi-declarator case, while `extract.rs`/`rust.rs`/`python.rs` extract none, which makes `get_symbol`'s `children: []` ambiguous between "no members" and "this pack doesn't look" (the defect M22 actually fixes); and **`search_code` does search `.md` files** (confirmed live — `ROADMAP.md`, `GLOSSARY.md`, `setup/USAGE.md` and `docs/specs/*.md` all returned hits), but that same live call demonstrated the untruncated-line payload problem M20's own entry above had flagged as "not observed failing yet" — about 15 KB returned for ~20 matches of `Merkle`, because `MAX_RESULTS` caps match *count* while committed spec prose puts 1–3 KB on a single line. Now observed; folded into M21. Semantic search was raised as an explicit question and answered by reframing rather than scheduling: the "Deferred behind the polyglot core" `tantivy` + ONNX bullet is rewritten around **`search_specs`** — embedding the hash-checked spec corpus (prose, which embeddings are good at) instead of raw source (which they are not), returning symbol ids that compose into `get_source`/`get_callers` — with the ~90 MB model file vs. the single-binary principle named as the real decision, and the whole thing gated on measuring the gap after M21/M22 rather than built on the strength of the argument alone. Next, unchanged: **M20**.

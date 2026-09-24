@@ -622,6 +622,24 @@ checking that the socket didn't have to change shape to fit them.
   `StackPack` machinery produces something coherent for a non-web,
   non-framework codebase.
 
+**Agent reliance**
+: Whether a coding agent mid-task actually *reaches for* CodeOwl instead
+  of falling back to `grep` and raw file reads — a different property from
+  coverage or freshness, and the one M21/M22 are scoped against.
+
+  Named 2026-09-24, after observing that an agent working inside this repo,
+  with the server connected and the graph current, kept using `grep`
+  anyway — and that it was mostly right to, because the lookups it was
+  making (a function's **body**, a Rust `struct`'s **fields**, a sweep
+  needing a path filter) had no CodeOwl answer to reach for. The key
+  property, and why it gets its own track rather than three scattered
+  fixes: **reliance is all-or-nothing in a way coverage is not.** A tool
+  that under-answers one class of question loses the questions it answers
+  well too, because the caller stops asking. The specific defect shape to
+  watch for is an answer a caller can't distinguish from ignorance —
+  `children: []` meaning "this pack doesn't look" rather than "there are
+  none." See `experiments/exp-04-agent-reliance.md`.
+
 **`structural_sweep.py`**
 : The tool that proves a refactor changed nothing a consumer can observe.
   It builds two versions of CodeOwl (before and after the change), runs
