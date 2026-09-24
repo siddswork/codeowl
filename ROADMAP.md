@@ -675,6 +675,8 @@ These milestones are deliberately *not* about making the spec layer better. They
 
 The cheap half of the reliance track: no new dependencies, no cache invalidation, no change to any hashing or spec mechanism. Both items are pure additions to the read surface.
 
+**Sequencing within this milestone: ship the `search_code` truncation fix (scope item 2's second half) first, on its own, before the rest of this milestone's ergonomics work.** It's a live defect, not an enhancement — `search.rs` already returns ~15 KB for a ~20-match query against this repo's own committed prose, confirmed live, not projected — so it doesn't need to wait behind `get_source` or the rest of `search_code`'s new parameters. Direct precedent: the God-class `get_next_spec_task` payload fix (PR #37) shipped early and separately, out of its own milestone's order, for the identical reason — an urgent production-shaped fix doesn't wait for the milestone that happens to contain it. Everything else in this milestone's scope can land after.
+
 #### Scope
 
 **1. `get_source(id, context_lines?)` — the body the graph never kept.**
