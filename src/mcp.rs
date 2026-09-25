@@ -407,6 +407,13 @@ pub struct CalleesResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SearchResponse {
     pub matches: Vec<SearchMatch>,
+    /// `true` when the match-count cap or the cumulative response-size
+    /// budget stopped the walk before every real match in the repo was
+    /// found -- not to be confused with any one match's own `truncated`
+    /// field, which only means that match's `text` was cut. Narrow
+    /// `path` or raise `max_results` (up to 200) to see more; the
+    /// response-size budget itself isn't caller-adjustable.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -971,11 +978,25 @@ impl CodeOwlServer {
         let spans = spans.get_or_insert_with(|| vec![[1, total_lines]]);
         if context_lines > 0 {
             if let Some(first) = spans.first_mut() {
-                first[0] = first[0].saturating_sub(context_lines).max(1);
+                first[0] = first[0].saturating_sub(context_lines);
             }
             if let Some(last) = spans.last_mut() {
-                last[1] = (last[1] + context_lines).min(total_lines);
+                last[1] += context_lines;
             }
+        }
+        // Code-review finding: this clamp used to live only inside the
+        // `context_lines > 0` branch above, so a symbol's *recorded*
+        // span -- stale if the file shrank since the last reindex --
+        // could report `lines` past what the file's *current* text
+        // actually has, while `render_spans`' own internal clamp
+        // silently gave back less `source` than that. Now unconditional:
+        // `lines` never claims more than the file currently contains,
+        // whether or not `context_lines` touched anything.
+        if let Some(first) = spans.first_mut() {
+            first[0] = first[0].clamp(1, total_lines);
+        }
+        if let Some(last) = spans.last_mut() {
+            last[1] = last[1].min(total_lines);
         }
 
         let lines = [
@@ -1408,7 +1429,7 @@ impl CodeOwlServer {
 
     #[tool(
         name = "search_code",
-        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches (or `max_results` if lower) in walk order -- not ranked by relevance. Each match's `text` is capped at 500 bytes with `truncated: true` set if it was cut -- a long line (e.g. committed prose) isn't dropped, just shortened from its end; re-read the file directly for the full line. Optionally scope to `path` (a file or directory, true boundary not bare prefix), match case-insensitively with `ignore_case`, and pull `context_lines` (capped at 5) of surrounding text into `context_before`/`context_after` on each match."
+        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches (or `max_results` if lower) in walk order -- not ranked by relevance; the whole response's `truncated: true` means the walk stopped before every real match was found (the count cap, or a roughly 100,000-byte total-size budget). Each match's own `text` is capped at 500 bytes with `truncated: true` if it was cut -- a long line (e.g. committed prose) isn't dropped, just shortened from its end; re-read the file directly for the full line. Optionally scope to `path` (a file or directory, true boundary not bare prefix), match case-insensitively with `ignore_case`, and pull `context_lines` (capped at 5) of surrounding text into `context_before`/`context_after` on each match -- `context_unavailable: true` on a match means context was requested but couldn't be read, distinct from context legitimately being empty."
     )]
     async fn search(
         &self,
@@ -1421,7 +1442,12 @@ impl CodeOwlServer {
             max_results: req.max_results,
         };
         crate::search::search_code(&self.root, &req.query, &opts)
-            .map(|matches| Json(SearchResponse { matches }))
+            .map(|result| {
+                Json(SearchResponse {
+                    matches: result.matches,
+                    truncated: result.truncated,
+                })
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -3922,5 +3948,46 @@ mod tests {
         // The true span is still reported accurately, truncation or not --
         // an agent that needs the rest knows exactly what to re-read.
         assert_eq!(result.0.lines, [1, 3]);
+    }
+
+    #[tokio::test]
+    async fn get_source_clamps_lines_to_the_file_s_current_length_even_without_context_lines() {
+        // Code-review finding: the only clamp against a file's current
+        // length lived inside the `if context_lines > 0` branch, so a
+        // symbol recorded at e.g. [1, 3] in a file that's since *shrunk*
+        // (not grown -- the existing graph_in_sync test only covers
+        // growth) reported that stale, too-long span verbatim while
+        // render_spans' own internal clamp silently gave back less text
+        // than `lines` claimed -- contradicting SourceResponse.lines'
+        // documented guarantee that it "stays accurate ... nothing here
+        // is silently dropped without this flag saying so."
+        let server = test_server(&[(
+            "a.ts",
+            "export function target(): number {\n    return 1;\n}\n",
+        )]);
+        // Shrink the file out from under the graph, bypassing the watcher
+        // entirely -- same technique the existing debounce test uses for
+        // growth, here used for the untested shrink direction.
+        std::fs::write(server.root().join("a.ts"), "short\n").unwrap();
+
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::target".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+
+        assert!(!result.0.graph_in_sync);
+        assert!(
+            result.0.lines[1] <= 1,
+            "lines must never claim more than the file's current length (1 line): {:?}",
+            result.0.lines
+        );
+        assert_eq!(
+            result.0.source.lines().count(),
+            result.0.lines[1] - result.0.lines[0] + 1,
+            "source's real line count must match the span lines claims to cover"
+        );
     }
 }
