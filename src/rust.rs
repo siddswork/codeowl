@@ -119,6 +119,23 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         let block_hash = syms[i].source_hash.clone();
         let block_markers = syms[i].markers.clone();
 
+        // Ids already claimed under this type -- its own pre-merge members
+        // (struct fields, from visit_container's earlier pass) plus every
+        // method already reparented onto it by an earlier impl block in
+        // this same sweep (`several_inherent_impls_all_fold_into_the_one_type`).
+        // Code-review finding: Rust allows a field and a method to share a
+        // bare name (`self.x` vs `self.x()` — a `pub validate: bool` field
+        // alongside `fn validate(&self)` is real, valid, idiomatic getter
+        // code, not a hypothetical), and reparenting a method onto the
+        // same id a field already has would silently overwrite the
+        // field's arena slot in Graph::build's by_id map -- confirmed via
+        // a reproduction before this fix existed.
+        let mut claimed: std::collections::HashSet<String> =
+            syms[ti].children.iter().cloned().collect();
+        if let Some(already) = folded.get(&ti) {
+            claimed.extend(already.methods.iter().map(|m| m.id.clone()));
+        }
+
         // This block's methods are the contiguous run right after it whose
         // `parent` is the block (`visit_container` inserts the container,
         // then its members follow directly).
@@ -129,7 +146,25 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             }
             dropped[j] = true;
             let mut method = m.clone();
-            method.id = format!("{type_id}::{}", short_id(&m.id));
+            let mut candidate = format!("{type_id}::{}", short_id(&m.id));
+            if claimed.contains(&candidate) {
+                // Disambiguate deterministically rather than collide --
+                // the field (or an earlier-merged method) keeps the plain
+                // name, since that's the id scheme's pre-existing,
+                // already-relied-upon contract; the newly reparented
+                // method backs off.
+                let mut n = 2;
+                loop {
+                    let next = format!("{candidate}#{n}");
+                    if !claimed.contains(&next) {
+                        candidate = next;
+                        break;
+                    }
+                    n += 1;
+                }
+            }
+            claimed.insert(candidate.clone());
+            method.id = candidate;
             method.parent = Some(type_id.clone());
             methods.push(method);
         }
@@ -879,6 +914,58 @@ mod tests {
         assert_eq!(syms.len(), 1);
         assert!(!syms[0].is_exported);
         assert_eq!(syms[0].interface_hash, None);
+    }
+
+    #[test]
+    fn a_method_colliding_with_a_field_of_the_same_name_gets_a_distinct_id() {
+        // Real, valid Rust (a common getter idiom): `self.validate` (the
+        // field) and `self.validate()` (the method) coexist fine, but
+        // both naturally compute to the same id string under this
+        // extractor's `{parent}::{name}` scheme. Code-review finding:
+        // before this test existed, the method's reparented id silently
+        // collided with the field's, and Graph::build's by_id map would
+        // keep only whichever won the last insert -- the other's arena
+        // node became permanently unreachable by any lookup.
+        let src = "pub struct Config {\n    pub validate: bool,\n}\n\nimpl Config {\n    pub fn validate(&self) -> bool {\n        self.validate\n    }\n}\n";
+        let syms = extract_file(src, "a.rs");
+        let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
+        // No two symbols share an id.
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "a real id collision survived: {ids:?}"
+        );
+
+        let field = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Value)
+            .expect("the field");
+        assert_eq!(
+            field.id, "a.rs::Config::validate",
+            "the field keeps the plain name"
+        );
+
+        let method = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Callable && s.raw == "method")
+            .expect("the method");
+        assert_ne!(method.id, field.id);
+        assert!(
+            method.id.starts_with("a.rs::Config::validate#"),
+            "method got a disambiguated id: {}",
+            method.id
+        );
+
+        // Config's own `children` lists both real, distinct ids -- not
+        // the same string twice.
+        let config = &syms[0];
+        assert_eq!(config.children.len(), 2);
+        assert_ne!(config.children[0], config.children[1]);
+        assert!(config.children.contains(&field.id));
+        assert!(config.children.contains(&method.id));
     }
 
     #[test]

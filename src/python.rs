@@ -113,6 +113,36 @@ fn visit_container(
         }
     }
 
+    // Disambiguate any id collision among this class's own direct
+    // members before finalizing. Code-review finding: Python allows a
+    // class attribute and a method to share a bare name (real, valid
+    // code — `self.x` vs `self.x()`), and both compute to the same
+    // `{parent}::{name}` id under this extractor's scheme; silently
+    // colliding would let one member's arena node overwrite the
+    // other's in Graph::build's by_id map. Whichever member was pushed
+    // first (declaration order) keeps the plain id; a later collision
+    // backs off. Only direct children are touched — a nested class's
+    // own members were already deduped by its own visit_container call.
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for s in out[before..].iter_mut() {
+        if s.parent.as_deref() != Some(id.as_str()) {
+            continue;
+        }
+        if claimed.contains(&s.id) {
+            let base = s.id.clone();
+            let mut n = 2;
+            loop {
+                let next = format!("{base}#{n}");
+                if !claimed.contains(&next) {
+                    s.id = next;
+                    break;
+                }
+                n += 1;
+            }
+        }
+        claimed.insert(s.id.clone());
+    }
+
     let direct: Vec<&ExtractedSymbol> = out[before..]
         .iter()
         .filter(|s| s.parent.as_deref() == Some(id.as_str()))
@@ -936,6 +966,38 @@ def read_item(id: int) -> ItemPublic:
         let b = extract_file("class C:\n    def m(self):\n        return 2\n", "c.py");
         assert_ne!(a[0].source_hash, b[0].source_hash, "Merkle rollup moves");
         assert_eq!(a[0].interface_hash, b[0].interface_hash, "signature didn't");
+    }
+
+    #[test]
+    fn a_method_colliding_with_an_attribute_of_the_same_name_gets_a_distinct_id() {
+        let src = "class Config:\n    validate: bool = False\n\n    def validate(self):\n        return self.validate\n";
+        let syms = extract_file(src, "a.py");
+        let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "a real id collision survived: {ids:?}"
+        );
+
+        let attr = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Value)
+            .expect("the attribute");
+        assert_eq!(attr.id, "a.py::Config::validate");
+
+        let method = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Callable)
+            .expect("the method");
+        assert_ne!(method.id, attr.id);
+        assert!(method.id.starts_with("a.py::Config::validate#"));
+
+        let class = &syms[0];
+        assert_eq!(class.children.len(), 2);
+        assert_ne!(class.children[0], class.children[1]);
     }
 
     #[test]

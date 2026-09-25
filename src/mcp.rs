@@ -925,7 +925,7 @@ impl CodeOwlServer {
 #[tool_router]
 impl CodeOwlServer {
     #[tool(
-        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\". For a container (a class, struct, etc.), `signature` is just its declaration line -- it does not list fields, so use get_source on the same id for the real member list. `children` lists its member ids -- always its methods; fields/properties too, but only on some stacks today, so an empty `children` on an otherwise-real type isn't proof it has no members. Pass any child id back in to look that member up the same way."
+        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\". For a container (a class, struct, etc.), `signature` is just its declaration line -- it does not list fields, so use get_source on the same id for the real member list. `children` lists its member ids -- methods and fields/properties/attributes alike, on every stack. One known gap: a Rust tuple struct's positional fields aren't extracted yet, so an empty `children` there isn't proof of no members -- everywhere else, an empty list means the type genuinely has none. Pass any child id back in to look that member up the same way."
     )]
     async fn get_symbol(
         &self,

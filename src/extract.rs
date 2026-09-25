@@ -129,7 +129,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
                     continue;
                 };
                 let m_name = field_text(member, "name", source).unwrap_or("<anonymous>");
-                let m_id = format!("{class_id}.{m_name}");
+                let m_id = dedupe_member_id(format!("{class_id}.{m_name}"), &member_ids);
                 let m_source_hash = hash_text(text(member, source));
                 member_symbols.push(ExtractedSymbol {
                     id: m_id.clone(),
@@ -160,7 +160,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
                 let Some(f_name) = field_text(member, "name", source) else {
                     continue;
                 };
-                let f_id = format!("{class_id}.{f_name}");
+                let f_id = dedupe_member_id(format!("{class_id}.{f_name}"), &member_ids);
                 let f_source_hash = hash_text(text(member, source));
                 member_symbols.push(ExtractedSymbol {
                     id: f_id.clone(),
@@ -311,6 +311,29 @@ fn signature_text(node: Node, body: Node, source: &str) -> String {
     let start = node.start_byte();
     let end = body.start_byte().max(start);
     source[start..end].trim_end().to_string()
+}
+
+/// If `candidate` is already in `existing`, append a `#2`/`#3`/… suffix
+/// until it's unique. Code-review finding: a class field and a method can
+/// share a bare name in real, syntactically valid code (tree-sitter parses
+/// it regardless of what `tsc` would say), and both naturally compute to
+/// the same `{class}.{name}` id under this extractor's scheme -- silently
+/// colliding would let one member's arena node overwrite the other's in
+/// `Graph::build`'s `by_id` map. Whichever member is declared first keeps
+/// the plain id (this scheme's pre-existing, already-relied-upon
+/// contract); a later collision backs off.
+fn dedupe_member_id(candidate: String, existing: &[String]) -> String {
+    if !existing.contains(&candidate) {
+        return candidate;
+    }
+    let mut n = 2;
+    loop {
+        let next = format!("{candidate}#{n}");
+        if !existing.contains(&next) {
+            return next;
+        }
+        n += 1;
+    }
 }
 
 /// A `public_field_definition`'s declaration text with any initializer
@@ -538,6 +561,41 @@ mod tests {
         let src = "export { Foo } from './foo';\nexport * from './bar';\n";
         let symbols = extract_file(src, "a.ts");
         assert!(symbols.is_empty());
+    }
+
+    #[test]
+    fn a_method_colliding_with_a_field_of_the_same_name_gets_a_distinct_id() {
+        // tree-sitter parses this regardless of whether tsc would accept
+        // it -- a syntax tree, not a type checker -- so CodeOwl still
+        // needs to index it without corrupting the graph.
+        let src = "export class Config {\n    validate: boolean = false;\n    validate() { return this.validate; }\n}\n";
+        let syms = extract_file(src, "a.ts");
+        let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "a real id collision survived: {ids:?}"
+        );
+
+        let field = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Value)
+            .expect("the field");
+        assert_eq!(field.id, "a.ts::Config.validate");
+
+        let method = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Callable)
+            .expect("the method");
+        assert_ne!(method.id, field.id);
+        assert!(method.id.starts_with("a.ts::Config.validate#"));
+
+        let class = &syms[0];
+        assert_eq!(class.children.len(), 2);
+        assert_ne!(class.children[0], class.children[1]);
     }
 
     #[test]
