@@ -30,10 +30,16 @@ spec leads with a `## Key flows` section instead.
 
 Once your repo's `CLAUDE.md` has the line from `README.md` step 5, the
 agent queries CodeOwl on its own. You just ask normal questions and it
-reaches for the index instead of grepping. The questions below aren't
-hypothetical — they were run live against *this* repo's own MCP
-connection while writing this doc, so you can reproduce every one of
-them yourself right now:
+reaches for the index instead of grepping.
+
+### Try these right now, on CodeOwl's own repo
+
+You already have this repo cloned and built — no second checkout, no
+other setup. Every one of these is a **literal command, not a
+paraphrase**: run live against *this* repo's own MCP connection while
+writing this doc (and re-verified live again before this section was
+split), so you can reproduce every one of them yourself, right now,
+against the exact code you just built:
 
 - *"What's `Graph`'s shape before I touch it?"* → `get_symbol` — one
   call: signature, all 24 methods, no file open.
@@ -67,16 +73,56 @@ them yourself right now:
   `rx.recv_timeout(DEBOUNCE)` call that actually uses it, each with its
   real doc comment attached — one call, not a grep plus a manual
   file open.
-- *"How does checkout work end to end?"* → `get_spec feature:<slug>` —
-  this repo has no feature layer (a CLI/library, not a routed service,
-  so there's no `feature:<slug>` to query here), but on any repo with
-  routes — API endpoints, pages, queue listeners — this is the
-  highest-value question CodeOwl answers in one call instead of a
-  hand-traced UI→API→DB walk.
 
 If a spec exists and is current, the agent gets an accurate answer without
 opening a file. If it's `missing` or `stale`, the agent falls back to
 reading source — CodeOwl never blocks it, it just doesn't help as much.
+
+### What this looks like on your own repo, if it's shaped differently
+
+CodeOwl's own repo is a Rust **CLI/library** — no routes, no SQL schema,
+so two real capabilities have nothing to show here no matter how you ask.
+The examples below aren't runnable against this repo (and the target
+repos they're really from aren't part of this project — one is a
+private production app, the others are external open-source projects
+this project happens to dogfood against), but each is a **real, live
+result**, captured the same way as the examples above, against a real
+repo of that shape — so you know what to expect once you point CodeOwl
+at your own.
+
+**TypeScript / Next.js, a routed web app (e.g. with Supabase):**
+- `search_code("createClient", path: "lib", context_lines: 1)` found
+  every real client-construction call across the codebase, each with
+  its JSDoc attached — not just the definition, every call site too.
+- `get_source` on a found symbol returned the real function body — a
+  cookie-handling Supabase client constructor, in this case — the same
+  gap it closes on any stack.
+- On a repo with real routes, `get_spec feature:<slug>` is the
+  highest-value question CodeOwl answers in one call: a feature spec
+  traces one route's entry point through to its data access, instead
+  of a hand-traced UI→API→DB walk. CodeOwl's own repo — the one you
+  just built — is a CLI/library with no routes, so it has no feature
+  layer at all and no `feature:<slug>` to ask; this is what you gain
+  the moment you point CodeOwl at a real routed service instead.
+
+**Python / FastAPI, with a SQLModel schema:**
+- `search_code("table=True", context_lines: 2)` — the exact schema
+  signal CodeOwl's Python support looks for — found the real table
+  classes immediately, correctly skipping a base class one level up
+  that shares the same parent but isn't itself a table.
+- `get_symbol` on one of those classes came back `"kind": "schema"` —
+  confirmation the schema hook fired, not just a class definition.
+  `get_source` on the same id returned its real field list.
+
+**Java / Quarkus, a CDI service:**
+- `search_code("@ApplicationScoped", path: "<one-module>",
+  context_lines: 1)` — the exact annotation CodeOwl's Java support
+  treats as "this class is part of the service's core," scoped to one
+  module — found the real service and repository classes.
+- `get_source` on one of those classes, with `context_lines: 2`,
+  correctly widened the returned span to include the trailing Javadoc
+  line sitting just above the class's own annotation — not just the
+  class body, the real doc comment that explains it too.
 
 You can also **drive the tools yourself in chat** — this is a normal
 workflow, not just something the agent does invisibly: *"ask codeowl who
