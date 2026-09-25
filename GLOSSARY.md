@@ -268,12 +268,19 @@ why CodeOwl cares.
   being folded into its parent's.
 
   The rules:
-  - A **top-level** function or type is spec-bearing.
+  - A **top-level** function or type is spec-bearing, **exported or not**
+    (corrected 2026-09-25 — a private top-level declaration used to be
+    excluded, which meant an entirely-private file, like a `tests/*.rs`
+    integration-test file with no `pub` anywhere, got no spec at all,
+    ever — not deprioritized, invisible. See `ARCHITECTURE.md`'s
+    granularity rules for the full reasoning).
   - A **method** is not — it's described inside its class's section.
   - A **`const`** is not — it's mentioned in the file's summary.
-  - A **file** is spec-bearing only if it has at least one exported
-    function or class. A file that just re-exports things from elsewhere (a
-    "barrel") is not.
+  - A **file** is spec-bearing only if it has at least one top-level
+    function or class, exported or not. A file that just re-exports
+    things from elsewhere (a "barrel") is not — it extracts to *zero*
+    top-level symbols, so this test already excludes it on its own,
+    independent of exportedness.
   - A **directory** is spec-bearing (it gets a rollup) only if it contains
     at least two spec-bearing files.
 
