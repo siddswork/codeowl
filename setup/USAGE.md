@@ -44,32 +44,32 @@ never the point — an agent reads intent, not a script, and either one
 of a pair gets you the same place:
 
 - *"What does `Graph` actually contain before I touch it?"*, *"What
-  fields and methods does `Graph` have?"*
+  fields and methods does `Graph` have?"*<br>
   → `get_symbol` — one call: signature, all 24 methods, no file open.
 - *"What breaks if I change `Graph`'s public API?"*, *"Who depends on
-  `Graph`?"*
+  `Graph`?"*<br>
   → `get_callers` — 13 files import it directly. Ask the same on
   `Graph::build`, a method instead of a type, and you get back
   `{"callers":[]}` — the "not a call graph" caveat below, proven, not
   just asserted.
 - *"What does `graph.rs` itself depend on?"*, *"What does `graph.rs`
-  import?"*
+  import?"*<br>
   → `get_callees` — its own resolved imports, separate from who
   depends on it.
 - *"Can I trust this file's spec, or do I need to read the source
-  myself?"*, *"Is the documentation for this file still accurate?"*
+  myself?"*, *"Is the documentation for this file still accurate?"*<br>
   → `get_spec` on the file id. Right now, on this repo: `stale`,
   `changed: ["changed:source"]` — real drift, caught live.
 - *"New to `src/` — what's actually in here?"*, *"Give me an overview
-  of `src/`."*
+  of `src/`."*<br>
   → `get_spec rollup:src` — a real directory narrative, not a file
   listing.
 - *"What should I document first?"*, *"Where are the documentation
-  gaps?"*
+  gaps?"*<br>
   → `get_spec_coverage` — `top_stale_by_impact` names `graph.rs` first
   here (fan-in 27): fix that one before the long tail.
 - *"What does this function actually do?"*, *"Show me the real
-  implementation, not just the signature."*
+  implementation, not just the signature."*<br>
   → `get_source`. `get_symbol` on `search_code` (the function this
   exact tool wraps) stops at `pub fn search_code(root: &Path, query:
   &str, opts: &SearchOptions) -> Result<SearchResults>` — the declared
@@ -78,7 +78,7 @@ of a pair gets you the same place:
   `missing`, or just prose) answers "what does this actually do" —
   `get_source` is the only one reading the real thing.
 - *"Where's `DEBOUNCE` actually implemented — not just mentioned?"*,
-  *"Find every real use of `DEBOUNCE` in `watch.rs`, with context."*
+  *"Find every real use of `DEBOUNCE` in `watch.rs`, with context."*<br>
   → `search_code` with `path` and `context_lines`:
   `search_code("DEBOUNCE", path: "src/watch.rs", context_lines: 2)`
   returns the constant's declaration *and* the
