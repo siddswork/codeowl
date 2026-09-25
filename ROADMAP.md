@@ -822,23 +822,27 @@ The 79%/92% numbers are real and meaningful — just read them as evidence for t
 
 ##### M21.b — Decide open question 12, owner's call, from M21.a's real numbers
 
-**Decided, 2026-09-25: yes, fold — implemented as a straightforward full fold (not category-filtered; see the reasoning below the table), Python's value-stripping prerequisite built first.** The table below is both the decision record and the build tracker — each row's `Implemented` column updates as the work lands, so this stays accurate rather than becoming a stale changelog entry.
+**Decided, 2026-09-25: yes, fold — implemented as a straightforward full fold (not category-filtered; see the reasoning below the table), Python's value-stripping prerequisite built first. Shipped, 2026-09-25, all 4 packs.** The table below is both the decision record and the build tracker.
 
 | # | Change | Impacts spec (yes/no) | Effect (cascade/local) | Implemented |
 | --- | --- | --- | --- | --- |
-| 1 | Public field's type changes (name/role unchanged) | Yes | Cascade | Deferred |
-| 2 | Public field renamed | Yes | Cascade | Deferred |
-| 3 | Public field added | Yes | Cascade | Deferred |
-| 4 | Public field removed | Yes | Cascade | Deferred |
-| 5 | Field visibility pub → private | Yes | Cascade | Deferred |
-| 6 | Field visibility private → pub | Yes | Cascade | Deferred |
-| 7 | Fields reordered, nothing else changes | No | Cascade | Deferred |
+| 1 | Public field's type changes (name/role unchanged) | Yes | Cascade | Yes |
+| 2 | Public field renamed | Yes | Cascade | Yes |
+| 3 | Public field added | Yes | Cascade | Yes |
+| 4 | Public field removed | Yes | Cascade | Yes |
+| 5 | Field visibility pub → private | Yes | Cascade | Yes |
+| 6 | Field visibility private → pub | Yes | Cascade | Yes |
+| 7 | Fields reordered, nothing else changes | No | Cascade | Yes |
 | 8 | Field's doc comment changes | Yes | Local | No |
 | 9 | Method body changes | Yes | Local | Yes |
 | 10 | Method signature changes | Yes | Local | Yes |
 | 11 | Private field's type changes | No | Local | Yes |
 
-Rows 1-7 move together — they're all the same fold, not separable work; row 7 fires mechanically (mirrors `source_hash`'s existing order-sensitive fold) despite carrying no real correctness benefit, deliberately not engineered around (reorder-only edits are rare in practice, adding fields is the common real driver of position changes — not worth the complexity of an order-independent fold to avoid it). Row 8 sits outside this decision entirely — a docstring-only edit doesn't move any hash for any symbol today, predating M21, a separate gap from what this table tracks. Rows 9-11 are already correct and already shipped; nothing here changes them.
+Rows 1-7 moved together — they're all the same fold, not separable work; row 7 fires mechanically (mirrors `source_hash`'s existing order-sensitive fold) despite carrying no real correctness benefit, deliberately not engineered around (reorder-only edits are rare in practice, adding fields is the common real driver of position changes — not worth the complexity of an order-independent fold to avoid it). Row 8 sits outside this decision entirely — a docstring-only edit doesn't move any hash for any symbol today, predating M21, a separate gap from what this table tracks. Rows 9-11 were already correct and already shipped; nothing here changed them.
+
+**Per pack:** each pack's `interface_hash` now folds in every public field's own signature (name+type, value excluded), the same way `source_hash` already folds every member — Rust (`pub`), TypeScript (public-by-default, excluded by `private`/`#`-private), Python (public-by-convention via `is_public_name`'s leading-underscore rule), Java (`public`/`protected`, matching `has_public_or_protected`). `FORMAT_VERSION` bumped 9 → 13 across the arc (one bump per meaningful shape change). The cross-file cascade itself — a field's signature change moves `interface_hash` and stales exactly the direct importer, one hop, never further — is covered by its own dedicated regression test, modeled on the existing method-level sibling test.
+
+**Two real regressions found and fixed while building this, both the same underlying lesson: a field's stored `signature`/value text can be load-bearing for something unrelated to interface_hash, discovered by real test failures, not assumed.** Python's `fastapi.rs::router_prefix` reads a module-level `router = APIRouter(prefix="/items")` assignment's value straight out of its `signature` to resolve a route's URL prefix — fixed by scoping the value-stripping prerequisite to class-level attributes only, leaving module-level assignments untouched. Java's `quarkus.rs::resolve_channel_name` reads a Kafka channel constant's literal string value the same way — fixed differently, since Java's `raw: "field"`/`"constant"` symbols serve both purposes with no clean scope split available: `signature` stays value-inclusive for Java, and the fold strips the value transiently, at fold time only, via a dedicated helper that never touches the stored field.
 
 **Scope of the build:** implement the fold in `extract.rs`'s rollup and each pack's equivalent (mirroring how `source_hash` already folds every member, applied now to `interface_hash` for exported fields specifically), normalize Python's field `signature` text to strip default-value expressions first (today TS already does this, Python doesn't — building the fold before this lands would make a pure default-value edit also move `interface_hash`, which isn't real public-surface breakage), and add the regression test this invariant originally asked for — a field's signature change moves `interface_hash` and cascades exactly one hop via `deps_hash`, per "Reference-edge propagation." `ARCHITECTURE.md` open question 12 gets marked resolved once this lands.
 
