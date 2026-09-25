@@ -2,10 +2,14 @@
 //! top-level items — the Rust pack's counterpart to `extract.rs` (M14).
 //!
 //! Deliberately shallow, like `extract.rs`: `source_file`'s direct
-//! children, plus one level into `impl` / `trait` / inline `mod` bodies
-//! for the callables they contain. Function bodies, struct fields, enum
-//! variants, and nested `fn`s are implementation detail, not declarations
-//! CodeOwl generates a spec for.
+//! children, plus one level into `impl` / `trait` / inline `mod` / `struct`
+//! bodies for the callables and (M21) named fields they contain. A struct's
+//! *named* fields become `Value` members (`field_declaration_list`); a
+//! tuple struct's positional fields (`ordered_field_declaration_list`, no
+//! `name` node in the grammar at all) are not yet extracted — see
+//! `visit_item`'s own comment. Function bodies, enum variants, and nested
+//! `fn`s remain implementation detail, not declarations CodeOwl generates
+//! a spec for.
 //!
 //! Kind mapping onto the stack-neutral [`SymbolKind`] (M14 / design
 //! decision 1): `fn` -> `Callable`, `struct`/`enum`/`union`/`trait`/`impl`/
@@ -115,6 +119,23 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         let block_hash = syms[i].source_hash.clone();
         let block_markers = syms[i].markers.clone();
 
+        // Ids already claimed under this type -- its own pre-merge members
+        // (struct fields, from visit_container's earlier pass) plus every
+        // method already reparented onto it by an earlier impl block in
+        // this same sweep (`several_inherent_impls_all_fold_into_the_one_type`).
+        // Code-review finding: Rust allows a field and a method to share a
+        // bare name (`self.x` vs `self.x()` — a `pub validate: bool` field
+        // alongside `fn validate(&self)` is real, valid, idiomatic getter
+        // code, not a hypothetical), and reparenting a method onto the
+        // same id a field already has would silently overwrite the
+        // field's arena slot in Graph::build's by_id map -- confirmed via
+        // a reproduction before this fix existed.
+        let mut claimed: std::collections::HashSet<String> =
+            syms[ti].children.iter().cloned().collect();
+        if let Some(already) = folded.get(&ti) {
+            claimed.extend(already.methods.iter().map(|m| m.id.clone()));
+        }
+
         // This block's methods are the contiguous run right after it whose
         // `parent` is the block (`visit_container` inserts the container,
         // then its members follow directly).
@@ -125,7 +146,25 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             }
             dropped[j] = true;
             let mut method = m.clone();
-            method.id = format!("{type_id}::{}", short_id(&m.id));
+            let mut candidate = format!("{type_id}::{}", short_id(&m.id));
+            if claimed.contains(&candidate) {
+                // Disambiguate deterministically rather than collide --
+                // the field (or an earlier-merged method) keeps the plain
+                // name, since that's the id scheme's pre-existing,
+                // already-relied-upon contract; the newly reparented
+                // method backs off.
+                let mut n = 2;
+                loop {
+                    let next = format!("{candidate}#{n}");
+                    if !claimed.contains(&next) {
+                        candidate = next;
+                        break;
+                    }
+                    n += 1;
+                }
+            }
+            claimed.insert(candidate.clone());
+            method.id = candidate;
             method.parent = Some(type_id.clone());
             methods.push(method);
         }
@@ -199,10 +238,21 @@ fn visit_item(
                 out,
             );
         }
-        "struct_item" => push_leaf(
+        "struct_item" => {
+            let name = field_text(node, "name", source)
+                .unwrap_or("<struct>")
+                .to_string();
+            visit_container(node, "struct", name, parent_id, source, file, out)
+        }
+        // One symbol per named field. Deliberately not a tuple struct's
+        // positional fields (`ordered_field_declaration_list`'s children
+        // have no `name` field at all in the grammar) -- out of scope for
+        // this pass, falls through to the catch-all below and is skipped
+        // gracefully rather than guessed at ahead of a real repo needing it.
+        "field_declaration" => push_leaf(
             node,
-            SymbolKind::Container,
-            "struct",
+            SymbolKind::Value,
+            "field",
             parent_id,
             source,
             file,
@@ -262,16 +312,24 @@ fn visit_item(
             file,
             out,
         ),
-        "trait_item" => visit_container(node, "trait", trait_name(node, source), source, file, out),
+        "trait_item" => visit_container(
+            node,
+            "trait",
+            trait_name(node, source),
+            parent_id,
+            source,
+            file,
+            out,
+        ),
         "impl_item" => {
             let name = impl_header(node, source);
-            visit_container(node, "impl", name, source, file, out)
+            visit_container(node, "impl", name, parent_id, source, file, out)
         }
         "mod_item" if node.child_by_field_name("body").is_some() && !is_cfg_test(node, source) => {
             let name = field_text(node, "name", source)
                 .unwrap_or("<mod>")
                 .to_string();
-            visit_container(node, "mod", name, source, file, out)
+            visit_container(node, "mod", name, parent_id, source, file, out)
         }
         _ => {}
     }
@@ -287,19 +345,23 @@ fn is_cfg_test(node: Node, source: &str) -> bool {
         .any(|a| a.replace(' ', "").contains("cfg(test)"))
 }
 
-/// A `Container` with a body — recurse one level for the callables it
-/// holds, then Merkle-fold their `source_hash`es into the container's own
-/// (an edit to any member is an edit to the container), matching how
-/// `extract.rs` treats a class.
+/// A `Container` with a body — recurse one level for the callables (and,
+/// as of M21, the fields) it holds, then Merkle-fold their `source_hash`es
+/// into the container's own (an edit to any member is an edit to the
+/// container), matching how `extract.rs` treats a class.
 fn visit_container(
     node: Node,
     raw: &str,
     name: String,
+    parent_id: Option<&str>,
     source: &str,
     file: &str,
     out: &mut Vec<ExtractedSymbol>,
 ) {
-    let id = format!("{file}::{name}");
+    let id = match parent_id {
+        Some(p) => format!("{p}::{name}"),
+        None => format!("{file}::{name}"),
+    };
     let before = out.len();
 
     if let Some(body) = node.child_by_field_name("body") {
@@ -309,15 +371,24 @@ fn visit_container(
         }
     }
 
-    let member_ids: Vec<String> = out[before..].iter().map(|s| s.id.clone()).collect();
-    let mut rollup = signature_before_body(node, source);
-    for s in &out[before..] {
+    // Direct children only — a nested container recursed above has
+    // already pushed its own members into this same flat `out` range, so
+    // filtering by `parent == id` here (not just "anything after
+    // `before`") avoids treating a grandchild as this container's own
+    // direct member. Matches `java.rs::visit_container`'s identical guard.
+    let direct: Vec<&ExtractedSymbol> = out[before..]
+        .iter()
+        .filter(|s| s.parent.as_deref() == Some(id.as_str()))
+        .collect();
+    let member_ids: Vec<String> = direct.iter().map(|s| s.id.clone()).collect();
+    let sig = signature_before_body(node, source);
+    let mut rollup = sig.clone();
+    for s in &direct {
         rollup.push('\n');
         rollup.push_str(&s.source_hash);
     }
 
     let is_exported = has_pub(node, source);
-    let sig = signature_before_body(node, source);
     // Insert the container *before* its members so declaration order in
     // `out` stays parent-then-children, like `extract.rs`.
     out.insert(
@@ -334,7 +405,7 @@ fn visit_container(
             source_hash: hash_text(&rollup),
             interface_hash: is_exported.then(|| hash_text(&sig)),
             markers: attributes(node, source),
-            parent: None,
+            parent: parent_id.map(str::to_string),
             children: member_ids,
         },
     );
@@ -846,6 +917,58 @@ mod tests {
     }
 
     #[test]
+    fn a_method_colliding_with_a_field_of_the_same_name_gets_a_distinct_id() {
+        // Real, valid Rust (a common getter idiom): `self.validate` (the
+        // field) and `self.validate()` (the method) coexist fine, but
+        // both naturally compute to the same id string under this
+        // extractor's `{parent}::{name}` scheme. Code-review finding:
+        // before this test existed, the method's reparented id silently
+        // collided with the field's, and Graph::build's by_id map would
+        // keep only whichever won the last insert -- the other's arena
+        // node became permanently unreachable by any lookup.
+        let src = "pub struct Config {\n    pub validate: bool,\n}\n\nimpl Config {\n    pub fn validate(&self) -> bool {\n        self.validate\n    }\n}\n";
+        let syms = extract_file(src, "a.rs");
+        let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
+        // No two symbols share an id.
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            ids.len(),
+            "a real id collision survived: {ids:?}"
+        );
+
+        let field = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Value)
+            .expect("the field");
+        assert_eq!(
+            field.id, "a.rs::Config::validate",
+            "the field keeps the plain name"
+        );
+
+        let method = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::Callable && s.raw == "method")
+            .expect("the method");
+        assert_ne!(method.id, field.id);
+        assert!(
+            method.id.starts_with("a.rs::Config::validate#"),
+            "method got a disambiguated id: {}",
+            method.id
+        );
+
+        // Config's own `children` lists both real, distinct ids -- not
+        // the same string twice.
+        let config = &syms[0];
+        assert_eq!(config.children.len(), 2);
+        assert_ne!(config.children[0], config.children[1]);
+        assert!(config.children.contains(&field.id));
+        assert!(config.children.contains(&method.id));
+    }
+
+    #[test]
     fn inherent_impl_folds_into_its_type() {
         let src = "\
 pub struct Counter {\n    n: u64,\n}\n\n\
@@ -862,8 +985,12 @@ impl Counter {\n\
                 "src/counter.rs::Counter",
                 "src/counter.rs::Counter::new",
                 "src/counter.rs::Counter::bump",
+                "src/counter.rs::Counter::n",
             ],
-            "the `impl Counter` block should be gone, its methods reparented onto Counter"
+            "the `impl Counter` block should be gone, its methods reparented onto Counter -- \
+             `n` trails the flat list here (an artifact of the fold pass appending an already- \
+             extracted field's index after the impl's methods), but Counter's own `children` \
+             below keeps the true field-then-methods order"
         );
 
         let the_struct = &syms[0];
@@ -872,6 +999,7 @@ impl Counter {\n\
         assert_eq!(
             the_struct.children,
             vec![
+                "src/counter.rs::Counter::n",
                 "src/counter.rs::Counter::new",
                 "src/counter.rs::Counter::bump"
             ]
@@ -882,6 +1010,11 @@ impl Counter {\n\
         assert_eq!(new.parent.as_deref(), Some("src/counter.rs::Counter"));
         assert_eq!(new.docstring.as_deref(), Some("Start at zero."));
         assert!(!new.is_exported);
+
+        let n = &syms[3];
+        assert_eq!(n.id, "src/counter.rs::Counter::n");
+        assert_eq!(n.kind, SymbolKind::Value);
+        assert_eq!(n.raw, "field");
     }
 
     #[test]
@@ -976,6 +1109,120 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
         assert_eq!(syms[0].raw, "const");
         assert_eq!(syms[1].kind, SymbolKind::Value);
         assert_eq!(syms[1].raw, "static");
+    }
+
+    #[test]
+    fn struct_fields_are_extracted_as_value_members() {
+        // The exact FileNode shape (src/graph.rs) that sent an agent to
+        // Read mid-session (M21.a's own exit test, per ROADMAP.md).
+        let src = "\
+pub struct FileNode {\n\
+    /// Repo-relative path.\n\
+    pub id: String,\n\
+    /// Hash of the file's raw text.\n\
+    pub source_hash: String,\n\
+    /// Top-level symbols, in declaration order.\n\
+    pub children: Vec<SymbolId>,\n\
+}\n";
+        let syms = extract_file(src, "a.rs");
+        assert_eq!(syms[0].id, "a.rs::FileNode");
+        assert_eq!(syms[0].kind, SymbolKind::Container);
+        assert_eq!(
+            syms[0].children,
+            vec![
+                "a.rs::FileNode::id",
+                "a.rs::FileNode::source_hash",
+                "a.rs::FileNode::children"
+            ]
+        );
+
+        let fields = &syms[1..4];
+        let ids: Vec<&str> = fields.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "a.rs::FileNode::id",
+                "a.rs::FileNode::source_hash",
+                "a.rs::FileNode::children"
+            ]
+        );
+        for f in fields {
+            assert_eq!(f.kind, SymbolKind::Value);
+            assert_eq!(f.raw, "field");
+            assert_eq!(f.parent.as_deref(), Some("a.rs::FileNode"));
+            // A member is never independently imported -- same stance as
+            // a method (push_leaf's own rule), so this is never exported
+            // on its own even though the field itself is `pub`.
+            assert!(!f.is_exported);
+            assert_eq!(f.interface_hash, None);
+        }
+        assert_eq!(fields[0].docstring.as_deref(), Some("Repo-relative path."));
+        assert_eq!(
+            fields[1].docstring.as_deref(),
+            Some("Hash of the file's raw text.")
+        );
+        assert_eq!(
+            fields[2].docstring.as_deref(),
+            Some("Top-level symbols, in declaration order.")
+        );
+    }
+
+    #[test]
+    fn a_private_field_is_still_extracted_as_a_member() {
+        // Matches java.rs's precedent: a member is extracted regardless
+        // of its own visibility, same as a private method already is.
+        let syms = extract_file("pub struct C {\n    n: u64,\n}\n", "a.rs");
+        assert_eq!(syms.len(), 2);
+        assert_eq!(syms[1].id, "a.rs::C::n");
+        assert_eq!(syms[1].raw, "field");
+    }
+
+    #[test]
+    fn field_reorder_moves_the_structs_source_hash_but_unrelated_edit_does_not() {
+        let a = extract_file("pub struct P {\n    x: u32,\n    y: u32,\n}\n", "a.rs");
+        let reordered = extract_file("pub struct P {\n    y: u32,\n    x: u32,\n}\n", "a.rs");
+        assert_ne!(a[0].source_hash, reordered[0].source_hash);
+
+        let unrelated_edit = extract_file(
+            "// a comment that doesn't touch the struct\npub struct P {\n    x: u32,\n    y: u32,\n}\n",
+            "a.rs",
+        );
+        assert_eq!(a[0].source_hash, unrelated_edit[0].source_hash);
+    }
+
+    #[test]
+    fn unit_struct_with_no_body_has_no_members() {
+        let syms = extract_file("pub struct Marker;\n", "a.rs");
+        assert_eq!(syms.len(), 1);
+        assert_eq!(syms[0].children, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_nested_structs_fields_are_not_leaked_onto_its_enclosing_module() {
+        // Regression: visit_container's member_ids used to be "everything
+        // after `before`" -- correct back when a nested container's own
+        // members were always leaf callables with no children of their
+        // own, but a struct with real field members now recurses and
+        // pushes grandchildren into that same flat range too.
+        let src = "pub mod outer {\n    pub struct Foo {\n        x: i32,\n    }\n}\n";
+        let syms = extract_file(src, "a.rs");
+        let outer = syms.iter().find(|s| s.id == "a.rs::outer").unwrap();
+        assert_eq!(outer.children, vec!["a.rs::outer::Foo"]);
+        let foo = syms.iter().find(|s| s.id == "a.rs::outer::Foo").unwrap();
+        assert_eq!(foo.children, vec!["a.rs::outer::Foo::x"]);
+        assert_eq!(foo.parent.as_deref(), Some("a.rs::outer"));
+    }
+
+    #[test]
+    fn tuple_struct_fields_are_not_yet_extracted_as_members() {
+        // Deliberately out of scope for this pass (see rust.rs's module
+        // doc): a tuple field has no `name` field in the grammar at all
+        // (`ordered_field_declaration_list`, not `field_declaration_list`),
+        // so it falls through visit_item's catch-all and is skipped --
+        // gracefully, not silently wrong, just not a member yet.
+        let syms = extract_file("pub struct Point(pub f64, pub f64);\n", "a.rs");
+        assert_eq!(syms.len(), 1);
+        assert_eq!(syms[0].children, Vec::<String>::new());
     }
 
     #[test]

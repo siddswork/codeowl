@@ -79,17 +79,18 @@ impl SymbolView {
     }
 }
 
-/// A file's own arena node. `id` is its repo-relative path (the same
-/// string scheme `Symbol::file` uses); `source_hash` is a hash of the
-/// file's raw text — deliberately *not* a rollup of children's hashes like
-/// a `Class`'s is, since a file's spec-relevant content (imports, types,
-/// comments) isn't fully captured by its declared symbols alone, and a
-/// whole-file hash is simpler and strictly more sensitive. `children` are
-/// its top-level symbols, in declaration order.
+/// A file's own arena node.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FileNode {
+    /// Its repo-relative path — the same string scheme `Symbol::file` uses.
     pub id: String,
+    /// A hash of the file's raw text — deliberately *not* a rollup of
+    /// children's hashes like a `Class`'s is, since a file's spec-relevant
+    /// content (imports, types, comments) isn't fully captured by its
+    /// declared symbols alone, and a whole-file hash is simpler and
+    /// strictly more sensitive.
     pub source_hash: String,
+    /// Its top-level symbols, in declaration order.
     pub children: Vec<SymbolId>,
 }
 
@@ -157,8 +158,22 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// (`Graph` / `RepoIndex` gain `pack_name`, so a cache built by a
 /// different `StackPack` is rejected). 6 = M15 (the Rust pack folds an
 /// inherent `impl Foo` block into the `Foo` symbol — symbol ids and the
-/// containment tree change for every Rust type with methods).
-pub const FORMAT_VERSION: u32 = 6;
+/// containment tree change for every Rust type with methods). 7 = M21.a
+/// (member-level extraction, Rust: a struct's named fields become
+/// `SymbolKind::Value` members, folded Merkle-style into the struct's own
+/// `source_hash` like any other member — moves every Rust container's
+/// `source_hash` and `children`, not a shape drift a `#[serde(default)]`
+/// would paper over, but the cache would otherwise silently keep serving
+/// pre-fix `children: []` forever with nothing to invalidate it). 8 =
+/// M21.a (member-level extraction, TypeScript: same treatment for a
+/// class's fields — moves every TS/Next class's `source_hash`/`children`
+/// too, same reasoning as version 7). 9 = M21.a (member-level extraction,
+/// Python: a class body's `NAME = …` / `NAME: T = …` assignments become
+/// `SymbolKind::Value` members instead of being silently folded away,
+/// same reasoning again — and `PythonStack::is_schema_symbol` drops its
+/// now-broken leaf-only guard in the same commit, retagging a `table=True`
+/// model with real field children as `Schema` again).
+pub const FORMAT_VERSION: u32 = 9;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

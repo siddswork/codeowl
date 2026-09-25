@@ -744,7 +744,11 @@ This is not a missing capability. It is an **inconsistent** one, and the inconsi
 
 It also means the single place where a Rust codebase writes its data contracts — per-field `///` doc comments on a struct — is unreachable through CodeOwl by any path.
 
-#### Scope
+#### Scope, split into two dependent sub-phases
+
+**M21.b depends on M21.a's findings.** Rather than deciding invariant 3 below by argument, this milestone follows the same pattern already used to resolve open questions 8/10/11 elsewhere in this project: wait for real measurement on real repos, don't reason ahead of it. M21.a is mechanical — no design call, just extraction plus the instrumentation needed to measure the one real open question. M21.b is the owner reviewing M21.a's actual numbers and making that call; if the call requires a code change, it ships as part of M21.b, in this same phase — not deferred to M22 or later. See "Definition of done" below: this milestone isn't complete until both halves are.
+
+##### M21.a — Extraction + measurement
 
 **1. Bring TS, Rust, and Python up to Java's existing behavior.** Each pack's body walk gains a case for its own grammar's field node kind. No new `StackPack` trait method is needed: unlike `is_schema_symbol`, there's no judgement call about *whether* something is a field, so this is per-pack extraction detail, not a hook. What each emits is a shared convention:
 
@@ -754,23 +758,90 @@ It also means the single place where a Rust codebase writes its data contracts �
 - `is_exported`: the language's own visibility rule — Rust `pub`, Java `public`, TS non-`private`, Python's `is_public_name` convention
 - `signature`: the field's declaration text; **`docstring`: the field's own doc comment** — the point of the whole exercise
 
-**2. Three invariants the implementation has to protect.**
+**2. Two invariants this half protects unconditionally** (the third — `interface_hash` — is what M21.b exists to decide, not guess here):
 
 1. **Spec granularity must not move.** Design decision 1 above already says `Value` folds into its file's spec and never gets its own document. Verified, not assumed: `file_is_spec_bearing` (`spec.rs:78`) counts only `is_exported && (Callable | Container)`, so `Value` members can neither make a file spec-bearing nor become documents themselves. The corpus does not grow by one document per field. **This must have a regression test**, because it's the property that keeps this milestone from quietly multiplying `generations_remaining` across every repo.
 
 2. **The Merkle fold moves, deliberately and totally.** A container's `source_hash` folds in each direct member's `source_hash` in declaration order (`extract.rs:159` and each pack's equivalent). Adding fields as members therefore moves **every container's `source_hash` in every Rust/TS/Python repo** — a one-time, complete cache and spec invalidation. That is a `FORMAT_VERSION` bump and precisely what `FORMAT_VERSION` exists for. It's worth stating why the cheaper-looking alternative is wrong: excluding fields from the fold to avoid the churn would make a field reorder or a field type change invisible to `source_hash`, and in Rust a field reorder is a real, layout-affecting change while in a tuple struct it's caller-visible. Taking the invalidation is the correct answer; dodging it would introduce a hash that lies.
 
-3. **`interface_hash` raises a real question — to decide during the milestone, not guess now.** `extract.rs:159`'s comment records that a container's `interface_hash` deliberately does *not* fold member signatures, reasoned from M2's scope ("nothing watches a class's members"). Public **fields** put pressure on that: a `pub` field is public surface in the same sense a method signature is — changing its type breaks every consumer, exactly as a changed return type would — and reference-edge invalidation (`deps_hash` keyed on the target's `interface_hash`) would not notice. Folding exported fields into `interface_hash` is the arguably-correct fix and is also a change to **the most load-bearing mechanism in the project**, with a cascade profile nothing has measured. Logged as `ARCHITECTURE.md` open question 12; the milestone's job is to decide it with the extraction in hand, not to assume either way beforehand.
+**3. Measure the arena cost. Done, 2026-09-25 — real numbers, not estimated.** Built a `git worktree` at `793e6ee` (the commit right before field extraction started) to get a clean "before" release binary, ran both it and the current binary against a fresh `.codeowl/` on four real repos, and diffed node count + `.codeowl/graph` byte size:
 
-**3. Measure the arena cost.** commons-lang is already 14,725 nodes *with* Java fields extracted, so the Java data point exists. Record node count and `.codeowl/graph` size before and after on CodeOwl's own repo and the pilot — arena size feeds both serialization and every full rebuild, and this is the first change that grows it by a large constant factor rather than incrementally.
+| Repo | Pack touched? | Nodes before → after | Bytes before → after |
+| --- | --- | --- | --- |
+| CodeOwl itself | Rust | 652 → 925 (+41.9%) | 594,838 → 784,148 (+31.8%) |
+| full-stack-fastapi-template | Python | 236 → 307 (+30.1%) | 202,352 → 246,260 (+21.7%) |
+| talentTrail | TypeScript | 1,200 → 1,204 (+0.3%) | 1,201,587 → 1,204,191 (+0.2%) |
+| quarkus-super-heroes | Java (untouched, control) | 3,020 → 3,020 (+0%) | 3,369,839 → 3,369,839 (byte-identical) |
+
+Confirms the prediction, with real variance explained by real shape: a "large constant factor" (+30-42%) on a repo with real classes/structs carrying fields (this project's own Rust source, FastAPI's SQLModel layer), but near-zero on a repo that's mostly functional components with few classes at all (talentTrail — the growth ceiling here isn't extraction missing anything, it's that there's little to extract). The Java control repo is byte-identical before/after, confirming the shared pipeline changes (`FORMAT_VERSION`, `graph.rs`) touched nothing for an untouched pack. commons-lang (a bigger, older Java data point) wasn't re-measured since Java's own fields predate this milestone entirely — its size was never going to move.
+
+**4. Instrument the `interface_hash` question — produce the evidence, don't spend it yet. Done, 2026-09-25 — real numbers, not estimated.** `extract.rs:159`'s comment records that a container's `interface_hash` deliberately does *not* fold member signatures, reasoned from M2's scope ("nothing watches a class's members"). Public **fields** put pressure on that: a `pub` field is public surface in the same sense a method signature is — changing its type breaks every consumer, exactly as a changed return type would — and reference-edge invalidation (`deps_hash` keyed on the target's `interface_hash`, confirmed by reading `spec.rs::interface_or_source_hash`) would not notice under today's rule.
+
+Today's rule needs no simulation to characterize: `interface_hash` is a hash of the container's own declaration line only (`signature_before_body`/equivalent), so **it structurally cannot move from a field edit, ever** — meaning a field-signature edit invalidates exactly 0 importers today, by construction, for any repo, any field, any edit. The only real unknown is what the *folded* rule (treating `interface_hash` the way `source_hash` already treats member hashes) would cost — computed directly from the real resolved-import graph rather than simulating one hand-picked edit: for every exported container with at least one real, publicly-visible field (not just any field — a private field's type changing isn't public-surface breakage, checked per language's own visibility convention), its real current importer count *is* exactly how many consumers a field edit would newly invalidate under the folded rule.
+
+| Repo | Containers w/ a real public field | ...with real importers today | Folded-rule importers per edit (top 5) | Sum if every one had one field edited | Average |
+| --- | --- | --- | --- | --- | --- |
+| CodeOwl itself (Rust) | 63 | 14 | 10, 6, 6, 3, 3 | 43 | 3.1 |
+| full-stack-fastapi-template (Python) | 19 | 14 | 7, 5, 4, 3, 1 | 29 | 2.1 |
+| quarkus-super-heroes (Java, fields pre-date M21) | 8 | 8 | 11, 9, 9, 5, 5 | 44 | 5.5 |
+| talentTrail (TypeScript) | 0 | 0 | — | 0 | — |
+
+Worst single case: `src/symbol.rs::ExtractedSymbol` (13 pub fields, the shared record every pack's extractor produces) has 10 real importers. Java's worst case (`Location`, 11 importers) is worth a caveat: it's a `FileRole::Generated` gRPC stub, never spec-bearing either way regardless of this decision — a real importer count, but not evidence the *type itself* would ever need a spec update.
+
+**The follow-up question, in plain terms: if we don't fold, how often does that actually cause a real, wrong answer — not just a theoretical one?** The table above only says how many files *would* get flagged for re-checking if we folded. It doesn't say whether those files' specs are actually saying something wrong today. So the next check looks at the specs that already exist: when a file imports one of these structs, does that file's own spec *actually talk about* one of the struct's specific fields by name?
+
+Checked every already-written spec belonging to a file that imports one of these structs, and searched its text for the struct's own field names — skipping short, generic words like `id`/`kind`/`file` that would show up in almost any sentence regardless of what it's about, since matching on those would just be noise, not signal:
+
+| Repo | Files with a spec that could mention a field | ...whose spec actually names a specific field | Rate |
+| --- | --- | --- | --- |
+| CodeOwl itself (Rust) | 38 | 30 | 79% |
+| full-stack-fastapi-template (Python) | 24 | 22 | 92% |
+| quarkus-super-heroes (Java) | 2 | 1 | 50% (too small a sample to mean much) |
+
+**First pass reading, then a correction.** My first read of this was "so a field's type changing would falsify 8-9 in 10 of these specs." Checked against the actual sentences (`app/models.py::UserCreate`'s `password`, named in 4 separate consumer specs) and that's wrong: every real sentence found is *behavioral* — "password changes always go through `get_password_hash`," "Cannot touch `is_active`/`is_superuser`/`password`" — not a claim about the field's *type*. None of them would actually go false if `password`'s type changed but its name and role stayed the same. Naming a field in prose is a necessary precondition for *some* kinds of field changes to break that prose, not for all of them — it doesn't distinguish which kind.
+
+So the real, corrected read requires splitting "fold fields into `interface_hash`" into what specifically would move the hash, and judging each on its own:
+
+| Change | Moves `interface_hash` if folded? | Actually falsifies existing prose? |
+| --- | --- | --- |
+| A public field is **renamed** | Yes | **Yes, reliably** — prose naming the old field name is now describing something that doesn't exist. |
+| A public field is **removed** | Yes | **Yes, reliably** — same reason. |
+| A public field's visibility goes **pub → private** | Yes | **Yes** — prose describing external access to it is now describing something that no longer compiles. |
+| A public field is **added** | Yes | No — nothing already written becomes false, it's just now incomplete. Lower severity: a coverage gap, not a lie. |
+| A private field becomes **pub** | Yes | No, same reason as above — newly relevant, not previously wrong. |
+| A field's **type changes**, name/role unchanged | Yes | **Weakly evidenced** — only if the spec makes a claim about the type specifically, which the sample checked did not. Real, but narrower than first assumed. |
+| Fields are **reordered**, nothing else changes | Yes, under a plain declaration-order fold (mirrors how `source_hash` already folds members) | No — content is unchanged, only position moved. Confirmed low-frequency in practice (real refactors add fields far more often than they pure-reorder them), so not worth building order-independence to avoid. |
+
+The 79%/92% numbers are real and meaningful — just read them as evidence for the **rename/removal/pub→private** risk (where the failure is a spec actively lying), not for the type-change risk (where it's weaker) or the add/newly-public risk (which is an omission, not a falsehood). Put together with the cost table above: folding is bounded (worst case seen: 11 files get re-flagged) and the highest-severity part of the risk it closes — a field disappearing or losing public access while a consumer's spec still describes using it — is the *common* case in these repos, not a rare one.
+
+**Two build prerequisites this surfaced, not yet done, separate from the fold decision itself:**
+- **Field "signature" text isn't consistent across packs today.** TS's extraction already strips a field's default value before storing its signature; Python's doesn't (`id: int = Field(primary_key=True)` is stored whole, value included). Folding as-is would make a **Python default-value change** (not a type change) also move `interface_hash`, which isn't really "public surface" in the same sense. Needs normalizing — strip the value, consistently — before this is safe to build.
+- **A field's own docstring changing doesn't trigger anything, for any symbol, anywhere — this predates M21 entirely, confirmed empirically (a function's own docstring doesn't move its own `source_hash` either).** Real, but a separate gap from open question 12: this is about a symbol's *own* spec going stale (`source_hash`), not about propagating to *other files* (`interface_hash`, what this whole section is about). Worth its own note, not something this decision should try to also fix.
+
+**Reading the numbers:** the folded rule's cascade is real and non-zero — every qualifying field edit would invalidate single-digit-to-low-double-digit importers, not zero — but it isn't explosive either; the worst case across 4 real repos tops out at 11, not hundreds. talentTrail shows the honest floor: a repo with no real public-field-carrying exported types (mostly functional components) sees zero difference either way. This is M21.a's full output — the decision itself is M21.b's, made from this table, not guessed here.
+
+##### M21.b — Decide open question 12, owner's call, from M21.a's real numbers
+
+Not a default, not guessed ahead of the data. Owner reviews M21.a's measured cascade counts and decides whether exported fields fold into `interface_hash`. If yes: implement the fold (`extract.rs`'s rollup + each pack's equivalent), and add the regression test this invariant originally asked for — a field's signature change moves `interface_hash` and cascades exactly one hop via `deps_hash`, per "Reference-edge propagation." If no: record the decision and the measured evidence that produced it. Either way, `ARCHITECTURE.md` open question 12 gets marked resolved with the real numbers — not left open, and not silently defaulted.
+
+#### Definition of done
+
+M21 is not complete when field extraction merely lands. It requires all of:
+
+- M21.a's extraction, both unconditional invariants, and the arena-cost measurement — complete and tested.
+- M21.a's `interface_hash` instrumentation actually run, on CodeOwl's own repo and at least one dogfooded pilot, with the cascade-count delta reported (not estimated).
+- M21.b's decision made by the owner from that real data, and `ARCHITECTURE.md` open question 12 updated to reflect it — no longer "not yet decided."
+- If M21.b's decision requires folding fields into `interface_hash`, that implementation shipped as part of this same phase — not deferred to M22 or logged as a future milestone.
 
 #### Validation (TDD — the failing test first)
 
-- `get_symbol("src/graph.rs::FileNode")` returns three children — `id`, `source_hash`, `children` — each carrying its own `docstring` from its `///` comment. This is verbatim the lookup that sent an agent to `Read` in the 2026-09-24 session; it is the milestone's real exit test.
+- `get_symbol("src/graph.rs::FileNode")` returns three children — `id`, `source_hash`, `children` — each carrying its own `docstring` from its `///` comment. This is verbatim the lookup that sent an agent to `Read` in the 2026-09-24 session; it is M21.a's real exit test.
 - `get_spec_coverage`'s `generations_remaining` on CodeOwl's own repo is **unchanged** before vs. after (invariant 1).
 - A Rust struct's `source_hash` moves when a field is reordered, and does not move when an unrelated line in the file is edited (invariant 2).
 - Every pack's field extraction has the multi-name / multi-declarator test Java already has where the grammar permits it.
 - The full existing suite passes after the `FORMAT_VERSION` bump, with a fresh `.codeowl/` on every test repo.
+- M21.a's `interface_hash` instrumentation produces a real, reported cascade-count delta for at least two repos (CodeOwl's own, plus one pilot) — this is a required M21.a deliverable, not optional polish.
+- (M21.b, conditional on the decision) If fields fold into `interface_hash`: a field's signature change moves the container's `interface_hash` and invalidates exactly its direct importers' `deps_hash`, one hop, never further. If they don't: no new test — the existing exclusion behavior is already covered.
 
 ---
 
