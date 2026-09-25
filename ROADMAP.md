@@ -846,6 +846,26 @@ Rows 1-7 moved together — they're all the same fold, not separable work; row 7
 
 **Scope of the build:** implement the fold in `extract.rs`'s rollup and each pack's equivalent (mirroring how `source_hash` already folds every member, applied now to `interface_hash` for exported fields specifically), normalize Python's field `signature` text to strip default-value expressions first (today TS already does this, Python doesn't — building the fold before this lands would make a pure default-value edit also move `interface_hash`, which isn't real public-surface breakage), and add the regression test this invariant originally asked for — a field's signature change moves `interface_hash` and cascades exactly one hop via `deps_hash`, per "Reference-edge propagation." `ARCHITECTURE.md` open question 12 gets marked resolved once this lands.
 
+##### M21.c — Close the cross-stack test gaps two `/code-review` rounds exposed
+
+Not part of the original two-sub-phase design above — this is new scope, opened after M21.b shipped, when a second `/code-review` pass on the same branch found 3 more real bugs (Rust: a `type` alias's target silently excluded from `interface_hash`; Java: a private field's string value containing the word "public"/"protected" misread as a visibility modifier; Python: a class attribute's default value stripped at the source, breaking `spec.rs`'s God-class reduction) on top of the 3 the first round found. None of the 6 were caught by `tests/lifecycle_matrix.rs`, the permanent cross-stack suite — not because it ran and missed them, but because every one of its 4 fixtures has exactly one field, always public, so it structurally could not exercise a private field, a type alias, or an oversized container. That's a real, narrow gap in what the suite covers, distinct from the per-language parsing fixes themselves (which got their own regression tests in `rust.rs`/`java.rs`/`spec.rs`, where they belong).
+
+One piece already shipped on this branch: a private-field-stays-local scenario added to every fixture (`4c44f85`), generalizing `mcp.rs`'s single-stack `a_public_fields_type_change_stales_the_importer_exactly_one_hop_not_further` to all 4 stacks — the same "a single-stack invariant test deserves a cross-stack sibling" pattern this whole milestone already established for the cascade case itself. M21.c is the rest of that same work:
+
+1. **Unrelated bystander file never stales.** Generalize the other half of that same `mcp.rs` test — its TS-only `other.ts`, a file importing nothing from `Widget` — to all 4 stacks: add a third fixture file per stack and assert it stays fully current across every owner edit, not just the ones already exercised.
+2. **A newly added public field cascades.** Adding a member is a different code path from changing an existing member's type — a fold loop that only iterates previously-known members would pass every currently existing test (including M21.c item 1) and still be wrong.
+3. **A removed public field cascades.** The symmetric case to 2, opposite direction; a naive diff-by-name fold could silently miss a removal.
+4. **Method signature change cascades, method body doesn't.** Extends the already-tested "body edit stays local" case. Gated on first confirming in source whether method signatures are folded into `interface_hash` at all — write the assertion only once that premise is verified against `rust.rs`/`java.rs`/etc., not assumed from the milestone's own field-only framing.
+
+Deliberately excluded, logged as later, separate, bigger-fixture work instead of folded into this milestone: generalizing `mcp.rs`'s `leaf_body_edit_stales_exactly_its_file_and_containing_rollup` and `feature_spec_goes_stale_when_a_core_participant_changes_but_not_an_unrelated_file` to all 4 stacks. Both need a directory-level rollup or a feature entry point — a materially different fixture shape than one more `Fixture` struct field, and likely its own test file rather than an addition to `lifecycle_matrix.rs`. Also out of scope: `mcp.rs`'s 80.5% function coverage and `watch.rs`'s 85.2% — a different layer (the async MCP call surface, filesystem-watcher timing) that `lifecycle_matrix.rs` deliberately bypasses by calling `spec::` directly; closing those needs different test infrastructure, not more fixture fields.
+
+**Size:** S · **Builds on:** M21.b, same branch (`m21b-interface-hash-decision`), unmerged.
+
+**Validation (TDD — the failing test first):**
+- `lifecycle_matrix.rs` gains a fourth, unrelated file per stack; `next_task`/`is_fully_current` on it must show no effect from any owner edit in the matrix, at every scenario.
+- `lifecycle_matrix.rs` gains an added-field and a removed-field scenario per stack, each proving the same one-hop cascade shape scenario 2 (field-type-change) already proves, for a structural member-list change instead of a value change on an existing member.
+- The method-signature-change case is written only if source inspection confirms the premise; if method signatures turn out not to be folded into `interface_hash` at all, that's itself a finding to record here, not silently skipped.
+
 #### Definition of done
 
 M21 is not complete when field extraction merely lands. It requires all of:
