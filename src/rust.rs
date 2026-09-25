@@ -388,6 +388,20 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
+    // M21.b: interface_hash folds in each *public* field's own signature
+    // (name+type, no docstring, no value -- exactly `signature`, per
+    // ROADMAP.md's decision table). Methods stay excluded, unchanged --
+    // this is specifically about fields being public surface the same
+    // way a method's own params/return type already are. A private
+    // field never contributes (not public surface, under either regime).
+    let mut iface_rollup = sig.clone();
+    for s in &direct {
+        if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
+            iface_rollup.push('\n');
+            iface_rollup.push_str(&s.signature);
+        }
+    }
+
     let is_exported = has_pub(node, source);
     // Insert the container *before* its members so declaration order in
     // `out` stays parent-then-children, like `extract.rs`.
@@ -403,7 +417,7 @@ fn visit_container(
             docstring: leading_doc(node, source),
             is_exported,
             source_hash: hash_text(&rollup),
-            interface_hash: is_exported.then(|| hash_text(&sig)),
+            interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: attributes(node, source),
             parent: parent_id.map(str::to_string),
             children: member_ids,
@@ -618,6 +632,20 @@ fn has_pub(node: Node, source: &str) -> bool {
     let mut cursor = node.walk();
     node.children(&mut cursor)
         .any(|c| c.kind() == "visibility_modifier" && text(c, source).starts_with("pub"))
+}
+
+/// Does a field's own stored `signature` text (`"pub x: u32"` / `"x: u32"`
+/// / `"pub(crate) x: u32"`) start with a real `pub` visibility keyword? A
+/// bare prefix check (`signature.starts_with("pub")`) would false-positive
+/// on a private field literally named e.g. `pub_key` -- checking the first
+/// whitespace-separated token for an exact `"pub"` or a `"pub("` prefix
+/// (for `pub(crate)`/`pub(super)`, one token, no internal space) avoids
+/// that.
+fn is_pub_field_signature(signature: &str) -> bool {
+    match signature.split_whitespace().next() {
+        Some(first) => first == "pub" || first.starts_with("pub("),
+        None => false,
+    }
 }
 
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
@@ -1109,6 +1137,80 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
         assert_eq!(syms[0].raw, "const");
         assert_eq!(syms[1].kind, SymbolKind::Value);
         assert_eq!(syms[1].raw, "static");
+    }
+
+    #[test]
+    fn a_pub_fields_type_change_moves_the_structs_interface_hash() {
+        // M21.b: the whole point of the fold -- a public field's type is
+        // public surface exactly like a method's return type is.
+        let a = extract_file("pub struct P {\n    pub x: u32,\n}\n", "a.rs");
+        let b = extract_file("pub struct P {\n    pub x: u64,\n}\n", "a.rs");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_fields_value_only_edit_never_applies_here_but_reorder_still_moves_it() {
+        // Table row 6 (M21.b decision record, ROADMAP.md): reordering two
+        // pub fields does move interface_hash under the plain fold
+        // (mirrors source_hash's existing order-sensitive treatment),
+        // even though nothing about the public contract changed --
+        // deliberately not engineered around, confirmed here so the
+        // behavior is at least tested, not silently assumed.
+        let a = extract_file(
+            "pub struct P {\n    pub x: u32,\n    pub y: u32,\n}\n",
+            "a.rs",
+        );
+        let reordered = extract_file(
+            "pub struct P {\n    pub y: u32,\n    pub x: u32,\n}\n",
+            "a.rs",
+        );
+        assert_ne!(a[0].interface_hash, reordered[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_fields_type_change_does_not_move_interface_hash() {
+        // Table row 11: private isn't public surface, under either regime.
+        let a = extract_file("pub struct P {\n    x: u32,\n}\n", "a.rs");
+        let b = extract_file("pub struct P {\n    x: u64,\n}\n", "a.rs");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_fields_docstring_change_does_not_move_interface_hash() {
+        // Table row 8: a doc comment never contributes to interface_hash,
+        // for anything -- a field's own text (what gets folded) never
+        // included its docstring to begin with.
+        let a = extract_file(
+            "pub struct P {\n    /// old doc\n    pub x: u32,\n}\n",
+            "a.rs",
+        );
+        let b = extract_file(
+            "pub struct P {\n    /// totally different doc\n    pub x: u32,\n}\n",
+            "a.rs",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_new_pub_field_moves_interface_hash_but_a_new_private_one_does_not() {
+        let base = extract_file("pub struct P {\n    pub x: u32,\n}\n", "a.rs");
+        let plus_pub = extract_file(
+            "pub struct P {\n    pub x: u32,\n    pub y: u32,\n}\n",
+            "a.rs",
+        );
+        let plus_private =
+            extract_file("pub struct P {\n    pub x: u32,\n    y: u32,\n}\n", "a.rs");
+        assert_ne!(base[0].interface_hash, plus_pub[0].interface_hash);
+        assert_eq!(base[0].interface_hash, plus_private[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_field_literally_named_pub_key_is_not_mistaken_for_public() {
+        // is_pub_field_signature's whole reason to exist: a bare
+        // signature.starts_with("pub") would false-positive here.
+        let a = extract_file("pub struct P {\n    pub_key: u32,\n}\n", "a.rs");
+        let b = extract_file("pub struct P {\n    pub_key: u64,\n}\n", "a.rs");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]
