@@ -156,17 +156,21 @@ fn visit_container(
     }
 
     // M21.b: interface_hash folds in each *public-by-convention* attribute's
-    // own signature (name+type, value already stripped -- the M21.b
-    // prerequisite), the same way source_hash already folds every member.
-    // Methods stay excluded, unchanged. Python has no visibility keyword,
-    // so "public" reuses is_public_name -- the same leading-underscore
-    // convention already applied to module-level names and functions.
+    // own signature, value stripped -- transiently, here, never touching
+    // the stored field (code-review finding: an earlier version stripped
+    // the value at the source, which silently broke
+    // spec.rs::maybe_reduce_container_source's God-class reduction --
+    // see `strip_value_for_fold`'s own doc comment). The same way
+    // source_hash already folds every member. Methods stay excluded,
+    // unchanged. Python has no visibility keyword, so "public" reuses
+    // is_public_name -- the same leading-underscore convention already
+    // applied to module-level names and functions.
     let mut iface_rollup = sig.clone();
     for s in &direct {
         let attr_name = s.id.rsplit("::").next().unwrap_or(&s.id);
         if s.kind == SymbolKind::Value && is_public_name(attr_name) {
             iface_rollup.push('\n');
-            iface_rollup.push_str(&s.signature);
+            iface_rollup.push_str(strip_value_for_fold(&s.signature));
         }
     }
 
@@ -259,26 +263,27 @@ fn visit_assignment(
             Some(p) => format!("{p}::{name}"),
             None => format!("{file}::{name}"),
         };
-        // The initializer is stripped for a class attribute only -- name
-        // (+ type, if annotated) is the public-surface-relevant part,
-        // mirroring extract.rs's field_signature_text, and this is
-        // exactly the text M21.b's container-level interface_hash fold
-        // reads per field. NOT applied at module scope: fastapi.rs's
-        // router_prefix specifically reads a module-level assignment's
-        // full signature (`s.signature.contains("APIRouter(")`, then
-        // parses the prefix kwarg out of that same string) -- stripping
-        // there would break real, load-bearing route detection for a
-        // module-level inconsistency this milestone was never scoped to
-        // fix (found and reverted after breaking 3 real tests).
-        let sig = if parent_id.is_some() {
-            assignment_signature(child, source)
-        } else {
-            text(child, source)
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .to_string()
-        };
+        // Deliberately value-inclusive at *both* scopes -- code-review
+        // finding: an earlier version stripped the value for class-level
+        // attributes only (on the theory that name+type is the only
+        // public-surface-relevant part), but `.signature` has other real
+        // readers besides the interface_hash fold:
+        // fastapi.rs::router_prefix reads a module-level assignment's
+        // full value (`s.signature.contains("APIRouter(")`, then parses
+        // the prefix kwarg out of that same string), and
+        // spec.rs::maybe_reduce_container_source's God-class reduction
+        // shows a member's `.signature` straight to the LLM writing that
+        // class's spec -- stripping a class attribute's default value
+        // there silently drops real context (`Field(primary_key=True)`)
+        // from what the LLM sees. Same lesson as java.rs's fold: don't
+        // strip a field the stored, shared record itself carries --
+        // strip transiently, only where the fold actually reads it (this
+        // function's own caller, in visit_container, below).
+        let sig = text(child, source)
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .to_string();
         // A class attribute is never independently imported — same stance
         // as a method or nested class; a module-level assignment is
         // exported by name convention.
@@ -339,23 +344,26 @@ fn signature_before_body(node: Node, source: &str) -> String {
         .join(" ")
 }
 
-/// An `assignment` node's declaration text with any initializer stripped —
-/// the "everything before the `=`" trick, mirroring `extract.rs`'s
-/// `field_signature_text`. `NAME: T` (no initializer at all -- no `right`
-/// field in the grammar) is returned as-is; `NAME = value` / `NAME: T =
-/// value` has `value` cut off.
-fn assignment_signature(node: Node, source: &str) -> String {
-    let start = node.start_byte();
-    let end = node
-        .child_by_field_name("right")
-        .map(|r| r.start_byte())
-        .unwrap_or_else(|| node.end_byte())
-        .max(start);
-    source[start..end]
-        .trim_end()
-        .trim_end_matches('=')
-        .trim_end()
-        .to_string()
+/// An assignment's stored `signature` text with any initializer value
+/// stripped, for the interface_hash fold only -- never touches the
+/// stored field itself (see `visit_assignment`'s own comment for why:
+/// other real readers, like `fastapi.rs::router_prefix` and
+/// `spec.rs::maybe_reduce_container_source`, need the full value).
+/// Bracket-depth tracking, same shape as `java.rs`/`rust.rs`'s
+/// `strip_value_for_fold`: only a top-level `=` counts, so a default
+/// value's own kwargs (`Field(primary_key=True, foreign_key="x")`) never
+/// get mistaken for the real assignment.
+fn strip_value_for_fold(signature: &str) -> &str {
+    let mut depth = 0i32;
+    for (i, c) in signature.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '=' if depth == 0 => return signature[..i].trim_end(),
+            _ => {}
+        }
+    }
+    signature
 }
 
 /// The module/class/function docstring: a bare string literal as the first
@@ -1102,11 +1110,11 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(id_field.kind, SymbolKind::Value);
         assert_eq!(id_field.raw, "attribute");
         assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
-        // M21.b prerequisite: the initializer is stripped from `signature`,
-        // matching extract.rs's field_signature_text -- name+type is the
-        // public-surface-relevant part; the default value isn't, and this
-        // is exactly the text M21.b's interface_hash fold reads per field.
-        assert_eq!(id_field.signature, "id: int");
+        // `.signature` stays value-inclusive (code-review finding:
+        // fastapi.rs::router_prefix and spec.rs's God-class reduction
+        // both need the full value elsewhere) -- the interface_hash
+        // fold strips it transiently, at fold time only, never here.
+        assert_eq!(id_field.signature, "id: int = Field(primary_key=True)");
         // A class attribute is never independently imported -- same
         // stance as a method or nested class.
         assert!(!id_field.is_exported);

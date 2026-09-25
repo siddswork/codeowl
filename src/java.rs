@@ -202,12 +202,22 @@ fn visit_container(
     // and the idiomatic style omits the now-redundant keyword entirely,
     // so requiring an explicit token here silently excluded real public
     // surface.
+    //
+    // Value stripped *before* the visibility check, not after -- code-
+    // review finding: checking is_pub_or_protected_field_signature
+    // against the raw, still-value-inclusive text let a private field's
+    // own string value (`private String note = "...is public only to
+    // admins";`) supply a stray "public" token and get misclassified as
+    // public surface. Stripping first removes the value from the text
+    // being scanned entirely, not just from what gets folded in.
     let mut iface_rollup = sig.clone();
     for s in &direct {
-        let is_pub_field = s.raw == "constant" || is_pub_or_protected_field_signature(&s.signature);
+        let declaration_only = strip_value_for_fold(&s.signature);
+        let is_pub_field =
+            s.raw == "constant" || is_pub_or_protected_field_signature(declaration_only);
         if s.kind == SymbolKind::Value && is_pub_field {
             iface_rollup.push('\n');
-            iface_rollup.push_str(strip_value_for_fold(&s.signature));
+            iface_rollup.push_str(declaration_only);
         }
     }
 
@@ -1002,6 +1012,27 @@ public @interface JsonProperty {\n\
         let a = extract_file("interface C {\n    int X = 5;\n}\n", "c.java");
         let b = extract_file("interface C {\n    String X = \"5\";\n}\n", "c.java");
         assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_fields_value_containing_the_word_public_is_not_misread_as_a_modifier() {
+        // Code-review finding: `.signature` stays value-inclusive for
+        // Java (quarkus.rs needs it -- see the fold's own comment), so a
+        // naive whitespace-token scan over the *whole* signature can
+        // find "public"/"protected" sitting inside a private field's own
+        // string value and misclassify it as a visibility keyword.
+        let a = extract_file(
+            "class C {\n    private String note = \"this endpoint is public only to admins\";\n}\n",
+            "c.java",
+        );
+        let b = extract_file(
+            "class C {\n    private String note = \"nothing special here\";\n}\n",
+            "c.java",
+        );
+        assert_eq!(
+            a[0].interface_hash, b[0].interface_hash,
+            "both fields are private; neither should ever contribute to interface_hash"
+        );
     }
 
     #[test]

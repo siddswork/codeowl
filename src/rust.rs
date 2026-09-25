@@ -394,16 +394,23 @@ fn visit_container(
     // specifically about fields/consts being public surface the same
     // way a method's own params/return type already are. A private
     // member never contributes (not public surface, under either
-    // regime). Code-review finding: `SymbolKind::Value` covers struct
-    // fields (raw "field", no inline value syntax at all) *and*
-    // const/static items nested in this container (raw "const"/
-    // "static", which do carry a value) -- strip_value_for_fold handles
-    // both uniformly, a no-op for a field's already-value-free text.
+    // regime). `SymbolKind::Value` covers struct fields (raw "field", no
+    // inline value syntax at all), const/static items nested in this
+    // container (raw "const"/"static", which do carry a value) --
+    // strip_value_for_fold handles both uniformly, a no-op for a field's
+    // already-value-free text -- and type aliases (raw "type"), which
+    // are the one real exception: code-review finding, a type alias's
+    // `= Target` is not a discardable value the way a const's is, it IS
+    // the alias's entire public meaning, so it's never stripped.
     let mut iface_rollup = sig.clone();
     for s in &direct {
         if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
             iface_rollup.push('\n');
-            iface_rollup.push_str(strip_value_for_fold(&s.signature));
+            if s.raw == "type" {
+                iface_rollup.push_str(&s.signature);
+            } else {
+                iface_rollup.push_str(strip_value_for_fold(&s.signature));
+            }
         }
     }
 
@@ -1255,6 +1262,16 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
             extract_file("pub struct P {\n    pub x: u32,\n    y: u32,\n}\n", "a.rs");
         assert_ne!(base[0].interface_hash, plus_pub[0].interface_hash);
         assert_eq!(base[0].interface_hash, plus_private[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_type_aliass_target_change_moves_interface_hash() {
+        // Code-review finding: unlike const/static, a type alias's "=" is
+        // not a discardable value -- the aliased type IS its entire
+        // public meaning, so strip_value_for_fold must never touch it.
+        let a = extract_file("pub mod config {\n    pub type Id = u64;\n}\n", "a.rs");
+        let b = extract_file("pub mod config {\n    pub type Id = String;\n}\n", "a.rs");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]

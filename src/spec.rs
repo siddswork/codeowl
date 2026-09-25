@@ -3637,6 +3637,51 @@ impl Counter {\n\
     }
 
     #[test]
+    fn maybe_reduce_container_source_keeps_a_python_fields_default_value() {
+        // Code-review finding: a reduced God-class's per-member text
+        // comes straight from `.signature` -- if a field's default
+        // value were stripped from the *stored* field (as an earlier
+        // version of M21.b's interface_hash fold did), the LLM writing
+        // this class's spec would silently lose real context like which
+        // field is the primary key. `.signature` must stay
+        // value-inclusive; the fold strips it transiently, elsewhere.
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-godclass-py",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let padding = "x".repeat(LARGE_CONTAINER_BYTES_DEFAULT + 1000);
+        let src = format!(
+            "class Big:\n    id: int = Field(primary_key=True)\n\n    def bump(self):\n        # {padding}\n        return self.id + 1\n"
+        );
+        std::fs::write(dir.join("src/big.py"), &src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/big.py".to_string(),
+            source_hash: hash_text(&src),
+            symbols: crate::python::extract_file(&src, "src/big.py"),
+        }]);
+        let big = graph
+            .get_symbol(graph.find("src/big.py::Big").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/big.py", big).unwrap();
+        assert!(
+            full.len() > LARGE_CONTAINER_BYTES_DEFAULT,
+            "fixture must actually clear the threshold"
+        );
+
+        let reduced =
+            maybe_reduce_container_source(big, &graph, full.clone(), LARGE_CONTAINER_BYTES_DEFAULT);
+        assert!(
+            reduced.contains("Field(primary_key=True)"),
+            "the field's default value must survive reduction:\n{reduced}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn maybe_reduce_container_source_leaves_an_ordinary_class_untouched() {
         let dir = std::env::temp_dir().join(format!(
             "codeowl-spec-test-{}-smallclass",
