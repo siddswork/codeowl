@@ -24,7 +24,10 @@ use crate::symbol::SymbolKind;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IdRequest {
-    /// A symbol's stable id, e.g. "lib/utils.ts::cn".
+    /// A symbol's stable id, e.g. "lib/utils.ts::cn" -- always accepted.
+    /// Some tools using this same field also accept a bare file path, or
+    /// (get_spec only) a "feature:<slug>"/"rollup:<dir>"/"system" id --
+    /// see that tool's own description for exactly which.
     pub id: String,
 }
 
@@ -950,8 +953,9 @@ impl CodeOwlServer {
             .ok_or_else(|| Self::not_found(&req.id))?;
         let context_lines = req.context_lines.unwrap_or(0).min(MAX_CONTEXT_LINES);
 
-        let (file, mut spans, recorded_hash) = match graph.get(id) {
-            Node::File(f) => (f.id.clone(), None, f.source_hash.clone()),
+        let file = graph.owning_file_id(id).to_string();
+        let (mut spans, recorded_hash) = match graph.get(id) {
+            Node::File(f) => (None, f.source_hash.clone()),
             Node::Symbol(sym) => {
                 let spans = crate::spec::merged_symbol_spans(&graph, sym);
                 let file_id = graph
@@ -961,7 +965,7 @@ impl CodeOwlServer {
                     .get_file(file_id)
                     .map(|f| f.source_hash.clone())
                     .unwrap_or_default();
-                (sym.file.clone(), Some(spans), recorded_hash)
+                (Some(spans), recorded_hash)
             }
         };
 
@@ -1066,10 +1070,7 @@ impl CodeOwlServer {
         let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let file = match graph.get(id) {
-            Node::File(f) => f.id.clone(),
-            Node::Symbol(sym) => sym.file.clone(),
-        };
+        let file = graph.owning_file_id(id).to_string();
         let callees = graph
             .imports()
             .iter()

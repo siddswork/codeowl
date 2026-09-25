@@ -358,6 +358,17 @@ impl Graph {
         }
     }
 
+    /// The id of the file a node's source lives in -- itself, for a
+    /// `File`; its `file` field, for a `Symbol`. What every handler that
+    /// accepts "a symbol id or a bare file id" (`get_source`,
+    /// `get_callees`) needs before doing anything node-kind-specific.
+    pub fn owning_file_id(&self, id: SymbolId) -> &str {
+        match self.get(id) {
+            Node::File(f) => &f.id,
+            Node::Symbol(sym) => &sym.file,
+        }
+    }
+
     /// The stable string id a `SymbolId` resolves to — how internal
     /// `SymbolId`-typed containment gets translated back to something safe
     /// to hand to an MCP caller (see `SymbolId`'s doc comment: it must
