@@ -1017,7 +1017,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph, and only works on names imported directly: never query a method, or an associated/static function reached via its type (e.g. Rust's `Type::function()`) -- callers of these import the type, not the function itself, so querying the function always returns an empty list even if it's called everywhere. That empty list does not mean nothing calls it; search_code is the fallback for these cases."
+        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph, and only works on names imported directly: never query a method, or an associated/static function reached via its type (e.g. Rust's `Type::function()`) -- callers of these import the type, not the function itself, so querying the function always returns an empty list even if it's called everywhere. That empty list does not mean nothing calls it; search_code is the fallback for these cases. Symbol ids only -- a bare file id resolves without error but always returns an empty list too, since import edges target symbols, never files."
     )]
     async fn get_callers(
         &self,
@@ -1056,7 +1056,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List what the FILE containing this symbol imports. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges. Each entry's `resolved_id` is the target symbol's id when it resolves inside this repo, or `null` when it doesn't -- most often an external package, but also a broken import or an unresolved re-export chain, so `null` isn't always benign."
+        description = "List what a file imports -- accepts a symbol id (answers for the file containing it) or a bare file id directly, same either way. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges. Each entry's `resolved_id` is the target symbol's id when it resolves inside this repo, or `null` when it doesn't -- most often an external package, but also a broken import or an unresolved re-export chain, so `null` isn't always benign."
     )]
     async fn get_callees(
         &self,
@@ -1066,11 +1066,10 @@ impl CodeOwlServer {
         let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let file = graph
-            .get_symbol(id)
-            .ok_or_else(|| Self::not_found(&req.id))?
-            .file
-            .clone();
+        let file = match graph.get(id) {
+            Node::File(f) => f.id.clone(),
+            Node::Symbol(sym) => sym.file.clone(),
+        };
         let callees = graph
             .imports()
             .iter()
@@ -1715,6 +1714,31 @@ mod tests {
             external.resolved_id, None,
             "external package should not resolve"
         );
+    }
+
+    #[tokio::test]
+    async fn get_callees_accepts_a_bare_file_id_same_as_a_symbol_in_it() {
+        let server = test_server(&[
+            (
+                "a.ts",
+                "export const marker = 1;\nimport { helper } from './b';\n",
+            ),
+            ("b.ts", "export function helper(): void {}\n"),
+        ]);
+        let via_file = server
+            .get_callees(Parameters(IdRequest {
+                id: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let via_symbol = server
+            .get_callees(Parameters(IdRequest {
+                id: "a.ts::marker".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(via_file.0.callees, via_symbol.0.callees);
+        assert_eq!(via_file.0.callees.len(), 1);
     }
 
     #[tokio::test]
