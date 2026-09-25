@@ -5,10 +5,12 @@
 //! stack (Rust, TypeScript, Python, Java), not just one.
 //!
 //! Each stack's fixture is the same shape: an "owner" file defining a
-//! `Widget` container with one public field (`count`) and one method
-//! (`touch`, deliberately not referencing `count`'s type, so a field-type
-//! edit and a method-body edit are independent variables, never both moving
-//! together) and a "consumer" file that imports `Widget` and calls `touch`.
+//! `Widget` container with one public field (`count`), one private field
+//! (`secret`, used only for the private-field-stays-local scenario), and
+//! one method (`touch`, deliberately not referencing either field's type,
+//! so a field edit and a method-body edit are independent variables, never
+//! both moving together) and a "consumer" file that imports `Widget` and
+//! calls `touch`.
 //! One shared baseline of specs is submitted once per fixture; every
 //! scenario below re-derives a fresh `Graph` from a differently-edited copy
 //! of the *same* on-disk files and checks staleness against that one
@@ -44,6 +46,11 @@ struct Fixture {
     /// this whole matrix exists to exercise: must stale the owner *and*
     /// the consumer, one hop.
     owner_field_type_change: &'static str,
+    /// `secret` (private/non-exported)'s type changes, `count` and
+    /// `touch` don't. The interface_hash fold only ever walks *public*
+    /// fields -- this must stale the owner alone, same as a body edit,
+    /// never cross to the consumer.
+    owner_private_field_change: &'static str,
     consumer_src: &'static str,
     /// A file path elsewhere in the same repo that this stack's `Widget`
     /// gets renamed to for the rename scenario -- same content as
@@ -62,12 +69,13 @@ const RUST: Fixture = Fixture {
     consumer_path: "src/consumer.rs",
     owner_symbol_id: "src/owner.rs::Widget",
     consumer_symbol_id: "src/consumer.rs::make",
-    owner_v1: "pub struct Widget {\n    pub count: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
-    owner_body_edit: "pub struct Widget {\n    pub count: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched again\");\n    }\n}\n",
-    owner_field_type_change: "pub struct Widget {\n    pub count: i64,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
+    owner_v1: "pub struct Widget {\n    pub count: i32,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
+    owner_body_edit: "pub struct Widget {\n    pub count: i32,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched again\");\n    }\n}\n",
+    owner_field_type_change: "pub struct Widget {\n    pub count: i64,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
+    owner_private_field_change: "pub struct Widget {\n    pub count: i32,\n    secret: i64,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
     consumer_src: "use crate::owner::Widget;\n\npub fn make() -> Widget {\n    let w = Widget { count: 0 };\n    w.touch();\n    w\n}\n",
     owner_renamed_path: "src/gadget.rs",
-    owner_renamed_content: "pub struct Widget {\n    pub count: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
+    owner_renamed_content: "pub struct Widget {\n    pub count: i32,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
 };
 
 const TYPESCRIPT: Fixture = Fixture {
@@ -77,12 +85,13 @@ const TYPESCRIPT: Fixture = Fixture {
     consumer_path: "consumer.ts",
     owner_symbol_id: "owner.ts::Widget",
     consumer_symbol_id: "consumer.ts::make",
-    owner_v1: "export class Widget {\n    count: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
-    owner_body_edit: "export class Widget {\n    count: number;\n\n    touch(): void {\n        console.log('touched again');\n    }\n}\n",
-    owner_field_type_change: "export class Widget {\n    count: string;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
+    owner_v1: "export class Widget {\n    count: number;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
+    owner_body_edit: "export class Widget {\n    count: number;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched again');\n    }\n}\n",
+    owner_field_type_change: "export class Widget {\n    count: string;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
+    owner_private_field_change: "export class Widget {\n    count: number;\n    private secret: string;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
     consumer_src: "import { Widget } from './owner';\n\nexport function make(): Widget {\n    const w = new Widget();\n    w.touch();\n    return w;\n}\n",
     owner_renamed_path: "gadget.ts",
-    owner_renamed_content: "export class Widget {\n    count: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
+    owner_renamed_content: "export class Widget {\n    count: number;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
 };
 
 const PYTHON: Fixture = Fixture {
@@ -92,12 +101,13 @@ const PYTHON: Fixture = Fixture {
     consumer_path: "consumer.py",
     owner_symbol_id: "owner.py::Widget",
     consumer_symbol_id: "consumer.py::make",
-    owner_v1: "class Widget:\n    count: int\n\n    def touch(self):\n        print(\"touched\")\n",
-    owner_body_edit: "class Widget:\n    count: int\n\n    def touch(self):\n        print(\"touched again\")\n",
-    owner_field_type_change: "class Widget:\n    count: str\n\n    def touch(self):\n        print(\"touched\")\n",
+    owner_v1: "class Widget:\n    count: int\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
+    owner_body_edit: "class Widget:\n    count: int\n    _secret: int\n\n    def touch(self):\n        print(\"touched again\")\n",
+    owner_field_type_change: "class Widget:\n    count: str\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
+    owner_private_field_change: "class Widget:\n    count: int\n    _secret: str\n\n    def touch(self):\n        print(\"touched\")\n",
     consumer_src: "from owner import Widget\n\n\ndef make():\n    w = Widget()\n    w.touch()\n    return w\n",
     owner_renamed_path: "gadget.py",
-    owner_renamed_content: "class Widget:\n    count: int\n\n    def touch(self):\n        print(\"touched\")\n",
+    owner_renamed_content: "class Widget:\n    count: int\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
 };
 
 const JAVA: Fixture = Fixture {
@@ -113,15 +123,16 @@ const JAVA: Fixture = Fixture {
     // carries the task. Unlike Rust/TS/Python's `make`, a bare top-level
     // function there and genuinely independently spec-bearing.
     consumer_symbol_id: "src/main/java/com/example/Consumer.java::Consumer",
-    owner_v1: "package com.example;\n\npublic class Widget {\n    public int count;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
-    owner_body_edit: "package com.example;\n\npublic class Widget {\n    public int count;\n\n    public void touch() {\n        System.out.println(\"touched again\");\n    }\n}\n",
-    owner_field_type_change: "package com.example;\n\npublic class Widget {\n    public String count;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
+    owner_v1: "package com.example;\n\npublic class Widget {\n    public int count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
+    owner_body_edit: "package com.example;\n\npublic class Widget {\n    public int count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched again\");\n    }\n}\n",
+    owner_field_type_change: "package com.example;\n\npublic class Widget {\n    public String count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
+    owner_private_field_change: "package com.example;\n\npublic class Widget {\n    public int count;\n    private String secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
     consumer_src: "package com.example;\n\npublic class Consumer {\n    public Widget make() {\n        Widget w = new Widget();\n        w.touch();\n        return w;\n    }\n}\n",
     // A real Java rename needs the public class name to match the new
     // file name, unlike the other 3 stacks -- Gadget.java's own class is
     // renamed to Gadget, not left as Widget.
     owner_renamed_path: "src/main/java/com/example/Gadget.java",
-    owner_renamed_content: "package com.example;\n\npublic class Gadget {\n    public int count;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
+    owner_renamed_content: "package com.example;\n\npublic class Gadget {\n    public int count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
 };
 
 fn tempdir(tag: &str) -> std::path::PathBuf {
@@ -296,6 +307,44 @@ fn run_lifecycle(fx: &Fixture) {
         "{}: a public field's type change must cascade to the consumer's own \
          make symbol somewhere in its ladder -- this is the M21.b interface_hash \
          fold this whole matrix exists to prove. Offered: {consumer_offered:?}",
+        fx.stack
+    );
+
+    // --- 2b. Private field's own change: never crosses the fold. ---
+    // Restore the owner to its baseline shape and re-establish a fully
+    // current state for both files first -- the cascade case above left
+    // the consumer's spec matching the *field-type-changed* owner, so
+    // reverting the owner without redraining would itself stale the
+    // consumer, confounding the assertion below with scenario 2's
+    // leftover effect rather than the private field edit under test.
+    write_file(&dir, fx.owner_path, fx.owner_v1);
+    let graph = reindex(&dir);
+    let owner_id = owner_file_id(&graph, fx);
+    let consumer_id = consumer_file_id(&graph, fx);
+    drain(&graph, &dir, owner_id);
+    drain(&graph, &dir, consumer_id);
+    assert!(
+        is_fully_current(&graph, &dir, owner_id) && is_fully_current(&graph, &dir, consumer_id),
+        "{}: both files must be fully current again before the private-field scenario",
+        fx.stack
+    );
+
+    write_file(&dir, fx.owner_path, fx.owner_private_field_change);
+    let graph = reindex(&dir);
+    let owner_id = owner_file_id(&graph, fx);
+    let consumer_id = consumer_file_id(&graph, fx);
+    assert_eq!(
+        next_symbol_task_id(&graph, &dir, owner_id).as_deref(),
+        Some(fx.owner_symbol_id),
+        "{}: a private field's change must still re-offer the owner's own Widget \
+         symbol -- its source_hash moved even though nothing public did",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, consumer_id),
+        "{}: a private field's change must NOT cross the interface_hash fold -- \
+         local effect only, exactly like scenario 1's method-body edit, and the \
+         reason M21.b's fold only ever walks *public* fields in the first place",
         fx.stack
     );
 
