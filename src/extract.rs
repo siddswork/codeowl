@@ -194,12 +194,9 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
     // hold: edit one member, and both that member's and the class's
     // source_hash move.
     //
-    // interface_hash deliberately does NOT fold in member signatures —
-    // M2 only resolves file-to-file import edges (a consumer imports the
-    // class itself), not member-level call/access resolution, so nothing
-    // yet watches a class's members for invalidation purposes. Whether an
-    // exported field should be the one exception is ROADMAP.md's open
-    // question 12 (M21.b) — not decided here.
+    // source_hash's own rollup, built here; interface_hash's separate
+    // rollup (which *does* fold in public field signatures, per M21.b
+    // below) is built further down, once member_symbols exists.
     let mut rollup_input = signature.clone();
     for h in &member_source_hashes {
         rollup_input.push('\n');
@@ -209,11 +206,17 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
     // M21.b: interface_hash folds in each *public* field's own signature
     // (name+type, no docstring, no value -- exactly `signature`, per
     // ROADMAP.md's decision table). Methods stay excluded, unchanged.
+    // Skipped entirely for a non-exported class (code-review finding: it
+    // was built unconditionally, then discarded by `.then()` below) --
+    // wasted allocation and iteration on every reparse otherwise, and
+    // the watcher reparses on every save.
     let mut iface_rollup = signature.clone();
-    for m in &member_symbols {
-        if m.kind == SymbolKind::Value && is_pub_field_signature(&m.signature) {
-            iface_rollup.push('\n');
-            iface_rollup.push_str(&m.signature);
+    if is_exported {
+        for m in &member_symbols {
+            if m.kind == SymbolKind::Value && is_pub_field_signature(&m.signature) {
+                iface_rollup.push('\n');
+                iface_rollup.push_str(&m.signature);
+            }
         }
     }
 

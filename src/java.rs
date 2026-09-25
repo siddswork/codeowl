@@ -32,6 +32,7 @@ use crate::hash::hash_text;
 use crate::imports::{FileImports, ImportRef};
 use crate::resolve::ResolvedImport;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
+use crate::text::strip_value_for_fold;
 
 /// Parse `source` (the contents of `rel_path`, a `.java` file) and extract
 /// its top-level types and their members.
@@ -210,20 +211,26 @@ fn visit_container(
     // admins";`) supply a stray "public" token and get misclassified as
     // public surface. Stripping first removes the value from the text
     // being scanned entirely, not just from what gets folded in.
-    let mut iface_rollup = sig.clone();
-    for s in &direct {
-        let declaration_only = strip_value_for_fold(&s.signature);
-        let is_pub_field =
-            s.raw == "constant" || is_pub_or_protected_field_signature(declaration_only);
-        if s.kind == SymbolKind::Value && is_pub_field {
-            iface_rollup.push('\n');
-            iface_rollup.push_str(declaration_only);
-        }
-    }
-
     // A top-level Java type is always at least package-visible, so it's
     // reachable (and spec-bearing); a nested type needs `public`/`protected`.
     let is_exported = parent_id.is_none() || has_public_or_protected(node);
+
+    // Skip building the fold at all for a non-exported container
+    // (code-review finding: it was computed unconditionally, then
+    // discarded by `.then()` below) -- wasted allocation and iteration
+    // on every reparse otherwise, and the watcher reparses on every save.
+    let mut iface_rollup = sig.clone();
+    if is_exported {
+        for s in &direct {
+            let declaration_only = strip_value_for_fold(&s.signature);
+            let is_pub_field =
+                s.raw == "constant" || is_pub_or_protected_field_signature(declaration_only);
+            if s.kind == SymbolKind::Value && is_pub_field {
+                iface_rollup.push('\n');
+                iface_rollup.push_str(declaration_only);
+            }
+        }
+    }
 
     // Insert the container *before* its members so declaration order in
     // `out` stays parent-then-children.
@@ -349,34 +356,11 @@ fn is_pub_or_protected_field_signature(signature: &str) -> bool {
         .any(|tok| tok == "public" || tok == "protected")
 }
 
-/// A field/constant's stored `signature` still carries its initializer
-/// value verbatim (deliberately -- see `visit_container`'s fold comment
-/// for why it isn't stripped at the source like Rust/TS/Python's is), so
-/// the interface_hash fold strips it here instead, transiently, without
-/// touching the stored field. Best-effort for a multi-declarator field
-/// sharing one `field_declaration`'s text (`int a, b = 2;`): cuts at the
-/// first `=`, which can leave a later declarator's own fragment attached
-/// to an earlier one's fold contribution -- already true of `signature`
-/// itself before this fold existed (both declarators already share
-/// identical text), not a new imprecision.
-fn strip_value_for_fold(signature: &str) -> &str {
-    // Code-review finding: a plain first-'=' split cuts inside a leading
-    // annotation's own argument (`@Column(name = "x")` has an `=` of its
-    // own, well before the field's real assignment) and silently keeps
-    // only the annotation prefix. Bracket-depth tracking finds the real,
-    // top-level `=` instead -- the one the field's own initializer uses,
-    // never one nested inside `(...)`/`[...]`/`{...}`.
-    let mut depth = 0i32;
-    for (i, c) in signature.char_indices() {
-        match c {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            '=' if depth == 0 => return signature[..i].trim_end(),
-            _ => {}
-        }
-    }
-    signature
-}
+// A field/constant's stored `signature` still carries its initializer
+// value verbatim (deliberately -- see `visit_container`'s fold comment
+// for why it isn't stripped at the source like Rust/TS/Python's is), so
+// the interface_hash fold strips it via `crate::text::strip_value_for_fold`
+// instead, transiently, without touching the stored field.
 
 /// The `modifiers` child of a declaration, if present. `class_declaration`
 /// exposes it as a field; a few nodes only have it as an ordinary child.
@@ -960,23 +944,10 @@ public @interface JsonProperty {\n\
         );
     }
 
-    #[test]
-    fn strip_value_for_fold_cuts_at_the_first_equals() {
-        assert_eq!(strip_value_for_fold("public int x = 5"), "public int x");
-        assert_eq!(strip_value_for_fold("public int x"), "public int x");
-    }
-
-    #[test]
-    fn strip_value_for_fold_ignores_an_equals_inside_an_annotation_argument() {
-        // Code-review finding: a naive first-'=' split cuts inside
-        // `@Column(name = "x")`'s own argument, silently keeping only
-        // the annotation prefix and dropping the field's real name+type.
-        assert_eq!(
-            strip_value_for_fold("@Column(name = \"x\")\n\tpublic int y = 5"),
-            "@Column(name = \"x\")\n\tpublic int y"
-        );
-    }
-
+    // strip_value_for_fold's own unit tests moved to text.rs (shared
+    // across rust.rs/java.rs/python.rs, code-review finding); this test
+    // stays here since it's Java-specific end-to-end coverage through
+    // extract_file, not a strip_value_for_fold unit test.
     #[test]
     fn an_annotated_public_fields_type_change_moves_interface_hash_despite_the_annotations_own_equals()
      {

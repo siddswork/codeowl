@@ -28,6 +28,7 @@ use tree_sitter::{Node, Parser};
 
 use crate::hash::hash_text;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
+use crate::text::strip_value_for_fold;
 
 /// Parse `source` (the contents of `rel_path`, a `.rs` file) and extract
 /// its top-level items plus one level of `impl`/`trait`/`mod` members.
@@ -402,19 +403,25 @@ fn visit_container(
     // are the one real exception: code-review finding, a type alias's
     // `= Target` is not a discardable value the way a const's is, it IS
     // the alias's entire public meaning, so it's never stripped.
+    let is_exported = has_pub(node, source);
+    // Skip building the fold at all for a non-exported container
+    // (code-review finding: it was computed unconditionally, then
+    // discarded by `.then()` below) -- wasted allocation and iteration
+    // on every reparse otherwise, and the watcher reparses on every save.
     let mut iface_rollup = sig.clone();
-    for s in &direct {
-        if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
-            iface_rollup.push('\n');
-            if s.raw == "type" {
-                iface_rollup.push_str(&s.signature);
-            } else {
-                iface_rollup.push_str(strip_value_for_fold(&s.signature));
+    if is_exported {
+        for s in &direct {
+            if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
+                iface_rollup.push('\n');
+                if s.raw == "type" {
+                    iface_rollup.push_str(&s.signature);
+                } else {
+                    iface_rollup.push_str(strip_value_for_fold(&s.signature));
+                }
             }
         }
     }
 
-    let is_exported = has_pub(node, source);
     // Insert the container *before* its members so declaration order in
     // `out` stays parent-then-children, like `extract.rs`.
     out.insert(
@@ -660,29 +667,13 @@ fn is_pub_field_signature(signature: &str) -> bool {
     }
 }
 
-/// A struct field never has inline value syntax in Rust (that's not
-/// valid -- defaults come via `impl Default`, never in the field
-/// declaration itself), but `const`/`static` items do, and their own
-/// `signature` (via `signature_before_body`'s fallback, since neither
-/// has a `body` field to cut at) carries that value verbatim -- so the
-/// interface_hash fold strips it here, transiently, without touching
-/// the stored field (same shape as `java.rs::strip_value_for_fold`).
-/// Bracket-depth tracking, not a plain first-`=` split: a const generic
-/// default or an array-length expression could in principle carry its
-/// own `=` before the real one, and this only ever cuts at a top-level
-/// one.
-fn strip_value_for_fold(signature: &str) -> &str {
-    let mut depth = 0i32;
-    for (i, c) in signature.char_indices() {
-        match c {
-            '(' | '[' | '{' => depth += 1,
-            ')' | ']' | '}' => depth -= 1,
-            '=' if depth == 0 => return signature[..i].trim_end(),
-            _ => {}
-        }
-    }
-    signature
-}
+// A struct field never has inline value syntax in Rust (that's not
+// valid -- defaults come via `impl Default`, never in the field
+// declaration itself), but `const`/`static` items do, and their own
+// `signature` (via `signature_before_body`'s fallback, since neither
+// has a `body` field to cut at) carries that value verbatim -- so the
+// interface_hash fold strips it via `crate::text::strip_value_for_fold`,
+// transiently, without touching the stored field.
 
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
     node.child_by_field_name(field).map(|n| text(n, source))
