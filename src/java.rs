@@ -196,10 +196,16 @@ fn visit_container(
     // (&s.signature)`) -- stripping the stored field broke that real,
     // load-bearing consumer, caught by a real test failure before this
     // fold-time-only version replaced it. Methods stay excluded,
-    // unchanged.
+    // unchanged. `raw == "constant"` (an interface's own member, never a
+    // class's) is included unconditionally -- code-review finding: the
+    // JLS makes every interface field implicitly public/static/final,
+    // and the idiomatic style omits the now-redundant keyword entirely,
+    // so requiring an explicit token here silently excluded real public
+    // surface.
     let mut iface_rollup = sig.clone();
     for s in &direct {
-        if s.kind == SymbolKind::Value && is_pub_or_protected_field_signature(&s.signature) {
+        let is_pub_field = s.raw == "constant" || is_pub_or_protected_field_signature(&s.signature);
+        if s.kind == SymbolKind::Value && is_pub_field {
             iface_rollup.push('\n');
             iface_rollup.push_str(strip_value_for_fold(&s.signature));
         }
@@ -344,10 +350,22 @@ fn is_pub_or_protected_field_signature(signature: &str) -> bool {
 /// itself before this fold existed (both declarators already share
 /// identical text), not a new imprecision.
 fn strip_value_for_fold(signature: &str) -> &str {
-    match signature.split_once('=') {
-        Some((before, _)) => before.trim_end(),
-        None => signature,
+    // Code-review finding: a plain first-'=' split cuts inside a leading
+    // annotation's own argument (`@Column(name = "x")` has an `=` of its
+    // own, well before the field's real assignment) and silently keeps
+    // only the annotation prefix. Bracket-depth tracking finds the real,
+    // top-level `=` instead -- the one the field's own initializer uses,
+    // never one nested inside `(...)`/`[...]`/`{...}`.
+    let mut depth = 0i32;
+    for (i, c) in signature.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '=' if depth == 0 => return signature[..i].trim_end(),
+            _ => {}
+        }
     }
+    signature
 }
 
 /// The `modifiers` child of a declaration, if present. `class_declaration`
@@ -936,6 +954,54 @@ public @interface JsonProperty {\n\
     fn strip_value_for_fold_cuts_at_the_first_equals() {
         assert_eq!(strip_value_for_fold("public int x = 5"), "public int x");
         assert_eq!(strip_value_for_fold("public int x"), "public int x");
+    }
+
+    #[test]
+    fn strip_value_for_fold_ignores_an_equals_inside_an_annotation_argument() {
+        // Code-review finding: a naive first-'=' split cuts inside
+        // `@Column(name = "x")`'s own argument, silently keeping only
+        // the annotation prefix and dropping the field's real name+type.
+        assert_eq!(
+            strip_value_for_fold("@Column(name = \"x\")\n\tpublic int y = 5"),
+            "@Column(name = \"x\")\n\tpublic int y"
+        );
+    }
+
+    #[test]
+    fn an_annotated_public_fields_type_change_moves_interface_hash_despite_the_annotations_own_equals()
+     {
+        let a = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public int y = 5;\n}\n",
+            "c.java",
+        );
+        let b = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public String y = \"5\";\n}\n",
+            "c.java",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn an_annotated_public_fields_value_only_edit_does_not_move_interface_hash() {
+        let a = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public int y = 5;\n}\n",
+            "c.java",
+        );
+        let b = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public int y = 6;\n}\n",
+            "c.java",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn an_interface_constant_with_no_explicit_public_keyword_is_still_folded() {
+        // Code-review finding: interface members are implicitly public
+        // per the JLS even with no explicit modifier -- the idiomatic
+        // style omits the redundant keyword entirely.
+        let a = extract_file("interface C {\n    int X = 5;\n}\n", "c.java");
+        let b = extract_file("interface C {\n    String X = \"5\";\n}\n", "c.java");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]

@@ -388,17 +388,22 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
-    // M21.b: interface_hash folds in each *public* field's own signature
-    // (name+type, no docstring, no value -- exactly `signature`, per
-    // ROADMAP.md's decision table). Methods stay excluded, unchanged --
-    // this is specifically about fields being public surface the same
+    // M21.b: interface_hash folds in each *public* Value member's own
+    // signature, value stripped (name+type is public surface, a value
+    // assignment isn't). Methods stay excluded, unchanged -- this is
+    // specifically about fields/consts being public surface the same
     // way a method's own params/return type already are. A private
-    // field never contributes (not public surface, under either regime).
+    // member never contributes (not public surface, under either
+    // regime). Code-review finding: `SymbolKind::Value` covers struct
+    // fields (raw "field", no inline value syntax at all) *and*
+    // const/static items nested in this container (raw "const"/
+    // "static", which do carry a value) -- strip_value_for_fold handles
+    // both uniformly, a no-op for a field's already-value-free text.
     let mut iface_rollup = sig.clone();
     for s in &direct {
         if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
             iface_rollup.push('\n');
-            iface_rollup.push_str(&s.signature);
+            iface_rollup.push_str(strip_value_for_fold(&s.signature));
         }
     }
 
@@ -646,6 +651,30 @@ fn is_pub_field_signature(signature: &str) -> bool {
         Some(first) => first == "pub" || first.starts_with("pub("),
         None => false,
     }
+}
+
+/// A struct field never has inline value syntax in Rust (that's not
+/// valid -- defaults come via `impl Default`, never in the field
+/// declaration itself), but `const`/`static` items do, and their own
+/// `signature` (via `signature_before_body`'s fallback, since neither
+/// has a `body` field to cut at) carries that value verbatim -- so the
+/// interface_hash fold strips it here, transiently, without touching
+/// the stored field (same shape as `java.rs::strip_value_for_fold`).
+/// Bracket-depth tracking, not a plain first-`=` split: a const generic
+/// default or an array-length expression could in principle carry its
+/// own `=` before the real one, and this only ever cuts at a top-level
+/// one.
+fn strip_value_for_fold(signature: &str) -> &str {
+    let mut depth = 0i32;
+    for (i, c) in signature.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            '=' if depth == 0 => return signature[..i].trim_end(),
+            _ => {}
+        }
+    }
+    signature
 }
 
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
@@ -1189,6 +1218,30 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
             "a.rs",
         );
         assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_consts_value_only_edit_inside_a_pub_mod_does_not_move_interface_hash() {
+        // Code-review finding: the fold loop includes every SymbolKind
+        // ::Value direct member, not just struct fields -- a pub mod's
+        // pub const/static items are also Value, and (unlike struct
+        // fields, which have no inline value syntax in Rust at all)
+        // const/static's own `signature` does carry its initializer
+        // value, so a value-only edit was spuriously moving the mod's
+        // interface_hash.
+        let a = extract_file("pub mod config {\n    pub const X: i32 = 1;\n}\n", "a.rs");
+        let b = extract_file("pub mod config {\n    pub const X: i32 = 2;\n}\n", "a.rs");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_consts_type_change_inside_a_pub_mod_moves_interface_hash() {
+        let a = extract_file("pub mod config {\n    pub const X: i32 = 1;\n}\n", "a.rs");
+        let b = extract_file(
+            "pub mod config {\n    pub const X: &str = \"1\";\n}\n",
+            "a.rs",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]
