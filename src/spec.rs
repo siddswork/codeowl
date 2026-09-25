@@ -3198,6 +3198,38 @@ mod tests {
     }
 
     #[test]
+    fn a_structs_field_members_do_not_inflate_generations_remaining() {
+        // M21 invariant 1: adding fields as SymbolKind::Value members must
+        // not multiply generations_remaining across every repo.
+        // spec_bearing_children only ever looks at a FILE's direct
+        // children, and a field's parent is the struct, never the file, so
+        // this holds structurally -- confirmed here against a real fixture
+        // rather than just argued from the filter's shape.
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-field-generations",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = "pub struct FileNode {\n    pub id: String,\n    pub source_hash: String,\n    pub children: Vec<u32>,\n}\n";
+        std::fs::write(dir.join("a.rs"), src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "a.rs".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::rust::extract_file(src, "a.rs"),
+        }]);
+        let file_id = graph.find("a.rs").unwrap();
+
+        assert!(file_is_spec_bearing(&graph, file_id));
+        // 2, not 5: the struct's own `### Summary`/`### Behavior` task (1)
+        // plus the file's own never-generated `## Summary` (1) -- never
+        // one extra per field.
+        assert_eq!(file_pending_generations(&graph, &dir, file_id).unwrap(), 2);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_generated_file_is_never_spec_bearing_even_with_exported_symbols() {
         // M19: FileRole::Generated must exclude a file from spec
         // generation regardless of what it exports -- a real
