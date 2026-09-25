@@ -6,11 +6,15 @@ question: **are CodeOwl's live `tools/list` descriptions enough for an
 agent with zero CodeOwl codebase access to use the tools correctly and
 reach accurate conclusions?**
 
-First run: 2026-09-25, against CodeOwl's own repo, found 6 real
-description gaps (all fixed same session — see `src/mcp.rs` commits
-`c8f37ae`, `31ba65c`, `0ec353c`). The method below generalizes that
-run so it can be repeated against any repo without hand-picking new
-"gotcha" targets each time.
+First run: 2026-09-25, against CodeOwl's own repo (hand-picked
+targets), found 6 real description gaps — fixed in `src/mcp.rs`
+commits `c8f37ae`, `31ba65c`, `0ec353c`. Second run, same day, using
+this generalized self-discovery version: intended for
+`~/dev/startup/talentTrail` but actually landed on CodeOwl's own repo
+again (see "How to launch it" below for why) — found 2 more real gaps
+in `get_callers`/`get_callees`, fixed the same session. Still useful
+signal even on a repeat repo, since this version picks its own targets
+rather than reusing the first run's.
 
 ## When to re-run this
 
@@ -28,12 +32,30 @@ run so it can be repeated against any repo without hand-picking new
 
 ## How to launch it
 
-Fill in `{REPO_PATH}` below (an absolute path to any repo CodeOwl has
-already indexed — a fresh `.codeowl/` build isn't part of what this
-tests) and launch it via the `Agent` tool, `subagent_type:
-"general-purpose"`, with the filled-in text below as the prompt.
-Nothing about this requires being inside the CodeOwl repo itself —
-the subagent only ever touches `{REPO_PATH}` through the MCP tools.
+**The `{REPO_PATH}` text in the prompt is documentation for whoever
+reads the report, not a live parameter — a subagent cannot redirect
+which repo the `mcp__codeowl__*` tools talk to.** Those tools are
+wired at session start to whatever `codeowl serve <repo>` process this
+Claude Code session's own MCP config points at (see `setup/mcp.json`'s
+`args`); a subagent spawned via the `Agent` tool inherits that same
+live connection, full stop. Confirmed the hard way on the second run
+of this test (2026-09-25): asked for `~/dev/startup/talentTrail` in
+the prompt, the subagent correctly noticed the tools were actually
+still answering from CodeOwl's own repo, said so instead of pretending
+otherwise, and proceeded against what was really there.
+
+**To actually test a different repo**, run this from a Claude Code
+session whose own MCP config already points `codeowl serve` at that
+repo — a separate window/session with that repo as the working
+directory and its own `.mcp.json` (or equivalent) pointed at it, not
+this one. Only then does launching the subagent below, from *that*
+session, reach the intended repo. Update `{REPO_PATH}` in the prompt
+text purely so the subagent's own report states the right repo name,
+not to control which server it hits.
+
+Once actually pointed at the right repo, launch it via the `Agent`
+tool, `subagent_type: "general-purpose"`, with the text below as the
+prompt.
 
 After it reports back:
 

@@ -1017,7 +1017,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph, and only works on names imported directly: never query a method, or an associated/static function reached via its type (e.g. Rust's `Type::function()`) -- callers of these import the type, not the function itself, so querying the function always returns an empty list even if it's called everywhere. That empty list does not mean nothing calls it; search_code is the fallback for these cases. Symbol ids only -- a bare file id resolves without error but always returns an empty list too, since import edges target symbols, never files."
+        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved import statement; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph, and scoped to declared imports only: a method, an associated/static function reached via its type (e.g. Rust's `Type::function()`), or a same-module call made via a fully-qualified path with no import statement at all -- all real call sites, all invisible here, since none of them imports the symbol by its own name. An empty list never means nothing calls it, only that nothing imports it that way; search_code is the fallback for real call sites. Symbol ids only -- a bare file id resolves without error but always returns an empty list too, since import edges target symbols, never files."
     )]
     async fn get_callers(
         &self,
@@ -1056,7 +1056,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List what a file imports -- accepts a symbol id (answers for the file containing it) or a bare file id directly, same either way. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges. Each entry's `resolved_id` is the target symbol's id when it resolves inside this repo, or `null` when it doesn't -- most often an external package, but also a broken import or an unresolved re-export chain, so `null` isn't always benign."
+        description = "List what a file imports -- accepts a symbol id (answers for the file containing it) or a bare file id directly, same either way. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges. Each entry's `resolved_id` is the target symbol's id when it resolves inside this repo, or `null` when it doesn't -- most often an external package, but also a broken import, an unresolved re-export chain, or an internal name CodeOwl doesn't extract as a symbol yet (e.g. a TS `type`/`interface`, a destructured const). `null` isn't always benign, and isn't always external either."
     )]
     async fn get_callees(
         &self,
