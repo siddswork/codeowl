@@ -244,11 +244,26 @@ fn visit_assignment(
             Some(p) => format!("{p}::{name}"),
             None => format!("{file}::{name}"),
         };
-        let one_line = text(child, source)
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .to_string();
+        // The initializer is stripped for a class attribute only -- name
+        // (+ type, if annotated) is the public-surface-relevant part,
+        // mirroring extract.rs's field_signature_text, and this is
+        // exactly the text M21.b's container-level interface_hash fold
+        // reads per field. NOT applied at module scope: fastapi.rs's
+        // router_prefix specifically reads a module-level assignment's
+        // full signature (`s.signature.contains("APIRouter(")`, then
+        // parses the prefix kwarg out of that same string) -- stripping
+        // there would break real, load-bearing route detection for a
+        // module-level inconsistency this milestone was never scoped to
+        // fix (found and reverted after breaking 3 real tests).
+        let sig = if parent_id.is_some() {
+            assignment_signature(child, source)
+        } else {
+            text(child, source)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_string()
+        };
         // A class attribute is never independently imported — same stance
         // as a method or nested class; a module-level assignment is
         // exported by name convention.
@@ -264,11 +279,11 @@ fn visit_assignment(
             .to_string(),
             file: file.to_string(),
             lines: node_lines(child),
-            signature: one_line,
+            signature: sig.clone(),
             docstring: None,
             is_exported,
             source_hash: hash_text(text(child, source)),
-            interface_hash: is_exported.then(|| hash_text(text(child, source))),
+            interface_hash: is_exported.then(|| hash_text(&sig)),
             markers: Vec::new(),
             parent: parent_id.map(str::to_string),
             children: Vec::new(),
@@ -307,6 +322,25 @@ fn signature_before_body(node: Node, source: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// An `assignment` node's declaration text with any initializer stripped —
+/// the "everything before the `=`" trick, mirroring `extract.rs`'s
+/// `field_signature_text`. `NAME: T` (no initializer at all -- no `right`
+/// field in the grammar) is returned as-is; `NAME = value` / `NAME: T =
+/// value` has `value` cut off.
+fn assignment_signature(node: Node, source: &str) -> String {
+    let start = node.start_byte();
+    let end = node
+        .child_by_field_name("right")
+        .map(|r| r.start_byte())
+        .unwrap_or_else(|| node.end_byte())
+        .max(start);
+    source[start..end]
+        .trim_end()
+        .trim_end_matches('=')
+        .trim_end()
+        .to_string()
 }
 
 /// The module/class/function docstring: a bare string literal as the first
@@ -856,6 +890,11 @@ def get_db():
         let router = &syms[0];
         assert_eq!(router.kind, SymbolKind::Value);
         assert_eq!(router.raw, "assignment");
+        // Module-level signature keeps the full assignment text,
+        // deliberately not stripped like a class attribute's is --
+        // fastapi.rs::router_prefix reads the value out of exactly this
+        // string (`s.signature.contains("APIRouter(")`, then parses the
+        // `prefix` kwarg from it).
         assert_eq!(router.signature, "router = APIRouter(prefix=\"/items\")");
 
         let svc = &syms[1];
@@ -1031,7 +1070,11 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(id_field.kind, SymbolKind::Value);
         assert_eq!(id_field.raw, "attribute");
         assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
-        assert_eq!(id_field.signature, "id: int = Field(primary_key=True)");
+        // M21.b prerequisite: the initializer is stripped from `signature`,
+        // matching extract.rs's field_signature_text -- name+type is the
+        // public-surface-relevant part; the default value isn't, and this
+        // is exactly the text M21.b's interface_hash fold reads per field.
+        assert_eq!(id_field.signature, "id: int");
         // A class attribute is never independently imported -- same
         // stance as a method or nested class.
         assert!(!id_field.is_exported);
