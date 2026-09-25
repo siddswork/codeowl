@@ -822,7 +822,25 @@ The 79%/92% numbers are real and meaningful — just read them as evidence for t
 
 ##### M21.b — Decide open question 12, owner's call, from M21.a's real numbers
 
-Not a default, not guessed ahead of the data. Owner reviews M21.a's measured cascade counts and decides whether exported fields fold into `interface_hash`. If yes: implement the fold (`extract.rs`'s rollup + each pack's equivalent), and add the regression test this invariant originally asked for — a field's signature change moves `interface_hash` and cascades exactly one hop via `deps_hash`, per "Reference-edge propagation." If no: record the decision and the measured evidence that produced it. Either way, `ARCHITECTURE.md` open question 12 gets marked resolved with the real numbers — not left open, and not silently defaulted.
+**Decided, 2026-09-25: yes, fold — implemented as a straightforward full fold (not category-filtered; see the reasoning below the table), Python's value-stripping prerequisite built first.** The table below is both the decision record and the build tracker — each row's `Implemented` column updates as the work lands, so this stays accurate rather than becoming a stale changelog entry.
+
+| # | Change | Impacts spec (yes/no) | Effect (cascade/local) | Implemented |
+| --- | --- | --- | --- | --- |
+| 1 | Public field's type changes (name/role unchanged) | Yes | Cascade | Deferred |
+| 2 | Public field renamed | Yes | Cascade | Deferred |
+| 3 | Public field added | Yes | Cascade | Deferred |
+| 4 | Public field removed | Yes | Cascade | Deferred |
+| 5 | Field visibility pub → private | Yes | Cascade | Deferred |
+| 6 | Field visibility private → pub | Yes | Cascade | Deferred |
+| 7 | Fields reordered, nothing else changes | No | Cascade | Deferred |
+| 8 | Field's doc comment changes | Yes | Local | No |
+| 9 | Method body changes | Yes | Local | Yes |
+| 10 | Method signature changes | Yes | Local | Yes |
+| 11 | Private field's type changes | No | Local | Yes |
+
+Rows 1-7 move together — they're all the same fold, not separable work; row 7 fires mechanically (mirrors `source_hash`'s existing order-sensitive fold) despite carrying no real correctness benefit, deliberately not engineered around (reorder-only edits are rare in practice, adding fields is the common real driver of position changes — not worth the complexity of an order-independent fold to avoid it). Row 8 sits outside this decision entirely — a docstring-only edit doesn't move any hash for any symbol today, predating M21, a separate gap from what this table tracks. Rows 9-11 are already correct and already shipped; nothing here changes them.
+
+**Scope of the build:** implement the fold in `extract.rs`'s rollup and each pack's equivalent (mirroring how `source_hash` already folds every member, applied now to `interface_hash` for exported fields specifically), normalize Python's field `signature` text to strip default-value expressions first (today TS already does this, Python doesn't — building the fold before this lands would make a pure default-value edit also move `interface_hash`, which isn't real public-surface breakage), and add the regression test this invariant originally asked for — a field's signature change moves `interface_hash` and cascades exactly one hop via `deps_hash`, per "Reference-edge propagation." `ARCHITECTURE.md` open question 12 gets marked resolved once this lands.
 
 #### Definition of done
 
