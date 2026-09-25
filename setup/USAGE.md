@@ -35,41 +35,53 @@ reaches for the index instead of grepping.
 ### Try these right now, on CodeOwl's own repo
 
 You already have this repo cloned and built — no second checkout, no
-other setup. Every one of these is a **literal command, not a
-paraphrase**: run live against *this* repo's own MCP connection while
-writing this doc (and re-verified live again before this section was
-split), so you can reproduce every one of them yourself, right now,
-against the exact code you just built:
+other setup. Each tool call and its result below is real: run live
+against *this* repo's own MCP connection while writing this doc, and
+re-verified live again before this section was split — reproduce any of
+them yourself, right now, against the exact code you just built. Two
+natural phrasings are given per question, since the exact wording is
+never the point — an agent reads intent, not a script, and either one
+of a pair gets you the same place:
 
-- *"What's `Graph`'s shape before I touch it?"* → `get_symbol` — one
-  call: signature, all 24 methods, no file open.
-- *"What breaks if I change `Graph`'s public shape?"* → `get_callers` —
-  13 files import it directly. Ask the same on `Graph::build`, a
-  method instead of a type, and you get back `{"callers":[]}` — the
-  "not a call graph" caveat below, proven, not just asserted.
-- *"What does `graph.rs` itself depend on?"* → `get_callees` — its own
-  resolved imports, separate from who depends on it.
+- *"What does `Graph` actually contain before I touch it?"*, *"What
+  fields and methods does `Graph` have?"*
+  → `get_symbol` — one call: signature, all 24 methods, no file open.
+- *"What breaks if I change `Graph`'s public API?"*, *"Who depends on
+  `Graph`?"*
+  → `get_callers` — 13 files import it directly. Ask the same on
+  `Graph::build`, a method instead of a type, and you get back
+  `{"callers":[]}` — the "not a call graph" caveat below, proven, not
+  just asserted.
+- *"What does `graph.rs` itself depend on?"*, *"What does `graph.rs`
+  import?"*
+  → `get_callees` — its own resolved imports, separate from who
+  depends on it.
 - *"Can I trust this file's spec, or do I need to read the source
-  myself?"* → `get_spec` on the file id. Right now, on this repo:
-  `stale`, `changed: ["changed:source"]` — real drift, caught live.
-- *"New to `src/` — what's actually in here?"* → `get_spec
-  rollup:src` — a real directory narrative, not a file listing.
-- *"Where's the highest-leverage place to spend a documentation pass?"*
+  myself?"*, *"Is the documentation for this file still accurate?"*
+  → `get_spec` on the file id. Right now, on this repo: `stale`,
+  `changed: ["changed:source"]` — real drift, caught live.
+- *"New to `src/` — what's actually in here?"*, *"Give me an overview
+  of `src/`."*
+  → `get_spec rollup:src` — a real directory narrative, not a file
+  listing.
+- *"What should I document first?"*, *"Where are the documentation
+  gaps?"*
   → `get_spec_coverage` — `top_stale_by_impact` names `graph.rs` first
   here (fan-in 27): fix that one before the long tail.
-- *"Does this function actually do what its name says — not what a spec
-  claims, the real code?"* → `get_source`. `get_symbol` on
-  `search_code` (the function this exact tool wraps) stops at
-  `pub fn search_code(root: &Path, query: &str, opts: &SearchOptions)
-  -> Result<SearchResults>` — the declared shape, nothing else.
-  `get_source` on the same id returns the whole 83-line body. Neither
-  `get_symbol` nor a spec (which can be `stale`, `missing`, or just
-  prose) answers "what does this actually do" — `get_source` is the
-  only one reading the real thing.
-- *"Find every real implementation of X, not just mentions, and show me
-  the surrounding lines."* → `search_code` with `path` and
-  `context_lines`: `search_code("DEBOUNCE", path: "src/watch.rs",
-  context_lines: 2)` returns the constant's declaration *and* the
+- *"What does this function actually do?"*, *"Show me the real
+  implementation, not just the signature."*
+  → `get_source`. `get_symbol` on `search_code` (the function this
+  exact tool wraps) stops at `pub fn search_code(root: &Path, query:
+  &str, opts: &SearchOptions) -> Result<SearchResults>` — the declared
+  shape, nothing else. `get_source` on the same id returns the whole
+  83-line body. Neither `get_symbol` nor a spec (which can be `stale`,
+  `missing`, or just prose) answers "what does this actually do" —
+  `get_source` is the only one reading the real thing.
+- *"Where's `DEBOUNCE` actually implemented — not just mentioned?"*,
+  *"Find every real use of `DEBOUNCE` in `watch.rs`, with context."*
+  → `search_code` with `path` and `context_lines`:
+  `search_code("DEBOUNCE", path: "src/watch.rs", context_lines: 2)`
+  returns the constant's declaration *and* the
   `rx.recv_timeout(DEBOUNCE)` call that actually uses it, each with its
   real doc comment attached — one call, not a grep plus a manual
   file open.
