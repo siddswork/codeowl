@@ -17,6 +17,7 @@ pub mod search;
 pub mod spec;
 pub mod stack;
 pub mod symbol;
+pub mod text;
 pub mod watch;
 
 pub use extract::extract_file;

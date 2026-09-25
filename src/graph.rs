@@ -172,8 +172,22 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// `SymbolKind::Value` members instead of being silently folded away,
 /// same reasoning again — and `PythonStack::is_schema_symbol` drops its
 /// now-broken leaf-only guard in the same commit, retagging a `table=True`
-/// model with real field children as `Schema` again).
-pub const FORMAT_VERSION: u32 = 9;
+/// model with real field children as `Schema` again). 10 = M21.b (Rust: a
+/// public field's own signature now folds into its container's
+/// `interface_hash`, not just `source_hash` — moves every Rust
+/// container's `interface_hash` that has at least one `pub` field). 11 =
+/// M21.b (TypeScript: same fold for a class's fields — public by
+/// default, excluded only by an explicit `private` or a JS `#`-private
+/// name). 12 = M21.b (Python: same fold for a class's attributes --
+/// public-by-convention via `is_public_name`'s existing leading
+/// -underscore rule, no visibility keyword to check). 13 = M21.b (Java:
+/// same fold for a class's fields/constants -- `public`/`protected`
+/// only, matching `has_public_or_protected`'s existing rule; the value
+/// is stripped transiently at fold time only, since `.signature` itself
+/// stays value-inclusive for `quarkus.rs::resolve_channel_name`, a real
+/// consumer that reads a Kafka channel constant's literal value out of
+/// it).
+pub const FORMAT_VERSION: u32 = 13;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

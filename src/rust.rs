@@ -28,6 +28,7 @@ use tree_sitter::{Node, Parser};
 
 use crate::hash::hash_text;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
+use crate::text::strip_value_for_fold;
 
 /// Parse `source` (the contents of `rel_path`, a `.rs` file) and extract
 /// its top-level items plus one level of `impl`/`trait`/`mod` members.
@@ -388,7 +389,39 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
+    // M21.b: interface_hash folds in each *public* Value member's own
+    // signature, value stripped (name+type is public surface, a value
+    // assignment isn't). Methods stay excluded, unchanged -- this is
+    // specifically about fields/consts being public surface the same
+    // way a method's own params/return type already are. A private
+    // member never contributes (not public surface, under either
+    // regime). `SymbolKind::Value` covers struct fields (raw "field", no
+    // inline value syntax at all), const/static items nested in this
+    // container (raw "const"/"static", which do carry a value) --
+    // strip_value_for_fold handles both uniformly, a no-op for a field's
+    // already-value-free text -- and type aliases (raw "type"), which
+    // are the one real exception: code-review finding, a type alias's
+    // `= Target` is not a discardable value the way a const's is, it IS
+    // the alias's entire public meaning, so it's never stripped.
     let is_exported = has_pub(node, source);
+    // Skip building the fold at all for a non-exported container
+    // (code-review finding: it was computed unconditionally, then
+    // discarded by `.then()` below) -- wasted allocation and iteration
+    // on every reparse otherwise, and the watcher reparses on every save.
+    let mut iface_rollup = sig.clone();
+    if is_exported {
+        for s in &direct {
+            if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
+                iface_rollup.push('\n');
+                if s.raw == "type" {
+                    iface_rollup.push_str(&s.signature);
+                } else {
+                    iface_rollup.push_str(strip_value_for_fold(&s.signature));
+                }
+            }
+        }
+    }
+
     // Insert the container *before* its members so declaration order in
     // `out` stays parent-then-children, like `extract.rs`.
     out.insert(
@@ -403,7 +436,7 @@ fn visit_container(
             docstring: leading_doc(node, source),
             is_exported,
             source_hash: hash_text(&rollup),
-            interface_hash: is_exported.then(|| hash_text(&sig)),
+            interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: attributes(node, source),
             parent: parent_id.map(str::to_string),
             children: member_ids,
@@ -619,6 +652,28 @@ fn has_pub(node: Node, source: &str) -> bool {
     node.children(&mut cursor)
         .any(|c| c.kind() == "visibility_modifier" && text(c, source).starts_with("pub"))
 }
+
+/// Does a field's own stored `signature` text (`"pub x: u32"` / `"x: u32"`
+/// / `"pub(crate) x: u32"`) start with a real `pub` visibility keyword? A
+/// bare prefix check (`signature.starts_with("pub")`) would false-positive
+/// on a private field literally named e.g. `pub_key` -- checking the first
+/// whitespace-separated token for an exact `"pub"` or a `"pub("` prefix
+/// (for `pub(crate)`/`pub(super)`, one token, no internal space) avoids
+/// that.
+fn is_pub_field_signature(signature: &str) -> bool {
+    match signature.split_whitespace().next() {
+        Some(first) => first == "pub" || first.starts_with("pub("),
+        None => false,
+    }
+}
+
+// A struct field never has inline value syntax in Rust (that's not
+// valid -- defaults come via `impl Default`, never in the field
+// declaration itself), but `const`/`static` items do, and their own
+// `signature` (via `signature_before_body`'s fallback, since neither
+// has a `body` field to cut at) carries that value verbatim -- so the
+// interface_hash fold strips it via `crate::text::strip_value_for_fold`,
+// transiently, without touching the stored field.
 
 fn field_text<'a>(node: Node, field: &str, source: &'a str) -> Option<&'a str> {
     node.child_by_field_name(field).map(|n| text(n, source))
@@ -1109,6 +1164,114 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
         assert_eq!(syms[0].raw, "const");
         assert_eq!(syms[1].kind, SymbolKind::Value);
         assert_eq!(syms[1].raw, "static");
+    }
+
+    #[test]
+    fn a_pub_fields_type_change_moves_the_structs_interface_hash() {
+        // M21.b: the whole point of the fold -- a public field's type is
+        // public surface exactly like a method's return type is.
+        let a = extract_file("pub struct P {\n    pub x: u32,\n}\n", "a.rs");
+        let b = extract_file("pub struct P {\n    pub x: u64,\n}\n", "a.rs");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_fields_value_only_edit_never_applies_here_but_reorder_still_moves_it() {
+        // Table row 6 (M21.b decision record, ROADMAP.md): reordering two
+        // pub fields does move interface_hash under the plain fold
+        // (mirrors source_hash's existing order-sensitive treatment),
+        // even though nothing about the public contract changed --
+        // deliberately not engineered around, confirmed here so the
+        // behavior is at least tested, not silently assumed.
+        let a = extract_file(
+            "pub struct P {\n    pub x: u32,\n    pub y: u32,\n}\n",
+            "a.rs",
+        );
+        let reordered = extract_file(
+            "pub struct P {\n    pub y: u32,\n    pub x: u32,\n}\n",
+            "a.rs",
+        );
+        assert_ne!(a[0].interface_hash, reordered[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_fields_type_change_does_not_move_interface_hash() {
+        // Table row 11: private isn't public surface, under either regime.
+        let a = extract_file("pub struct P {\n    x: u32,\n}\n", "a.rs");
+        let b = extract_file("pub struct P {\n    x: u64,\n}\n", "a.rs");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_fields_docstring_change_does_not_move_interface_hash() {
+        // Table row 8: a doc comment never contributes to interface_hash,
+        // for anything -- a field's own text (what gets folded) never
+        // included its docstring to begin with.
+        let a = extract_file(
+            "pub struct P {\n    /// old doc\n    pub x: u32,\n}\n",
+            "a.rs",
+        );
+        let b = extract_file(
+            "pub struct P {\n    /// totally different doc\n    pub x: u32,\n}\n",
+            "a.rs",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_consts_value_only_edit_inside_a_pub_mod_does_not_move_interface_hash() {
+        // Code-review finding: the fold loop includes every SymbolKind
+        // ::Value direct member, not just struct fields -- a pub mod's
+        // pub const/static items are also Value, and (unlike struct
+        // fields, which have no inline value syntax in Rust at all)
+        // const/static's own `signature` does carry its initializer
+        // value, so a value-only edit was spuriously moving the mod's
+        // interface_hash.
+        let a = extract_file("pub mod config {\n    pub const X: i32 = 1;\n}\n", "a.rs");
+        let b = extract_file("pub mod config {\n    pub const X: i32 = 2;\n}\n", "a.rs");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_consts_type_change_inside_a_pub_mod_moves_interface_hash() {
+        let a = extract_file("pub mod config {\n    pub const X: i32 = 1;\n}\n", "a.rs");
+        let b = extract_file(
+            "pub mod config {\n    pub const X: &str = \"1\";\n}\n",
+            "a.rs",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_new_pub_field_moves_interface_hash_but_a_new_private_one_does_not() {
+        let base = extract_file("pub struct P {\n    pub x: u32,\n}\n", "a.rs");
+        let plus_pub = extract_file(
+            "pub struct P {\n    pub x: u32,\n    pub y: u32,\n}\n",
+            "a.rs",
+        );
+        let plus_private =
+            extract_file("pub struct P {\n    pub x: u32,\n    y: u32,\n}\n", "a.rs");
+        assert_ne!(base[0].interface_hash, plus_pub[0].interface_hash);
+        assert_eq!(base[0].interface_hash, plus_private[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_type_aliass_target_change_moves_interface_hash() {
+        // Code-review finding: unlike const/static, a type alias's "=" is
+        // not a discardable value -- the aliased type IS its entire
+        // public meaning, so strip_value_for_fold must never touch it.
+        let a = extract_file("pub mod config {\n    pub type Id = u64;\n}\n", "a.rs");
+        let b = extract_file("pub mod config {\n    pub type Id = String;\n}\n", "a.rs");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_field_literally_named_pub_key_is_not_mistaken_for_public() {
+        // is_pub_field_signature's whole reason to exist: a bare
+        // signature.starts_with("pub") would false-positive here.
+        let a = extract_file("pub struct P {\n    pub_key: u32,\n}\n", "a.rs");
+        let b = extract_file("pub struct P {\n    pub_key: u64,\n}\n", "a.rs");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]

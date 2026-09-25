@@ -2489,6 +2489,107 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    #[tokio::test]
+    async fn a_public_fields_type_change_stales_the_importer_exactly_one_hop_not_further() {
+        // M21.b's own stated exit test (ROADMAP.md): a field's signature
+        // change moves interface_hash and cascades exactly one hop via
+        // deps_hash. Three files: config.ts (the field owner), user.ts
+        // (imports Config directly -- one hop), other.ts (unrelated,
+        // imports nothing from config.ts -- must never move).
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-fieldstale-{}", std::process::id()));
+        let config_v1 = "export class Config {\n    x: number;\n}\n";
+        let user = "import { Config } from './config';\n\nexport function useConfig(c: Config): number {\n  return c.x;\n}\n";
+        let other = "export function noop(): void {}\n";
+
+        let server = rebuild_server(
+            dir.clone(),
+            &[
+                ("config.ts", config_v1),
+                ("user.ts", user),
+                ("other.ts", other),
+            ],
+        );
+        for (sym_id, sym_content, file_id, file_content) in [
+            (
+                "user.ts::useConfig",
+                "### Summary\nReads the config's x value and returns it to the caller.\n### Behavior\nAccesses c.x directly and returns it, with no further transformation applied.\n",
+                "user.ts",
+                "Reads a Config's x value.",
+            ),
+            (
+                "other.ts::noop",
+                "### Summary\nDoes nothing at all.\n### Behavior\nIntentionally performs no operation.\n",
+                "other.ts",
+                "An intentional, deliberate no-op function.",
+            ),
+        ] {
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: sym_id.to_string(),
+                    content: sym_content.to_string(),
+                }))
+                .await
+                .unwrap();
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: file_id.to_string(),
+                    content: file_content.to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+
+        // config.ts's public field x changes type: number -> string.
+        let config_v2 = "export class Config {\n    x: string;\n}\n";
+        let server_edit = rebuild_server(
+            dir.clone(),
+            &[
+                ("config.ts", config_v2),
+                ("user.ts", user),
+                ("other.ts", other),
+            ],
+        );
+        let task = server_edit
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "user.ts".to_string(),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(
+            matches!(task, SpecTaskResponse::Symbol { ref id, .. } if id == "user.ts::useConfig"),
+            "the direct importer must be re-offered: {task:?}"
+        );
+
+        let useconfig = server_edit
+            .get_spec(Parameters(IdRequest {
+                id: "user.ts::useConfig".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(useconfig.0.status, "stale");
+        assert_eq!(
+            useconfig.0.changed,
+            vec!["changed:dependencies".to_string()]
+        );
+
+        // Exactly one hop: an unrelated file that imports nothing from
+        // config.ts must never move, however many hops away it sits.
+        let other_spec = server_edit
+            .get_spec(Parameters(IdRequest {
+                id: "other.ts::noop".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            other_spec.0.status, "current",
+            "an unrelated file must not be affected"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     // --- M18: the God-class generation-task payload fix ----------------
 
     #[tokio::test]

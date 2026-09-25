@@ -32,6 +32,7 @@ use crate::hash::hash_text;
 use crate::imports::{FileImports, ImportRef};
 use crate::resolve::ResolvedImport;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
+use crate::text::strip_value_for_fold;
 
 /// Parse `source` (the contents of `rel_path`, a `.java` file) and extract
 /// its top-level types and their members.
@@ -187,9 +188,49 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
+    // M21.b: interface_hash folds in each `public`/`protected` field's
+    // own signature, value stripped (name+type is public surface, a
+    // value assignment isn't -- code-review-shaped finding: `.signature`
+    // itself is deliberately left value-inclusive, unlike Rust/TS/Python,
+    // because `quarkus.rs::resolve_channel_name` reads a Kafka channel
+    // constant's literal value straight out of it (`first_string_literal
+    // (&s.signature)`) -- stripping the stored field broke that real,
+    // load-bearing consumer, caught by a real test failure before this
+    // fold-time-only version replaced it. Methods stay excluded,
+    // unchanged. `raw == "constant"` (an interface's own member, never a
+    // class's) is included unconditionally -- code-review finding: the
+    // JLS makes every interface field implicitly public/static/final,
+    // and the idiomatic style omits the now-redundant keyword entirely,
+    // so requiring an explicit token here silently excluded real public
+    // surface.
+    //
+    // Value stripped *before* the visibility check, not after -- code-
+    // review finding: checking is_pub_or_protected_field_signature
+    // against the raw, still-value-inclusive text let a private field's
+    // own string value (`private String note = "...is public only to
+    // admins";`) supply a stray "public" token and get misclassified as
+    // public surface. Stripping first removes the value from the text
+    // being scanned entirely, not just from what gets folded in.
     // A top-level Java type is always at least package-visible, so it's
     // reachable (and spec-bearing); a nested type needs `public`/`protected`.
     let is_exported = parent_id.is_none() || has_public_or_protected(node);
+
+    // Skip building the fold at all for a non-exported container
+    // (code-review finding: it was computed unconditionally, then
+    // discarded by `.then()` below) -- wasted allocation and iteration
+    // on every reparse otherwise, and the watcher reparses on every save.
+    let mut iface_rollup = sig.clone();
+    if is_exported {
+        for s in &direct {
+            let declaration_only = strip_value_for_fold(&s.signature);
+            let is_pub_field =
+                s.raw == "constant" || is_pub_or_protected_field_signature(declaration_only);
+            if s.kind == SymbolKind::Value && is_pub_field {
+                iface_rollup.push('\n');
+                iface_rollup.push_str(declaration_only);
+            }
+        }
+    }
 
     // Insert the container *before* its members so declaration order in
     // `out` stays parent-then-children.
@@ -205,7 +246,7 @@ fn visit_container(
             docstring: leading_doc(node, source),
             is_exported,
             source_hash: hash_text(&rollup),
-            interface_hash: is_exported.then(|| hash_text(&sig)),
+            interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: annotations(node, source),
             parent: parent_id.map(str::to_string),
             children: member_ids,
@@ -302,6 +343,24 @@ fn has_public_or_protected(node: Node) -> bool {
         .children(&mut cursor)
         .any(|c| matches!(c.kind(), "public" | "protected"))
 }
+
+/// The signature-string version of `has_public_or_protected`, for a
+/// field's own already-extracted `signature` (the interface_hash fold in
+/// `visit_container` has no tree-sitter `Node` left to re-check, only the
+/// stored text) -- an exact whitespace-token match, not a substring
+/// check, so a field legitimately named e.g. `publicApiUrl` isn't
+/// mistaken for a `public` modifier.
+fn is_pub_or_protected_field_signature(signature: &str) -> bool {
+    signature
+        .split_whitespace()
+        .any(|tok| tok == "public" || tok == "protected")
+}
+
+// A field/constant's stored `signature` still carries its initializer
+// value verbatim (deliberately -- see `visit_container`'s fold comment
+// for why it isn't stripped at the source like Rust/TS/Python's is), so
+// the interface_hash fold strips it via `crate::text::strip_value_for_fold`
+// instead, transiently, without touching the stored field.
 
 /// The `modifiers` child of a declaration, if present. `class_declaration`
 /// exposes it as a field; a few nodes only have it as an ordinary child.
@@ -855,6 +914,113 @@ public @interface JsonProperty {\n\
         assert_eq!(with_method[0].kind, SymbolKind::Container);
         assert_eq!(with_method[0].raw, "record");
         assert!(with_method.iter().any(|s| s.id == "r.java::Range::has"));
+    }
+
+    #[test]
+    fn a_fields_signature_still_carries_its_initializer_value() {
+        // Deliberately NOT stripped at the source, unlike Rust/TS/Python
+        // -- quarkus.rs::resolve_channel_name reads a Kafka channel
+        // constant's literal value straight out of `.signature`
+        // (first_string_literal), a real, load-bearing dependency this
+        // milestone doesn't own and must not break.
+        let syms = extract_file("class C {\n    public int x = 5;\n}\n", "c.java");
+        let field = syms.iter().find(|s| s.raw == "field").unwrap();
+        assert_eq!(field.signature, "public int x = 5");
+    }
+
+    #[test]
+    fn a_pub_fields_value_only_edit_does_not_move_interface_hash() {
+        // The fold strips the value transiently (strip_value_for_fold),
+        // without touching the stored `.signature` tested above.
+        let a = extract_file("class C {\n    public int x = 5;\n}\n", "c.java");
+        let b = extract_file("class C {\n    public int x = 6;\n}\n", "c.java");
+        assert_ne!(
+            a[0].source_hash, b[0].source_hash,
+            "source_hash still moves"
+        );
+        assert_eq!(
+            a[0].interface_hash, b[0].interface_hash,
+            "interface_hash must not move from a value-only edit"
+        );
+    }
+
+    // strip_value_for_fold's own unit tests moved to text.rs (shared
+    // across rust.rs/java.rs/python.rs, code-review finding); this test
+    // stays here since it's Java-specific end-to-end coverage through
+    // extract_file, not a strip_value_for_fold unit test.
+    #[test]
+    fn an_annotated_public_fields_type_change_moves_interface_hash_despite_the_annotations_own_equals()
+     {
+        let a = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public int y = 5;\n}\n",
+            "c.java",
+        );
+        let b = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public String y = \"5\";\n}\n",
+            "c.java",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn an_annotated_public_fields_value_only_edit_does_not_move_interface_hash() {
+        let a = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public int y = 5;\n}\n",
+            "c.java",
+        );
+        let b = extract_file(
+            "class C {\n    @Column(name = \"x\")\n    public int y = 6;\n}\n",
+            "c.java",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn an_interface_constant_with_no_explicit_public_keyword_is_still_folded() {
+        // Code-review finding: interface members are implicitly public
+        // per the JLS even with no explicit modifier -- the idiomatic
+        // style omits the redundant keyword entirely.
+        let a = extract_file("interface C {\n    int X = 5;\n}\n", "c.java");
+        let b = extract_file("interface C {\n    String X = \"5\";\n}\n", "c.java");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_fields_value_containing_the_word_public_is_not_misread_as_a_modifier() {
+        // Code-review finding: `.signature` stays value-inclusive for
+        // Java (quarkus.rs needs it -- see the fold's own comment), so a
+        // naive whitespace-token scan over the *whole* signature can
+        // find "public"/"protected" sitting inside a private field's own
+        // string value and misclassify it as a visibility keyword.
+        let a = extract_file(
+            "class C {\n    private String note = \"this endpoint is public only to admins\";\n}\n",
+            "c.java",
+        );
+        let b = extract_file(
+            "class C {\n    private String note = \"nothing special here\";\n}\n",
+            "c.java",
+        );
+        assert_eq!(
+            a[0].interface_hash, b[0].interface_hash,
+            "both fields are private; neither should ever contribute to interface_hash"
+        );
+    }
+
+    #[test]
+    fn a_public_fields_type_change_moves_the_classs_interface_hash() {
+        let a = extract_file("class C {\n    public int x;\n}\n", "c.java");
+        let b = extract_file("class C {\n    public String x;\n}\n", "c.java");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_package_private_fields_type_change_does_not_move_interface_hash() {
+        // Java: public surface is `public`/`protected` only, same rule
+        // has_public_or_protected already applies to a member's own
+        // is_exported -- package-private and private both stay excluded.
+        let a = extract_file("class C {\n    int x;\n}\n", "c.java");
+        let b = extract_file("class C {\n    String x;\n}\n", "c.java");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]

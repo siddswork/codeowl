@@ -30,6 +30,7 @@ use crate::hash::hash_text;
 use crate::imports::{FileImports, ImportRef};
 use crate::resolve::ResolvedImport;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
+use crate::text::strip_value_for_fold;
 
 /// Parse `source` (the contents of `rel_path`, a `.py` file) and extract
 /// its module-level declarations and their members.
@@ -155,9 +156,34 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
+    // M21.b: interface_hash folds in each *public-by-convention* attribute's
+    // own signature, value stripped -- transiently, here, never touching
+    // the stored field (code-review finding: an earlier version stripped
+    // the value at the source, which silently broke
+    // spec.rs::maybe_reduce_container_source's God-class reduction --
+    // see `strip_value_for_fold`'s own doc comment). The same way
+    // source_hash already folds every member. Methods stay excluded,
+    // unchanged. Python has no visibility keyword, so "public" reuses
+    // is_public_name -- the same leading-underscore convention already
+    // applied to module-level names and functions.
     // Top-level classes are exported by name convention; a nested class is
     // a member (usually `Meta` / `Config`) and not independently reachable.
     let is_exported = parent_id.is_none() && is_public_name(&name);
+
+    // Skip building the fold at all for a non-exported container
+    // (code-review finding: it was computed unconditionally, then
+    // discarded by `.then()` below) -- wasted allocation and iteration
+    // on every reparse otherwise, and the watcher reparses on every save.
+    let mut iface_rollup = sig.clone();
+    if is_exported {
+        for s in &direct {
+            let attr_name = s.id.rsplit("::").next().unwrap_or(&s.id);
+            if s.kind == SymbolKind::Value && is_public_name(attr_name) {
+                iface_rollup.push('\n');
+                iface_rollup.push_str(strip_value_for_fold(&s.signature));
+            }
+        }
+    }
 
     out.insert(
         before,
@@ -171,7 +197,7 @@ fn visit_container(
             docstring: docstring(node, source),
             is_exported,
             source_hash: hash_text(&rollup),
-            interface_hash: is_exported.then(|| hash_text(&sig)),
+            interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: markers.to_vec(),
             parent: parent_id.map(str::to_string),
             children: member_ids,
@@ -244,11 +270,30 @@ fn visit_assignment(
             Some(p) => format!("{p}::{name}"),
             None => format!("{file}::{name}"),
         };
-        let one_line = text(child, source)
-            .lines()
-            .next()
-            .unwrap_or_default()
-            .to_string();
+        // Deliberately value-inclusive at *both* scopes -- code-review
+        // finding: an earlier version stripped the value for class-level
+        // attributes only (on the theory that name+type is the only
+        // public-surface-relevant part), but `.signature` has other real
+        // readers besides the interface_hash fold:
+        // fastapi.rs::router_prefix reads a module-level assignment's
+        // full value (`s.signature.contains("APIRouter(")`, then parses
+        // the prefix kwarg out of that same string), and
+        // spec.rs::maybe_reduce_container_source's God-class reduction
+        // shows a member's `.signature` straight to the LLM writing that
+        // class's spec -- stripping a class attribute's default value
+        // there silently drops real context (`Field(primary_key=True)`)
+        // from what the LLM sees. Same lesson as java.rs's fold: don't
+        // strip a field the stored, shared record itself carries --
+        // strip transiently, only where the fold actually reads it (this
+        // function's own caller, in visit_container, below).
+        //
+        // The full node text, not just its first line (code-review
+        // finding): a multi-line public value's later lines are real
+        // public surface too, and truncating them here silently kept
+        // them out of both `signature` and `interface_hash` alike --
+        // `source_hash` below was never truncated, so the two hashes
+        // could disagree about whether the same edit was a real change.
+        let sig = text(child, source).to_string();
         // A class attribute is never independently imported — same stance
         // as a method or nested class; a module-level assignment is
         // exported by name convention.
@@ -264,11 +309,11 @@ fn visit_assignment(
             .to_string(),
             file: file.to_string(),
             lines: node_lines(child),
-            signature: one_line,
+            signature: sig.clone(),
             docstring: None,
             is_exported,
             source_hash: hash_text(text(child, source)),
-            interface_hash: is_exported.then(|| hash_text(text(child, source))),
+            interface_hash: is_exported.then(|| hash_text(&sig)),
             markers: Vec::new(),
             parent: parent_id.map(str::to_string),
             children: Vec::new(),
@@ -308,6 +353,13 @@ fn signature_before_body(node: Node, source: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+// An assignment's stored `signature` text with any initializer value
+// stripped, for the interface_hash fold only -- never touches the
+// stored field itself (see `visit_assignment`'s own comment for why:
+// other real readers, like `fastapi.rs::router_prefix` and
+// `spec.rs::maybe_reduce_container_source`, need the full value). Uses
+// `crate::text::strip_value_for_fold`, shared with java.rs/rust.rs.
 
 /// The module/class/function docstring: a bare string literal as the first
 /// statement of the body. Leading indentation and blank lines trimmed.
@@ -856,6 +908,11 @@ def get_db():
         let router = &syms[0];
         assert_eq!(router.kind, SymbolKind::Value);
         assert_eq!(router.raw, "assignment");
+        // Module-level signature keeps the full assignment text,
+        // deliberately not stripped like a class attribute's is --
+        // fastapi.rs::router_prefix reads the value out of exactly this
+        // string (`s.signature.contains("APIRouter(")`, then parses the
+        // `prefix` kwarg from it).
         assert_eq!(router.signature, "router = APIRouter(prefix=\"/items\")");
 
         let svc = &syms[1];
@@ -1001,6 +1058,23 @@ def read_item(id: int) -> ItemPublic:
     }
 
     #[test]
+    fn a_public_by_convention_attributes_type_change_moves_the_classs_interface_hash() {
+        // Python has no visibility keyword -- public-by-convention is a
+        // leading underscore, same rule is_public_name already applies
+        // to module-level names and functions.
+        let a = extract_file("class P:\n    x: int\n", "a.py");
+        let b = extract_file("class P:\n    x: str\n", "a.py");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_leading_underscore_attributes_type_change_does_not_move_interface_hash() {
+        let a = extract_file("class P:\n    _x: int\n", "a.py");
+        let b = extract_file("class P:\n    _x: str\n", "a.py");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
     fn class_body_assignments_become_value_members() {
         // SQLModel-shaped: many field assignments in the class body, now
         // one Value member each -- including the bare-annotation case
@@ -1031,6 +1105,10 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(id_field.kind, SymbolKind::Value);
         assert_eq!(id_field.raw, "attribute");
         assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
+        // `.signature` stays value-inclusive (code-review finding:
+        // fastapi.rs::router_prefix and spec.rs's God-class reduction
+        // both need the full value elsewhere) -- the interface_hash
+        // fold strips it transiently, at fold time only, never here.
         assert_eq!(id_field.signature, "id: int = Field(primary_key=True)");
         // A class attribute is never independently imported -- same
         // stance as a method or nested class.
@@ -1048,6 +1126,28 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(syms[0].raw, "assignment");
         assert_eq!(syms[0].kind, SymbolKind::Value);
         assert_eq!(syms[0].parent, None);
+    }
+
+    #[test]
+    fn a_multi_line_assignments_interface_hash_sees_past_the_first_line() {
+        // Code-review finding: `sig` used to be `.lines().next()` --
+        // only the first line of the node's text -- while `source_hash`
+        // correctly hashed the whole node. For a single-line assignment
+        // those happen to agree, which is why this went unnoticed; for a
+        // real multi-line public value they don't. A public dict/list
+        // constant's later lines are exactly the shape that hides: only
+        // `SETTINGS = {` was ever visible to interface_hash, so editing
+        // line 2 moved source_hash (correctly re-offering SETTINGS's own
+        // spec) but left interface_hash bit-for-bit identical -- an
+        // importer's deps_hash would never move, silently reporting it
+        // as still current.
+        let a = extract_file("SETTINGS = {\n    \"timeout\": 30,\n}\n", "a.py");
+        let b = extract_file("SETTINGS = {\n    \"timeout\": 60,\n}\n", "a.py");
+        assert_ne!(a[0].source_hash, b[0].source_hash);
+        assert_ne!(
+            a[0].interface_hash, b[0].interface_hash,
+            "a multi-line public value's later lines must move interface_hash too"
+        );
     }
 
     #[test]

@@ -54,10 +54,25 @@ pub fn is_test_path(graph: &Graph, path: &str) -> bool {
     matches!(classify_in(graph, path), FileRole::Test)
 }
 
-/// A file is spec-bearing iff it declares at least one exported `Callable`
-/// or `Container` among its top-level symbols — barrel files, const-only
-/// route config, and metadata-only boilerplate get no document (see
+/// A file is spec-bearing iff it declares at least one `Callable` or
+/// `Container` among its top-level symbols — barrel files (zero top-level
+/// declarations at all — see `barrel_file_is_not_spec_bearing`) and
+/// const-only/metadata-only boilerplate get no document (see
 /// `ARCHITECTURE.md`'s granularity rules).
+///
+/// **Deliberately not gated on `is_exported` (design correction,
+/// 2026-09-25).** An earlier version additionally required the top-level
+/// symbol to be exported, reasoning it would also catch barrel files —
+/// but a real barrel file already has zero top-level `Callable`/
+/// `Container` symbols at all (a re-export isn't a declaration), so that
+/// gate caught nothing a barrel file needed. Its only actual effect was
+/// making a file with substantial, real, *entirely private* code —
+/// `tests/*.rs`-style integration-test files with no `pub` anywhere are
+/// the common real case — permanently invisible to `get_spec_coverage`:
+/// not merely deprioritized (`FileRole::Test` already exists for that),
+/// literally never offered a spec, ever. A top-level declaration being
+/// private only means nothing *outside this file* can import it; it says
+/// nothing about whether the file itself is worth documenting.
 ///
 /// **`FileRole::Generated` is never spec-bearing, regardless of what it
 /// exports (M19).** A build-generated interface (an OpenAPI-codegen'd
@@ -66,8 +81,8 @@ pub fn is_test_path(graph: &Graph, path: &str) -> bool {
 /// alone has 8 — but it's read-only structural reference, never the
 /// hand-written code a spec describes, per the "only spec the
 /// hand-written code" principle `ARCHITECTURE.md` open question 11
-/// states. Checked first so it short-circuits before the exported-symbol
-/// scan below runs at all.
+/// states. Checked first so it short-circuits before the symbol scan
+/// below runs at all.
 pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool {
     if matches!(
         classify_in(graph, graph.string_id(file_id)),
@@ -76,9 +91,9 @@ pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool {
         return false;
     }
     graph.children_ids(file_id).iter().any(|&id| {
-        graph.get_symbol(id).is_some_and(|s| {
-            s.is_exported && matches!(s.kind, SymbolKind::Callable | SymbolKind::Container)
-        })
+        graph
+            .get_symbol(id)
+            .is_some_and(|s| matches!(s.kind, SymbolKind::Callable | SymbolKind::Container))
     })
 }
 
@@ -3198,6 +3213,26 @@ mod tests {
     }
 
     #[test]
+    fn a_private_top_level_function_is_still_spec_bearing() {
+        // Design correction, 2026-09-25: `file_is_spec_bearing` used to
+        // additionally require the top-level symbol to be *exported*
+        // (`is_exported`). A real barrel file is already excluded
+        // independently -- it declares zero top-level symbols at all,
+        // see `barrel_file_is_not_spec_bearing` -- so the export check's
+        // only actual effect was hiding a file whose real, substantial
+        // code happens to be entirely private, like a `tests/*.rs`
+        // integration-test file with no `pub` anywhere: structurally in
+        // the graph, permanently invisible to `get_spec_coverage`, with
+        // literally no spec obtainable for it, ever. A top-level
+        // function being private only means nothing *outside this file*
+        // can import it -- it says nothing about whether the file is
+        // worth documenting.
+        let graph = build_graph_from_sources(&[("a.ts", "function helper(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        assert!(file_is_spec_bearing(&graph, file_id));
+    }
+
+    #[test]
     fn a_classs_field_members_do_not_inflate_generations_remaining_ts() {
         // Same invariant as the Rust version above, for extract.rs's own
         // field extraction -- a field's parent is the class, never the
@@ -3330,7 +3365,12 @@ mod tests {
     }
 
     #[test]
-    fn non_exported_only_file_is_not_spec_bearing() {
+    fn const_only_file_is_not_spec_bearing() {
+        // Excluded by *kind* (`Value`, never `Callable`/`Container`), not
+        // by export status -- renamed from `non_exported_only_file_...`
+        // to stop reading as the export-status case, which is now
+        // `a_private_top_level_function_is_still_spec_bearing` above and
+        // asserts the opposite.
         let graph = build_graph_from_sources(&[("a.ts", "const helper = 1;\n")]);
         let file_id = graph.find("a.ts").unwrap();
         assert!(!file_is_spec_bearing(&graph, file_id));
@@ -3631,6 +3671,51 @@ impl Counter {\n\
         assert!(
             reduced.len() < full.len(),
             "reduced text must actually be smaller"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn maybe_reduce_container_source_keeps_a_python_fields_default_value() {
+        // Code-review finding: a reduced God-class's per-member text
+        // comes straight from `.signature` -- if a field's default
+        // value were stripped from the *stored* field (as an earlier
+        // version of M21.b's interface_hash fold did), the LLM writing
+        // this class's spec would silently lose real context like which
+        // field is the primary key. `.signature` must stay
+        // value-inclusive; the fold strips it transiently, elsewhere.
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-godclass-py",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let padding = "x".repeat(LARGE_CONTAINER_BYTES_DEFAULT + 1000);
+        let src = format!(
+            "class Big:\n    id: int = Field(primary_key=True)\n\n    def bump(self):\n        # {padding}\n        return self.id + 1\n"
+        );
+        std::fs::write(dir.join("src/big.py"), &src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/big.py".to_string(),
+            source_hash: hash_text(&src),
+            symbols: crate::python::extract_file(&src, "src/big.py"),
+        }]);
+        let big = graph
+            .get_symbol(graph.find("src/big.py::Big").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/big.py", big).unwrap();
+        assert!(
+            full.len() > LARGE_CONTAINER_BYTES_DEFAULT,
+            "fixture must actually clear the threshold"
+        );
+
+        let reduced =
+            maybe_reduce_container_source(big, &graph, full.clone(), LARGE_CONTAINER_BYTES_DEFAULT);
+        assert!(
+            reduced.contains("Field(primary_key=True)"),
+            "the field's default value must survive reduction:\n{reduced}"
         );
 
         std::fs::remove_dir_all(&dir).ok();
