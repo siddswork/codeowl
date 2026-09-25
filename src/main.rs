@@ -40,6 +40,13 @@ enum Command {
         /// this above its own undocumented inline-context limit).
         #[arg(long, default_value_t = codeowl::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT)]
         max_spec_task_bytes: usize,
+        /// The byte ceiling applied to a single `get_source` response.
+        /// Deliberately separate from `max_spec_task_bytes` and much
+        /// larger by default: that cap keeps a *generation task* small
+        /// enough to author against, this one exists so a verification
+        /// read gets the real text rather than a prompt-sized fragment.
+        #[arg(long, default_value_t = codeowl::spec::MAX_SOURCE_TEXT_BYTES_DEFAULT)]
+        max_source_bytes: usize,
     },
 }
 
@@ -62,6 +69,7 @@ async fn main() -> Result<()> {
             path,
             large_class_bytes,
             max_spec_task_bytes,
+            max_source_bytes,
         } => {
             let root = canonical_root(&path)?;
             let (index, graph, caught) = RepoIndex::open(&root)?;
@@ -81,7 +89,8 @@ async fn main() -> Result<()> {
                 );
             }
             let server = CodeOwlServer::new(root.clone(), graph)
-                .with_generation_limits(Some(large_class_bytes), Some(max_spec_task_bytes));
+                .with_generation_limits(Some(large_class_bytes), Some(max_spec_task_bytes))
+                .with_source_limit(Some(max_source_bytes));
             // Keep the watcher alive for the whole session — it stops when
             // this handle drops, which is when `serve` returns.
             let _watcher = codeowl::watch::spawn(root, server.graph_store(), index)

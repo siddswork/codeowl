@@ -51,8 +51,22 @@ them yourself right now:
 - *"Where's the highest-leverage place to spend a documentation pass?"*
   → `get_spec_coverage` — `top_stale_by_impact` names `graph.rs` first
   here (fan-in 27): fix that one before the long tail.
-- *"Find every real implementation of X, not just mentions."* →
-  `search_code` — plain regex, but scoped to tracked source.
+- *"Does this function actually do what its name says — not what a spec
+  claims, the real code?"* → `get_source`. `get_symbol` on
+  `search_code` (the function this exact tool wraps) stops at
+  `pub fn search_code(root: &Path, query: &str, opts: &SearchOptions)
+  -> Result<SearchResults>` — the declared shape, nothing else.
+  `get_source` on the same id returns the whole 83-line body. Neither
+  `get_symbol` nor a spec (which can be `stale`, `missing`, or just
+  prose) answers "what does this actually do" — `get_source` is the
+  only one reading the real thing.
+- *"Find every real implementation of X, not just mentions, and show me
+  the surrounding lines."* → `search_code` with `path` and
+  `context_lines`: `search_code("DEBOUNCE", path: "src/watch.rs",
+  context_lines: 2)` returns the constant's declaration *and* the
+  `rx.recv_timeout(DEBOUNCE)` call that actually uses it, each with its
+  real doc comment attached — one call, not a grep plus a manual
+  file open.
 - *"How does checkout work end to end?"* → `get_spec feature:<slug>` —
   this repo has no feature layer (a CLI/library, not a routed service,
   so there's no `feature:<slug>` to query here), but on any repo with
@@ -74,13 +88,26 @@ of specs that already exist. They are not how you generate — see below.
 
 ### How the tools actually behave
 
-CodeOwl's 8 MCP tools are a thin layer over the resolved graph and the
+CodeOwl's 9 MCP tools are a thin layer over the resolved graph and the
 persisted spec store — precise, but Phase-1 literal. Worth knowing before
 you rely on an answer:
 
 - **`get_symbol(id)`** — one symbol's record: signature, line range,
   docstring, `kind`/`raw`, and (for a type/class) every method it
   contains. The fast "where is this, what's its shape" lookup.
+- **`get_source(id, context_lines?)`** — the **actual source text**,
+  read off disk at the span `get_symbol` recorded — the one thing
+  `get_symbol` (signature only, stops before the body) and `get_spec`
+  (LLM-written prose *about* the symbol, which can be `stale` or
+  `missing`) never give you. Accepts a symbol id or a bare file path.
+  `context_lines` (default 0, capped at 20) widens the returned span —
+  pull in the imports a snippet depends on, or the enclosing block.
+  `truncated: true` means `source` was cut at the byte cap; `lines`
+  always reports the true span regardless, so you know exactly what's
+  missing. `graph_in_sync: false` means the file changed on disk more
+  recently than the index caught up (the watcher debounces ~300ms) —
+  `lines` may not point at the right place until that settles. Pure
+  read: never touches a spec.
 - **`get_callers(id)`** — the files that reference `id` through a
   **resolved `import` / `use` edge**, plus (for a SQL table) the files
   with a `.from("table")` that resolves to it. It is *not* a call graph.
@@ -128,9 +155,24 @@ you rely on an answer:
   persists what your agent wrote. `/codeowl-generate` drives both — see
   "How generation works" below; call them yourself only if you're
   building your own generation client.
-- **`search_code(query)`** — plain regex over every tracked file
-  (`.gitignore`-respecting, capped, no index). The same as running `rg`
-  yourself.
+- **`search_code(query, path?, ignore_case?, context_lines?,
+  max_results?)`** — plain regex over every tracked file
+  (`.gitignore`-respecting, no index) — the same as running `rg`
+  yourself, now with `rg`'s own ergonomics: `path` scopes to a file or
+  directory (a true boundary, not a bare prefix — `"lib"` never matches
+  `"library/foo.ts"`); `ignore_case` for case-insensitive matching;
+  `context_lines` (capped at 5) pulls surrounding lines into each
+  match's `context_before`/`context_after`; `max_results` narrows the
+  default 200-match cap, never widens it. Each match's `text` is capped
+  at 500 bytes with `truncated: true` if cut (the match itself is kept,
+  never the tail); `context_unavailable: true` on a match means context
+  was asked for but a second read of that file failed in the moment
+  between finding the match and re-reading it — distinct from context
+  legitimately being empty. The whole response carries its own
+  `truncated: true` when the match cap *or* a roughly 100 KB total
+  response-size budget stopped the walk short — narrow `path` or the
+  query itself to see the rest; the size budget isn't something you can
+  raise from the request.
 
 The tools give you the **edges** cheaply and reliably — things grep can't
 see (a resolved re-export, an import vs. a same-named local) or can't

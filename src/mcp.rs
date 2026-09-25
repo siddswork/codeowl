@@ -18,7 +18,7 @@ use rmcp::{ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::graph::{Graph, SymbolView};
+use crate::graph::{Graph, Node, SymbolView};
 use crate::search::SearchMatch;
 use crate::symbol::SymbolKind;
 
@@ -28,10 +28,75 @@ pub struct IdRequest {
     pub id: String,
 }
 
+/// Extra lines of surrounding context `get_source` adds on each side of
+/// the returned span, capped regardless of what's asked for — see
+/// `MAX_CONTEXT_LINES`.
+const MAX_CONTEXT_LINES: usize = 20;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SourceRequest {
+    /// A symbol's stable id (e.g. "lib/utils.ts::cn") or a bare file
+    /// path (e.g. "lib/utils.ts") — same id scheme `get_symbol` and
+    /// `get_spec` already use.
+    pub id: String,
+    /// Extra lines of context on each side of the returned span (e.g. the
+    /// surrounding imports, or the enclosing match arm) — default 0,
+    /// capped at 20 regardless of what's asked for.
+    #[serde(default)]
+    pub context_lines: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct SourceResponse {
+    pub id: String,
+    /// The file this source was read from — always a real repo-relative
+    /// path, even when `id` was a symbol id.
+    pub file: String,
+    /// The true full span this response covers, 1-based inclusive —
+    /// stays accurate even when `truncated` is `true`, so a caller that
+    /// needs the rest knows exactly what's missing rather than guessing.
+    pub lines: [usize; 2],
+    pub source: String,
+    /// `true` when `source` was cut short of the true `lines` span
+    /// because it exceeded the byte cap. Re-read the file directly (or
+    /// narrow `context_lines`) for what's missing — nothing here is
+    /// silently dropped without this flag saying so.
+    pub truncated: bool,
+    /// `true` when the file this was read from still hashes to what the
+    /// graph has on record. `false` means the file changed since the
+    /// last reindex (the watcher debounces for ~300ms) — `lines` is the
+    /// graph's *recorded* span, read against the file's *current* text,
+    /// so it may no longer point at the right place if the edit moved
+    /// things around.
+    pub graph_in_sync: bool,
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchRequest {
     /// A regex pattern to search for across the repo's source files.
     pub query: String,
+    /// Restrict matches to this file or directory (e.g. "src" or
+    /// "src/mcp.rs") — a true path boundary, not a bare string prefix:
+    /// "lib" matches "lib/foo.ts", never "library/foo.ts". Omit to
+    /// search the whole repo.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Case-insensitive matching. Omit or `false` for case-sensitive
+    /// (the default).
+    #[serde(default)]
+    pub ignore_case: Option<bool>,
+    /// Lines of surrounding context per match, each side — default 0,
+    /// capped at 5 regardless of what's asked for (a single call can
+    /// return many matches, each now carrying its own context, so an
+    /// unbounded per-match multiplier reintroduces the payload problem
+    /// the 500-byte-per-line cap on `text` already exists to fix).
+    #[serde(default)]
+    pub context_lines: Option<usize>,
+    /// Narrow the match cap below the default 200 — omit, or a value
+    /// above 200, leaves the default 200 in place; this can only make a
+    /// response smaller, never larger.
+    #[serde(default)]
+    pub max_results: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -342,6 +407,13 @@ pub struct CalleesResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SearchResponse {
     pub matches: Vec<SearchMatch>,
+    /// `true` when the match-count cap or the cumulative response-size
+    /// budget stopped the walk before every real match in the repo was
+    /// found -- not to be confused with any one match's own `truncated`
+    /// field, which only means that match's `text` was cut. Narrow
+    /// `path` or raise `max_results` (up to 200) to see more; the
+    /// response-size budget itself isn't caller-adjustable.
+    pub truncated: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -554,6 +626,12 @@ pub struct CodeOwlServer {
     /// unchanged, since these just default here.
     large_class_bytes: usize,
     max_spec_task_bytes: usize,
+    /// `get_source`'s own byte cap (M20) — deliberately a separate field
+    /// from the two above, not folded into `with_generation_limits`,
+    /// since it serves a different purpose (a verification read, not a
+    /// generation-task prompt) and defaults much larger — see
+    /// `spec::MAX_SOURCE_TEXT_BYTES_DEFAULT`.
+    max_source_bytes: usize,
 }
 
 impl CodeOwlServer {
@@ -564,6 +642,7 @@ impl CodeOwlServer {
             tool_router: Self::tool_router(),
             large_class_bytes: crate::spec::LARGE_CONTAINER_BYTES_DEFAULT,
             max_spec_task_bytes: crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
+            max_source_bytes: crate::spec::MAX_SOURCE_TEXT_BYTES_DEFAULT,
         }
     }
 
@@ -582,6 +661,15 @@ impl CodeOwlServer {
         }
         if let Some(v) = max_spec_task_bytes {
             self.max_spec_task_bytes = v;
+        }
+        self
+    }
+
+    /// Override `get_source`'s byte cap from its compiled-in default —
+    /// `codeowl serve`'s `--max-source-bytes` flag calls this.
+    pub fn with_source_limit(mut self, max_source_bytes: Option<usize>) -> Self {
+        if let Some(v) = max_source_bytes {
+            self.max_source_bytes = v;
         }
         self
     }
@@ -847,6 +935,85 @@ impl CodeOwlServer {
         SymbolView::from_graph(&graph, id)
             .map(Json)
             .ok_or_else(|| Self::not_found(&req.id))
+    }
+
+    #[tool(
+        description = "The real source text behind a symbol or file id -- what get_symbol/get_spec don't give you: get_symbol stops at the signature (the text before the body), and get_spec is LLM-written prose about the symbol, not the code itself. Use this to verify a claim about actual behavior. Accepts a symbol id (\"lib/utils.ts::cn\") or a bare file path (\"lib/utils.ts\"). `context_lines` (default 0, capped at 20) pulls in surrounding lines -- e.g. the imports a snippet depends on. `truncated: true` means `source` was cut short of the true `lines` span (re-read the file directly for the rest); `graph_in_sync: false` means the file changed on disk more recently than the index was rebuilt, so `lines` may not point at the right place in the file's current text."
+    )]
+    async fn get_source(
+        &self,
+        Parameters(req): Parameters<SourceRequest>,
+    ) -> Result<Json<SourceResponse>, String> {
+        let graph = self.graph.load_full();
+        let id = graph
+            .find(&req.id)
+            .ok_or_else(|| Self::not_found(&req.id))?;
+        let context_lines = req.context_lines.unwrap_or(0).min(MAX_CONTEXT_LINES);
+
+        let (file, mut spans, recorded_hash) = match graph.get(id) {
+            Node::File(f) => (f.id.clone(), None, f.source_hash.clone()),
+            Node::Symbol(sym) => {
+                let spans = crate::spec::merged_symbol_spans(&graph, sym);
+                let file_id = graph
+                    .find(&sym.file)
+                    .ok_or_else(|| Self::not_found(&sym.file))?;
+                let recorded_hash = graph
+                    .get_file(file_id)
+                    .map(|f| f.source_hash.clone())
+                    .unwrap_or_default();
+                (sym.file.clone(), Some(spans), recorded_hash)
+            }
+        };
+
+        let content = std::fs::read_to_string(self.root.join(&file))
+            .map_err(|e| format!("reading {file}: {e}"))?;
+        // The freshness check: the file's *current* text hash against
+        // what the graph has on record. Deliberately the file's own
+        // source_hash, never a container's -- that one is a Merkle fold
+        // over its members, not a hash of its span text, so comparing
+        // against it here could never match even when nothing is stale.
+        let graph_in_sync = crate::hash::hash_text(&content) == recorded_hash;
+
+        let total_lines = content.lines().count().max(1);
+        let spans = spans.get_or_insert_with(|| vec![[1, total_lines]]);
+        if context_lines > 0 {
+            if let Some(first) = spans.first_mut() {
+                first[0] = first[0].saturating_sub(context_lines);
+            }
+            if let Some(last) = spans.last_mut() {
+                last[1] += context_lines;
+            }
+        }
+        // Code-review finding: this clamp used to live only inside the
+        // `context_lines > 0` branch above, so a symbol's *recorded*
+        // span -- stale if the file shrank since the last reindex --
+        // could report `lines` past what the file's *current* text
+        // actually has, while `render_spans`' own internal clamp
+        // silently gave back less `source` than that. Now unconditional:
+        // `lines` never claims more than the file currently contains,
+        // whether or not `context_lines` touched anything.
+        if let Some(first) = spans.first_mut() {
+            first[0] = first[0].clamp(1, total_lines);
+        }
+        if let Some(last) = spans.last_mut() {
+            last[1] = last[1].min(total_lines);
+        }
+
+        let lines = [
+            spans.first().map(|s| s[0]).unwrap_or(1),
+            spans.last().map(|s| s[1]).unwrap_or(total_lines),
+        ];
+        let source_text = crate::spec::render_spans(&content, spans);
+        let (source, truncated) = crate::spec::cap_source_text(source_text, self.max_source_bytes);
+
+        Ok(Json(SourceResponse {
+            id: req.id,
+            file,
+            lines,
+            source,
+            truncated,
+            graph_in_sync,
+        }))
     }
 
     #[tool(
@@ -1262,14 +1429,25 @@ impl CodeOwlServer {
 
     #[tool(
         name = "search_code",
-        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches in walk order -- not ranked by relevance."
+        description = "Regex-search every file in the repo (source, docs, config -- anything not gitignored). Embedded ripgrep, no index: literal and regex matching only, no semantic or natural-language search. Returns at most 200 matches (or `max_results` if lower) in walk order -- not ranked by relevance; the whole response's `truncated: true` means the walk stopped before every real match was found (the count cap, or a roughly 100,000-byte total-size budget). Each match's own `text` is capped at 500 bytes with `truncated: true` if it was cut -- a long line (e.g. committed prose) isn't dropped, just shortened from its end; re-read the file directly for the full line. Optionally scope to `path` (a file or directory, true boundary not bare prefix), match case-insensitively with `ignore_case`, and pull `context_lines` (capped at 5) of surrounding text into `context_before`/`context_after` on each match -- `context_unavailable: true` on a match means context was requested but couldn't be read, distinct from context legitimately being empty."
     )]
     async fn search(
         &self,
         Parameters(req): Parameters<SearchRequest>,
     ) -> Result<Json<SearchResponse>, String> {
-        crate::search::search_code(&self.root, &req.query)
-            .map(|matches| Json(SearchResponse { matches }))
+        let opts = crate::search::SearchOptions {
+            path: req.path,
+            ignore_case: req.ignore_case.unwrap_or(false),
+            context_lines: req.context_lines.unwrap_or(0),
+            max_results: req.max_results,
+        };
+        crate::search::search_code(&self.root, &req.query, &opts)
+            .map(|result| {
+                Json(SearchResponse {
+                    matches: result.matches,
+                    truncated: result.truncated,
+                })
+            })
             .map_err(|e| e.to_string())
     }
 
@@ -3525,10 +3703,291 @@ mod tests {
         let result = server
             .search(Parameters(SearchRequest {
                 query: "findMe".to_string(),
+                path: None,
+                ignore_case: None,
+                context_lines: None,
+                max_results: None,
             }))
             .await
             .unwrap();
         assert_eq!(result.0.matches.len(), 1);
         assert_eq!(result.0.matches[0].file, "a.ts");
+    }
+
+    #[tokio::test]
+    async fn search_request_s_new_fields_actually_reach_search_options() {
+        // search.rs's own tests cover path/ignore_case/context_lines/
+        // max_results exhaustively at the SearchOptions level -- this is
+        // the one check that mcp.rs's glue actually wires SearchRequest's
+        // fields to the right SearchOptions fields, not e.g. swapped.
+        let server = test_server(&[
+            ("src/a.ts", "const TARGET = 1;\n"),
+            ("tests/a.ts", "const TARGET = 2;\n"),
+        ]);
+        let result = server
+            .search(Parameters(SearchRequest {
+                query: "target".to_string(),
+                path: Some("src".to_string()),
+                ignore_case: Some(true),
+                context_lines: Some(1),
+                max_results: Some(5),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.0.matches.len(), 1, "path filter should apply");
+        assert_eq!(result.0.matches[0].file, "src/a.ts");
+        assert!(
+            result.0.matches[0].text.contains("TARGET"),
+            "ignore_case should have matched the uppercase line"
+        );
+    }
+
+    // --- M20: get_source ------------------------------------------------
+
+    #[tokio::test]
+    async fn get_source_returns_the_body_not_just_the_signature() {
+        // The exact gap get_source exists to close: get_symbol only ever
+        // returns `signature` (the text *before* the body). This is the
+        // real lookup that sent an agent to `Read` mid-session -- "does
+        // this function actually do X" has no other CodeOwl answer.
+        let server = test_server(&[(
+            "a.ts",
+            "export function resolveImports(spec: string): string | null {\n\
+             \x20   if (spec.startsWith(\".\")) {\n\
+             \x20       return resolveRelative(spec);\n\
+             \x20   }\n\
+             \x20   return null;\n\
+             }\n",
+        )]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::resolveImports".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(
+            result.0.source.contains("resolveRelative(spec)"),
+            "body missing from get_source output:\n{}",
+            result.0.source
+        );
+    }
+
+    #[tokio::test]
+    async fn get_source_on_a_folded_rust_impl_includes_the_method_bodies() {
+        // Same fixture shape as spec.rs's
+        // symbol_span_text_includes_a_folded_impl_s_method_bodies (M15) --
+        // get_source must reach the same folded text through the tool
+        // surface, not just internally.
+        let server = test_server(&[(
+            "src/counter.rs",
+            "pub struct Counter {\n    n: u64,\n}\n\n\
+             impl Counter {\n\
+             \x20   pub fn bump(&mut self) {\n\
+             \x20       self.n += 1;\n\
+             \x20   }\n\
+             }\n",
+        )]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "src/counter.rs::Counter".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(
+            result.0.source.contains("self.n += 1"),
+            "folded method body missing:\n{}",
+            result.0.source
+        );
+        assert!(result.0.source.contains("pub struct Counter"));
+    }
+
+    #[tokio::test]
+    async fn get_source_on_a_file_id_returns_the_whole_file() {
+        let server = test_server(&[("a.ts", "export const one = 1;\nexport const two = 2;\n")]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(result.0.file, "a.ts");
+        assert_eq!(result.0.lines, [1, 2]);
+        assert!(result.0.source.contains("one = 1"));
+        assert!(result.0.source.contains("two = 2"));
+    }
+
+    #[tokio::test]
+    async fn get_source_on_an_unknown_id_is_an_error() {
+        let server = test_server(&[("a.ts", "export const one = 1;\n")]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::nope".to_string(),
+                context_lines: None,
+            }))
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_source_context_lines_widens_the_returned_span() {
+        let server = test_server(&[(
+            "a.ts",
+            "import { helper } from \"./helper\";\n\
+             \n\
+             export function target(): number {\n\
+             \x20   return helper();\n\
+             }\n\
+             \n\
+             export const trailing = 1;\n",
+        )]);
+        let unwidened = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::target".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(!unwidened.0.source.contains("import"));
+
+        let widened = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::target".to_string(),
+                context_lines: Some(3),
+            }))
+            .await
+            .unwrap();
+        assert!(
+            widened.0.source.contains("import { helper }"),
+            "context_lines should pull the import into view:\n{}",
+            widened.0.source
+        );
+        assert!(widened.0.lines[0] < unwidened.0.lines[0]);
+    }
+
+    #[tokio::test]
+    async fn get_source_context_lines_is_capped_regardless_of_what_s_asked_for() {
+        let mut src = String::new();
+        for i in 0..40 {
+            src.push_str(&format!("const pad{i} = {i};\n"));
+        }
+        src.push_str("export function target(): number {\n    return 1;\n}\n");
+        let server = test_server(&[("a.ts", &src)]);
+
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::target".to_string(),
+                context_lines: Some(1000),
+            }))
+            .await
+            .unwrap();
+        // 40 padding lines + the 3-line function; asking for 1000 lines
+        // of context must not pull in more than MAX_CONTEXT_LINES worth.
+        let span = result.0.lines[1] - result.0.lines[0] + 1;
+        assert!(
+            span <= 3 + 2 * MAX_CONTEXT_LINES,
+            "context_lines cap was not enforced: span was {span} lines"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_source_reports_graph_in_sync_true_when_untouched() {
+        let server = test_server(&[("a.ts", "export const one = 1;\n")]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::one".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(result.0.graph_in_sync);
+    }
+
+    #[tokio::test]
+    async fn get_source_reports_graph_in_sync_false_after_an_out_of_band_edit() {
+        // The debounce-window scenario: the file on disk has changed but
+        // the graph hasn't been rebuilt against it yet (no watcher runs
+        // in a unit test, so writing directly to `server.root()`
+        // reproduces exactly that gap).
+        let server = test_server(&[("a.ts", "export const one = 1;\n")]);
+        std::fs::write(
+            server.root().join("a.ts"),
+            "export const one = 1;\nexport const two = 2;\n",
+        )
+        .unwrap();
+
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::one".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(!result.0.graph_in_sync);
+    }
+
+    #[tokio::test]
+    async fn get_source_truncates_over_the_configured_cap_but_reports_the_true_lines() {
+        let src = format!(
+            "export function big(): string {{\n    return \"{}\";\n}}\n",
+            "x".repeat(500)
+        );
+        let server = test_server(&[("a.ts", &src)]).with_source_limit(Some(50));
+
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::big".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(result.0.truncated);
+        assert!(result.0.source.len() <= 50);
+        // The true span is still reported accurately, truncation or not --
+        // an agent that needs the rest knows exactly what to re-read.
+        assert_eq!(result.0.lines, [1, 3]);
+    }
+
+    #[tokio::test]
+    async fn get_source_clamps_lines_to_the_file_s_current_length_even_without_context_lines() {
+        // Code-review finding: the only clamp against a file's current
+        // length lived inside the `if context_lines > 0` branch, so a
+        // symbol recorded at e.g. [1, 3] in a file that's since *shrunk*
+        // (not grown -- the existing graph_in_sync test only covers
+        // growth) reported that stale, too-long span verbatim while
+        // render_spans' own internal clamp silently gave back less text
+        // than `lines` claimed -- contradicting SourceResponse.lines'
+        // documented guarantee that it "stays accurate ... nothing here
+        // is silently dropped without this flag saying so."
+        let server = test_server(&[(
+            "a.ts",
+            "export function target(): number {\n    return 1;\n}\n",
+        )]);
+        // Shrink the file out from under the graph, bypassing the watcher
+        // entirely -- same technique the existing debounce test uses for
+        // growth, here used for the untested shrink direction.
+        std::fs::write(server.root().join("a.ts"), "short\n").unwrap();
+
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::target".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+
+        assert!(!result.0.graph_in_sync);
+        assert!(
+            result.0.lines[1] <= 1,
+            "lines must never claim more than the file's current length (1 line): {:?}",
+            result.0.lines
+        );
+        assert_eq!(
+            result.0.source.lines().count(),
+            result.0.lines[1] - result.0.lines[0] + 1,
+            "source's real line count must match the span lines claims to cover"
+        );
     }
 }
