@@ -922,7 +922,7 @@ impl CodeOwlServer {
 #[tool_router]
 impl CodeOwlServer {
     #[tool(
-        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\"."
+        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\". For a container (a class, struct, etc.), `children` lists its member ids -- always its methods; fields/properties too, but only on some stacks today, so an empty `children` on an otherwise-real type isn't proof it has no members. Pass any child id back in to look that member up the same way."
     )]
     async fn get_symbol(
         &self,
@@ -1017,7 +1017,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it."
+        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph: query the containing type or a free function, never a method -- a method is never imported by name, so querying one always returns an empty list even if it's called everywhere, and that empty list does not mean nothing calls it."
     )]
     async fn get_callers(
         &self,
@@ -1056,7 +1056,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List what the FILE containing this symbol imports. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges."
+        description = "List what the FILE containing this symbol imports. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges. Each entry's `resolved_id` is the target symbol's id when it resolves inside this repo, or `null` when it doesn't -- most often an external package, but also a broken import or an unresolved re-export chain, so `null` isn't always benign."
     )]
     async fn get_callees(
         &self,
@@ -1085,7 +1085,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, 'rollup:<dir_path>' id, or the fixed id 'system'. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed."
+        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, 'rollup:<dir_path>' id, or the fixed id 'system'. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed. `smells` is independent of `status`: a deterministic quality check that can flag even a \"current\" spec's prose as weak (e.g. suspiciously short, or a cop-out like \"see the source\" instead of an explanation) -- current means the hashes match, not that the writing is good."
     )]
     async fn get_spec(
         &self,
