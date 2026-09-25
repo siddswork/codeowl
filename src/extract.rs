@@ -118,57 +118,90 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
     let name = field_text(decl, "name", source).unwrap_or("<anonymous>");
     let class_id = format!("{file}::{name}");
 
-    let mut method_ids = Vec::new();
-    let mut method_source_hashes = Vec::new();
-    let mut method_symbols = Vec::new();
+    let mut member_ids = Vec::new();
+    let mut member_source_hashes = Vec::new();
+    let mut member_symbols = Vec::new();
     let mut cursor = body.walk();
     for member in body.children(&mut cursor) {
-        if member.kind() != "method_definition" {
-            continue;
+        match member.kind() {
+            "method_definition" => {
+                let Some(m_body) = member.child_by_field_name("body") else {
+                    continue;
+                };
+                let m_name = field_text(member, "name", source).unwrap_or("<anonymous>");
+                let m_id = format!("{class_id}.{m_name}");
+                let m_source_hash = hash_text(text(member, source));
+                member_symbols.push(ExtractedSymbol {
+                    id: m_id.clone(),
+                    kind: SymbolKind::Callable,
+                    raw: "method".to_string(),
+                    file: file.to_string(),
+                    lines: node_lines(member),
+                    signature: signature_text(member, m_body, source),
+                    docstring: leading_doc(member, source),
+                    // A method isn't independently exported/imported —
+                    // see the doc comment on Symbol::is_exported.
+                    is_exported: false,
+                    source_hash: m_source_hash.clone(),
+                    interface_hash: None,
+                    markers: Vec::new(),
+                    parent: Some(class_id.clone()),
+                    children: Vec::new(),
+                });
+                member_ids.push(m_id);
+                member_source_hashes.push(m_source_hash);
+            }
+            // One `Value` member per declared class field — TS's `#priv`
+            // JS-private fields land here too (grammar-wise identical to a
+            // plain one, just `name`'s own node kind differs), same as
+            // `private`-modified ones: a member is never independently
+            // exported regardless of its own visibility.
+            "public_field_definition" => {
+                let Some(f_name) = field_text(member, "name", source) else {
+                    continue;
+                };
+                let f_id = format!("{class_id}.{f_name}");
+                let f_source_hash = hash_text(text(member, source));
+                member_symbols.push(ExtractedSymbol {
+                    id: f_id.clone(),
+                    kind: SymbolKind::Value,
+                    raw: "property".to_string(),
+                    file: file.to_string(),
+                    lines: node_lines(member),
+                    signature: field_signature_text(member, source),
+                    docstring: leading_doc(member, source),
+                    is_exported: false,
+                    source_hash: f_source_hash.clone(),
+                    interface_hash: None,
+                    markers: Vec::new(),
+                    parent: Some(class_id.clone()),
+                    children: Vec::new(),
+                });
+                member_ids.push(f_id);
+                member_source_hashes.push(f_source_hash);
+            }
+            _ => {}
         }
-        let Some(m_body) = member.child_by_field_name("body") else {
-            continue;
-        };
-        let m_name = field_text(member, "name", source).unwrap_or("<anonymous>");
-        let m_id = format!("{class_id}.{m_name}");
-        let m_source_hash = hash_text(text(member, source));
-        method_symbols.push(ExtractedSymbol {
-            id: m_id.clone(),
-            kind: SymbolKind::Callable,
-            raw: "method".to_string(),
-            file: file.to_string(),
-            lines: node_lines(member),
-            signature: signature_text(member, m_body, source),
-            docstring: leading_doc(member, source),
-            // A method isn't independently exported/imported — see the
-            // doc comment on Symbol::is_exported.
-            is_exported: false,
-            source_hash: m_source_hash.clone(),
-            interface_hash: None,
-            markers: Vec::new(),
-            parent: Some(class_id.clone()),
-            children: Vec::new(),
-        });
-        method_ids.push(m_id);
-        method_source_hashes.push(m_source_hash);
     }
 
     let signature = signature_text(decl, body, source);
     let is_exported = outer.kind() == "export_statement";
 
-    // Merkle rollup: the class's own source_hash folds in each method's
-    // source_hash, in declaration order (reordering methods is a real
-    // change too). This is what makes the ancestor-chain hash-propagation
-    // validation in ROADMAP.md's M2 entry hold: edit one method's body,
-    // and both that method's and the class's source_hash move.
+    // Merkle rollup: the class's own source_hash folds in each member's
+    // source_hash (methods and, as of M21, fields), in declaration order
+    // (reordering members is a real change too). This is what makes the
+    // ancestor-chain hash-propagation validation in ROADMAP.md's M2 entry
+    // hold: edit one member, and both that member's and the class's
+    // source_hash move.
     //
-    // interface_hash deliberately does NOT fold in method signatures —
+    // interface_hash deliberately does NOT fold in member signatures —
     // M2 only resolves file-to-file import edges (a consumer imports the
-    // class itself), not method-level call resolution, so nothing yet
-    // watches a class's members for invalidation purposes. Revisit once a
-    // later milestone adds call-level resolution.
+    // class itself), not member-level call/access resolution, so nothing
+    // yet watches a class's members for invalidation purposes. Whether an
+    // exported field should be the one exception is ROADMAP.md's open
+    // question 12 (M21.b) — not decided here.
     let mut rollup_input = signature.clone();
-    for h in &method_source_hashes {
+    for h in &member_source_hashes {
         rollup_input.push('\n');
         rollup_input.push_str(h);
     }
@@ -186,9 +219,9 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         is_exported,
         markers: Vec::new(),
         parent: None,
-        children: method_ids,
+        children: member_ids,
     });
-    out.extend(method_symbols);
+    out.extend(member_symbols);
 }
 
 fn visit_lexical(
@@ -278,6 +311,27 @@ fn signature_text(node: Node, body: Node, source: &str) -> String {
     let start = node.start_byte();
     let end = body.start_byte().max(start);
     source[start..end].trim_end().to_string()
+}
+
+/// A `public_field_definition`'s declaration text with any initializer
+/// stripped — the "everything before the `=`" version of `signature_text`'s
+/// "everything before the `{`" trick, since a field has no body node to
+/// anchor on. Falls back to the whole node (trailing `;` trimmed) when
+/// there's no initializer at all.
+fn field_signature_text(node: Node, source: &str) -> String {
+    let start = node.start_byte();
+    let end = node
+        .child_by_field_name("value")
+        .map(|v| v.start_byte())
+        .unwrap_or_else(|| node.end_byte())
+        .max(start);
+    source[start..end]
+        .trim_end()
+        .trim_end_matches('=')
+        .trim_end()
+        .trim_end_matches(';')
+        .trim_end()
+        .to_string()
 }
 
 /// Walk backward over `node`'s immediately preceding siblings, collecting a
@@ -527,6 +581,57 @@ mod tests {
                 .signature
                 .starts_with("async doThing(y: T): Promise<void>")
         );
+    }
+
+    #[test]
+    fn class_fields_are_extracted_as_value_members() {
+        let src = "export class FileNode {\n    /** Repo-relative path. */\n    id: string;\n    /** Hash of the file's raw text. */\n    private source_hash: string = \"\";\n    method() {}\n}\n";
+        let symbols = extract_file(src, "a.ts");
+        let class = &symbols[0];
+        assert_eq!(
+            class.children,
+            vec![
+                "a.ts::FileNode.id",
+                "a.ts::FileNode.source_hash",
+                "a.ts::FileNode.method"
+            ]
+        );
+
+        let id_field = symbols
+            .iter()
+            .find(|s| s.id == "a.ts::FileNode.id")
+            .unwrap();
+        assert_eq!(id_field.kind, SymbolKind::Value);
+        assert_eq!(id_field.raw, "property");
+        assert_eq!(id_field.parent.as_deref(), Some("a.ts::FileNode"));
+        assert_eq!(id_field.docstring.as_deref(), Some("Repo-relative path."));
+        assert_eq!(id_field.signature, "id: string");
+        // A member is never independently imported -- same stance as a
+        // method (see Symbol::is_exported's own doc comment).
+        assert!(!id_field.is_exported);
+        assert_eq!(id_field.interface_hash, None);
+
+        let hash_field = symbols
+            .iter()
+            .find(|s| s.id == "a.ts::FileNode.source_hash")
+            .unwrap();
+        assert_eq!(hash_field.kind, SymbolKind::Value);
+        // The initializer is stripped from the signature, same as
+        // visit_lexical already does for a plain top-level const.
+        assert_eq!(hash_field.signature, "private source_hash: string");
+    }
+
+    #[test]
+    fn field_reorder_moves_the_classs_source_hash_but_unrelated_edit_does_not() {
+        let a = extract_file("class P {\n    x = 1;\n    y = 2;\n}\n", "a.ts");
+        let reordered = extract_file("class P {\n    y = 2;\n    x = 1;\n}\n", "a.ts");
+        assert_ne!(a[0].source_hash, reordered[0].source_hash);
+
+        let unrelated_edit = extract_file(
+            "// a comment that doesn't touch the class\nclass P {\n    x = 1;\n    y = 2;\n}\n",
+            "a.ts",
+        );
+        assert_eq!(a[0].source_hash, unrelated_edit[0].source_hash);
     }
 
     #[test]

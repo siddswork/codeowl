@@ -164,8 +164,11 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// `source_hash` like any other member — moves every Rust container's
 /// `source_hash` and `children`, not a shape drift a `#[serde(default)]`
 /// would paper over, but the cache would otherwise silently keep serving
-/// pre-fix `children: []` forever with nothing to invalidate it).
-pub const FORMAT_VERSION: u32 = 7;
+/// pre-fix `children: []` forever with nothing to invalidate it). 8 =
+/// M21.a (member-level extraction, TypeScript: same treatment for a
+/// class's fields — moves every TS/Next class's `source_hash`/`children`
+/// too, same reasoning as version 7).
+pub const FORMAT_VERSION: u32 = 8;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
