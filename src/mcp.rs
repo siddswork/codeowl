@@ -922,7 +922,7 @@ impl CodeOwlServer {
 #[tool_router]
 impl CodeOwlServer {
     #[tool(
-        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\". For a container (a class, struct, etc.), `children` lists its member ids -- always its methods; fields/properties too, but only on some stacks today, so an empty `children` on an otherwise-real type isn't proof it has no members. Pass any child id back in to look that member up the same way."
+        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\". For a container (a class, struct, etc.), `signature` is just its declaration line -- it does not list fields, so use get_source on the same id for the real member list. `children` lists its member ids -- always its methods; fields/properties too, but only on some stacks today, so an empty `children` on an otherwise-real type isn't proof it has no members. Pass any child id back in to look that member up the same way."
     )]
     async fn get_symbol(
         &self,
@@ -1017,7 +1017,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph: query the containing type or a free function, never a method -- a method is never imported by name, so querying one always returns an empty list even if it's called everywhere, and that empty list does not mean nothing calls it."
+        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph, and only works on names imported directly: never query a method, or an associated/static function reached via its type (e.g. Rust's `Type::function()`) -- callers of these import the type, not the function itself, so querying the function always returns an empty list even if it's called everywhere. That empty list does not mean nothing calls it; search_code is the fallback for these cases."
     )]
     async fn get_callers(
         &self,
