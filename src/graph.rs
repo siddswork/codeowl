@@ -167,8 +167,13 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// pre-fix `children: []` forever with nothing to invalidate it). 8 =
 /// M21.a (member-level extraction, TypeScript: same treatment for a
 /// class's fields — moves every TS/Next class's `source_hash`/`children`
-/// too, same reasoning as version 7).
-pub const FORMAT_VERSION: u32 = 8;
+/// too, same reasoning as version 7). 9 = M21.a (member-level extraction,
+/// Python: a class body's `NAME = …` / `NAME: T = …` assignments become
+/// `SymbolKind::Value` members instead of being silently folded away,
+/// same reasoning again — and `PythonStack::is_schema_symbol` drops its
+/// now-broken leaf-only guard in the same commit, retagging a `table=True`
+/// model with real field children as `Schema` again).
+pub const FORMAT_VERSION: u32 = 9;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

@@ -74,12 +74,13 @@ fn visit_item(
         }
         "class_definition" => visit_container(node, parent_id, markers, source, file, out),
         "function_definition" => push_callable(node, parent_id, markers, source, file, out),
-        // Module-level `NAME = …` (and `NAME: T = …`) → a `Value` symbol.
-        // A class body's assignments (model fields, `Config`) stay folded
-        // into the class — the same stance `rust.rs` takes for struct
-        // fields.
-        "expression_statement" if parent_id.is_none() => {
-            visit_module_assignment(node, source, file, out);
+        // `NAME = …` (and `NAME: T = …`) → one `Value` member per bound
+        // name — at module scope (M17) or, as of M21, at class scope too:
+        // there's no separate "field" node kind in Python's grammar the
+        // way Rust/TS/Java each have, model fields (SQLModel/SQLAlchemy/
+        // Django/Pydantic) are ordinary class-body assignments.
+        "expression_statement" => {
+            visit_assignment(node, parent_id, source, file, out);
         }
         _ => {}
     }
@@ -185,10 +186,18 @@ fn push_callable(
     });
 }
 
-/// `NAME = …` / `NAME: T = …` at module scope → one `Value` per bound
-/// name. Skips tuple targets (`a, b = …`) and attribute targets
-/// (`obj.attr = …`) — neither is a top-level declaration.
-fn visit_module_assignment(stmt: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>) {
+/// `NAME = …` / `NAME: T = …` at module or class scope → one `Value` per
+/// bound name (a bare `NAME: T` with no initializer is still an
+/// `assignment` node in the grammar, just without a `right` field — both
+/// forms are handled the same way here). Skips tuple targets (`a, b = …`)
+/// and attribute targets (`obj.attr = …`) — neither is a declaration.
+fn visit_assignment(
+    stmt: Node,
+    parent_id: Option<&str>,
+    source: &str,
+    file: &str,
+    out: &mut Vec<ExtractedSymbol>,
+) {
     let mut cursor = stmt.walk();
     for child in stmt.children(&mut cursor) {
         if child.kind() != "assignment" {
@@ -201,16 +210,28 @@ fn visit_module_assignment(stmt: Node, source: &str, file: &str, out: &mut Vec<E
             continue;
         }
         let name = text(lhs, source).to_string();
+        let id = match parent_id {
+            Some(p) => format!("{p}::{name}"),
+            None => format!("{file}::{name}"),
+        };
         let one_line = text(child, source)
             .lines()
             .next()
             .unwrap_or_default()
             .to_string();
-        let is_exported = is_public_name(&name);
+        // A class attribute is never independently imported — same stance
+        // as a method or nested class; a module-level assignment is
+        // exported by name convention.
+        let is_exported = parent_id.is_none() && is_public_name(&name);
         out.push(ExtractedSymbol {
-            id: format!("{file}::{name}"),
+            id,
             kind: SymbolKind::Value,
-            raw: "assignment".to_string(),
+            raw: if parent_id.is_some() {
+                "attribute"
+            } else {
+                "assignment"
+            }
+            .to_string(),
             file: file.to_string(),
             lines: node_lines(child),
             signature: one_line,
@@ -219,7 +240,7 @@ fn visit_module_assignment(stmt: Node, source: &str, file: &str, out: &mut Vec<E
             source_hash: hash_text(text(child, source)),
             interface_hash: is_exported.then(|| hash_text(text(child, source))),
             markers: Vec::new(),
-            parent: None,
+            parent: parent_id.map(str::to_string),
             children: Vec::new(),
         });
     }
@@ -892,10 +913,20 @@ def read_item(id: int) -> ItemPublic:
 "#;
         let syms = extract_file(src, "m.py");
         let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, vec!["m.py::Item", "m.py::Item::Meta", "m.py::Item::m"]);
+        assert_eq!(
+            ids,
+            vec![
+                "m.py::Item",
+                "m.py::Item::Meta",
+                "m.py::Item::Meta::ordering",
+                "m.py::Item::m"
+            ],
+            "Meta's own `ordering = [...]` is now a real attribute member, not silently folded"
+        );
         let meta = syms.iter().find(|s| s.id == "m.py::Item::Meta").unwrap();
         assert_eq!(meta.kind, SymbolKind::Container);
         assert!(!meta.is_exported, "a nested class is a member");
+        assert_eq!(meta.children, vec!["m.py::Item::Meta::ordering"]);
         assert_eq!(syms[0].children.len(), 2);
     }
 
@@ -908,20 +939,66 @@ def read_item(id: int) -> ItemPublic:
     }
 
     #[test]
-    fn class_body_assignments_do_not_become_symbols() {
-        // SQLModel-shaped: many field assignments in the class body. They
-        // stay folded into the class, not one Value symbol each.
+    fn class_body_assignments_become_value_members() {
+        // SQLModel-shaped: many field assignments in the class body, now
+        // one Value member each -- including the bare-annotation case
+        // (`owner_id: int`, no initializer) that's still an `assignment`
+        // node in the grammar, just without a `right` field.
         let src = r#"class Item(SQLModel, table=True):
     id: int = Field(primary_key=True)
     title: str = Field(max_length=255)
     owner_id: int
 "#;
         let syms = extract_file(src, "models.py");
-        assert_eq!(syms.len(), 1, "just the class, no field symbols");
+        assert_eq!(syms.len(), 4, "the class plus 3 attribute members");
         assert_eq!(
             syms[0].signature, "class Item(SQLModel, table=True)",
             "the class arg list is in the signature"
         );
+        assert_eq!(
+            syms[0].children,
+            vec![
+                "models.py::Item::id",
+                "models.py::Item::title",
+                "models.py::Item::owner_id"
+            ]
+        );
+
+        let id_field = &syms[1];
+        assert_eq!(id_field.id, "models.py::Item::id");
+        assert_eq!(id_field.kind, SymbolKind::Value);
+        assert_eq!(id_field.raw, "attribute");
+        assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
+        assert_eq!(id_field.signature, "id: int = Field(primary_key=True)");
+        // A class attribute is never independently imported -- same
+        // stance as a method or nested class.
+        assert!(!id_field.is_exported);
+        assert_eq!(id_field.interface_hash, None);
+
+        let owner_id = &syms[3];
+        assert_eq!(owner_id.id, "models.py::Item::owner_id");
+        assert_eq!(owner_id.signature, "owner_id: int");
+    }
+
+    #[test]
+    fn module_level_assignment_keeps_its_own_raw_word_not_attribute() {
+        let syms = extract_file("MAX = 8\n", "a.py");
+        assert_eq!(syms[0].raw, "assignment");
+        assert_eq!(syms[0].kind, SymbolKind::Value);
+        assert_eq!(syms[0].parent, None);
+    }
+
+    #[test]
+    fn field_reorder_moves_the_classs_source_hash_but_unrelated_edit_does_not() {
+        let a = extract_file("class P:\n    x: int\n    y: int\n", "a.py");
+        let reordered = extract_file("class P:\n    y: int\n    x: int\n", "a.py");
+        assert_ne!(a[0].source_hash, reordered[0].source_hash);
+
+        let unrelated_edit = extract_file(
+            "# a comment that doesn't touch the class\nclass P:\n    x: int\n    y: int\n",
+            "a.py",
+        );
+        assert_eq!(a[0].source_hash, unrelated_edit[0].source_hash);
     }
 
     // --- imports + resolution ------------------------------------------

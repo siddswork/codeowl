@@ -526,10 +526,20 @@ impl StackPack for PythonStack {
     }
 
     fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {
-        // Only a class, and only a leaf one — a table with methods is more
-        // class than table; leave it a Container (an M19 refinement if a
-        // real repo needs it).
-        sym.raw == "class" && sym.children.is_empty() && python_class_is_table(&sym.signature)
+        // M17's original guard required `children.is_empty()` too ("a
+        // table with methods is more class than table"), flagged even
+        // then as revisable. M21's field extraction makes every real
+        // table model fail that check trivially — a `table=True` class's
+        // own declared fields are now real Value children, id/children
+        // strings that look identical to a method's (no kind signal
+        // reachable from `sym` alone to tell them apart) — so a table
+        // with zero methods and one field could never pass either.
+        // Dropped rather than patched around: `java.rs`'s own
+        // `is_schema_symbol` never had this restriction at all, and an
+        // `@Entity` class with real methods is tagged Schema there
+        // without issue, so Python matching that precedent isn't a new
+        // risk, just consistency.
+        sym.raw == "class" && python_class_is_table(&sym.signature)
     }
 }
 
@@ -730,10 +740,13 @@ mod tests {
         assert!(!pack.is_schema_symbol(&mk("class ItemCreate(ItemBase)")));
         assert!(!pack.is_schema_symbol(&mk("class Msg(SQLModel)")));
         assert!(!pack.is_schema_symbol(&mk("class C(BaseModel)")));
-        // A table class with members stays a Container (leaf-only guard).
-        let mut with_method = mk("class Item(SQLModel, table=True)");
-        with_method.children = vec!["m.py::Item::save".into()];
-        assert!(!pack.is_schema_symbol(&with_method));
+        // A table class with real members (fields, methods, both) is
+        // still Schema -- the M17 leaf-only guard was dropped in M21
+        // (field extraction made every real table fail it trivially),
+        // matching java.rs's is_schema_symbol, which never had it either.
+        let mut with_members = mk("class Item(SQLModel, table=True)");
+        with_members.children = vec!["m.py::Item::save".into()];
+        assert!(pack.is_schema_symbol(&with_members));
     }
 
     #[test]
