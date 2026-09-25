@@ -180,8 +180,14 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// default, excluded only by an explicit `private` or a JS `#`-private
 /// name). 12 = M21.b (Python: same fold for a class's attributes --
 /// public-by-convention via `is_public_name`'s existing leading
-/// -underscore rule, no visibility keyword to check).
-pub const FORMAT_VERSION: u32 = 12;
+/// -underscore rule, no visibility keyword to check). 13 = M21.b (Java:
+/// same fold for a class's fields/constants -- `public`/`protected`
+/// only, matching `has_public_or_protected`'s existing rule; the value
+/// is stripped transiently at fold time only, since `.signature` itself
+/// stays value-inclusive for `quarkus.rs::resolve_channel_name`, a real
+/// consumer that reads a Kafka channel constant's literal value out of
+/// it).
+pub const FORMAT_VERSION: u32 = 13;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

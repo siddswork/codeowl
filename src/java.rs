@@ -187,6 +187,24 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
+    // M21.b: interface_hash folds in each `public`/`protected` field's
+    // own signature, value stripped (name+type is public surface, a
+    // value assignment isn't -- code-review-shaped finding: `.signature`
+    // itself is deliberately left value-inclusive, unlike Rust/TS/Python,
+    // because `quarkus.rs::resolve_channel_name` reads a Kafka channel
+    // constant's literal value straight out of it (`first_string_literal
+    // (&s.signature)`) -- stripping the stored field broke that real,
+    // load-bearing consumer, caught by a real test failure before this
+    // fold-time-only version replaced it. Methods stay excluded,
+    // unchanged.
+    let mut iface_rollup = sig.clone();
+    for s in &direct {
+        if s.kind == SymbolKind::Value && is_pub_or_protected_field_signature(&s.signature) {
+            iface_rollup.push('\n');
+            iface_rollup.push_str(strip_value_for_fold(&s.signature));
+        }
+    }
+
     // A top-level Java type is always at least package-visible, so it's
     // reachable (and spec-bearing); a nested type needs `public`/`protected`.
     let is_exported = parent_id.is_none() || has_public_or_protected(node);
@@ -205,7 +223,7 @@ fn visit_container(
             docstring: leading_doc(node, source),
             is_exported,
             source_hash: hash_text(&rollup),
-            interface_hash: is_exported.then(|| hash_text(&sig)),
+            interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: annotations(node, source),
             parent: parent_id.map(str::to_string),
             children: member_ids,
@@ -301,6 +319,35 @@ fn has_public_or_protected(node: Node) -> bool {
     modifiers
         .children(&mut cursor)
         .any(|c| matches!(c.kind(), "public" | "protected"))
+}
+
+/// The signature-string version of `has_public_or_protected`, for a
+/// field's own already-extracted `signature` (the interface_hash fold in
+/// `visit_container` has no tree-sitter `Node` left to re-check, only the
+/// stored text) -- an exact whitespace-token match, not a substring
+/// check, so a field legitimately named e.g. `publicApiUrl` isn't
+/// mistaken for a `public` modifier.
+fn is_pub_or_protected_field_signature(signature: &str) -> bool {
+    signature
+        .split_whitespace()
+        .any(|tok| tok == "public" || tok == "protected")
+}
+
+/// A field/constant's stored `signature` still carries its initializer
+/// value verbatim (deliberately -- see `visit_container`'s fold comment
+/// for why it isn't stripped at the source like Rust/TS/Python's is), so
+/// the interface_hash fold strips it here instead, transiently, without
+/// touching the stored field. Best-effort for a multi-declarator field
+/// sharing one `field_declaration`'s text (`int a, b = 2;`): cuts at the
+/// first `=`, which can leave a later declarator's own fragment attached
+/// to an earlier one's fold contribution -- already true of `signature`
+/// itself before this fold existed (both declarators already share
+/// identical text), not a new imprecision.
+fn strip_value_for_fold(signature: &str) -> &str {
+    match signature.split_once('=') {
+        Some((before, _)) => before.trim_end(),
+        None => signature,
+    }
 }
 
 /// The `modifiers` child of a declaration, if present. `class_declaration`
@@ -855,6 +902,57 @@ public @interface JsonProperty {\n\
         assert_eq!(with_method[0].kind, SymbolKind::Container);
         assert_eq!(with_method[0].raw, "record");
         assert!(with_method.iter().any(|s| s.id == "r.java::Range::has"));
+    }
+
+    #[test]
+    fn a_fields_signature_still_carries_its_initializer_value() {
+        // Deliberately NOT stripped at the source, unlike Rust/TS/Python
+        // -- quarkus.rs::resolve_channel_name reads a Kafka channel
+        // constant's literal value straight out of `.signature`
+        // (first_string_literal), a real, load-bearing dependency this
+        // milestone doesn't own and must not break.
+        let syms = extract_file("class C {\n    public int x = 5;\n}\n", "c.java");
+        let field = syms.iter().find(|s| s.raw == "field").unwrap();
+        assert_eq!(field.signature, "public int x = 5");
+    }
+
+    #[test]
+    fn a_pub_fields_value_only_edit_does_not_move_interface_hash() {
+        // The fold strips the value transiently (strip_value_for_fold),
+        // without touching the stored `.signature` tested above.
+        let a = extract_file("class C {\n    public int x = 5;\n}\n", "c.java");
+        let b = extract_file("class C {\n    public int x = 6;\n}\n", "c.java");
+        assert_ne!(
+            a[0].source_hash, b[0].source_hash,
+            "source_hash still moves"
+        );
+        assert_eq!(
+            a[0].interface_hash, b[0].interface_hash,
+            "interface_hash must not move from a value-only edit"
+        );
+    }
+
+    #[test]
+    fn strip_value_for_fold_cuts_at_the_first_equals() {
+        assert_eq!(strip_value_for_fold("public int x = 5"), "public int x");
+        assert_eq!(strip_value_for_fold("public int x"), "public int x");
+    }
+
+    #[test]
+    fn a_public_fields_type_change_moves_the_classs_interface_hash() {
+        let a = extract_file("class C {\n    public int x;\n}\n", "c.java");
+        let b = extract_file("class C {\n    public String x;\n}\n", "c.java");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_package_private_fields_type_change_does_not_move_interface_hash() {
+        // Java: public surface is `public`/`protected` only, same rule
+        // has_public_or_protected already applies to a member's own
+        // is_exported -- package-private and private both stay excluded.
+        let a = extract_file("class C {\n    int x;\n}\n", "c.java");
+        let b = extract_file("class C {\n    String x;\n}\n", "c.java");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]
