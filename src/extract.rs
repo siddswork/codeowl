@@ -206,6 +206,17 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         rollup_input.push_str(h);
     }
 
+    // M21.b: interface_hash folds in each *public* field's own signature
+    // (name+type, no docstring, no value -- exactly `signature`, per
+    // ROADMAP.md's decision table). Methods stay excluded, unchanged.
+    let mut iface_rollup = signature.clone();
+    for m in &member_symbols {
+        if m.kind == SymbolKind::Value && is_pub_field_signature(&m.signature) {
+            iface_rollup.push('\n');
+            iface_rollup.push_str(&m.signature);
+        }
+    }
+
     out.push(ExtractedSymbol {
         id: class_id,
         kind: SymbolKind::Container,
@@ -213,7 +224,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         file: file.to_string(),
         lines: node_lines(decl),
         source_hash: hash_text(&rollup_input),
-        interface_hash: is_exported.then(|| hash_text(&signature)),
+        interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
         signature,
         docstring: leading_doc(outer, source),
         is_exported,
@@ -333,6 +344,20 @@ fn dedupe_member_id(candidate: String, existing: &[String]) -> String {
             return next;
         }
         n += 1;
+    }
+}
+
+/// Is a field's own stored `signature` text publicly visible? TS fields
+/// are public by default -- no keyword needed, unlike Rust's `pub`
+/// -required convention -- so this only excludes the two ways a field
+/// opts *out*: an explicit `private` modifier, or a JS `#`-private name
+/// (needs no `private` keyword at all, the `#` sigil alone does it, and
+/// the signature text starts with the sigil directly since it's part of
+/// the name).
+fn is_pub_field_signature(signature: &str) -> bool {
+    match signature.split_whitespace().next() {
+        Some(first) => first != "private" && !first.starts_with('#'),
+        None => false,
     }
 }
 
@@ -639,6 +664,44 @@ mod tests {
                 .signature
                 .starts_with("async doThing(y: T): Promise<void>")
         );
+    }
+
+    #[test]
+    fn a_public_by_default_fields_type_change_moves_the_classs_interface_hash() {
+        // TS default visibility is public -- no keyword needed, unlike
+        // Rust's `pub`-required convention.
+        let a = extract_file("export class P {\n    x: number;\n}\n", "a.ts");
+        let b = extract_file("export class P {\n    x: string;\n}\n", "a.ts");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_keyword_fields_type_change_does_not_move_interface_hash() {
+        let a = extract_file("export class P {\n    private x: number;\n}\n", "a.ts");
+        let b = extract_file("export class P {\n    private x: string;\n}\n", "a.ts");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_js_hash_private_fields_type_change_does_not_move_interface_hash() {
+        // `#priv` needs no `private` keyword -- the `#` sigil alone makes
+        // it JS-private, and the signature text starts with it directly.
+        let a = extract_file("export class P {\n    #x: number;\n}\n", "a.ts");
+        let b = extract_file("export class P {\n    #x: string;\n}\n", "a.ts");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_fields_docstring_change_does_not_move_interface_hash() {
+        let a = extract_file(
+            "export class P {\n    /** old doc */\n    x: number;\n}\n",
+            "a.ts",
+        );
+        let b = extract_file(
+            "export class P {\n    /** totally different */\n    x: number;\n}\n",
+            "a.ts",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]
