@@ -155,6 +155,21 @@ fn visit_container(
         rollup.push_str(&s.source_hash);
     }
 
+    // M21.b: interface_hash folds in each *public-by-convention* attribute's
+    // own signature (name+type, value already stripped -- the M21.b
+    // prerequisite), the same way source_hash already folds every member.
+    // Methods stay excluded, unchanged. Python has no visibility keyword,
+    // so "public" reuses is_public_name -- the same leading-underscore
+    // convention already applied to module-level names and functions.
+    let mut iface_rollup = sig.clone();
+    for s in &direct {
+        let attr_name = s.id.rsplit("::").next().unwrap_or(&s.id);
+        if s.kind == SymbolKind::Value && is_public_name(attr_name) {
+            iface_rollup.push('\n');
+            iface_rollup.push_str(&s.signature);
+        }
+    }
+
     // Top-level classes are exported by name convention; a nested class is
     // a member (usually `Meta` / `Config`) and not independently reachable.
     let is_exported = parent_id.is_none() && is_public_name(&name);
@@ -171,7 +186,7 @@ fn visit_container(
             docstring: docstring(node, source),
             is_exported,
             source_hash: hash_text(&rollup),
-            interface_hash: is_exported.then(|| hash_text(&sig)),
+            interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: markers.to_vec(),
             parent: parent_id.map(str::to_string),
             children: member_ids,
@@ -1037,6 +1052,23 @@ def read_item(id: int) -> ItemPublic:
         let class = &syms[0];
         assert_eq!(class.children.len(), 2);
         assert_ne!(class.children[0], class.children[1]);
+    }
+
+    #[test]
+    fn a_public_by_convention_attributes_type_change_moves_the_classs_interface_hash() {
+        // Python has no visibility keyword -- public-by-convention is a
+        // leading underscore, same rule is_public_name already applies
+        // to module-level names and functions.
+        let a = extract_file("class P:\n    x: int\n", "a.py");
+        let b = extract_file("class P:\n    x: str\n", "a.py");
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_leading_underscore_attributes_type_change_does_not_move_interface_hash() {
+        let a = extract_file("class P:\n    _x: int\n", "a.py");
+        let b = extract_file("class P:\n    _x: str\n", "a.py");
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]

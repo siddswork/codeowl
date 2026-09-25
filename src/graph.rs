@@ -178,8 +178,10 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// container's `interface_hash` that has at least one `pub` field). 11 =
 /// M21.b (TypeScript: same fold for a class's fields — public by
 /// default, excluded only by an explicit `private` or a JS `#`-private
-/// name).
-pub const FORMAT_VERSION: u32 = 11;
+/// name). 12 = M21.b (Python: same fold for a class's attributes --
+/// public-by-convention via `is_public_name`'s existing leading
+/// -underscore rule, no visibility keyword to check).
+pub const FORMAT_VERSION: u32 = 12;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
