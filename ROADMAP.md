@@ -788,6 +788,20 @@ Today's rule needs no simulation to characterize: `interface_hash` is a hash of 
 
 Worst single case: `src/symbol.rs::ExtractedSymbol` (13 pub fields, the shared record every pack's extractor produces) has 10 real importers. Java's worst case (`Location`, 11 importers) is worth a caveat: it's a `FileRole::Generated` gRPC stub, never spec-bearing either way regardless of this decision — a real importer count, but not evidence the *type itself* would ever need a spec update.
 
+**The follow-up question, in plain terms: if we don't fold, how often does that actually cause a real, wrong answer — not just a theoretical one?** The table above only says how many files *would* get flagged for re-checking if we folded. It doesn't say whether those files' specs are actually saying something wrong today. So the next check looks at the specs that already exist: when a file imports one of these structs, does that file's own spec *actually talk about* one of the struct's specific fields by name — the kind of sentence that would turn false the moment that field's type changes?
+
+Checked every already-written spec belonging to a file that imports one of these structs, and searched its text for the struct's own field names — skipping short, generic words like `id`/`kind`/`file` that would show up in almost any sentence regardless of what it's about, since matching on those would just be noise, not signal:
+
+| Repo | Files with a spec that could mention a field | ...whose spec actually names a specific field | Rate |
+| --- | --- | --- | --- |
+| CodeOwl itself (Rust) | 38 | 30 | 79% |
+| full-stack-fastapi-template (Python) | 24 | 22 | 92% |
+| quarkus-super-heroes (Java) | 2 | 1 | 50% (too small a sample to mean much) |
+
+In plain English: most of the time, a file that imports one of these structs already has a spec that calls out a specific field by name — not just "this file uses `User`," but sentences that mention `password`, `is_active`, `email`, or (in CodeOwl's own repo) `source_hash`, `docstring`, `rel_path`. That's not proof any spec is wrong *right now* — nobody has changed one of these fields' types since the spec was written, as far as we know. What it shows is the setup for the failure is already the *normal* case, not a rare one: the moment someone does change a field's type, there's a roughly 8-in-10 (Rust) to 9-in-10 (Python) chance the file that depends on it already has a spec specific enough to become quietly false, with nothing anywhere saying so.
+
+Put together with the cost table above: folding is bounded (worst case seen: 11 files get re-flagged) but not folding means the failure mode isn't an edge case — it's the likely outcome, most of the time, for these repos.
+
 **Reading the numbers:** the folded rule's cascade is real and non-zero — every qualifying field edit would invalidate single-digit-to-low-double-digit importers, not zero — but it isn't explosive either; the worst case across 4 real repos tops out at 11, not hundreds. talentTrail shows the honest floor: a repo with no real public-field-carrying exported types (mostly functional components) sees zero difference either way. This is M21.a's full output — the decision itself is M21.b's, made from this table, not guessed here.
 
 ##### M21.b — Decide open question 12, owner's call, from M21.a's real numbers
