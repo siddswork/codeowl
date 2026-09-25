@@ -143,7 +143,7 @@ This repo has a CodeOwl MCP server. Before exploring the codebase, check
 ## Known rough edges with Copilot
 
 CodeOwl was built and tuned against Claude Code. The read tools
-(`get_symbol`, `get_callers`, `get_callees`, `get_spec`,
+(`get_symbol`, `get_source`, `get_callers`, `get_callees`, `get_spec`,
 `get_spec_coverage`, `search_code`) work the same anywhere. The
 **generation loop** has two Copilot-specific frictions:
 

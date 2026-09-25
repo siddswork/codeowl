@@ -675,8 +675,21 @@ Two places, with opposite lifecycles:
   design notes also describe a *second*, file-level fold — a file's
   `interface_hash` as the hash of its exported children's
   `interface_hash`es. That one isn't actually implemented; a file node
-  has no `interface_hash` field at all. The real, shipped fold is
-  `source_hash`-only, at the class→method level.
+  has no `interface_hash` field at all.
+
+  What *is* implemented goes a step further than the `checkout()`
+  example above: a container's `interface_hash` doesn't stop at its own
+  signature, it also folds in every **public field**'s own signature
+  (name + type, never its value/default, never a method). Add a field
+  to `ShoppingCart`, or change an existing public field's type, and
+  `ShoppingCart`'s `interface_hash` moves — which is exactly why a
+  function that constructs a `ShoppingCart { total: … }` goes stale over
+  that edit, the same way it already did for `checkout()`'s own
+  signature. Methods are still excluded from the fold entirely (a method
+  body *or* signature edit only ever moves `source_hash`, matching the
+  `checkout()` example above unchanged), and a **private** field never
+  contributes regardless of what it is — only a field reachable from
+  outside the type counts as part of the promise.
 
 ---
 
