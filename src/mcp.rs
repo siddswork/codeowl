@@ -24,7 +24,10 @@ use crate::symbol::SymbolKind;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct IdRequest {
-    /// A symbol's stable id, e.g. "lib/utils.ts::cn".
+    /// A symbol's stable id, e.g. "lib/utils.ts::cn" -- always accepted.
+    /// Some tools using this same field also accept a bare file path, or
+    /// (get_spec only) a "feature:<slug>"/"rollup:<dir>"/"system" id --
+    /// see that tool's own description for exactly which.
     pub id: String,
 }
 
@@ -922,7 +925,7 @@ impl CodeOwlServer {
 #[tool_router]
 impl CodeOwlServer {
     #[tool(
-        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\"."
+        description = "Look up one symbol's full record (signature, docstring, line range, hashes) by its stable id, e.g. \"lib/utils.ts::cn\". For a container (a class, struct, etc.), `signature` is just its declaration line -- it does not list fields, so use get_source on the same id for the real member list. `children` lists its member ids -- always its methods; fields/properties too, but only on some stacks today, so an empty `children` on an otherwise-real type isn't proof it has no members. Pass any child id back in to look that member up the same way."
     )]
     async fn get_symbol(
         &self,
@@ -950,8 +953,9 @@ impl CodeOwlServer {
             .ok_or_else(|| Self::not_found(&req.id))?;
         let context_lines = req.context_lines.unwrap_or(0).min(MAX_CONTEXT_LINES);
 
-        let (file, mut spans, recorded_hash) = match graph.get(id) {
-            Node::File(f) => (f.id.clone(), None, f.source_hash.clone()),
+        let file = graph.owning_file_id(id).to_string();
+        let (mut spans, recorded_hash) = match graph.get(id) {
+            Node::File(f) => (None, f.source_hash.clone()),
             Node::Symbol(sym) => {
                 let spans = crate::spec::merged_symbol_spans(&graph, sym);
                 let file_id = graph
@@ -961,7 +965,7 @@ impl CodeOwlServer {
                     .get_file(file_id)
                     .map(|f| f.source_hash.clone())
                     .unwrap_or_default();
-                (sym.file.clone(), Some(spans), recorded_hash)
+                (Some(spans), recorded_hash)
             }
         };
 
@@ -1017,7 +1021,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved reference edge; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it."
+        description = "List every file that references this symbol: for a code symbol, the files that import it by name via a resolved import statement; for a SQL table node, the files with a `.from(\"table\")` call that resolves to it. Not a call graph, and scoped to declared imports only: a method, an associated/static function reached via its type (e.g. Rust's `Type::function()`), or a same-module call made via a fully-qualified path with no import statement at all -- all real call sites, all invisible here, since none of them imports the symbol by its own name. An empty list never means nothing calls it, only that nothing imports it that way; search_code is the fallback for real call sites. Symbol ids only -- a bare file id resolves without error but always returns an empty list too, since import edges target symbols, never files."
     )]
     async fn get_callers(
         &self,
@@ -1056,7 +1060,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "List what the FILE containing this symbol imports. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges."
+        description = "List what a file imports -- accepts a symbol id (answers for the file containing it) or a bare file id directly, same either way. File-level granularity, not per-symbol: CodeOwl resolves file-to-file reference edges, not call edges. Each entry's `resolved_id` is the target symbol's id when it resolves inside this repo, or `null` when it doesn't -- most often an external package, but also a broken import, an unresolved re-export chain, or an internal name CodeOwl doesn't extract as a symbol yet (e.g. a TS `type`/`interface`, a destructured const). `null` isn't always benign, and isn't always external either."
     )]
     async fn get_callees(
         &self,
@@ -1066,11 +1070,7 @@ impl CodeOwlServer {
         let id = graph
             .find(&req.id)
             .ok_or_else(|| Self::not_found(&req.id))?;
-        let file = graph
-            .get_symbol(id)
-            .ok_or_else(|| Self::not_found(&req.id))?
-            .file
-            .clone();
+        let file = graph.owning_file_id(id).to_string();
         let callees = graph
             .imports()
             .iter()
@@ -1085,7 +1085,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, 'rollup:<dir_path>' id, or the fixed id 'system'. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed."
+        description = "Get the spec for a symbol id, file id, 'feature:<slug>' id, 'rollup:<dir_path>' id, or the fixed id 'system'. Always a pure read -- never triggers generation (that's /codeowl generate, via get_next_spec_task/submit_spec). Returns status \"missing\" (no content) if nothing's been generated yet, \"current\" if the persisted spec's inputs all still match, or \"stale\" -- the last-known-good content, plus `changed` naming what moved -- if generation happened but the source (or something it depends on) has since changed. `smells` is independent of `status`: a deterministic quality check that can flag even a \"current\" spec's prose as weak (e.g. suspiciously short, or a cop-out like \"see the source\" instead of an explanation) -- current means the hashes match, not that the writing is good."
     )]
     async fn get_spec(
         &self,
@@ -1715,6 +1715,31 @@ mod tests {
             external.resolved_id, None,
             "external package should not resolve"
         );
+    }
+
+    #[tokio::test]
+    async fn get_callees_accepts_a_bare_file_id_same_as_a_symbol_in_it() {
+        let server = test_server(&[
+            (
+                "a.ts",
+                "export const marker = 1;\nimport { helper } from './b';\n",
+            ),
+            ("b.ts", "export function helper(): void {}\n"),
+        ]);
+        let via_file = server
+            .get_callees(Parameters(IdRequest {
+                id: "a.ts".to_string(),
+            }))
+            .await
+            .unwrap();
+        let via_symbol = server
+            .get_callees(Parameters(IdRequest {
+                id: "a.ts::marker".to_string(),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(via_file.0.callees, via_symbol.0.callees);
+        assert_eq!(via_file.0.callees.len(), 1);
     }
 
     #[tokio::test]
