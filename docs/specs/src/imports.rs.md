@@ -3,10 +3,10 @@ kind: file
 source_paths: [src/imports.rs]
 file: { source_hash: 4e1d1226c6720c19d926fede66b617af4e3850eac0a6f4fc5429d132634b7572, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 32299632f03d94b82e32fd628aea636e8293392bdf2d2f26bb4d4550ee29160d }
 symbols:
-  src/imports.rs::ImportRef: { source_hash: 1b927e9c131cb384bfcb2056471bbff21be0d27d99a0b8776ad2e44426a26fb3, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1860e729b7aa5e1e4bd5db4750f93c5261552e31bf75b0e8842e50dad5a0b2c9 }
-  src/imports.rs::ReExport: { source_hash: 6e93cb94dbb7cea61c279750b51f567ef99f6b1e0335f075eeb27206603f8778, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d100b1e8a87ac853d5fe8e5a4c887c21e47e3110022e13f2ea339c5f657983c0 }
-  src/imports.rs::DefaultImport: { source_hash: af1be68cb44e0a21c69353a88ad69f449922eb0ea7fa7780120819d4dd7fd116, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a70f0c43e5df13423e65cf4a89306288e889fbb7cdc9e68e8312f8a2b290d008 }
-  src/imports.rs::FileImports: { source_hash: dfdc5f0691f8f26444a4da8718e6cce982ac6c50d2ede25422c96514f20679d4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 23a09100cd719ac416786a680dcfcdd68487f136e60b3d1c24667eeb52db4f39 }
+  src/imports.rs::ImportRef: { source_hash: 5e4f34d49e172156333617bb4b0dd5cb42970f8cfe848c05e4b3d53d2dddd6cb, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6daf4a1a4e0a21d5ebe84bb7692f5af6d199c3234a479810f90bbe015e14743e }
+  src/imports.rs::ReExport: { source_hash: b9f7522994b6970557cd384bbf54eeb14c82d13c9a9ee27f21e7cabb583ce9e5, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0233028f3f4c9f6b467929f5412f0b5504326a0affe5c90234b4d763735607c2 }
+  src/imports.rs::DefaultImport: { source_hash: 3a7b058036a76f4074a2574a156c6c5e9e6691272901a907b8d56c27e9b03d88, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c2353e4863d9e9bf706ee143fea33ff7e76e8f1d843a4912abd44b596a2a7d8f }
+  src/imports.rs::FileImports: { source_hash: 4cf6340a91dc617f4e3c722542066c8ed648ae45ed09175a601b10866551e9bf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c75c551aaf0b628835b722da5ddf543017c175aeed48d36ad0c440bf5678c374 }
   src/imports.rs::extract_imports: { source_hash: fc2cdab27d82c0d0f1fb8c0bd435d2ce54c4d94385c5cf9129d9727858b84af3, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 14a4add6341926c6cc1bf32d8f037d0128b1ebb024eeba8c496c5d59d63bb582 }
   src/imports.rs::visit_import: { source_hash: 3789ebd450c51020d52120119a8f3e0fa544a4fdddc6a8b22612ea6ffd674024, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 841e1a0ec4883dd97864d6219265d7d03f3440010723c27447341c510d9065db }
   src/imports.rs::visit_maybe_reexport: { source_hash: 879ed65f55f1eebb887827501ecdd3e20f67f51756b4463b0efc596e72c98602, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8dabfde9927059389ba79aaaaaf835b9a3d824a9ca52bbc62bef81be7c1f8d44 }
@@ -22,36 +22,36 @@ The TypeScript pack's import parser — one of the two tree-sitter passes over a
 ## `ImportRef`
 `pub struct ImportRef`
 ### Summary
-One named import parsed out of a file — the specifier it was imported from (`'./x'`, `'@/lib/y'`) and the name that was imported. The unit the resolver turns into a file-to-file reference edge.
+One named `import` statement as extracted from a file's source, before it's been resolved to an actual target — the raw shape of `import { <imported_name> } from '<specifier>'`.
 ### Behavior
-A plain data pair, `Serialize`/`Deserialize` so it can be cached in `RepoIndex` alongside the file's other inputs. Only the *source* name is stored: `import { Foo as Bar }` records `Foo`, because the local alias `Bar` is irrelevant to resolving what the import points at. Default imports and namespace/wildcard imports are tracked separately (or not at all) — this type is exclusively for the `{ named }` form.
+`specifier` is the module string as written (`'./graph'`, `'@/lib/utils'`). `imported_name` is the name being imported. A local alias (`import { Foo as Bar }`) is deliberately not tracked here: renaming on import is purely local to the importing file and has no bearing on what the import actually resolves to, so keeping it would add a field nothing downstream needs.
 ### Depends on
 - (none)
 
 ## `ReExport`
 `pub struct ReExport`
 ### Summary
-One named re-export — `export { source_name as exported_as } from 'specifier'` — the mechanism a barrel file uses to forward a name it doesn't declare itself.
+One named re-export — how a barrel file (a file whose only job is to gather and forward names from other files, without declaring anything itself) passes along a name it doesn't own: `export { <source_name> as <exported_as> } from '<specifier>'`.
 ### Behavior
-Keeps both names because they serve different roles in resolution: `exported_as` is what a consumer importing from the barrel asks for, `source_name` is what to look up in the file the barrel forwards from. The resolver follows these chains one hop when a direct lookup in the target file fails. Cached in `RepoIndex` with the rest of a file's import inputs.
+`specifier` is the module the name is being forwarded from. `source_name` is that name as declared in the source module; `exported_as` is the name this file re-exports it under (identical to `source_name` when there's no `as` rename). Resolving an import against a barrel means following its `ReExport`s through to wherever `source_name` is actually declared, rather than stopping at the barrel file itself.
 ### Depends on
 - (none)
 
 ## `DefaultImport`
 `pub struct DefaultImport`
 ### Summary
-One default import — `import Local from 'specifier'`, or the default half of `import Local, { ... } from 'specifier'`. Tracked so the M11 rendered-component resolver can match a `<Component/>` tag to the file it comes from.
+One default import: `import <local_name> from '<specifier>'` (or the default half of `import <local_name>, { ... } from '<specifier>'`). Tracked specifically so a rendered `<Component/>` tag can be resolved to the file it came from — React components are almost always default-exported, so the named-import list alone can't answer "what file defines this component."
 ### Behavior
-Stores the local binding name and the specifier only. Unlike a named import, this resolves at the *file* level, not to a specific exported symbol: React components are nearly always default exports and the export name inside the target file is arbitrary, so `resolve::resolve_default_imports` just records "this local name resolves to that file". Used only for the rendered-component flow edge — a default import to a non-component module carries no further meaning in the graph.
+`local_name` is the name this file calls the import by; `specifier` is the module string it came from. Resolution here is deliberately file-level only — it answers "which file does this default import point at," not "which specific symbol in that file," since a default export doesn't have a name of its own to match against the way a named import does. See `resolve::resolve_default_imports` for how this gets turned into an actual file target.
 ### Depends on
 - (none)
 
 ## `FileImports`
 `pub struct FileImports`
 ### Summary
-Everything one file's `import`/`export ... from` statements contribute to the reference graph: its named imports, its named re-exports, and its default imports. The per-file unit `extract_imports` produces and `RepoIndex` caches.
+One file's whole import surface, gathered in one place — every named import, every re-export it forwards, and every default import — ready for the resolver to work through.
 ### Behavior
-Three `Vec`s, one per import shape. `default_imports` is `#[serde(default)]` because it was added in M11 after the cache format already existed, so an older cache deserializes it as empty. Derives `Default`, so a pack with no import concept (or a schema file) can return an empty `FileImports` trivially. `resolve_imports` consumes the whole map of these (path → `FileImports`) to produce resolved edges once the arena exists.
+A plain grouping struct: `imports` holds the file's `ImportRef`s, `re_exports` its `ReExport`s, and `default_imports` its `DefaultImport`s. `default_imports` is `#[serde(default)]` so an older cache written before that field existed still deserializes, just with an empty list. Nothing here does any resolution itself — this is purely the extracted, unresolved shape of one file's `import`/`export` statements, handed to `resolve.rs` afterward.
 ### Depends on
 - (none)
 

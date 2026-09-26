@@ -1,9 +1,9 @@
 ---
 kind: file
 source_paths: [src/features.rs]
-file: { source_hash: 3f0188bbd1d4176f437f9e39546dd2049a4989be321124652db4aa96449cb970, deps_hash: d5c3156f5bc2680a6386d7499aca3490c81fe1e2edebc78adc24a7d2b266cec2, spec_hash: d44753526a096da0942da3bf387ff040eeaf44100f1f7f6c2ce1122048ad0e1d }
+file: { source_hash: 61f378d056693664aadd68f3bd235e62e9ae5f14e8432958375880e18989ef49, deps_hash: d26e7b92551b276f7105d2a391aca55c75979d28e3114b2f2c6e2ff7d465adef, spec_hash: a11b732c3676ddd55698e111979af9ed8d2e4918f18d7d6e3dc548930c1f4294 }
 symbols:
-  src/features.rs::RouteLiteral: { source_hash: d2baf942592553167183563648ad6e873fe11018b1ebcf4dd75f6228d01d7a94, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6aad537836bbfa7707b64482d4a885015e2632535970a9b0afc1b60461fd9d35 }
+  src/features.rs::RouteLiteral: { source_hash: d7e4f32edfd30a779fb2647dda0a8b602a17b6d94eddb16e1caeb397a6a0c672, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0c9e5b6514887bf29a0463c06e517c5d3a2a948503a59e28aefc9c2c7489d881 }
   src/features.rs::extract_route_literals: { source_hash: 015937105e99f9bae9eff259e3fc6ce15962516f3e776e20cf8ce7987baf47cf, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 34ad8aa56f43b2d6cc9c2f9de69b6d8f227b697502a3426578522ef207fc9abf }
   src/features.rs::walk_for_fetch: { source_hash: 25ae381631f0b95a4766bff0566f1b9f83c4a6043eda9b7348e24f558fa7081d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9827d00c4ab6e912cd5a39e50661397f5ecf8f960666da6b8ed765c84f7954c0 }
   src/features.rs::static_path_from_literal: { source_hash: 466e406b1e929a468178d5bf926dedd7ed02962d1218bfa1d1929480d79cfe29, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d5ac7cc20cf607e0fdfa292bc7586c3debe71b527304727c87ff9c8b495fc6f2 }
@@ -12,22 +12,22 @@ symbols:
   src/features.rs::resolve_route_literal: { source_hash: ff424df261cbf7a39dc00cab4b4f0e50be247f9ceb5a18af25654a2aa1d5b872, deps_hash: c335ae0e0e925cb69b66229f557b3d099ce0be0d0c9199d8cb977a3bc4aaca36, spec_hash: 985e3dce00f796475c2355335f2053617078abeee4fe565ec2e04d61a69deb39 }
   src/features.rs::api_route_segments: { source_hash: 512e3e2c61265a714ce740bbeefab4608867e57fa6df65dcc52edcaf3fd25437, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 79bea0b54f14df818636979de644ad569985cd76bbf35d64a0b89a04de6cea78 }
   src/features.rs::is_dynamic_segment: { source_hash: fb3998b9afb357004e1bdac19dd1345658bbb34568bb15c26ba0e65c006950d4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4fee7272d46539f99a4f9498433fd33aa18de00719ec6fa259095da271205224 }
-  src/features.rs::TableRef: { source_hash: 54afd9498e358ccedc363d3caa2bfcd53ae8942087b16a9a9b34743663f7f8a4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 88a44d71aa86cf1cd99d7c65c615464c7b7023341e99edc591de83026b6ef74b }
+  src/features.rs::TableRef: { source_hash: 205ec7ab82f1faf889dd5731c60929eb83763094b6fd25bdd22b7d3f41a45b62, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 49123e980a999815dc6b04061685393b553a6c025543f8106c844b65cf559ae0 }
   src/features.rs::extract_table_refs: { source_hash: 87fb254f3b3ebb59852c7098c20e84da55a0e5b839a5ac543b7500f24e67624f, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 668ed520590353c671220e52c73160af376a68e36846603dd2c318b662e61113 }
   src/features.rs::walk_for_from: { source_hash: e9eb1b2325e1bafbefd281f79ea1fde6d7b3360722f7a18e6988e1e1ca2df7cc, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 678017dd7400110823e5dac34dabcc838fcea9d10f64a487e94535b2078c6df7 }
   src/features.rs::is_table_name: { source_hash: 0c34141590be7a87d2b2671805ba41aa82be4f8a70b86eee022ecfd0e2b2980a, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d25cf01880f522656847470378aaab01c96c7b0c9cca66b10fe13032f21b6fd1 }
   src/features.rs::is_builtin_from_receiver: { source_hash: d326a6ada1650f3b903b05dd70058259b29722c34d4855abdcc035d1c478c00c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9cfd424f2b144c0ac924a0144ffea6b79ec2ee0267689ac422972c730f3f6bbc }
   src/features.rs::resolve_table_ref: { source_hash: babc3781ac887a30cda18b963f65afa6d13ebbb7f4f2f5bc77f168780ac2ddd8, deps_hash: c335ae0e0e925cb69b66229f557b3d099ce0be0d0c9199d8cb977a3bc4aaca36, spec_hash: 0e5470e5d5dcb81ee04e8f456cc335cf82728ca44e88356daf631adfac3975eb }
   src/features.rs::table_name_of: { source_hash: 3ab7f2821e689fa3a52af2d94ade829d9da385ca8146fe517b6a68af20b33897, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1d366e2d2ae330afa27b251f2a9ab88276bbe50a8f2fb8a7fda21365ea0790da }
-  src/features.rs::RenderedComponent: { source_hash: a145202a18043923f388f3690fd6ecb25e4b73a2486fe915ea3bb3d66bde3b7d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e1820eaf72755ac674aeca00d46f7f7194f17e8c1477d79cb25a304db0c91628 }
+  src/features.rs::RenderedComponent: { source_hash: c3d78c4e7fefd81448277e6ac25385f27bf53963e0e6c9b4dd25160b9a030ade, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fcc647b18a2d0362aec3b1c4c85086c31903e95ff8209266126a3257cc5f2b26 }
   src/features.rs::extract_rendered_components: { source_hash: d0624e458b7b4dda82e7908b63066af3b35cd6fb8d646f2c7b02a2a4e384188e, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 78c60c25851d5836071a903a6f1c8da65a2d3b9c49b6b3122888aae2f2367cf9 }
   src/features.rs::walk_for_jsx: { source_hash: e7f29aa3cdf066408bcb5cee99d9bad576d91ab73604b0787ce0f719c4c70100, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 87ce320d65ae00d4bfe31e60778e1e4e40e3dc60dd111e10908b4f993257c2bb }
   src/features.rs::resolve_rendered_component: { source_hash: b76e27e7e96ebcd1ce1156d18f35c8e376969f059612b0a25760a2e2d3040ab2, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: eca9f2b9c02523cbb48954e35adf77c4ae3553b30ac43c99717e5f901c53f436 }
   src/features.rs::file_does_data_work: { source_hash: 9827bc93fb00d65c6ddea07f08a94e1bbfd7daa86d834e84ab7dabfcd8c5d1bf, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: f655f0e5aa33bc994d3577ae01248410390343f6b391dbe31fcd6fdae16c5b32 }
   src/features.rs::is_colocated: { source_hash: 4910d4eede771b8b81193d569b11bc4b0beca325fb19f9974cf879c10f4ba610, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d906a941c418103d8eeedc88e13f4f054c726ee4538d06eb801879aa96b2a7f8 }
-  src/features.rs::EntryPoint: { source_hash: 520d31466ed79b1e8e2f21ae4d7204f345fce62b528caefdd652cdbb1e1b3e8e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 688bb27c38ec5832cb705207ea855cf424e356defb71d50237a351c64790cc5b }
+  src/features.rs::EntryPoint: { source_hash: e9a78fbd8ea6896f5669332c918968c1651df69a8c2fa5ed7f2c6388365679f4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 14310da16b5d25452474b693f600d997e68941243081af421bb5694d59be8ff7 }
   src/features.rs::FeatureModel: { source_hash: 5d8016218b72d79bdab048db932382dbfb6bdc6fe10aa18147377772c4c29756, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: 87628930bb7a64eba986f9b28e266b301042ecafc12ff5ecce5340b8e8969df3 }
-  src/features.rs::TypeScriptNextFeatureModel: { source_hash: 5e7a65d103593ce9fb70602d180c2acb886749b683333184ff3a335e8b2474cf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2e53cba5cf064b20c3e74520a2c3709c8ab366fbb9825c07346e1376a933f882 }
+  src/features.rs::TypeScriptNextFeatureModel: { source_hash: 65402d2c9af83dd6cf50f85aea171d715a8b9e9f39ead03b67ee90b33c2d63e7, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8062137ce86edc1ca2ed1ab99fb34110ea7190af3d5f9df0fbc82e2d82678d06 }
   src/features.rs::impl FeatureModel for TypeScriptNextFeatureModel: { source_hash: 29411cad6ad63e986d3673b0f69d7c8484bf6b12734f50877e96154b3790ddfc, deps_hash: baad53d385b014dca083e64f140204ed5585c42dd2a9b99f4c41d5c3acc36700, spec_hash: cebe687b4d6e33a430304cc43629aaddc9c1617ee37155cb56e2577adba65cea }
   src/features.rs::default_feature_model: { source_hash: c40e36eddb78a13af1f6cf5bc50152f53b4ab0e93b5460c85a6229e82b7bca95, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3541dcb3b43cb96c26541cb8e18834671254ae85be1eba5572687870b2f4bda4 }
   src/features.rs::feature_model_for: { source_hash: 4d2a3d5fdbf79640569bd6597bc27b964db51f1f54587ea7e977e7c79b9090c5, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: 2db48fa15aad434657088996f22c2c6581f9108528d9baa516b522c14a0fceec }
@@ -36,19 +36,19 @@ symbols:
   src/features.rs::is_api_route: { source_hash: 21a66b688e02081894c337c50a8ed23288e0935f65a3704d6fddf7879e9f5601, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 99d7cd2beb4db2f934dccfa0a72663c87074df5e86c2b87bf932a87bcf262208 }
   src/features.rs::entry_route_path: { source_hash: b8e89eea81e3ccabbfe00d9fe007504e5db010decc5d458a645f634945c3d2c1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 79699e95a60041f7cb871760ace6ce3088d9287e7f9121f01daf129f043ce512 }
   src/features.rs::feature_slug: { source_hash: b7249fe722139aed12c34ceffdc0fccec63396317314e4adbe16baa0aeed894f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 68151d633e2ee8d0e4c95d1d39467905538a67b1862432ae1775082dba85db63 }
-  src/features.rs::Participants: { source_hash: a00b633a4ea3290dd88f6fed02492f0499d387dde435d51db94f82155c0fdd29, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e4e795ae08d14d23247074a9442485fb86a7d33c0db6b4da9756fb7fc66f1dff }
-  src/features.rs::assemble_participants: { source_hash: 432e0a33618a923ab88be2d54b2fa56d8548bc7e9131cb6c3e779b4ac0ba7725, deps_hash: 1848230fc562146b1cce7a8fd01e5f351997f6b24b89cfd992c4f3e7b67a28d8, spec_hash: 10121c9af8550eef01d7850f7b892b034fd662ce1bcd61efde8f0303d2d6acf2 }
+  src/features.rs::Participants: { source_hash: 30442c4153843c182830e7de2f8d7c02a252efccc3e88efb93c3526598556e68, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c3a921ea219f43a30a401f678af8384ff8a4d13e4e07567a1cae4a285b8c6fed }
+  src/features.rs::assemble_participants: { source_hash: efbcf677d434fff3d43cb0d274663d6b989c4ba92836ff4d4ef46dc0e7cdb654, deps_hash: 94543510e57a2960ff90f620c9ed22c02c13f4c4e8f66dd3222b3b7d288a253b, spec_hash: 32c09b4e071a78dea3b6e8382547f7da3273a7ebc772f49171976d4e19498a18 }
 ---
 # src/features.rs
 ## Summary
-This file is CodeOwl's "feature layer" — the part that recognizes a whole end-to-end capability (say, an upload form and the API route it calls) rather than just individual files. Most of a codebase's structure comes for free from imports and class/function containment, but a "feature" spans things a plain import graph can't see: a `fetch("/api/...")` call whose target is only known by matching the URL string against a routing convention, a database query naming a table by string (`.from("payments")`), or a React component rendered as a JSX tag rather than imported and called directly. This file extracts each of those narrow, deliberately-limited patterns and resolves them into real links in the graph. It also enumerates the entry points themselves (every page and API route in a Next.js app) and, given one entry point, walks outward from it to assemble the full set of "participants" — the feature's own code (`core`), the other functions it calls into (`dependencies`), and the database tables it touches (`data`). The framework-specific judgment calls (what counts as an entry point, what belongs in `core` versus what's just a one-hop dependency) are kept behind a `FeatureModel` interface (a swappable set of rules) so a future non-Next.js stack can plug in its own without touching the generic graph-walking logic.</content>
+This file is CodeOwl's feature layer — the part that recognizes a stack's runtime entry points (a Next.js page, an orphan API route, or whatever a stack's own conventions expose), resolves the extra connections a plain import graph can't see (a `fetch("/api/...")` call, a `.from("table")` query, a rendered `<Component/>` matched back to its import), and assembles each feature's full participant set (`core`/`dependencies`/`data`) for spec generation. It's deliberately narrow rather than general call-graph analysis: only these specific, framework-convention-shaped patterns are resolved, nothing else. The walk that assembles participants (`assemble_participants`) is fully generic across stacks — it only follows flow edges and one-hop imports off the graph — while everything specific to one framework (recognizing a page, turning its path into a slug, deciding which other files belong in its `core` set) lives behind the `FeatureModel` trait, implemented here for TypeScript + Next.js by `TypeScriptNextFeatureModel`. A stack with no comparable runtime entry surface (a CLI, a library) simply has no feature model and no feature layer at all.
 
 ## `RouteLiteral`
 `pub struct RouteLiteral`
 ### Summary
-A resolved `fetch("/api/...")` call site — the file it appears in and the static request path — used to build the client→route edge a feature spec needs. Cached on `Graph` alongside `ResolvedImport` so task assembly never re-parses a file's syntax tree.
+One `fetch("/api/...")` call found anywhere in a file's client code — the raw evidence CodeOwl uses to connect a page to the API route it actually calls, since that connection is a string match, not an `import`.
 ### Behavior
-Plain data. `static_path` is already normalised by the time a `RouteLiteral` exists: the query string is stripped and the value is guaranteed to start with `/api/` (the extractor discards anything else — a fully dynamic URL, an external host). Call sites are found anywhere in the file, not just at top level, because these calls almost always sit inside an event handler or an effect.
+`from_file` is the file the call was found in. `static_path` is the matched path, already stripped of any query string and guaranteed to start with `/api/`. The search isn't limited to top-level code — these calls are almost always inside an event handler or a `useEffect`, so the whole file is scanned regardless of nesting. `RouteLiteral`s are persisted on the `Graph` itself (the same way a `ResolvedImport` is) so that `get_next_spec_task` doesn't have to re-walk every file's syntax tree (the structure `tree-sitter` produces from the source text) on every call — they're computed once and read back out.
 ### Depends on
 - (none)
 
@@ -128,9 +128,9 @@ A bracket check: `true` iff the segment starts with `[` and ends with `]`. It do
 ## `TableRef`
 `pub struct TableRef`
 ### Summary
-One `.from("<table>")` call site — the file and the table name it queries — the Supabase/PostgREST convention for "this code touches that table" (M10). Cached on `Graph` and resolved against the `Schema` nodes `schema.rs` extracts.
+One `.from("<table>")` call found in application code — the Supabase/PostgREST convention for naming which database table a query runs against, since that's also a string reference rather than anything an `import` can resolve.
 ### Behavior
-Plain data, same shape and lifecycle as `RouteLiteral`: found by a full-tree walk at index time, persisted so task assembly doesn't re-parse. `table` is the raw string argument, unqualified — resolution against a `schema-file::<table>` node happens later, in `graph.rs`.
+`from_file` is the file the call was found in; `table` is the table name matched inside the `.from(...)` call. Like `RouteLiteral`, these are stored on the `Graph` rather than re-derived per lookup, and get resolved against the schema nodes `schema.rs` extracts from `CREATE TABLE` statements — a `TableRef` whose `table` matches an extracted schema node becomes the flow edge that lets `get_callers` on a table answer "what app code actually touches this."
 ### Depends on
 - (none)
 
@@ -192,9 +192,9 @@ The bare table name from a schema symbol id — the segment after the last `::`.
 ## `RenderedComponent`
 `pub struct RenderedComponent`
 ### Summary
-One `<Component/>` JSX tag that a core file renders — a containment edge the import graph can't tell apart from importing a helper. `assemble_participants` follows these into a feature's `core` so the spec is written from the component that does the work, not the thin wrapper that renders it (M11).
+One `<Component/>` that a feature's entry point (or another file already known to belong to that feature) renders — a connection the plain import graph can't tell apart from importing an ordinary utility function, even though it means real feature logic (form state, submit handlers, validation) may live in that rendered file rather than the page itself.
 ### Behavior
-Plain data: the rendering file and the tag name as written (an uppercase-initial identifier — lowercase tags are HTML elements and skipped). The name is resolved lazily, at assemble time, against `from_file`'s own imports — it isn't a `SymbolId` here because a component is almost always a default export, which the named-import list can't resolve (hence `resolved_default_imports`).
+`from_file` is the file doing the rendering. `name` is the JSX tag as written — an uppercase-initial identifier like `Foo` for `<Foo/>` — matched against `from_file`'s imports later, at assemble time, to find which actual file that tag came from. `assemble_participants` follows these edges into a feature's `core` file set specifically so a feature spec ends up written from the code that does the real work, rather than stopping at whatever thin page component merely renders it.
 ### Depends on
 - (none)
 
@@ -247,9 +247,9 @@ Takes the entry file's directory (everything before its last `/`) and returns `t
 ## `EntryPoint`
 `pub struct EntryPoint`
 ### Summary
-One framework-enumerated feature entry point — the thing a feature spec is written about. `kind` names the framework convention it came from, `id` is the unique slug for `docs/specs/_features/<id>.md`, `file` is the source file, `title` is the human label rendered in the document.
+One entry point a framework's own conventions expose — a page, an API route, an HTTP resource, a scheduled job, whatever a given stack's `FeatureModel` knows how to recognize. This is the thing a feature spec gets generated for.
 ### Behavior
-Plain data returned by a `FeatureModel::enumerate_entry_points`. `kind` is pack-owned free text — `"page"` / `"api-route"` for the Next.js pack; M17 (Quarkus) adds `"http"`, `"kafka"`, etc. so one model can return a heterogeneous list. `id` must be unique *across* kinds because it names a file on disk; Next.js pages and API routes come from disjoint path spaces so `feature_slug` alone is enough here, but a multi-kind model has to kind-prefix. `title` is currently write-only — nothing reads it yet; it's present so the struct shape is settled before a second `FeatureModel` exists.
+`kind` names the framework convention this entry point came from (`"page"` / `"api-route"` for Next.js; other stacks add their own kinds like `"http"` or `"kafka"`), letting `enumerate_entry_points` return a mixed list spanning several conventions at once. `id` is the unique slug that names the resulting spec file (`docs/specs/_features/<id>.md`) — it must not collide across different `kind`s from the same stack; where a stack's entry-point path spaces overlap, its `FeatureModel` prefixes `id` with `kind` to keep them distinct. `title` is the human-facing label rendered inside the generated document. `file` is the entry point's own source file.
 ### Depends on
 - (none)
 
@@ -265,9 +265,9 @@ Two methods, deliberately minimal (design decision 8 — a second impl doesn't a
 ## `TypeScriptNextFeatureModel`
 `pub struct TypeScriptNextFeatureModel`
 ### Summary
-The `FeatureModel` for the TypeScript + Next.js App Router stack: a feature is an `app/**/page.tsx` (or an orphan `app/api/**/route.ts`) plus the component subtree and API routes it reaches.
+The Next.js-specific answer to "what counts as a feature" — a feature is a page (`app/**/page.tsx`), or an API route with no page pointing at it, plus everything that page or route actually reaches: its rendered components and the API routes it calls.
 ### Behavior
-A zero-size unit struct — all state is in the graph. It carries the whole Next-specific "feature" concept: `enumerate_entry_points` finds the pages and page-less API routes, and `admits_to_core` applies the `is_colocated(entry) || file_does_data_work` rule. The generic `assemble_participants` walk does everything else. Returned by `TypeScriptNextStack::feature_model` as `Some`.
+This is a marker type (no fields) that implements CodeOwl's generic `FeatureModel` trait — it's the whole of the Next-specific feature concept, kept out of the generic walk that drives feature-spec generation itself. Three things live entirely inside this type rather than the generic core: recognizing what counts as a page in the first place (`is_page`), turning a page's file path into the slug its feature spec is named after (a route-path slug — e.g. `app/submit/page.tsx` → `submit`), and the admission rule that decides which other files belong in a feature's `core` set — a file counts if it's co-located with the entry point (`is_colocated`) or if it does real data work (`does_data_work`), rather than every file the entry point transitively touches.
 ### Depends on
 - (none)
 
@@ -350,9 +350,15 @@ Same prefix/suffix trimming as `entry_route_path`, then: an empty result becomes
 ## `Participants`
 `pub struct Participants`
 ### Summary
-A feature's participant set, split into three tiers: `core` (the feature's own code — entry point plus what it reaches through flow edges the pack admits), `dependencies` (the symbols that core code imports directly), and `data` (the SQL tables the core code queries via a resolved `.from("table")`).
+Everything a feature spec is written from, split into three tiers by how directly each piece belongs to the feature and how its own staleness gets tracked.
 ### Behavior
-Plain vecs of string ids. The tiers differ in how staleness is tracked: `core` and `data` key on `source_hash` (a body change, or a schema change to a touched table, is a real change to the feature), while `dependencies` key on `interface_hash` (only a public-surface change matters, same as any reference edge). `dependencies` and `data` are one hop only — never expanded further — mirroring the containment-only recursion invariant for reference edges. Produced by `assemble_participants`; consumed by `next_feature_task` (to build the generation context) and `current_participant_hashes` (to detect staleness).
+`core` is the feature's own code: the entry point plus everything it reaches through the feature's own edges (a rendered component, a route literal it calls). Core files are tracked by `source_hash` — any real edit to their body is treated as a real change to the feature, since this is the code the feature spec is actually describing.
+
+`dependencies` are the symbols that core code imports directly — tracked by `interface_hash` instead, the same as any other reference edge elsewhere in CodeOwl, since only a change to a dependency's public surface (not its internal implementation) should make the feature spec stale.
+
+`data` are the SQL tables the core code queries via a resolved `.from("table")` call — tracked by `source_hash`, so a schema change to a table this feature touches (a column added or removed) makes the feature spec stale too.
+
+`dependencies` and `data` are deliberately one hop only, never expanded further: a feature spec consumes what it directly depends on, it doesn't recursively pull in the rest of the graph behind those dependencies. This mirrors the same one-hop discipline CodeOwl's recursive spec generation applies to containment edges, just applied here to reference edges instead.
 ### Depends on
 - (none)
 
@@ -363,11 +369,13 @@ Plain vecs of string ids. The tiers differ in how staleness is tracked: `core` a
     entry: &EntryPoint,
 ) -> Participants`
 ### Summary
-Given one feature's entry point (e.g. a web route), figures out every other file and database table that feature actually touches, and sorts them into three buckets: `core` (the feature's own code), `dependencies` (other code it calls into), and `data` (the database tables it reads or writes). It works the same way regardless of which language/framework the repo uses — the framework-specific judgment calls are delegated to a `FeatureModel` passed in, rather than hard-coded here.
+Walks the feature rooted at one entry point and produces its full `Participants` set — the `core`, `dependencies`, and `data` a feature spec gets written from — using the stack's own `FeatureModel` only for the two judgment calls that need framework-specific knowledge.
 ### Behavior
-Starts a breadth-first search (explore outward one "hop" at a time, level by level) from the entry point's file. A file joins `core` if it was reached by following either a "flow edge" (a looser link the plain import graph can't see, like a web framework's dependency-injection param or a rendered UI component — see `GLOSSARY.md`) or a module-level import that both point at another *file*, **and** `fm.admits_to_core` says yes for that target. That check is memoized per file within one call, since the same file (e.g. a shared `crud` module several routes import) would otherwise be re-judged every time a different core file reaches it.
+The walk itself is generic across every stack: it follows `flow_edges` and one-hop resolved imports off the graph, and never names a specific framework convention directly. It's a breadth-first search starting from the entry point's own file: for each file already in `core`, every flow edge or import leaving it is checked, and if the edge resolves to another *file*, `fm.admits_to_core` decides whether that file joins `core` too (memoized per candidate file, since the same file can be reached as a candidate from several different core files before it's ever dequeued — several routes importing the same shared module, say). An edge that resolves to a *symbol* rather than a whole file is followed back to that symbol's own containing file first, and the same `admits_to_core` judgment is applied to that file.
 
-Once the `core` set is fixed, a second pass looks at every edge (import or flow edge) leading out of a `core` file to a *symbol* rather than a file — a function, class, or database table. If that symbol is a `Schema`-kind node (a database table), it lands in `data`; otherwise it lands in `dependencies`. An edge from a core file to another file that never got admitted to `core` is simply dropped — it isn't retried as a dependency. Both flow edges and imports are pre-grouped by their source file once at the start (a `HashMap` keyed by file), rather than re-scanning the full edge/import lists for each file during the BFS and the two classification passes — this is a performance fix over a naive approach that would rescan repeatedly. `data` is sorted before returning so the result is stable across calls (call order into a `HashSet` isn't otherwise deterministic); `core` and `dependencies` keep discovery order.</content>
+Any file that declares at least one schema symbol (a database table) is excluded from `core` outright, even if some *other*, non-table symbol in that same file would otherwise have been admitted — a schema-bearing file's role in a feature is represented entirely through the `data` tier instead, one entry per table, so it's never double-counted as both `core` and `data` just because a table and an unrelated model class happen to share a file.
+
+Once the `core` walk finishes, every symbol reached from a `core` file by import or flow edge — but whose *own* file didn't already join `core` — gets classified into `dependencies` or `data`: a table symbol goes to `data`, anything else goes to `dependencies`. A symbol is skipped from both if its containing file is already in `core`, since that file's content is already fully tracked there and would otherwise be duplicated as a one-hop stub for the same underlying file.
 ### Depends on
 - `src/graph.rs::FlowEdge` — crate::graph
 - `src/graph.rs::FlowTarget` — crate::graph

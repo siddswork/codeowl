@@ -1,11 +1,11 @@
 ---
 kind: file
 source_paths: [src/lang.rs]
-file: { source_hash: aa4a56983460aff174ca497bff6fdf10736d5ddace764e125746fb7a7c8a70ff, deps_hash: 8327ad3224849edf0d1a55c3a19add2d918ce0f21cd578b0bfc847eb4064e594, spec_hash: 12d923da62218a75cbc1f977afc61ad094f5e380ecdad31610a143dc49d78241 }
+file: { source_hash: aa4a56983460aff174ca497bff6fdf10736d5ddace764e125746fb7a7c8a70ff, deps_hash: 364c7530c881d070e301df9a230178f7f0986c7e1e49e67ccd1841f1cf6836f7, spec_hash: baae5727196f7ae6f0ca4968a651d5e6fd17789ad83709499ad009c19546e2f9 }
 symbols:
   src/lang.rs::SourceKind: { source_hash: 030d6675bccb66a7f8439dc3f04f8c310d7bd2c00ab00dac67bec882b8ca1a15, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: bc02ee0a2ff92e0a20aef9446cf846aabfc7d9387530f38f83a01e24f787cb14 }
   src/lang.rs::ts_parser: { source_hash: a4658a5c6fc19c35d73f060642c96c4e029a9fb4ac78f7d14c6f8a2ab39892cf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3ca8125f4a6f16954cd35389b931e4f5254eed0644541aa93296a4246335abee }
-  src/lang.rs::extract_symbols: { source_hash: 9884210b833cf488592ee7a0904ea061eae1990853e1d2d70a2a41e5ae137746, deps_hash: ce7d9d7fc16420378d45b890370f2eb5a11a122aee5b39ac6d807d291364fb0f, spec_hash: 29f4be406bc146e17b2b6ae1d41a331c7b0e245f68df8761335dabb13a0375b2 }
+  src/lang.rs::extract_symbols: { source_hash: 9884210b833cf488592ee7a0904ea061eae1990853e1d2d70a2a41e5ae137746, deps_hash: 57b36ccf02abf241d59cf027b8af996e4e37cdf048813be00047a453efba7ce6, spec_hash: e6a6e8985503d7997920c38d2ad3594bfa63de572dbb3fe40f7c562649b05c6e }
   src/lang.rs::FileRole: { source_hash: 664e61d3b1ae6a13b12f0d090d22185e85254a0dee982702438d9a1223428088, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 99e9dec2af1c03a82d76c0e3fb72e3bfbaea90093c1abd1edd1599458fcae911 }
   src/lang.rs::classify: { source_hash: 908bf0c8a6f2bb97bc5feed5c0cd0e4df84717e8c481b29b9f1ac2eed35b626f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: cb5f679c4c0e908c4665e90988e4a80a1825f3fdab8173f868ad5a56ba9148c5 }
   src/lang.rs::is_test_path: { source_hash: 43bd27fc12cb63b5b6e60e8b23cc75ba2d0bc82465e1ffb6cf530d089aab30e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a511957bab4e03e1d307eb16d4d08b01087428c3d50e9d8673f9d4e459a0ea28 }
@@ -14,7 +14,7 @@ symbols:
 ---
 # src/lang.rs
 ## Summary
-This file has two jobs. The first, `detect`, is the very first thing CodeOwl does when pointed at a repo: it scans the file tree and decides which single supported language/framework ("stack" — TypeScript/Next.js, Rust, Java, or Python) the repo is written in, erroring out clearly rather than silently indexing the wrong thing or an empty graph if it finds no matching files or more than one stack's worth. The second job is the internal machinery specific to the TypeScript + Next.js stack: which file extensions count as source code, loading the right parser grammar (plain TypeScript vs. TSX, which adds JSX support), turning a file's text into its list of declared functions/classes, which file extensions the import resolver tries when following an `import` statement, and classifying a file's "role" (ordinary product code, a shared UI primitive like a button component, test code, or machine-generated code) — used to decide how a file's documentation gets prioritized and whether it counts as genuinely shared infrastructure. Everything except `detect` here is TypeScript-specific; other stacks (Rust, Java, Python) keep their own equivalent logic in their own files.</content>
+This file picks which `StackPack` should run against a given repo (`detect`), and separately holds the TypeScript + SQL pack's own internals — which file extensions count as source, which tree-sitter grammar (the parser CodeOwl uses to turn source text into a syntax tree) to load for a given path, how a file becomes a list of declarations, and heuristics for recognizing test code and shared UI-primitive components. `SourceKind` (a normal source file vs. a dedicated schema file) and `FileRole` (product code vs. a UI primitive vs. test code vs. machine-generated code) are the two stack-neutral classifications defined here, used to decide how a file's spec gets prioritized and whether it counts as shared infrastructure; everything else in this file is specific to the TypeScript stack. `detect` itself works by counting each candidate pack's own primary-source-file extension across the repo (skipping test and tooling trees, so a stray fixture file doesn't misidentify the repo's real language) and requires exactly one pack to claim the repo, erring out by name if none or more than one does.
 
 ## `SourceKind`
 `pub enum SourceKind`
@@ -37,9 +37,9 @@ Extension check on the string path: `.tsx` selects `LANGUAGE_TSX`, any other suf
 ## `extract_symbols`
 `pub fn extract_symbols(rel_path: &str, source: &str) -> Vec<ExtractedSymbol>`
 ### Summary
-Parses one TypeScript/TSX file's source text and pulls out its declarations (functions, classes, exports, etc.) as a list of extracted symbols — the entry point the TypeScript stack uses to turn a file's text into structured data.
+The TypeScript extractor's public entry point: turns one TypeScript file's source text into its list of top-level declarations.
 ### Behavior
-A thin pass-through to `extract::extract_file`, which does the actual parsing (via tree-sitter — the parser library CodeOwl uses to build a syntax tree from source text). Kept as its own free function, rather than inlined at each call site, so both the graph module's test helper and the production `TypeScriptNextStack` extractor can share one entry point. TypeScript-only: as of the M17 milestone, dispatching `.sql` schema files to the table extractor moved into the stack itself, so this function no longer branches on file extension at all.</content>
+A thin wrapper around `extract::extract_file`, kept as its own free function so both `TypeScriptNextStack` (production extraction) and `graph.rs`'s test helper can share one call site rather than each calling into `extract.rs` directly. It handles TypeScript only — `.sql` files are dispatched to the schema extractor by the pack itself, not from here.
 ### Depends on
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 
