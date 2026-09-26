@@ -249,8 +249,8 @@ single-target loop above:
      there, so real entry points defined only on a build-generated
      interface (an OpenAPI-codegen'd JAX-RS resource, a `.proto` stub)
      won't be visible yet. For Maven, tell them to run a real `mvn
-     compile` locally (not `mvn generate-sources` alone — confirmed to
-     produce nothing — and not `mvn quarkus:generate-code` in isolation
+     compile` locally (not `mvn generate-sources` alone — it produces
+     nothing — and not `mvn quarkus:generate-code` in isolation
      either, which silently generates from a placeholder spec instead of
      the project's real one; a `compile` failing afterward at an
      unrelated `javac`/toolchain step is fine, the generated sources are
