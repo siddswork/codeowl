@@ -9,8 +9,10 @@
 //! (`secret`, used only for the private-field-stays-local scenario), and
 //! one method (`touch`, deliberately not referencing either field's type,
 //! so a field edit and a method-body edit are independent variables, never
-//! both moving together) and a "consumer" file that imports `Widget` and
-//! calls `touch`.
+//! both moving together); a "consumer" file that imports `Widget` and
+//! calls `touch`; and an "unrelated" file (M21.c item 1) that references
+//! neither -- a genuine bystander, proving a cascade reaches only real
+//! importers, not the whole repo.
 //! One shared baseline of specs is submitted once per fixture; every
 //! scenario below re-derives a fresh `Graph` from a differently-edited copy
 //! of the *same* on-disk files and checks staleness against that one
@@ -52,6 +54,13 @@ struct Fixture {
     /// never cross to the consumer.
     owner_private_field_change: &'static str,
     consumer_src: &'static str,
+    /// A file referencing neither `Widget` nor `count`/`secret` at all --
+    /// the bystander for M21.c item 1. Must stay fully current across
+    /// every owner edit below (body, cascade, private field): nothing in
+    /// it resolves to `Widget`, so no fold, cascade, or reindex has any
+    /// path to reach it.
+    unrelated_path: &'static str,
+    unrelated_src: &'static str,
     /// A file path elsewhere in the same repo that this stack's `Widget`
     /// gets renamed to for the rename scenario -- same content as
     /// `owner_v1`, just relocated (and, for Java only, the class
@@ -64,7 +73,10 @@ struct Fixture {
 
 const RUST: Fixture = Fixture {
     stack: "rust",
-    scaffold: &[("src/lib.rs", "pub mod owner;\npub mod consumer;\n")],
+    scaffold: &[(
+        "src/lib.rs",
+        "pub mod owner;\npub mod consumer;\npub mod unrelated;\n",
+    )],
     owner_path: "src/owner.rs",
     consumer_path: "src/consumer.rs",
     owner_symbol_id: "src/owner.rs::Widget",
@@ -74,6 +86,8 @@ const RUST: Fixture = Fixture {
     owner_field_type_change: "pub struct Widget {\n    pub count: i64,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
     owner_private_field_change: "pub struct Widget {\n    pub count: i32,\n    secret: i64,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
     consumer_src: "use crate::owner::Widget;\n\npub fn make() -> Widget {\n    let w = Widget { count: 0 };\n    w.touch();\n    w\n}\n",
+    unrelated_path: "src/unrelated.rs",
+    unrelated_src: "pub fn noop() -> i32 {\n    42\n}\n",
     owner_renamed_path: "src/gadget.rs",
     owner_renamed_content: "pub struct Widget {\n    pub count: i32,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
 };
@@ -90,6 +104,8 @@ const TYPESCRIPT: Fixture = Fixture {
     owner_field_type_change: "export class Widget {\n    count: string;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
     owner_private_field_change: "export class Widget {\n    count: number;\n    private secret: string;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
     consumer_src: "import { Widget } from './owner';\n\nexport function make(): Widget {\n    const w = new Widget();\n    w.touch();\n    return w;\n}\n",
+    unrelated_path: "unrelated.ts",
+    unrelated_src: "export function noop(): number {\n    return 42;\n}\n",
     owner_renamed_path: "gadget.ts",
     owner_renamed_content: "export class Widget {\n    count: number;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
 };
@@ -106,6 +122,8 @@ const PYTHON: Fixture = Fixture {
     owner_field_type_change: "class Widget:\n    count: str\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
     owner_private_field_change: "class Widget:\n    count: int\n    _secret: str\n\n    def touch(self):\n        print(\"touched\")\n",
     consumer_src: "from owner import Widget\n\n\ndef make():\n    w = Widget()\n    w.touch()\n    return w\n",
+    unrelated_path: "unrelated.py",
+    unrelated_src: "def noop():\n    return 42\n",
     owner_renamed_path: "gadget.py",
     owner_renamed_content: "class Widget:\n    count: int\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
 };
@@ -128,6 +146,8 @@ const JAVA: Fixture = Fixture {
     owner_field_type_change: "package com.example;\n\npublic class Widget {\n    public String count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
     owner_private_field_change: "package com.example;\n\npublic class Widget {\n    public int count;\n    private String secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
     consumer_src: "package com.example;\n\npublic class Consumer {\n    public Widget make() {\n        Widget w = new Widget();\n        w.touch();\n        return w;\n    }\n}\n",
+    unrelated_path: "src/main/java/com/example/Unrelated.java",
+    unrelated_src: "package com.example;\n\npublic class Unrelated {\n    public int noop() {\n        return 42;\n    }\n}\n",
     // A real Java rename needs the public class name to match the new
     // file name, unlike the other 3 stacks -- Gadget.java's own class is
     // renamed to Gadget, not left as Widget.
@@ -245,6 +265,12 @@ fn consumer_file_id(graph: &Graph, fx: &Fixture) -> SymbolId {
         .unwrap_or_else(|| panic!("{}: consumer file not indexed", fx.stack))
 }
 
+fn unrelated_file_id(graph: &Graph, fx: &Fixture) -> SymbolId {
+    graph
+        .find(fx.unrelated_path)
+        .unwrap_or_else(|| panic!("{}: unrelated file not indexed", fx.stack))
+}
+
 fn run_lifecycle(fx: &Fixture) {
     let dir = tempdir(fx.stack);
     write_all(&dir, fx.scaffold);
@@ -253,15 +279,18 @@ fn run_lifecycle(fx: &Fixture) {
         &[
             (fx.owner_path, fx.owner_v1),
             (fx.consumer_path, fx.consumer_src),
+            (fx.unrelated_path, fx.unrelated_src),
         ],
     );
 
-    // --- Baseline: a full, real generate run over both files. ---
+    // --- Baseline: a full, real generate run over all three files. ---
     let graph = reindex(&dir);
     let owner_id = owner_file_id(&graph, fx);
     let consumer_id = consumer_file_id(&graph, fx);
+    let unrelated_id = unrelated_file_id(&graph, fx);
     drain(&graph, &dir, owner_id);
     drain(&graph, &dir, consumer_id);
+    drain(&graph, &dir, unrelated_id);
     assert!(
         is_fully_current(&graph, &dir, owner_id),
         "{}: owner should be fully current right after its own baseline drain",
@@ -270,6 +299,11 @@ fn run_lifecycle(fx: &Fixture) {
     assert!(
         is_fully_current(&graph, &dir, consumer_id),
         "{}: consumer should be fully current right after its own baseline drain",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, unrelated_id),
+        "{}: unrelated should be fully current right after its own baseline drain",
         fx.stack
     );
 
@@ -287,6 +321,11 @@ fn run_lifecycle(fx: &Fixture) {
     assert!(
         is_fully_current(&graph, &dir, consumer_id),
         "{}: a method body edit must NOT cascade to the consumer -- local effect only",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, unrelated_file_id(&graph, fx)),
+        "{}: a method body edit must not touch the file that never references Widget",
         fx.stack
     );
 
@@ -307,6 +346,13 @@ fn run_lifecycle(fx: &Fixture) {
         "{}: a public field's type change must cascade to the consumer's own \
          make symbol somewhere in its ladder -- this is the M21.b interface_hash \
          fold this whole matrix exists to prove. Offered: {consumer_offered:?}",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, unrelated_file_id(&graph, fx)),
+        "{}: a public field's type change must cascade to real importers of \
+         Widget only -- the file that never references it at all must stay \
+         current even while the consumer goes stale",
         fx.stack
     );
 
@@ -345,6 +391,12 @@ fn run_lifecycle(fx: &Fixture) {
         "{}: a private field's change must NOT cross the interface_hash fold -- \
          local effect only, exactly like scenario 1's method-body edit, and the \
          reason M21.b's fold only ever walks *public* fields in the first place",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, unrelated_file_id(&graph, fx)),
+        "{}: a private field's change must not touch the file that never \
+         references Widget",
         fx.stack
     );
 
