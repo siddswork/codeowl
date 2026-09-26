@@ -53,6 +53,14 @@ struct Fixture {
     /// fields -- this must stale the owner alone, same as a body edit,
     /// never cross to the consumer.
     owner_private_field_change: &'static str,
+    /// `owner_v1` plus one more public field (`label`) -- structurally
+    /// different from `owner_field_type_change` (a value change on an
+    /// existing member), this is a change to the *member list itself*.
+    /// Used in both directions (M21.c items 2/3): `owner_v1` ->
+    /// `owner_field_added` proves an added field cascades;
+    /// `owner_field_added` -> `owner_v1` proves a removed one does too,
+    /// with no separate fixture string needed for the reverse case.
+    owner_field_added: &'static str,
     consumer_src: &'static str,
     /// A file referencing neither `Widget` nor `count`/`secret` at all --
     /// the bystander for M21.c item 1. Must stay fully current across
@@ -85,6 +93,7 @@ const RUST: Fixture = Fixture {
     owner_body_edit: "pub struct Widget {\n    pub count: i32,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched again\");\n    }\n}\n",
     owner_field_type_change: "pub struct Widget {\n    pub count: i64,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
     owner_private_field_change: "pub struct Widget {\n    pub count: i32,\n    secret: i64,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
+    owner_field_added: "pub struct Widget {\n    pub count: i32,\n    pub label: String,\n    secret: i32,\n}\n\nimpl Widget {\n    pub fn touch(&self) {\n        println!(\"touched\");\n    }\n}\n",
     consumer_src: "use crate::owner::Widget;\n\npub fn make() -> Widget {\n    let w = Widget { count: 0 };\n    w.touch();\n    w\n}\n",
     unrelated_path: "src/unrelated.rs",
     unrelated_src: "pub fn noop() -> i32 {\n    42\n}\n",
@@ -103,6 +112,7 @@ const TYPESCRIPT: Fixture = Fixture {
     owner_body_edit: "export class Widget {\n    count: number;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched again');\n    }\n}\n",
     owner_field_type_change: "export class Widget {\n    count: string;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
     owner_private_field_change: "export class Widget {\n    count: number;\n    private secret: string;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
+    owner_field_added: "export class Widget {\n    count: number;\n    label: string;\n    private secret: number;\n\n    touch(): void {\n        console.log('touched');\n    }\n}\n",
     consumer_src: "import { Widget } from './owner';\n\nexport function make(): Widget {\n    const w = new Widget();\n    w.touch();\n    return w;\n}\n",
     unrelated_path: "unrelated.ts",
     unrelated_src: "export function noop(): number {\n    return 42;\n}\n",
@@ -121,6 +131,7 @@ const PYTHON: Fixture = Fixture {
     owner_body_edit: "class Widget:\n    count: int\n    _secret: int\n\n    def touch(self):\n        print(\"touched again\")\n",
     owner_field_type_change: "class Widget:\n    count: str\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
     owner_private_field_change: "class Widget:\n    count: int\n    _secret: str\n\n    def touch(self):\n        print(\"touched\")\n",
+    owner_field_added: "class Widget:\n    count: int\n    label: str\n    _secret: int\n\n    def touch(self):\n        print(\"touched\")\n",
     consumer_src: "from owner import Widget\n\n\ndef make():\n    w = Widget()\n    w.touch()\n    return w\n",
     unrelated_path: "unrelated.py",
     unrelated_src: "def noop():\n    return 42\n",
@@ -145,6 +156,7 @@ const JAVA: Fixture = Fixture {
     owner_body_edit: "package com.example;\n\npublic class Widget {\n    public int count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched again\");\n    }\n}\n",
     owner_field_type_change: "package com.example;\n\npublic class Widget {\n    public String count;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
     owner_private_field_change: "package com.example;\n\npublic class Widget {\n    public int count;\n    private String secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
+    owner_field_added: "package com.example;\n\npublic class Widget {\n    public int count;\n    public String label;\n    private int secret;\n\n    public void touch() {\n        System.out.println(\"touched\");\n    }\n}\n",
     consumer_src: "package com.example;\n\npublic class Consumer {\n    public Widget make() {\n        Widget w = new Widget();\n        w.touch();\n        return w;\n    }\n}\n",
     unrelated_path: "src/main/java/com/example/Unrelated.java",
     unrelated_src: "package com.example;\n\npublic class Unrelated {\n    public int noop() {\n        return 42;\n    }\n}\n",
@@ -396,6 +408,88 @@ fn run_lifecycle(fx: &Fixture) {
     assert!(
         is_fully_current(&graph, &dir, unrelated_file_id(&graph, fx)),
         "{}: a private field's change must not touch the file that never \
+         references Widget",
+        fx.stack
+    );
+
+    // --- 2c/2d. A field is added, then removed: both must cascade. ---
+    // M21.c items 2 and 3. A structural member-list change is a
+    // different code path from scenario 2's value change on an
+    // existing member -- a fold that only iterates previously-known
+    // members would pass every scenario above and still miss this.
+    // Re-establish a clean baseline first, same reasoning as 2b's own
+    // setup: reverting/editing the owner without redraining would
+    // confound this scenario's assertion with 2b's leftover effect.
+    write_file(&dir, fx.owner_path, fx.owner_v1);
+    let graph = reindex(&dir);
+    let owner_id = owner_file_id(&graph, fx);
+    let consumer_id = consumer_file_id(&graph, fx);
+    drain(&graph, &dir, owner_id);
+    drain(&graph, &dir, consumer_id);
+    assert!(
+        is_fully_current(&graph, &dir, owner_id) && is_fully_current(&graph, &dir, consumer_id),
+        "{}: both files must be fully current again before the field-added scenario",
+        fx.stack
+    );
+
+    // 2c. Add `label`: must cascade, same shape as scenario 2's type change.
+    write_file(&dir, fx.owner_path, fx.owner_field_added);
+    let graph = reindex(&dir);
+    let owner_id = owner_file_id(&graph, fx);
+    let consumer_id = consumer_file_id(&graph, fx);
+    assert_eq!(
+        next_symbol_task_id(&graph, &dir, owner_id).as_deref(),
+        Some(fx.owner_symbol_id),
+        "{}: adding a public field must re-offer the owner's own Widget symbol",
+        fx.stack
+    );
+    let consumer_offered = drain_symbol_task_ids(&graph, &dir, consumer_id);
+    assert!(
+        consumer_offered.contains(&fx.consumer_symbol_id.to_string()),
+        "{}: adding a public field must cascade to the consumer, same as \
+         changing an existing one's type -- a fold that only walks \
+         previously-known members would miss this. Offered: {consumer_offered:?}",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, unrelated_file_id(&graph, fx)),
+        "{}: adding a public field must not touch the file that never \
+         references Widget",
+        fx.stack
+    );
+
+    // 2d. Remove `label` again (owner_field_added -> owner_v1): the
+    // symmetric, opposite-direction case -- a naive diff-by-name fold
+    // could silently miss a removal the way it wouldn't miss an add.
+    let owner_id = owner_file_id(&graph, fx);
+    let consumer_id = consumer_file_id(&graph, fx);
+    drain(&graph, &dir, owner_id);
+    drain(&graph, &dir, consumer_id);
+    assert!(
+        is_fully_current(&graph, &dir, owner_id) && is_fully_current(&graph, &dir, consumer_id),
+        "{}: both files must be fully current again before the field-removed scenario",
+        fx.stack
+    );
+    write_file(&dir, fx.owner_path, fx.owner_v1);
+    let graph = reindex(&dir);
+    let owner_id = owner_file_id(&graph, fx);
+    let consumer_id = consumer_file_id(&graph, fx);
+    assert_eq!(
+        next_symbol_task_id(&graph, &dir, owner_id).as_deref(),
+        Some(fx.owner_symbol_id),
+        "{}: removing a public field must re-offer the owner's own Widget symbol",
+        fx.stack
+    );
+    let consumer_offered = drain_symbol_task_ids(&graph, &dir, consumer_id);
+    assert!(
+        consumer_offered.contains(&fx.consumer_symbol_id.to_string()),
+        "{}: removing a public field must cascade to the consumer too -- the \
+         symmetric, opposite-direction case from adding one. Offered: {consumer_offered:?}",
+        fx.stack
+    );
+    assert!(
+        is_fully_current(&graph, &dir, unrelated_file_id(&graph, fx)),
+        "{}: removing a public field must not touch the file that never \
          references Widget",
         fx.stack
     );
