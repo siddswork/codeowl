@@ -45,6 +45,12 @@ so that reader can follow along.
    by cutting hedge words and restating nothing the signature already
    says.
 
+8. **Never repeat this project's own milestone numbers.** Source comments
+   and docstrings in this repo often name a milestone (`M5`, `M17`, `M21`,
+   …) — CodeOwl's own build-sequence bookkeeping, not behavior. Describe
+   what the code does, not when it was added; this mirrors `CLAUDE.md`'s
+   rule that milestone numbers never appear in anything an agent reads.
+
 ## Quick test
 
 Read your `## Summary` out loud imagining a frontend developer who's

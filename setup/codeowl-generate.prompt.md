@@ -44,6 +44,11 @@ already up to date, no server restart.
   mode" below. Add `--stale` to refresh only specs that have gone out of
   date and leave never-generated ones alone — a cheap way to keep an
   existing corpus honest between full passes.
+- **Several targets in one invocation** (space-separated, e.g. `src/a.rs
+  src/b.rs`) — not a single shape `get_next_spec_task` understands on its
+  own. Run the entire single-target loop below against each one in turn,
+  in the order given, rather than passing the whole multi-target string
+  through as one `target` value.
 
 You don't need to know in advance which single-target shape applies: the
 loop below walks bottom-up (a file's symbols, then the file, then — for
@@ -73,7 +78,7 @@ reading level, never structure: the headings below and "base it only on
 **Read before writing, every time — this is not a formality.** Every
 piece of `source`/`core_sources` a task hands you exists to be read in
 full before you write anything, not skimmed for a plausible-sounding
-sentence. Two concrete failure modes to actively avoid, both observed in
+sentence. Three concrete failure modes to actively avoid, all observed in
 real generated output:
 - A feature task with several `core_sources` entries and the narrative
   only describing one of them, because the others were never actually
@@ -86,6 +91,15 @@ real generated output:
   would tell the reader is exactly what belongs on the page instead. If
   you don't yet know what to say there, that's a signal to go read more,
   not to write that sentence.
+- A task's `source` (or a feature's `core_sources` entry) ending in a
+  `[... truncated: ...]` marker, written from as if it were the whole
+  thing. That marker means real content is missing, not merely that the
+  symbol or file is long. Call `get_source` on the same id first — its
+  response sometimes fits more than the generation task's own bundled
+  payload did. If `get_source` also reports `truncated: true`, don't guess
+  at what the missing portion says: note in your end-of-loop report that
+  this one is too large to fully retrieve and move on, rather than
+  submitting a spec written from a partial fragment.
 
 ## Loop
 
