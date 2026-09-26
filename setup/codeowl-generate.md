@@ -37,6 +37,11 @@ already up to date, no server restart.
   mode" below. Add `--stale` to refresh only specs that have gone out of
   date and leave never-generated ones alone — a cheap way to keep an
   existing corpus honest between full passes.
+- **Several targets in one invocation** (space-separated, e.g. `src/a.rs
+  src/b.rs`) — not a single shape `get_next_spec_task` understands on its
+  own. Run the entire single-target loop below against each one in turn,
+  in the order given, rather than passing the whole multi-target string
+  through as one `target` value.
 
 You don't need to know in advance which single-target shape applies: the
 loop below walks bottom-up (a file's symbols, then the file, then — for
@@ -66,8 +71,7 @@ reading level, never structure: the headings below and "base it only on
 **Read before writing, every time — this is not a formality.** Every
 piece of `source`/`core_sources` a task hands you exists to be read in
 full before you write anything, not skimmed for a plausible-sounding
-sentence. Two concrete failure modes to actively avoid, both observed in
-real generated output:
+sentence. Three concrete failure modes to actively avoid:
 - A feature task with several `core_sources` entries and the narrative
   only describing one of them, because the others were never actually
   read. If there are three core files, the document needs to account for
@@ -79,6 +83,15 @@ real generated output:
   would tell the reader is exactly what belongs on the page instead. If
   you don't yet know what to say there, that's a signal to go read more,
   not to write that sentence.
+- A task's `source` (or a feature's `core_sources` entry) ending in a
+  `[... truncated: ...]` marker, written from as if it were the whole
+  thing. That marker means real content is missing, not merely that the
+  symbol or file is long. Call `get_source` on the same id first — its
+  response sometimes fits more than the generation task's own bundled
+  payload did. If `get_source` also reports `truncated: true`, don't guess
+  at what the missing portion says: note in your end-of-loop report that
+  this one is too large to fully retrieve and move on, rather than
+  submitting a spec written from a partial fragment.
 
 ## Loop
 
@@ -209,9 +222,7 @@ target loop above:
    of this algorithm assumes it has the whole prioritized list. Stopping
    after one page on a repo with more than 50 pending documents means
    silently treating a small slice as the entire backlog and reporting
-   "done" while most of it sits unprocessed — a real failure mode, not a
-   hypothetical one, on any repo past ~50 uncovered documents (confirmed
-   real on `commons-lang`: 622 pending items, 13 pages). Every other
+   "done" while most of it sits unprocessed. Every other
    field in the response (`missing`, `by_kind`, `by_module`,
    `top_stale_by_impact`, `orphaned`, `generated_sources`) is already
    whole-repo on every page — only `pending` needs this walk. Each
@@ -238,8 +249,7 @@ target loop above:
      unrelated `javac`/toolchain step is fine, the generated sources are
      already written by then and nothing cleans them up), then re-running
      this command. **The Gradle equivalent is unverified** — say so rather
-     than naming a specific command, since the Maven case already showed
-     the "obviously right" command can be wrong. State this as the
+     than naming a specific command. State this as the
      observed fact it is (`found: 0`), not a diagnosis — `generated_sources`
      doesn't know *why* it's zero, only that it is. Say nothing if the
      field is absent entirely (the pack has no such convention) or `found`
