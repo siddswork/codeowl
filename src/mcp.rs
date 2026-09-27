@@ -875,7 +875,8 @@ impl CodeOwlServer {
                 // externals folded to one line — the same treatment the
                 // rendered `### Depends on` section gets, so a Rust symbol
                 // isn't handed a wall of `Vec`/`Result`/`BTreeMap`.
-                let scoped = crate::spec::scoped_symbol_deps(graph, &file.id, source.as_str());
+                let scoped =
+                    crate::spec::scoped_symbol_deps(graph, &file.id, source.as_str(), Some(sym_id));
                 let mut dependencies: Vec<String> = scoped
                     .resolved
                     .iter()

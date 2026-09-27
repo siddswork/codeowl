@@ -991,7 +991,14 @@ fn same_file_trait_impl_edges(file: &str, graph: &Graph) -> Vec<ResolvedImport> 
             let target_id = graph.find(&format!("{file}::{target_name}"))?;
             Some(ResolvedImport {
                 from_file: file.to_string(),
-                specifier: String::new(),
+                // Every other resolved import's specifier is a real
+                // module path (`crate::stats`, a Java package); this one
+                // has no `use` statement to draw that from, but leaving
+                // it empty renders a malformed `` `target` — `` line with
+                // nothing after the dash wherever a dependency is
+                // displayed (the rendered `### Depends on` section,
+                // `get_callees`'s response) -- named plainly instead.
+                specifier: "same file".to_string(),
                 imported_name: target_name,
                 target: Some(target_id),
             })

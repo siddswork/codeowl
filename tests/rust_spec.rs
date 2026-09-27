@@ -49,6 +49,22 @@ fn rust_graph(rel_path: &str, src: &str) -> Graph {
     graph
 }
 
+/// The rendered block for one symbol's `## \`name\`` section, up to (not
+/// including) the next `## \`` heading or end of file — everything
+/// `render` wrote for it, including its own `### Depends on` list.
+fn section<'a>(rendered: &'a str, name: &str) -> &'a str {
+    let heading = format!("## `{name}`");
+    let start = rendered
+        .find(&heading)
+        .unwrap_or_else(|| panic!("missing section {heading:?} in:\n{rendered}"));
+    let rest = &rendered[start..];
+    let end = rest[heading.len()..]
+        .find("\n## `")
+        .map(|i| i + heading.len())
+        .unwrap_or(rest.len());
+    &rest[..end]
+}
+
 #[test]
 fn inherent_impl_is_folded_but_trait_impl_stays_its_own_section() {
     let dir = std::env::temp_dir().join(format!("codeowl-rust-spec-{}-fold", std::process::id()));
@@ -275,6 +291,26 @@ fn a_types_own_field_change_invalidates_its_trait_impls_document_without_folding
         rendered1.matches("\n## `").count(),
         3,
         "three top-level sections: Greeter, PersonalGreeter, its trait impl:\n{rendered1}"
+    );
+
+    // Regression: the synthetic impl -> type edge must never make the
+    // *type* appear to depend on itself. The edge's `imported_name` is
+    // `PersonalGreeter`'s own name, and `PersonalGreeter`'s own
+    // declaration necessarily contains that name too -- without an
+    // explicit self-exclusion, its own dependency scan matches its own
+    // synthetic edge.
+    let greeter_section = section(&rendered1, "PersonalGreeter");
+    assert!(
+        greeter_section.contains("### Depends on\n- (none)"),
+        "PersonalGreeter must not depend on anything, least of all itself:\n{greeter_section}"
+    );
+    // The impl's own section must have the real edge, with a real
+    // (non-empty) specifier -- not the malformed `` `target` — `` an
+    // empty specifier string would render.
+    let impl_section = section(&rendered1, "impl Greeter for PersonalGreeter");
+    assert!(
+        impl_section.contains("`src/greeter.rs::PersonalGreeter` — same file"),
+        "the impl must depend on PersonalGreeter with a real specifier:\n{impl_section}"
     );
 
     // Add a second public field. This moves PersonalGreeter's own
