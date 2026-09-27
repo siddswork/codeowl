@@ -958,9 +958,52 @@ pub fn resolve_imports(
                 target: resolve_one(&src, from_file, specifier, name, file_imports, graph),
             });
         }
+        out.extend(same_file_trait_impl_edges(from_file, graph));
     }
     let _ = root; // resolution is off the walked file set, not the FS
     out
+}
+
+/// `ARCHITECTURE.md` open question 16's general case (`ROADMAP.md` M21.g):
+/// `impl Trait for Type` never needs a `use` statement for `Type` when
+/// both live in the same file, so `graph.imports()` has no edge for it —
+/// without one, a change to `Type`'s own fields never invalidates the
+/// impl block's document, even though the impl's own text is what
+/// actually depends on that shape (`self.field` inside its methods). This
+/// synthesizes exactly the edge an explicit `use` would have produced,
+/// scoped to trait impls whose target is defined in the same file --
+/// `resolve_one` above already handles the cross-file case once a real
+/// `use` names the type, so this only fills the gap `use` can't reach.
+/// One edge per trait impl, `impl -> type`; no edge links two sibling
+/// impls of the same type to each other, since neither's document says
+/// anything about the other's behavior.
+fn same_file_trait_impl_edges(file: &str, graph: &Graph) -> Vec<ResolvedImport> {
+    let Some(file_node) = graph.find(file).and_then(|id| graph.get_file(id)) else {
+        return Vec::new();
+    };
+    file_node
+        .children
+        .iter()
+        .filter_map(|&id| graph.get_symbol(id))
+        .filter(|s| s.raw == "impl")
+        .filter_map(|s| {
+            let target_name = trait_impl_target(&s.signature)?;
+            let target_id = graph.find(&format!("{file}::{target_name}"))?;
+            Some(ResolvedImport {
+                from_file: file.to_string(),
+                // Every other resolved import's specifier is a real
+                // module path (`crate::stats`, a Java package); this one
+                // has no `use` statement to draw that from, but leaving
+                // it empty renders a malformed `` `target` — `` line with
+                // nothing after the dash wherever a dependency is
+                // displayed (the rendered `### Depends on` section,
+                // `get_callees`'s response) -- named plainly instead.
+                specifier: "same file".to_string(),
+                imported_name: target_name,
+                target: Some(target_id),
+            })
+        })
+        .collect()
 }
 
 fn resolve_one(
@@ -1790,5 +1833,62 @@ pub use crate::stack::RustStack;\n";
         assert!(edges.iter().any(|e| e.imported_name == "Graph"
             && e.specifier == "crate::graph"
             && e.target.is_some()));
+    }
+
+    #[test]
+    fn a_same_file_trait_impl_gets_a_synthetic_dependency_edge_to_its_type() {
+        // M21.g's actual gap: `impl Add for Stats` never has a `use`
+        // statement naming `Stats` -- same file, no import needed -- so
+        // without a synthetic edge nothing in `graph.imports()` would ever
+        // let a change to `Stats`'s own fields invalidate this impl's spec.
+        // `Stats` has a real field, so this is the general case (M21.e's
+        // fold leaves it alone; two documents is the correct end state).
+        let edges = resolved(&[(
+            "src/stats.rs",
+            "pub struct Stats {\n    pub elapsed: u64,\n}\n\n\
+             impl std::ops::Add for Stats {\n    \
+             type Output = Stats;\n    \
+             fn add(self, other: Stats) -> Stats {\n        \
+             Stats { elapsed: self.elapsed + other.elapsed }\n    \
+             }\n}\n",
+        )]);
+        let e = edges
+            .iter()
+            .find(|e| e.from_file == "src/stats.rs" && e.imported_name == "Stats")
+            .expect("expected a synthetic dependency edge from the trait impl to its type");
+        assert!(
+            e.target.is_some(),
+            "Stats should resolve to its own symbol in the same file"
+        );
+    }
+
+    #[test]
+    fn a_cross_file_trait_impl_already_resolves_via_its_own_use_statement() {
+        // The other half of the same gap, already covered by the existing
+        // `use`-based resolution -- no new code needed here, this only
+        // confirms it. `impl Add for Stats` here names `Stats` through an
+        // ordinary `use crate::stats::Stats;`, which `resolve_imports`
+        // already turns into a real edge -- `dependency_hash` (spec.rs)
+        // then finds it the same way it finds any other resolved import.
+        let edges = resolved(&[
+            (
+                "src/stats.rs",
+                "pub struct Stats {\n    pub elapsed: u64,\n}\n",
+            ),
+            (
+                "src/add.rs",
+                "use crate::stats::Stats;\n\n\
+                 impl std::ops::Add for Stats {\n    \
+                 type Output = Stats;\n    \
+                 fn add(self, other: Stats) -> Stats {\n        \
+                 Stats { elapsed: self.elapsed + other.elapsed }\n    \
+                 }\n}\n",
+            ),
+        ]);
+        let e = edges
+            .iter()
+            .find(|e| e.from_file == "src/add.rs" && e.imported_name == "Stats")
+            .expect("expected the ordinary use-based edge from add.rs to Stats");
+        assert!(e.target.is_some(), "Stats should resolve across files");
     }
 }

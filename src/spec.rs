@@ -343,7 +343,7 @@ fn dependency_lines(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol)
     let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
         return Vec::new();
     };
-    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text);
+    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text, graph.find(&sym.id));
 
     let mut lines: Vec<String> = scoped
         .resolved
@@ -369,11 +369,27 @@ pub(crate) struct ScopedDeps {
     pub externals: Vec<String>,
 }
 
-pub(crate) fn scoped_symbol_deps(graph: &Graph, from_file: &str, symbol_text: &str) -> ScopedDeps {
+/// `self_id`, when `Some`, excludes any resolved import whose `target` is
+/// that very symbol — real for M21.g's synthetic same-file impl -> type
+/// edge (`rust.rs::same_file_trait_impl_edges`): that edge's
+/// `imported_name` is the *type's* own name, and a type's own declaration
+/// always contains its own name, so without this exclusion the type's own
+/// scan would match its own synthetic edge and appear to depend on
+/// itself. No resolved import can ever legitimately target the symbol
+/// whose text is being scoped, so this exclusion is always safe, not
+/// specific to Rust or to this one edge kind.
+pub(crate) fn scoped_symbol_deps(
+    graph: &Graph,
+    from_file: &str,
+    symbol_text: &str,
+    self_id: Option<SymbolId>,
+) -> ScopedDeps {
     let mut resolved = Vec::new();
     let mut externals: Vec<String> = Vec::new();
     for imp in graph.imports().iter().filter(|imp| {
-        imp.from_file == from_file && contains_identifier(symbol_text, &imp.imported_name)
+        imp.from_file == from_file
+            && contains_identifier(symbol_text, &imp.imported_name)
+            && imp.target != self_id
     }) {
         match imp.target {
             Some(target) => {
@@ -728,11 +744,17 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
     let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
         return String::new();
     };
+    // Excludes a resolved import whose target is `sym` itself -- see the
+    // identical exclusion in `scoped_symbol_deps`'s own doc comment for
+    // why this can happen and why it's never a real dependency.
+    let self_id = graph.find(&sym.id);
     let targets = graph
         .imports()
         .iter()
         .filter(|imp| {
-            imp.from_file == file.id && contains_identifier(&symbol_text, &imp.imported_name)
+            imp.from_file == file.id
+                && contains_identifier(&symbol_text, &imp.imported_name)
+                && imp.target != self_id
         })
         .filter_map(|imp| imp.target);
     hash_dependency_targets(graph, targets)
