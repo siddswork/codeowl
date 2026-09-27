@@ -30,11 +30,23 @@ impl fmt::Display for Counter {\n\
 pub fn reset(c: &mut Counter) {\n    *c = Counter::new();\n}\n";
 
 fn rust_graph(rel_path: &str, src: &str) -> Graph {
-    Graph::build(vec![FileExtraction {
+    let mut graph = Graph::build(vec![FileExtraction {
         rel_path: rel_path.to_string(),
         source_hash: hash_text(src),
         symbols: codeowl::rust::extract_file(src, rel_path),
-    }])
+    }]);
+    // Mirrors `RepoIndex::build`: imports (including M21.g's synthetic
+    // same-file impl -> type edges) are resolved once the graph exists,
+    // never at extraction time — `dependency_hash` reads `graph.imports()`,
+    // so skipping this step would leave every dependency edge invisible.
+    let file_imports = std::collections::HashMap::from([(
+        rel_path.to_string(),
+        codeowl::rust::extract_imports(src, rel_path),
+    )]);
+    let resolved =
+        codeowl::rust::resolve_imports(std::path::Path::new("/unused"), &file_imports, &graph);
+    graph.set_resolved_imports(resolved);
+    graph
 }
 
 #[test]
@@ -179,6 +191,161 @@ fn a_zero_field_single_trait_impl_marker_type_folds_into_one_document() {
         2,
         "exactly two top-level sections: Greeter (the trait itself, untouched) \
          and EnglishGreeter (now folded with its impl):\n{rendered}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// M21.g (`ARCHITECTURE.md` open question 16, general case): `PersonalGreeter`
+// has a real field, so M21.e's fold correctly leaves it alone — two
+// documents, not one. But the trait impl's own text never mentions `use`
+// for `PersonalGreeter` (same file, no import needed), so without a
+// synthetic impl -> type dependency edge nothing would ever tell the impl's
+// document that `PersonalGreeter`'s own shape moved underneath it.
+fn personal_greeter_src(field_decl: &str) -> String {
+    format!(
+        "\
+pub trait Greeter {{\n\
+    fn greet(&self) -> String;\n\
+}}\n\
+\n\
+pub struct PersonalGreeter {{\n\
+    {field_decl}\n\
+}}\n\
+\n\
+impl Greeter for PersonalGreeter {{\n\
+    fn greet(&self) -> String {{\n        \
+        format!(\"Hello, {{}}!\", self.name)\n    \
+    }}\n\
+}}\n"
+    )
+}
+
+#[test]
+fn a_types_own_field_change_invalidates_its_trait_impls_document_without_folding() {
+    let dir =
+        std::env::temp_dir().join(format!("codeowl-rust-spec-{}-personal", std::process::id()));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+
+    let v1 = personal_greeter_src("pub name: String,");
+    std::fs::write(dir.join("src/greeter.rs"), &v1).unwrap();
+    let graph1 = rust_graph("src/greeter.rs", &v1);
+    let file_id1 = graph1.find("src/greeter.rs").unwrap();
+
+    let mut offered = Vec::new();
+    while let Some(task) = next_task(&graph1, &dir, file_id1).unwrap() {
+        match task {
+            SpecTask::Symbol { id, .. } => {
+                offered.push(id.clone());
+                submit(
+                    &graph1,
+                    &dir,
+                    &id,
+                    "### Summary\nA deliberate unit of behaviour.\n\
+                     ### Behavior\nDoes exactly what the name says and nothing more.\n",
+                )
+                .unwrap();
+            }
+            SpecTask::File { id, .. } => {
+                submit(
+                    &graph1,
+                    &dir,
+                    &id,
+                    "A greeter trait and one real implementor.",
+                )
+                .unwrap();
+            }
+        }
+    }
+    assert_eq!(
+        offered,
+        vec![
+            "src/greeter.rs::Greeter".to_string(),
+            "src/greeter.rs::PersonalGreeter".to_string(),
+            "src/greeter.rs::impl Greeter for PersonalGreeter".to_string(),
+        ],
+        "a real field keeps PersonalGreeter and its trait impl as separate tasks"
+    );
+
+    let spec1 = read_file_spec(&dir, "src/greeter.rs").unwrap().unwrap();
+    let rendered1 = render(&graph1, &dir, file_id1, &spec1);
+    assert!(rendered1.contains("## `PersonalGreeter`"));
+    assert!(rendered1.contains("## `impl Greeter for PersonalGreeter`"));
+    assert_eq!(
+        rendered1.matches("\n## `").count(),
+        3,
+        "three top-level sections: Greeter, PersonalGreeter, its trait impl:\n{rendered1}"
+    );
+
+    // Add a second public field. This moves PersonalGreeter's own
+    // source_hash *and* interface_hash — but the trait impl block's own
+    // text is byte-for-byte unchanged.
+    let v2 = personal_greeter_src("pub name: String,\n    pub greeting_count: u32,");
+    assert_eq!(
+        v1.lines()
+            .find(|l| l.contains("impl Greeter for PersonalGreeter"))
+            .unwrap(),
+        v2.lines()
+            .find(|l| l.contains("impl Greeter for PersonalGreeter"))
+            .unwrap(),
+        "sanity check: the impl block's own header line is unchanged"
+    );
+    std::fs::write(dir.join("src/greeter.rs"), &v2).unwrap();
+    let graph2 = rust_graph("src/greeter.rs", &v2);
+    let file_id2 = graph2.find("src/greeter.rs").unwrap();
+
+    let mut offered2 = Vec::new();
+    while let Some(task) = next_task(&graph2, &dir, file_id2).unwrap() {
+        if let SpecTask::Symbol { id, .. } = &task {
+            offered2.push(id.clone());
+        }
+        match task {
+            SpecTask::Symbol { id, .. } => {
+                submit(
+                    &graph2,
+                    &dir,
+                    &id,
+                    "### Summary\nA deliberate unit of behaviour, refreshed.\n\
+                     ### Behavior\nDoes exactly what the name says and nothing more.\n",
+                )
+                .unwrap();
+            }
+            SpecTask::File { id, .. } => {
+                submit(
+                    &graph2,
+                    &dir,
+                    &id,
+                    "A greeter trait and one real implementor.",
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    assert!(
+        offered2.contains(&"src/greeter.rs::PersonalGreeter".to_string()),
+        "PersonalGreeter's own text changed, so it must be regenerated: {offered2:?}"
+    );
+    assert!(
+        offered2.contains(&"src/greeter.rs::impl Greeter for PersonalGreeter".to_string()),
+        "the trait impl's document must go stale too -- PersonalGreeter's shape moved \
+         underneath it even though the impl's own text didn't change at all: {offered2:?}"
+    );
+    assert!(
+        !offered2.contains(&"src/greeter.rs::Greeter".to_string()),
+        "the unrelated trait itself must NOT be regenerated -- proves this isn't just \
+         regenerating everything blindly: {offered2:?}"
+    );
+
+    let spec2 = read_file_spec(&dir, "src/greeter.rs").unwrap().unwrap();
+    let rendered2 = render(&graph2, &dir, file_id2, &spec2);
+    assert!(rendered2.contains("## `PersonalGreeter`"));
+    assert!(rendered2.contains("## `impl Greeter for PersonalGreeter`"));
+    assert_eq!(
+        rendered2.matches("\n## `").count(),
+        3,
+        "still three separate sections after the fix -- linking staleness never folds \
+         them into one document:\n{rendered2}"
     );
 
     std::fs::remove_dir_all(&dir).ok();
