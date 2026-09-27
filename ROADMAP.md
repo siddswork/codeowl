@@ -878,10 +878,18 @@ Also already scoped when logged, from a real incident (the `JavaStack` self-corr
 
 **Size:** S · **Builds on:** M21.d.
 
+**Rust-only, confirmed before any code was written.** TypeScript's `extract.rs::visit_class`, `java.rs`'s `class_declaration`/`interface_declaration`, and `python.rs`'s `class_definition` all put a class's methods *inside* its own body node syntactically — there is no second, separately-parseable symbol to fold in any of the three, the same finding that made open question 16 itself Rust-specific. Only Rust's `impl Trait for Type` grammar produces the split this fold closes. The earlier draft of this section said "each of the four packs" — wrong, corrected here before implementation rather than after.
+
+**Mechanism: extend the existing inherent-impl fold, not a new one.** `rust.rs::merge_inherent_impls` already folds an *inherent* impl's methods into its target struct's symbol; `inherent_impl_target` deliberately returns `None` for a trait impl (`impl Trait for X`), leaving it "for its own spec section." This adds one more eligibility condition to that same `merge_into` map: a trait impl also folds when its target type has zero of its own fields, zero inherent-impl methods, and is the only trait impl targeting it in the file. Confirmed against the existing `tests/rust_spec.rs::inherent_impl_is_folded_but_trait_impl_stays_its_own_section` test before writing anything: its `Counter` fixture has both a field and an inherent impl, so it fails the new condition and needs no change -- it already proves the general case stays separate.
+
+**A real, visible consequence, not a side effect to discover later:** this moves `source_hash`/`children` for any matching Rust type, the same shape as M15's original inherent-impl fold (`FORMAT_VERSION` 5 -> 6) -- this one needs the same bump. It also means this repo's own already-committed specs for `stack.rs`'s `JavaStack`/`PythonStack`/`RustStack`/`TypeScriptNextStack` and `quarkus.rs`/`fastapi.rs`'s `QuarkusFeatureModel`/`FastApiFeatureModel` -- all real zero-field/one-trait-impl marker types in this repo -- need regenerating once the fold lands, since their current two-section shape becomes one. Regeneration is its own follow-up commit on this branch, not bundled into the extraction change itself.
+
 **Validation (TDD — the failing test first):**
-- A fixture matching the degenerate shape (zero fields, zero inherent methods, one trait impl) in each of the four packs: `get_next_spec_task` never offers an independent task for the type's own declaration; the type is described as part of its trait impl's document instead.
-- A fixture with real fields and/or more than one trait impl is unaffected — still two (or more) independent documents, exactly today's behavior, proving the fold is scoped to the degenerate case only and doesn't regress the general one.
-- `ARCHITECTURE.md` open question 16 updated: degenerate case marked resolved, general case left explicitly open with the reasoning above.
+- A new Rust fixture matching the degenerate shape (zero fields, zero inherent methods, exactly one trait impl — the real `JavaStack`/`impl StackPack for JavaStack` shape): `get_next_spec_task` never offers an independent task for the bare type; its declaration is folded into the one trait impl's own document instead.
+- The existing `Counter` fixture (a field plus an inherent impl) is unaffected -- still two independent documents (`Counter`, `impl fmt::Display for Counter`), proving the fold doesn't regress the general case.
+- `ARCHITECTURE.md` open question 16 updated: degenerate case marked resolved (Rust-specific), general case left explicitly open with the reasoning above.
+- `FORMAT_VERSION` bumped, with a new History entry naming this change.
+- CodeOwl's own affected specs (`stack.rs`, `quarkus.rs`, `fastapi.rs`) regenerated in a follow-up commit and confirmed to read as one section per type, not two.
 
 ##### M21.f — Fully-qualified same-crate/package call blind spot (`ARCHITECTURE.md` open question 14)
 
