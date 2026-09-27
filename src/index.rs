@@ -248,6 +248,11 @@ impl RepoIndex {
             let entry = entry.context("walking a generated-source directory")?;
             self.rescan_entry(&entry, &mut seen, &mut caught)?;
         }
+        // Extend, not overwrite: `rescan_entry` may have already recorded a
+        // removal of its own (a file that turned unreadable, purged right
+        // where it was found) -- `caught.removed = removed` would silently
+        // discard that entry, since a file this walk *did* visit is
+        // correctly excluded from the "not in seen" set computed here.
         let removed: Vec<String> = self
             .files
             .keys()
@@ -257,7 +262,7 @@ impl RepoIndex {
         for r in &removed {
             self.files.remove(r);
         }
-        caught.removed = removed;
+        caught.removed.extend(removed);
         Ok(caught.sorted())
     }
 
@@ -279,8 +284,25 @@ impl RepoIndex {
         }
         let rel = rel_path(&self.root, path);
         seen.insert(rel.clone());
-        let source =
-            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        // Same fix as `ingest_build_entry`: an unreadable file must not
+        // abort re-indexing every other changed file. `seen` already has
+        // this path, so it won't be mistaken for deleted by the "not in
+        // seen" pass at the end of `rescan`. Code-review finding: merely
+        // returning here used to leave a *stale* cache entry (if one
+        // existed) silently served forever, with no signal anything was
+        // wrong -- worse than the old abort-the-whole-build behavior, not
+        // better. Purge it instead, exactly the way `apply_changes` (the
+        // watcher path) already does for this identical scenario.
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(e) => {
+                eprintln!("skipping {} ({e})", path.display());
+                if self.files.remove(&rel).is_some() {
+                    caught.removed.push(rel);
+                }
+                return Ok(());
+            }
+        };
         match self.files.get(&rel) {
             Some(existing) if existing.source_hash == hash_text(&source) => {}
             Some(_) => {
@@ -492,8 +514,20 @@ fn ingest_build_entry(
     if pack.source_kind(path).is_none() {
         return Ok(());
     }
-    let source =
-        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    // A single unreadable file (real-world hit: a non-UTF8 test fixture in
+    // a dogfooded repo, `bat`) must not abort the whole build -- that
+    // silently loses every other file's symbols too, not just the bad
+    // one's. `apply_changes` (the watcher path) already treats this
+    // gracefully; skip here the same way, just without a `caught` list to
+    // record it in (a cold `build` has no "previously indexed" state to
+    // diff against).
+    let source = match std::fs::read_to_string(path) {
+        Ok(source) => source,
+        Err(e) => {
+            eprintln!("skipping {} ({e})", path.display());
+            return Ok(());
+        }
+    };
     let rel = rel_path(root, path);
     files.insert(rel.clone(), FileInputs::extract(pack, &rel, &source));
     Ok(())
@@ -701,6 +735,82 @@ mod tests {
         assert!(
             RepoIndex::index_path(&dir).exists(),
             "cache persisted for next spawn"
+        );
+    }
+
+    #[test]
+    fn build_skips_an_unreadable_file_instead_of_aborting_the_whole_walk() {
+        // Real bug, hit dogfooding against a real repo (bat): a single
+        // non-UTF8 `.rs` file anywhere in the tree used to abort the
+        // *entire* build with `Error: reading ... / stream did not
+        // contain valid UTF-8` -- every other file's symbols lost too,
+        // not just the one bad file's. `apply_changes` (the watcher path)
+        // already treats an unreadable file gracefully; `build`/`rescan`
+        // didn't.
+        let dir = tempdir("unreadable");
+        write(&dir, "a.ts", "export const a = 1;\n");
+        std::fs::write(dir.join("bad.ts"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        write(&dir, "b.ts", "export const b = 2;\n");
+
+        let graph = RepoIndex::build(&dir).unwrap().rebuild().unwrap();
+
+        assert!(graph.find("a.ts::a").is_some(), "file before the bad one");
+        assert!(graph.find("b.ts::b").is_some(), "file after the bad one");
+    }
+
+    #[test]
+    fn rescan_skips_an_unreadable_file_instead_of_aborting() {
+        // Same bug, the catch-up path `RepoIndex::open` drives on a
+        // fresh spawn: a file that turned unreadable (or was always
+        // non-UTF8 and only now got walked) must not abort re-indexing
+        // every other changed file.
+        let dir = tempdir("unreadable-rescan");
+        write(&dir, "a.ts", "export const a = 1;\n");
+        RepoIndex::open(&dir).unwrap();
+
+        std::fs::write(dir.join("bad.ts"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        write(&dir, "b.ts", "export const b = 2;\n");
+
+        let (_index, graph, _caught) = RepoIndex::open(&dir).unwrap();
+
+        assert!(graph.find("a.ts::a").is_some());
+        assert!(
+            graph.find("b.ts::b").is_some(),
+            "new file caught despite the bad one"
+        );
+    }
+
+    #[test]
+    fn rescan_purges_a_previously_cached_file_that_turned_unreadable() {
+        // Code-review finding: the fix above must not leave a *stale*
+        // cache entry silently served forever. A file with real,
+        // previously-indexed symbols that gets overwritten with non-UTF8
+        // bytes between runs (a bad merge, a binary overwrite -- the
+        // exact real-world `bat` fixture shape) is walked again, `seen`
+        // already has it so it's not the ordinary "file vanished"
+        // deletion path, but the read still fails -- `apply_changes` (the
+        // watcher path) already purges the entry for this exact scenario;
+        // `rescan` must match, not silently keep serving the old symbols
+        // with no staleness signal at all.
+        let dir = tempdir("unreadable-rescan-was-valid");
+        write(&dir, "a.ts", "export const a = 1;\n");
+        write(&dir, "config.ts", "export const cfg = 1;\n");
+        RepoIndex::open(&dir).unwrap();
+
+        std::fs::write(dir.join("config.ts"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+
+        let (_index, graph, caught) = RepoIndex::open(&dir).unwrap();
+
+        assert!(graph.find("a.ts::a").is_some());
+        assert!(
+            graph.find("config.ts::cfg").is_none(),
+            "stale symbols from before the file turned unreadable must not \
+             still be served"
+        );
+        assert!(
+            caught.removed.contains(&"config.ts".to_string()),
+            "turning unreadable must report as removed, the same signal \
+             an actual deletion gives: {caught:?}"
         );
     }
 
