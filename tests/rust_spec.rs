@@ -101,3 +101,85 @@ fn inherent_impl_is_folded_but_trait_impl_stays_its_own_section() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// M21.e (`ARCHITECTURE.md` open question 16, degenerate case): a zero-field,
+// zero-inherent-method type whose entire contract is one trait impl folds
+// into a single document too — the shape `Counter` above deliberately isn't,
+// since it has a field and an inherent impl. The real-world trigger was
+// `stack.rs::JavaStack`; this is the same shape in miniature.
+const MARKER_SRC: &str = "\
+pub trait Greeter {\n\
+    fn greet(&self) -> String;\n\
+}\n\
+\n\
+pub struct EnglishGreeter;\n\
+\n\
+impl Greeter for EnglishGreeter {\n\
+    fn greet(&self) -> String {\n        \"Hello!\".to_string()\n    }\n\
+}\n";
+
+#[test]
+fn a_zero_field_single_trait_impl_marker_type_folds_into_one_document() {
+    let dir = std::env::temp_dir().join(format!("codeowl-rust-spec-{}-marker", std::process::id()));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("src/greeter.rs"), MARKER_SRC).unwrap();
+
+    let graph = rust_graph("src/greeter.rs", MARKER_SRC);
+    let file_id = graph.find("src/greeter.rs").unwrap();
+
+    let mut offered = Vec::new();
+    while let Some(task) = next_task(&graph, &dir, file_id).unwrap() {
+        match task {
+            SpecTask::Symbol { id, .. } => {
+                offered.push(id.clone());
+                submit(
+                    &graph,
+                    &dir,
+                    &id,
+                    "### Summary\nA deliberate unit of behaviour.\n\
+                     ### Behavior\nDoes exactly what the name says and nothing more.\n",
+                )
+                .unwrap();
+            }
+            SpecTask::File { id, .. } => {
+                submit(
+                    &graph,
+                    &dir,
+                    &id,
+                    "A greeter trait and its one implementor.",
+                )
+                .unwrap();
+            }
+        }
+    }
+
+    assert_eq!(
+        offered,
+        vec![
+            "src/greeter.rs::Greeter".to_string(),
+            "src/greeter.rs::EnglishGreeter".to_string(),
+        ],
+        "the trait impl must not be offered as its own task — it's folded \
+         into EnglishGreeter, the same way an inherent impl already is"
+    );
+
+    let spec = read_file_spec(&dir, "src/greeter.rs").unwrap().unwrap();
+    let rendered = render(&graph, &dir, file_id, &spec);
+
+    assert!(
+        rendered.contains("## `EnglishGreeter`"),
+        "type section missing:\n{rendered}"
+    );
+    assert!(
+        !rendered.contains("## `impl Greeter for EnglishGreeter`"),
+        "the trait impl must not render as its own section once folded:\n{rendered}"
+    );
+    assert_eq!(
+        rendered.matches("\n## `").count(),
+        2,
+        "exactly two top-level sections: Greeter (the trait itself, untouched) \
+         and EnglishGreeter (now folded with its impl):\n{rendered}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -202,8 +202,16 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// is stripped transiently at fold time only, since `.signature` itself
 /// stays value-inclusive for `quarkus.rs::resolve_channel_name`, a real
 /// consumer that reads a Kafka channel constant's literal value out of
-/// it).
-pub const FORMAT_VERSION: u32 = 13;
+/// it). 14 = M21.e (Rust: a trait impl also folds into its target type's
+/// symbol, not just an inherent impl -- but only in the narrow degenerate
+/// shape `ARCHITECTURE.md` open question 16 names: zero fields, zero
+/// inherent methods, exactly one trait impl targeting the type. Moves
+/// `source_hash`/`children` for every Rust type matching that shape --
+/// the real trigger was `stack.rs::JavaStack`/`PythonStack`/`RustStack`/
+/// `TypeScriptNextStack` and `quarkus.rs`/`fastapi.rs`'s
+/// `QuarkusFeatureModel`/`FastApiFeatureModel`, all zero-field marker
+/// types in this repo).
+pub const FORMAT_VERSION: u32 = 14;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
