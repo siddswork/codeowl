@@ -1,14 +1,17 @@
 ---
 kind: file
 source_paths: [src/extract.rs]
-file: { source_hash: 1d6514a4bcd2f3ec3762c653552be2c41ad78971149d2907956c3e306215066a, deps_hash: 0f10f465419d7111a155630ce566adae74b00a3cc44b63273460f5043a64d027, spec_hash: ea3bf4f8f58b0b2352e3190bbd49937d8e4d4f446b6e11e79ac0e92652813f13 }
+file: { source_hash: cfa79a2066adb6ad8fc7c02d512cf52027f25741899b64f0a6e1835a2a40ec6a, deps_hash: 284c15f24db2f6014d2611ba2fb4ee5b7b64ef2580a8a7284456379b8a7ac426, spec_hash: c85687eb4b90a769e529c1167e16c54abe3253d513a6679e7e4d3b7a93d900a9 }
 symbols:
   src/extract.rs::extract_file: { source_hash: 0f80395f2d0895f891b54861868cd690539d694d6d078d92f5a259097e41129a, deps_hash: 7a249fa56fb8f71895f3311c45ae988dd0d5426fe72cd08f212c8d33029b1253, spec_hash: 279969477ef8721fea255ee14212e68963dc06b4a240e69dbe147b94a9bba0bb }
   src/extract.rs::visit_top_level: { source_hash: b3494f71abb74cf7a8026cae0f59dba426184803ab1f71dcbc82e43f6275f6e8, deps_hash: 57b36ccf02abf241d59cf027b8af996e4e37cdf048813be00047a453efba7ce6, spec_hash: 1dd94bea92fd0545b5f38902f2e10ffd1b1caa3be50f1d90dede5779a7826f70 }
   src/extract.rs::visit_function: { source_hash: 9ad2d57f1d77239149dba7a198136947d6450d6d458235f2b4ee71bf1344f292, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 3ed706af3b63d5c82ecaad80ec7bed1da6c783fbf1b319572cabceb26ad4d82e }
   src/extract.rs::visit_class: { source_hash: e51d518d683ec6a2c7313b3f5c560726a401ef0dd2ff81aa8baa686848512947, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 0aa92348644fca449bef76f23e19b29417bb15d148f936d7cbecc203cf009690 }
-  src/extract.rs::visit_lexical: { source_hash: e7406937d062fe58270abf2f9af8753d60b92117c086b4f91015b0ccf13ddbd4, deps_hash: d4034a9cbee7900a1fbe5e4401fc040618db110c2395b587568f12985ac649df, spec_hash: c4c8cb249e3ab4180b0f01d197d0d67face556f26a86f26dfbf80f109ac23c5b }
+  src/extract.rs::visit_lexical: { source_hash: e7406937d062fe58270abf2f9af8753d60b92117c086b4f91015b0ccf13ddbd4, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 8ba13ca7d441674d2d130a206075ba5d502ae512ff75ad760b592eb6ba99f20c }
   src/extract.rs::signature_text: { source_hash: 9596e4dcd49fc9e8ea493b1420cff5c22b200725f73ff1b6a7d2b2d82ecd097b, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b0cae5ed6ae3bd5f730fac83830eef5216066e4a6cf4707566b12e75523e96b4 }
+  src/extract.rs::dedupe_member_id: { source_hash: 9a34977327474d191fabc285ae9a1038a86e53363347cb4b4f339492911249be, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0a87580bde3bddf6df8d5fcab656f0486f1cb255b485728a3f6abbf3125d08b7 }
+  src/extract.rs::is_pub_field_signature: { source_hash: b13808da443685e9f773a33f684d01e3f3f00339a6bb6eedaa19aff2dc691783, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e5eb5c96f124a1a43b1ad128f4b243d8dfb17bde271a0d023d41319a2d56db4e }
+  src/extract.rs::field_signature_text: { source_hash: e23179e3090a2f37a435241ff9d1a631ab625b6314f8192d636fa1795f778344, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6d20951d74b3e5a7ab3771b4af367b6cb7cd1ceed22ac3e091205d1dfca629dc }
   src/extract.rs::leading_doc: { source_hash: 7f4bd6766ea1eab0417ea2e54f3e1b922a1d6b297bc223ec3aacd4a3079cf6fa, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a4791775f2e9d962c3992e11ea46cfa74fb8a8f2678229608c2a7fec065f8c83 }
   src/extract.rs::clean_comment: { source_hash: 1df018000c9a0de5ddab711125a125cedff410e550fe2b2f1d2652163b214e10, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 5a04d28635d7efb76eae5dd28073f74822a0eb2c5d74b44d5114bc9a1f5c4eb0 }
   src/extract.rs::field_text: { source_hash: 2a5140d871a8f94a462c9ede1e35d0cc3fc4e40157ee85e7866651beb6747233, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a88de7ed3d89b62b60a1a1e7c0db24ba134aae3752fa1bff14472ef6924b4f0f }
@@ -17,7 +20,7 @@ symbols:
 ---
 # src/extract.rs
 ## Summary
-Walks a single TypeScript/TSX file with tree-sitter and pulls out its top-level declarations — the TypeScript pack's counterpart to `rust.rs`. Deliberately shallow: only the syntax root's direct children (unwrapping `export`), plus one level into a class body for its methods. Nested closures and callbacks aren't declarations CodeOwl would ever spec. `extract_file` is the entry; `visit_top_level` dispatches to `visit_function` (a `Callable`), `visit_class` (a `Container` + method children, with a Merkle-rollup `source_hash`), or `visit_lexical` (a `const` — `Callable` if it holds an arrow function, else `Value`; `let`/`var` and destructures are skipped). The rest are small tree-sitter helpers (`signature_text`'s "text before the `{`" trick, `leading_doc`'s adjacency-checked comment run, `clean_comment`, `node_lines`). Every `node.kind()` string here is TypeScript-specific — a Phase-2 seam.
+This file is the TypeScript/TSX extractor: given one file's source text, it uses tree-sitter (the parsing library that turns source text into a navigable tree) to find every top-level declaration — functions, classes (and their methods and fields), and `const` values — and turns each into an `ExtractedSymbol` the rest of CodeOwl can build a graph from. It deliberately only looks at top-level declarations and, for a class, one level into its body; nested closures and callbacks are never extracted, since CodeOwl only generates specs for declarations, not every piece of syntax. Along the way it computes each symbol's `signature` (the declaration text with its body/value stripped) and decides which symbols get an `interface_hash` — only exported functions/values and, differently, none of a class's individual members, since a method or field is never independently exported or imported on its own.
 
 ## `extract_file`
 `pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol>`
@@ -91,9 +94,16 @@ The class symbol itself is pushed first, with `children` set to the ordered list
     out: &mut Vec<ExtractedSymbol>,
 )`
 ### Summary
-Handles a `const` declaration — emitting a `Callable` symbol for `const f = () => {}` (an arrow/function expression) or a `Value` symbol for a plain data const.
+Picks up top-level `const` declarations in a JavaScript/TypeScript file — both plain values (`const PI = 3.14`) and arrow-function/function-expression assignments (`const foo = () => {...}`) — and records each one as a symbol CodeOwl can track.
 ### Behavior
-Returns immediately unless the declaration keyword is `const` — `let` and `var` aren't spec-worthy. Iterates `variable_declarator`s, skipping any whose `name` isn't a plain `identifier` (a `const { a, b } = …` destructure has no single name to attach a symbol to). For each: if the value is an `arrow_function` / `function_expression`, it's a `Callable` (`raw: "function"`) with signature `const <name> = <params/return>`; otherwise a `Value` (`raw: "const"`) whose signature is `const <name><: type>` — the *declared type annotation* if present, never the literal value, so a type change moves `interface_hash` but a value-only edit doesn't. `is_exported` from the outer node; `interface_hash` set only when exported.
+Only runs for `const` declarations — `let` and `var` are a different AST (the parse tree — the structure tree-sitter builds from source text — node kind entirely and aren't declarations this generates specs for, so the function returns immediately if the declaration's `kind` field isn't `"const"`.
+
+For each `variable_declarator` child of the declaration:
+- A destructuring pattern (`const { a, b } = ...` or `const [a, b] = ...`) has no single name to attach a symbol to, so it's skipped rather than guessed at.
+- If the declared value is an arrow function or function expression, the symbol is recorded as `SymbolKind::Callable` with a signature built from the function's parameter list and return type (via `signature_text`), taking the function's body separately so the signature text doesn't include it.
+- Otherwise it's a plain value, recorded as `SymbolKind::Value`, whose signature is just `const <name>` plus its type annotation if one is present (e.g. `const PI: number`) — deliberately *not* including the literal value. This is what lets `interface_hash` (the hash used to decide whether a change to this symbol should ripple out to anything that references it — see `GLOSSARY.md`) ignore a value-only edit like changing `3.14` to `3.14159` while still catching a type change.
+
+`interface_hash` itself is only set (`Some`) when the declaration is exported (`is_exported`, true when the enclosing node is an `export_statement`) — an unexported const can never be referenced from another file, so there's nothing for a hash-based staleness check to protect there. Each resulting `ExtractedSymbol` also carries its own `source_hash` (hashing the full declarator text, body included), line span, and any leading doc comment.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
@@ -106,6 +116,41 @@ Returns immediately unless the declaration keyword is `const` — `let` and `var
 Extracts a declaration's signature as the source text from its start up to (not including) its body — the "everything before the `{`" trick.
 ### Behavior
 Slices `source[node.start .. body.start]` and trims trailing whitespace. Picks up modifiers, name, type parameters, params, and return type without naming each field, and works identically for `function_declaration`, `method_definition`, `class_declaration`, and arrow functions (where the "body" may be a braceless expression). `end` is `.max(start)` as a guard against a body that somehow starts before the node — the result is then an empty string rather than a panic.
+### Depends on
+- externals: tree_sitter
+
+## `dedupe_member_id`
+`fn dedupe_member_id(candidate: String, existing: &[String]) -> String`
+### Summary
+Makes sure two class members (a field and a method, say) never end up sharing the same generated id, by appending `#2`, `#3`, and so on until the id is unique.
+### Behavior
+Class members are given ids of the form `{class}.{name}`. That's normally unique, but a class field and a method can legally share a bare name in real code (the parser, tree-sitter, accepts it even though a type-checker like `tsc` wouldn't) — and both would compute to the exact same id under this scheme. Without deduplication, one member's node in the graph's arena (the flat list that owns every graph node) would silently overwrite the other's when the graph is built, and one of the two members would simply vanish from the index.
+
+`dedupe_member_id` returns `candidate` unchanged if it isn't already in `existing` (the ids already assigned to this class's other members). If it is, it tries `candidate#2`, then `candidate#3`, and so on, returning the first suffix not already in `existing`. Whichever member is declared first in the source keeps the plain, unsuffixed id — later members whose name collides with an earlier one are the ones that back off to a suffixed id.
+### Depends on
+- (none)
+
+## `is_pub_field_signature`
+`fn is_pub_field_signature(signature: &str) -> bool`
+### Summary
+Decides whether a TypeScript class field is publicly visible from outside the class, based on its signature text.
+### Behavior
+TypeScript fields are public by default — unlike Rust, there's no keyword required to make a field visible, so this function only has to catch the two ways a field opts *out* of being public:
+- an explicit `private` modifier, which always appears as the field's signature's first word; or
+- a JavaScript `#`-private name, which needs no `private` keyword at all — the `#` sigil is part of the field's actual name, so it shows up as the first character of the signature text itself.
+
+It takes the signature's first whitespace-separated token and returns `true` unless that token is exactly `"private"` or starts with `#`. An empty signature (no tokens at all) returns `false`.
+### Depends on
+- (none)
+
+## `field_signature_text`
+`fn field_signature_text(node: Node, source: &str) -> String`
+### Summary
+Extracts a class field's declaration text with its initializer value stripped off — e.g. `count: number = 0` becomes `count: number` — so the field's "shape" can be hashed without its value's own text affecting that hash.
+### Behavior
+A field declaration (a `public_field_definition` node in tree-sitter's parse tree — the structure the parser builds from source text) has no body node the way a function does, so this can't reuse the same "everything before the `{`" trick `signature_text` uses for functions. Instead it slices the source from the node's start up to the start of its `value` child (the initializer after `=`), if one exists — falling back to the node's own end byte when there's no initializer at all.
+
+After slicing, it trims trailing whitespace, then a trailing `=` (left over when there *was* an initializer, since the slice stopped just before the value but the `=` itself remains), then trailing whitespace again, then a trailing `;`, then whitespace once more — leaving a clean declaration like `count: number` or `private name: string` with no `=`, no value, and no semicolon.
 ### Depends on
 - externals: tree_sitter
 

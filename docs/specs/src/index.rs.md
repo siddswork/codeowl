@@ -1,25 +1,29 @@
 ---
 kind: file
 source_paths: [src/index.rs]
-file: { source_hash: 90c9ccd8f976a4af2783ba6f6a9d46e6c9c3b471909df3fd42787878a6e40dbc, deps_hash: 272826bcf6e38116ff6985b994d826d5e0f61540038f3c5b50c6724d3d64914f, spec_hash: 6b0a950e9b7cfbd3eccd4d49e7bc3e4580964566f262998f30f3dc9c518d06de }
+file: { source_hash: 25da236d1d71aad7ca5ff7d01bed9cd9e0317e741cff7c27faef60d716d1df7e, deps_hash: 93eda883167e5bac863605a36813f85e5a495af3a93606ec90b4dcbc5ba9a508, spec_hash: 82a98407ccd2d038d65268f94c42295b795f9b2e224bcfada819891638a576e0 }
 symbols:
-  src/index.rs::FileInputs: { source_hash: fbecd5dce11211eb08c26741360e048b5070afb4e23695b3e68ee0de30bbc445, deps_hash: b3e22fbedd140b149388c32715b9051e6eff3d7c6ade1e6e7ad1b060540d0825, spec_hash: d40cb41e07c71ff865a9b4d47e61d288ed018462fea2198c7f15118560c75512 }
-  src/index.rs::CatchUp: { source_hash: 677e9d2d3bd8a4bd4101ed2c956aa8dfb785a27dca9f0f6fb4994179f445a6dd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3dee682eb6762f6361122003798ef4c5917cbc7bdb96a62b8fdb8ed1b4867085 }
-  src/index.rs::RepoIndex: { source_hash: 35d4957e14d8e2f99cef049ee3db84574fe4875c40056414c91741aff238526f, deps_hash: f4472e7729baf28d1ef0aa1677f7817d40e163c3b948f849ca5204ba3bd9746f, spec_hash: 024200935414252f806b3aee536cedd4edd7299689f8f580f4350b07a71e6525 }
+  src/index.rs::FileInputs: { source_hash: 47e412f2023e265aec973a76fa55415237455a745e24eab6170a6fbf3451b8db, deps_hash: 1623a816d0d741f900c9c77e8c39d4d9d041c185410c6dfe941cd80dd2c7b456, spec_hash: a2cd33f6c64045cddeafff3f73c818456a0ea43330e704e8bc1edf950761cc7d }
+  src/index.rs::CatchUp: { source_hash: 07805fea5febc54c573e8083754584ac2d977962598fdd6afd4b01dca8bb27b6, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 52e10ce4b7920943505c7dffaf7c32c0086febee8f384aa2004fa98bb9c4568e }
+  src/index.rs::RepoIndex: { source_hash: 37aaea67d9aa2a57a58fdecf0b372f0a70f75033a17881f120665cf28d986a6b, deps_hash: 6781fd3bc3eda72c5dd88b4964c1369a538dec09e815f6d294ff3ca295a9e3c6, spec_hash: 7b35019a573085b15ae37bcf3723e6197dd5e51653a01c0480da79041106aede }
   src/index.rs::canonical_root: { source_hash: a12afe5bc286ba94b312c3a2ed43df1be87659af6c1dc03d27fb702901f0ad8e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c006dd5c57e68d23df0160e998922dd80f01dcdcbe723ac1f3913c9cc2c77ff8 }
   src/index.rs::canonicalize_event_path: { source_hash: 3bebe39ce6f00d1ab58958d5e87cf298bb3fcdc0f44186a7170e195f8e6ad359, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: bed0673d7e2ef62cc32f60efe539242a27ec17aee128e91c10688a71bfa63ab8 }
   src/index.rs::rel_path: { source_hash: 8fb5e79ec2f2f3bc5d8fed6fdbb54b303b47381e0bd2943f80b3745a47e1ee9c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b887526579e14f7161923631b7b35c6d45fe67e3905af60c966a59b04e051225 }
+  src/index.rs::ingest_build_entry: { source_hash: 63ba0acdc73a1e4f3d4604afa6a49459fe0449b7e967731ea531d37ebf021354, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 1ed7ee10f547817373ff2abb2858029e7108bb73c26332f81e113c887f104ea3 }
+  src/index.rs::generated_source_entries: { source_hash: 13f83892670cc66f4eb2da9852c203b725178b2d9f14664a078a547198ded4e1, deps_hash: f5afa2f13a5fae7ce9579309271426d63ca953f7caf6f86202a89f7f91e5a00f, spec_hash: 39836eaf94e3f79dd80f32baa688ef9e0052771c23eb875e1c8c9e9b826befc1 }
 ---
 # src/index.rs
 ## Summary
-This file makes CodeOwl's indexing incremental: instead of re-parsing every file in a repo each time it runs, `RepoIndex` remembers each file's raw-text hash and extracted data on disk (in `.codeowl/index`), so on a fresh run it only re-parses files that actually changed since the last time — and while CodeOwl is running, a background file watcher feeds it individual edits (via `apply_changes`) so the graph stays current without waiting for a restart. It handles both the cold-start case (no cache yet, or a cache from an incompatible format/language stack, so a full walk-and-parse happens) and the warm-start case (a valid cache exists, so only added/modified/deleted files get re-processed). After updating its cached per-file data, it rebuilds the full graph from that data (cheap, since no parsing is needed) and resolves cross-file links — imports, and the "flow edges" that need the whole graph to resolve against — before saving both the graph and the index back to disk. It also tracks which directories the file watcher should actually watch, respecting `.gitignore` so things like `node_modules` are never monitored.</content>
+This file implements incremental indexing: it caches, per file, exactly what was extracted from it (its symbols, imports, and any cross-cutting flow edges) plus a hash of that file's contents, so a rebuild after an edit only re-parses the files that actually changed rather than the whole repo. `RepoIndex` is the cache itself, persisted to `.codeowl/index` alongside the graph it can rebuild from those cached inputs. This backbone serves two moments: a fresh process starting up (`RepoIndex::open`, which hash-checks every file against the cache and only re-parses what moved since the last run) and the in-session file watcher (`RepoIndex::apply_changes`, driven from `watch.rs`, which reindexes only the specific paths reported as touched). It also walks any build-tool-generated source directories (like Maven's `target/generated-sources`) separately from the normal repo walk, since a repo's own `.gitignore` deliberately excludes those directories from everything else.
 
 ## `FileInputs`
 `pub struct FileInputs`
 ### Summary
-A per-file cache entry holding everything needed to build the graph and resolve imports for one file, without re-parsing that file's text again — the reason an unchanged file in a repo isn't re-scanned every time CodeOwl rebuilds its index.
+Everything CodeOwl caches about one source file so it never has to re-parse and re-extract a file that hasn't changed since the last time it ran.
 ### Behavior
-Holds a hash of the file's raw source text (used to detect whether it changed since it was cached), its extracted symbols, its parsed imports, and its unresolved "flow edges" (looser cross-file links, like a URL literal, that get resolved separately once the whole graph exists). The `extract` constructor is where a file actually gets processed for the first time: it hashes the source, asks the active language stack (a `StackPack`) to extract the file's symbols, and then applies the schema-detection hook (`is_schema_symbol`) to retag any symbol the stack recognizes as a database table (e.g. an ORM model class) from its default kind to `Schema`. For a dedicated schema file (like a `.sql` file), it skips import and flow-edge extraction entirely, since such a file has neither; for an ordinary code file (or an unrecognized kind), it also extracts imports and flow edges from the stack.</content>
+Holds a file's `source_hash` (used to detect whether the file changed at all since it was last cached), its extracted `symbols`, its `imports` (already-parsed but not-yet-resolved import statements), and its `flow_edges` — flow edges (a cross-cutting reference this stack's pack knows how to spot, like a UI component rendering a route) that are still unresolved at this point and only get matched up against the whole graph later, during `rebuild`. `flow_edges` defaults to an empty list when deserializing an older cache written before this field existed (`#[serde(default)]`), so an existing `.codeowl` cache doesn't break just because a new field was added.
+
+Its associated `extract` function builds one of these from scratch for a file: it hashes the source, asks the language-specific `pack` (a `StackPack` implementation — the trait that knows how to parse one particular language/framework) to extract the file's symbols, then reclassifies any symbol the pack recognizes as a schema declaration (a SQL table, say) to `SymbolKind::Schema` if it wasn't already tagged that way. What happens next depends on the file's `SourceKind`: a schema file (e.g. a `.sql` file) gets empty `imports`/`flow_edges`, since a schema file doesn't import anything or participate in cross-cutting flows the way ordinary code does; any other file (`Code`, or unclassified) gets its imports and flow edges extracted from the pack as normal.
 ### Depends on
 - `src/graph.rs::UnresolvedFlowEdge` — crate::graph
 - `src/hash.rs::hash_text` — crate::hash
@@ -33,26 +37,26 @@ Holds a hash of the file's raw source text (used to detect whether it changed si
 ## `CatchUp`
 `pub struct CatchUp`
 ### Summary
-The record of which files a rescan or incremental update touched — added / modified / removed paths. The evidence M9's validation asks for ("reindexes exactly the changed files") and what the watcher logs.
+A record of exactly which files a rescan or incremental update actually touched — added, modified, or removed — so a caller can confirm the index only reindexed what really changed, not the whole repo.
 ### Behavior
-Three string vecs plus helpers: `is_empty` (nothing changed — a fast-path no-op rebuild), `total` (count across all three), and `sorted` (sorts each vec, consumed and returned) so the result is deterministic for tests and logs regardless of directory-walk order.
+Three plain lists of file paths: `added`, `modified`, `removed`. `is_empty()` reports whether all three lists are empty (nothing changed at all). `total()` returns the combined count across all three, used for a quick "N files caught up" message. `sorted()` sorts each of the three lists independently and returns `self`, giving a stable, reproducible order regardless of the order files were discovered in during the scan.
 ### Depends on
 - (none)
 
 ## `RepoIndex`
 `pub struct RepoIndex`
 ### Summary
-Keeps the per-file inputs the graph is built from — each file's extracted symbols, its imports, and a hash of its raw text — so that after an edit CodeOwl re-parses only the files that actually changed, not the whole repo. It's what makes both startup and the live file-watcher fast. Saved to disk at `.codeowl/index`, next to the graph.
+The on-disk cache of everything CodeOwl has already parsed and extracted from a repo — what makes starting up on a repo you've indexed before fast, since only files that actually changed since last time need re-parsing.
 ### Behavior
-`build` does a cold start: canonicalize the repo root (resolve any symlinks — everything downstream strips this prefix off absolute paths, so the two forms have to match), pick the language pack via `lang::detect`, walk every file the pack reads, and cache each one's inputs.
+Holds, per repo-relative file path, that file's cached `FileInputs` (in a `BTreeMap`, so the graph built from it always comes out in the same deterministic order regardless of filesystem walk order). It also records `format_version` and `pack_name` as stamps: if the on-disk cache's format is older than what this build expects, or if `lang::detect` now picks a different stack pack (framework/language detector) than the one this cache was built with, `load` treats the whole cache as unusable and forces a full rebuild rather than trusting inputs parsed by the wrong grammar. `root` (the absolute repo path) and `pack` (the detected `StackPack`, boxed so `RepoIndex` stays a concrete type usable from `watch.rs`) are both machine/run-specific and never serialized — they're set fresh from context every time the cache is loaded or built.
 
-`open` is the normal startup path. It canonicalizes the root up front, then tries `load` on the saved `.codeowl/index`; if that returns something usable it runs `rescan` (hash-check every file on disk, re-parse only what changed while nothing was running) then `rebuild`, otherwise it falls back to a full `build`. `load` discards the cache — forcing a full rebuild — if the on-disk format stamp doesn't match the current one, or if `lang::detect` now picks a different pack than the cache was built with (the cached parse would be from the wrong grammar).
-
-`apply_changes` is the file-watcher's entry point: given a batch of changed paths, it first normalizes each to the same canonical form as the stored root (`canonicalize_event_path` — watcher backends report paths differently, and a form mismatch would silently drop the event), then per file: unchanged content → nothing; changed → re-extract and record `modified`/`added`; a path that no longer reads → treat as a deletion. If anything actually changed it calls `rebuild` and hands back the fresh graph.
-
-`rebuild` reconstructs the whole graph from the cached inputs — cheap, because no parsing happens: reassemble it in memory, run the pack's import resolution and flow-edge resolution against it, then write both `.codeowl/graph` and the updated index back to disk. `watchable_dirs` lists every directory under the root for the watcher to register.
-
-The struct carries the format stamp, the pack name it was built with, and the per-file map (a `BTreeMap`, so a rebuilt graph's node order is deterministic). The absolute root and the pack object are never serialized — they're re-derived from the repo on `load`.
+Key entry points:
+- `build(root)` does a full walk and parse of every extractable file — the cold-start path, used whenever there's no usable cache yet.
+- `open(root)` is the normal startup path: load the cached index, hash-check every file on disk, re-parse only what changed while nothing was running, then rebuild and persist the graph. Falls back to `build` when there's no usable cache, reporting an empty `CatchUp` in that case (there's nothing to diff against on a genuine first run).
+- `rescan()` walks the tree, diffing every extractable file's current hash against its cached one, re-extracting whatever moved and dropping whatever's gone; `rescan_entry` is the shared per-file logic both the main walk and a generated-source walk drive identically.
+- `apply_changes(paths)` is the file-watcher-driven path: given the absolute paths the watcher reported as touched, it only triggers a rebuild (`Some`) if at least one path actually changed something the graph depends on — an editor resaving identical content, or a touch to a non-source file, is a genuine no-op that returns `None`.
+- `rebuild()` reconstructs the whole `Graph` from whatever's currently cached and re-persists both the graph and the index to `.codeowl/`. This step is cheap — arena construction and import resolution only, since every file's symbols and imports are already sitting in the cache; no parsing happens here.
+- `watchable_dirs(root)` lists every directory the file watcher should register on — only the part of the tree visible under `.gitignore` rules, so something like `node_modules` in a real repo is never watched.
 ### Depends on
 - `src/graph.rs::FileExtraction` — crate::graph
 - `src/graph.rs::FlowEdge` — crate::graph
@@ -92,3 +96,35 @@ An absolute path as a repo-relative, forward-slash string — the id scheme `Sym
 Strips `root` (falling back to the whole path if it isn't a prefix), lossily converts to a `String`, and replaces `\` with `/` so a Windows path matches the same file's id as it would on Linux. The lossy conversion means a non-UTF-8 filename becomes `�`-containing text rather than an error — acceptable, since such a file wouldn't be valid TS/Rust source anyway.
 ### Depends on
 - externals: std
+
+## `ingest_build_entry`
+`fn ingest_build_entry(
+    files: &mut BTreeMap<String, FileInputs>,
+    root: &Path,
+    pack: &dyn StackPack,
+    entry: &ignore::DirEntry,
+) -> Result<()>`
+### Summary
+Processes one file found while walking the repo during a full build: reads it, extracts its symbols, and inserts the result into the in-progress cache — skipping anything that isn't a real, extractable source file.
+### Behavior
+Returns immediately (doing nothing) if the walked entry isn't a plain file (e.g. it's a directory), or if the stack pack (the language/framework-specific extractor) says this path's `source_kind` is `None` — meaning the pack doesn't recognize it as a file worth extracting at all. Otherwise it reads the file's contents to a string (surfacing a read error with `.context(...)` naming the path, if the read fails), computes its path relative to the repo root, and inserts a freshly built `FileInputs` for it into the `files` map, keyed by that relative path — overwriting any existing entry for the same path.
+
+This logic is factored out of `RepoIndex::build` specifically so that both the primary directory walk and a separate generated-source walk (for files a build tool produces, which live outside the normal source tree) can drive the exact same extract-and-insert steps instead of each maintaining its own copy.
+### Depends on
+- `src/stack.rs::StackPack` — crate::stack
+- externals: anyhow, std
+
+## `generated_source_entries`
+`fn generated_source_entries<'a>(
+    candidate_roots: &'a [PathBuf],
+    pack: &'a dyn StackPack,
+) -> impl Iterator<Item = Result<ignore::DirEntry, ignore::Error>> + 'a`
+### Summary
+Finds every file sitting inside a build tool's generated-source directories (like Maven's `target/generated-sources`) across the whole repo, so code that only exists after a real build — a generated JAX-RS resource, say — still gets indexed.
+### Behavior
+Asks the stack `pack` (the language/framework-specific extractor) which subdirectory names it considers generated-source directories, then, for each of `candidate_roots`, joins each of those directory names on and keeps only the ones that actually exist on disk (`is_dir()`) — a repo that hasn't been built locally simply won't have one yet, which is treated as normal, not an error. Each surviving directory is walked with `ignore::WalkBuilder` configured with `standard_filters(false)`, meaning `.gitignore` rules are deliberately *not* applied here — the whole point of a generated-source directory is that a repo's own `.gitignore` normally excludes it (`target/`, `build/`), and this is the one place CodeOwl reads through that exclusion on purpose.
+
+`candidate_roots` is not rediscovered by walking the repo again — it's handed in from the caller's own primary directory walk, which already visits every directory in the repo as part of finding files. A real multi-module build (where generated sources live per-module, e.g. `rest-heroes/target/generated-sources`, never once at the repo root) needs exactly this: checking only the repo root would silently find nothing on a multi-module repo, and doing a second full-repo walk to rediscover module boundaries would walk the tree twice for no reason. Reusing the primary walk's already-visited directories avoids both problems, and — since that walk visits each directory exactly once — also avoids ever checking the same directory's generated-source subfolder twice.
+### Depends on
+- `src/stack.rs::StackPack` — crate::stack
+- externals: anyhow, std
