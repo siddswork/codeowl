@@ -150,6 +150,22 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// A cache stamped with any other value is discarded and rebuilt from
 /// source, never partially reused (the latent M11 bug this closes).
 ///
+/// **Also bump it for a pure logic change with no shape change at all** —
+/// any edit to a pack's `extract_symbols`/`resolve_import`/`feature_model`/
+/// `is_schema_symbol` that changes what a given input produces, even
+/// though `ExtractedSymbol`/`Symbol`'s own fields are untouched. Two real
+/// incidents (`ARCHITECTURE.md` open question 9, resolved rather than
+/// fixed with new code): a pre-fix `full-stack-fastapi-template` cache and
+/// a pre-fix `quarkus-super-heroes` cache each kept silently serving
+/// stale-logic results, since neither incident touched any struct's shape
+/// — only a manual `.codeowl/` deletion caught either one. There is no
+/// separate per-pack version for this on purpose: a full rebuild costs
+/// well under a second on this repo (confirmed by direct measurement, not
+/// assumed) since it never calls an LLM, so the "imprecise, forces every
+/// stack's cache to rebuild" cost of one global bump is not worth a
+/// second counter with the identical "someone has to remember" failure
+/// mode, just a smaller blast radius per miss.
+///
 /// History: 1 = M12 (introduced). 2 = M13 (`ExtractedSymbol` / `Symbol`
 /// gain `markers`). 3 = M13 (the three typed edge fields — route literals,
 /// table refs, rendered components — collapse into one generic
