@@ -887,26 +887,41 @@ Also already scoped when logged, from a real incident (the `JavaStack` self-corr
 **Validation (TDD — the failing test first):**
 - A new Rust fixture matching the degenerate shape (zero fields, zero inherent methods, exactly one trait impl — the real `JavaStack`/`impl StackPack for JavaStack` shape): `get_next_spec_task` never offers an independent task for the bare type; its declaration is folded into the one trait impl's own document instead.
 - The existing `Counter` fixture (a field plus an inherent impl) is unaffected -- still two independent documents (`Counter`, `impl fmt::Display for Counter`), proving the fold doesn't regress the general case.
-- `ARCHITECTURE.md` open question 16 updated: degenerate case marked resolved (Rust-specific), general case left explicitly open with the reasoning above.
+- `ARCHITECTURE.md` open question 16 updated: degenerate case marked resolved (Rust-specific); general case scheduled next, as M21.f below, rather than left open — the owner's explicit call, made after seeing the real graph output for both shapes side by side (a toy `EnglishGreeter`/`Greeter` fixture for the degenerate case, `PersonalGreeter` for the general one).
 - `FORMAT_VERSION` bumped, with a new History entry naming this change.
 - CodeOwl's own affected specs (`stack.rs`, `quarkus.rs`, `fastapi.rs`) regenerated in a follow-up commit and confirmed to read as one section per type, not two.
 
-##### M21.f — Fully-qualified same-crate/package call blind spot (`ARCHITECTURE.md` open question 14)
+##### M21.f — The general case of open question 16: linking a type to its trait impl(s) for invalidation, without merging their documents
+
+Scheduled by the owner's explicit call, overriding the "wait for a real repo" default this milestone's own M21.e section argued for — there is still no confirmed incident of this shape actually producing a stale/misleading spec, unlike `JavaStack` for the degenerate case. Logged as a real, deliberate exception to that policy, not a silent reversal of it.
+
+**The shape, grounded in a real fixture before any design work starts:** a type with genuine independent content (a real field, an inherent method, or more than one trait impl) correctly keeps separate documents per M21.e's own scope — merging would be wrong here. But nothing links those documents today: extracting `struct PersonalGreeter { name: String }` plus `impl Greeter for PersonalGreeter` produces two nodes with no edge between them, identical in shape to the pre-fix `EnglishGreeter` case, except here two documents is the *correct* end state, not a bug to fold away. If `greet()`'s body changes, only the impl node's `source_hash` moves; `PersonalGreeter`'s own document reports `current` regardless of whether anything it says about greeting behavior is now wrong.
+
+**Not yet designed — this phase starts with the design, not a known implementation.** Unlike M21.e (a mechanical condition on existing data) and M21.d (a doc-comment fix), this needs a genuinely new edge kind: today containment means "members inside a body"; this needs "a type and its trait impl(s), declared separately but semantically one unit for staleness purposes." Open design questions to resolve in this phase, not before it: does the edge run type→impl, impl→type, or both directions; does it also link sibling trait impls of the same type to each other (two `impl Trait1 for X` / `impl Trait2 for X` blocks); does "linking" mean the linked document is marked `stale` outright, or only flagged with a softer signal (a `smells`-style hint) since the two documents' *prose* may still be entirely accurate even when the *code* relationship between them changed; and whether this generalizes to the other three packs at all (Java's `class X implements Y` is a same-symbol relationship already folded via `visit_container`, so this specific gap may be Rust-only the same way M21.e's mechanism is — check before assuming it needs to generalize).
+
+**Size:** M (design-first, implementation scope depends on the design) · **Builds on:** M21.e.
+
+**Validation:**
+- A design decision recorded against `ARCHITECTURE.md` open question 16's general case, answering the open questions above — not "not yet decided."
+- A fixture proving the decided shape: for the `PersonalGreeter`/`Greeter` case (or an equivalent), changing the trait impl's method body produces the decided signal (stale, or a smell) on the type's own document, without merging the two documents into one.
+- `PersonalGreeter`-shaped fixtures with a real field are confirmed to still produce two independent documents after this phase — the general case stays two documents, this phase only links their staleness, it does not fold them.
+
+##### M21.g — Fully-qualified same-crate/package call blind spot (`ARCHITECTURE.md` open question 14)
 
 Deliberately **not** designed ahead of data, per the owner's explicit call — same discipline M21.a/M21.b already used for open question 12, and the same reason: the fix shape has three live candidates (extend each pack's `extract_imports` to recognize a fully-qualified in-body reference as an import-equivalent edge; accept the gap as a documented tradeoff the way open question 1 already is; or something narrower, e.g. only within the same crate/package where resolution is unambiguous) and picking one from the framing alone would be guessing. This sub-phase is the measurement half only, mirroring M21.a's shape: count how often this pattern actually occurs — a same-crate/package reference to a real declared symbol, with no `use`/`import` statement, reached only via a fully-qualified path — across CodeOwl's own repo (already confirmed non-zero: `stack.rs`, `search.rs`) and at least one real Java dogfooded repo (`quarkus-super-heroes` or `commons-lang`, checking for the fully-package-qualified-reference idiom specifically). Whether the measured rate justifies extending `extract_imports`, and which of the three shapes to build if so, is the owner's call from that real count — made in this same phase if it requires a code change, not deferred, matching M21.b's own rule for M21.a's findings.
 
-**Size:** M (open-ended pending measurement) · **Builds on:** M21.e.
+**Size:** M (open-ended pending measurement) · **Builds on:** M21.f.
 
 **Validation:**
 - A reported, real count (not estimated) of fully-qualified unimported same-crate/package references, per pack, across at least two real repos.
 - The owner's decision recorded against `ARCHITECTURE.md` open question 14, no longer "not yet decided."
 - (Conditional on the decision) If `extract_imports` is extended: a fixture proving the previously-invisible dependency now appears in `get_callees` and in `assemble_participants`'s participant list, and that changing the referenced symbol's `interface_hash` now actually invalidates the referencing file's (or feature's) stored hash — the correctness gap open question 14 exists to close. If accepted as a tradeoff instead: no new test, `ARCHITECTURE.md` updated to say so plainly rather than left silently unresolved.
 
-##### M21.g — Method signatures in `interface_hash` (`ARCHITECTURE.md` open question 13)
+##### M21.h — Method signatures in `interface_hash` (`ARCHITECTURE.md` open question 13)
 
-The same shape open question 12 was before M21.a measured it, and — like M21.f above — deliberately not decided from the framing alone. Repeats M21.a's own playbook, this time for a `Callable`'s signature instead of a `Value`'s: a cost table (how many importers a method-signature-change cascade would actually invalidate, worst case, across CodeOwl's own repo plus the dogfooded pilots M21.a already has numbers for) and a correctness table (what fraction of real generated specs already state a dependency's method signature precisely enough that a real signature change would falsify them, the same measure M21.a used for fields). Likely cheaper than M21.a itself, since the instrumentation M21.a built for the field case should mostly generalize rather than need rebuilding from scratch — confirm that while scoping this phase, rather than assuming it.
+The same shape open question 12 was before M21.a measured it, and — like M21.g above — deliberately not decided from the framing alone. Repeats M21.a's own playbook, this time for a `Callable`'s signature instead of a `Value`'s: a cost table (how many importers a method-signature-change cascade would actually invalidate, worst case, across CodeOwl's own repo plus the dogfooded pilots M21.a already has numbers for) and a correctness table (what fraction of real generated specs already state a dependency's method signature precisely enough that a real signature change would falsify them, the same measure M21.a used for fields). Likely cheaper than M21.a itself, since the instrumentation M21.a built for the field case should mostly generalize rather than need rebuilding from scratch — confirm that while scoping this phase, rather than assuming it.
 
-**Size:** S–M · **Builds on:** M21.f.
+**Size:** S–M · **Builds on:** M21.g.
 
 **Validation:**
 - A real, reported cost-table delta and correctness-table percentage for method signatures, on at least the same repos M21.a measured for fields — not estimated.
