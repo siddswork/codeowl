@@ -50,7 +50,42 @@ pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
     for child in root.children(&mut cursor) {
         visit_item(child, None, source, rel_path, &mut out);
     }
-    merge_inherent_impls(out)
+    let opaque_types = top_level_types_with_unextracted_fields(root, source, rel_path);
+    merge_inherent_impls(out, &opaque_types)
+}
+
+/// Top-level struct ids whose real field data isn't reflected in
+/// `children` at all — specifically a tuple struct's positional fields
+/// (`ordered_field_declaration_list`, deliberately not extracted as
+/// members yet — see `tuple_struct_fields_are_not_yet_extracted_as_members`
+/// below). Code-review finding on M21.e: `merge_inherent_impls`'s "zero
+/// fields" check via `children.is_empty()` can't otherwise tell a genuine
+/// zero-field marker type from `struct UserId(u64);`, whose one real field
+/// this extractor just doesn't capture as a member — scanned separately,
+/// over `root.children()` only, since `merge_inherent_impls` only ever
+/// considers top-level types in the first place.
+fn top_level_types_with_unextracted_fields(
+    root: Node,
+    source: &str,
+    file: &str,
+) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "struct_item" {
+            continue;
+        }
+        let Some(body) = child.child_by_field_name("body") else {
+            continue;
+        };
+        if body.kind() == "ordered_field_declaration_list"
+            && body.named_child_count() > 0
+            && let Some(name) = field_text(child, "name", source)
+        {
+            out.insert(format!("{file}::{name}"));
+        }
+    }
+    out
 }
 
 /// The last `::`-separated segment of a stable id — `a.rs::Counter` ->
@@ -84,7 +119,25 @@ fn short_id(id: &str) -> &str {
 /// Any other shape (real fields, an inherent impl, or more than one trait
 /// impl) leaves every trait impl in its own section, unchanged — that
 /// general case is deliberately left open, not decided here.
-fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
+///
+/// **Known limitation, logged rather than built (M21.e code review):**
+/// "the only trait impl targeting it" is checked *within this file only*
+/// — `merge_inherent_impls` runs per-file, on one file's own
+/// `Vec<ExtractedSymbol>`, with no visibility into any other file. A type
+/// with a second trait impl living in a *different* file (a real, if
+/// uncommon, Rust organization style — impls split into their own module
+/// per trait) is invisible to `trait_target_counts` here, so that type
+/// still folds as if it had exactly one, silently reintroducing the exact
+/// unlinked-node gap this fold exists to close, just for the impl this
+/// file can't see. Closing it for real needs a whole-graph second pass
+/// after every file is extracted, not a per-file check — deliberately not
+/// built ahead of a real repo actually hitting it, the same "wait for
+/// evidence" policy this project applies elsewhere (open questions 8, 10,
+/// 11's remaining manifestations).
+fn merge_inherent_impls(
+    syms: Vec<ExtractedSymbol>,
+    opaque_types: &std::collections::HashSet<String>,
+) -> Vec<ExtractedSymbol> {
     use std::collections::{HashMap, HashSet};
 
     // Short name -> index of a top-level type this file defines.
@@ -131,6 +184,7 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
     for (i, ti) in trait_targets {
         let is_degenerate = !inherent_targets.contains(&ti)
             && syms[ti].children.is_empty()
+            && !opaque_types.contains(&syms[ti].id)
             && trait_target_counts.get(&ti) == Some(&1);
         if is_degenerate {
             merge_into.insert(i, ti);
@@ -542,30 +596,52 @@ fn trait_name(node: Node, source: &str) -> String {
         .to_string()
 }
 
-/// The bare type name an *inherent* `impl` header is for, or `None` for a
-/// trait impl or an unparseable header. `impl Graph` -> `Graph`,
-/// `impl<T> Wrapper<T>` -> `Wrapper`, `impl ResolveCtx<'_>` -> `ResolveCtx`,
-/// `impl foo::Bar` -> `Bar`. A ` for ` before any `where` clause means a
-/// trait impl (`impl Debug for S`) — left for its own spec section.
-fn inherent_impl_target(header: &str) -> Option<String> {
+/// Shared preamble both [`inherent_impl_target`] and [`trait_impl_target`]
+/// need before they diverge on whether/where a ` for ` appears
+/// (code-review finding on M21.e: this used to be duplicated in both,
+/// the same triplication risk `strip_value_for_fold` was consolidated into
+/// `text.rs` to avoid): normalize whitespace, strip the leading `impl`
+/// keyword (guarding against an identifier that merely starts with
+/// "impl"), and drop everything from a `where` clause onward. `None` for
+/// anything that isn't an `impl` header at all.
+fn impl_header_before_where(header: &str) -> Option<String> {
     let header: String = header.split_whitespace().collect::<Vec<_>>().join(" ");
     let rest = header.strip_prefix("impl")?;
-    // Guard against an identifier that merely starts with "impl".
     if !rest.is_empty() && !rest.starts_with(|c: char| c.is_whitespace() || c == '<') {
         return None;
     }
     let rest = rest.trim_start();
-    let before_where = rest.split(" where ").next().unwrap_or(rest);
-    if before_where.split(' ').any(|w| w == "for") {
-        return None;
-    }
-    let after_generics = strip_leading_generics(before_where);
+    Some(rest.split(" where ").next().unwrap_or(rest).to_string())
+}
+
+/// The bare type name at the front of `path` — any leading generics
+/// stripped, then the last `::`-segment taken. The shared tail both
+/// [`inherent_impl_target`] and [`trait_impl_target`] reduce to once
+/// they've isolated the type path itself. `strip_leading_generics` is a
+/// no-op when `path` has no leading `<...>`, so this is safe to call on
+/// `trait_impl_target`'s `after_for` (never itself generics-prefixed) as
+/// well as `inherent_impl_target`'s own `before_where`.
+fn bare_type_name(path: &str) -> Option<String> {
+    let after_generics = strip_leading_generics(path);
     let type_path = after_generics
         .split(|c: char| c.is_whitespace() || c == '<')
         .next()
         .unwrap_or("");
     let name = type_path.rsplit("::").next().unwrap_or(type_path);
     (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The bare type name an *inherent* `impl` header is for, or `None` for a
+/// trait impl or an unparseable header. `impl Graph` -> `Graph`,
+/// `impl<T> Wrapper<T>` -> `Wrapper`, `impl ResolveCtx<'_>` -> `ResolveCtx`,
+/// `impl foo::Bar` -> `Bar`. A ` for ` before any `where` clause means a
+/// trait impl (`impl Debug for S`) — left for its own spec section.
+fn inherent_impl_target(header: &str) -> Option<String> {
+    let before_where = impl_header_before_where(header)?;
+    if before_where.split(' ').any(|w| w == "for") {
+        return None;
+    }
+    bare_type_name(&before_where)
 }
 
 /// The bare type name a *trait* `impl` header targets — the mirror image of
@@ -578,22 +654,11 @@ fn inherent_impl_target(header: &str) -> Option<String> {
 /// never appear as a trait/type identifier inside a generic bound, however
 /// many spaces that bound itself contains (`<T: Iterator<Item = u8>>`).
 fn trait_impl_target(header: &str) -> Option<String> {
-    let header: String = header.split_whitespace().collect::<Vec<_>>().join(" ");
-    let rest = header.strip_prefix("impl")?;
-    if !rest.is_empty() && !rest.starts_with(|c: char| c.is_whitespace() || c == '<') {
-        return None;
-    }
-    let rest = rest.trim_start();
-    let before_where = rest.split(" where ").next().unwrap_or(rest);
+    let before_where = impl_header_before_where(header)?;
     let words: Vec<&str> = before_where.split(' ').collect();
     let for_pos = words.iter().position(|&w| w == "for")?;
     let after_for = words[for_pos + 1..].join(" ");
-    let type_path = after_for
-        .split(|c: char| c.is_whitespace() || c == '<')
-        .next()
-        .unwrap_or("");
-    let name = type_path.rsplit("::").next().unwrap_or(type_path);
-    (!name.is_empty()).then(|| name.to_string())
+    bare_type_name(&after_for)
 }
 
 /// Drop a leading `<…>` generic-parameter list (angle-bracket balanced, so
@@ -1233,6 +1298,33 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
         // `inherent_impl_target` returning `None` for a trait impl.
         assert_eq!(trait_impl_target("impl Graph"), None);
         assert_eq!(trait_impl_target("impl<T> Wrapper<T>"), None);
+    }
+
+    #[test]
+    fn a_tuple_structs_trait_impl_does_not_fold_in_despite_children_being_empty() {
+        // Code-review finding on M21.e: `children.is_empty()` is also true
+        // for a tuple struct's real positional fields, since this
+        // extractor doesn't capture them as members at all yet (see
+        // `tuple_struct_fields_are_not_yet_extracted_as_members` above).
+        // Without a separate check, `UserId` (one real field, just not one
+        // this pass extracts) would be mistaken for a content-free marker
+        // type and its Display impl folded in -- the exact over-merge
+        // M21.e exists to avoid for any type with real content.
+        let syms = extract_file(
+            "pub struct UserId(u64);\n\n\
+             impl std::fmt::Display for UserId {\n\
+                 fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n\
+                     write!(f, \"{}\", self.0)\n    }\n\
+             }\n",
+            "a.rs",
+        );
+        let ids: Vec<&str> = syms.iter().map(|s| s.id.as_str()).collect();
+        assert!(
+            ids.contains(&"a.rs::impl std::fmt::Display for UserId"),
+            "a tuple struct's trait impl must stay its own section, not \
+             fold into the type just because its real field isn't \
+             extracted as a member yet: {ids:?}"
+        );
     }
 
     #[test]
