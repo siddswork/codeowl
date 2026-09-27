@@ -67,10 +67,25 @@ fn short_id(id: &str) -> &str {
 /// `<file>::impl Foo::m` to `<file>::Foo::m`), Merkle-fold the block's
 /// `source_hash` into `Foo`'s, union the block's attribute `markers`, then
 /// drop the block. A type's several inherent impls all collapse into it, in
-/// source order. Trait impls (`impl Trait for Foo` — the ` for ` gives it
-/// away) and impls on a type this file doesn't define are left untouched.
+/// source order. Impls on a type this file doesn't define are left
+/// untouched.
+///
+/// **A trait impl (`impl Trait for Foo`) also folds, but only in one
+/// narrow, mechanical shape** (M21.e, `ARCHITECTURE.md` open question 16's
+/// degenerate case — the real trigger was `stack.rs::JavaStack`, whose
+/// entire content was one `impl StackPack for JavaStack` on a zero-field
+/// marker struct): `Foo` has zero fields of its own, zero inherent-impl
+/// methods (not itself a target above), and this is the *only* trait impl
+/// targeting it in the file. In that shape there is nothing left for a
+/// standalone `Foo` document to say beyond a guess at the very behavior
+/// the trait impl already states, and — since Rust's grammar gives the
+/// two symbols no edge between them at all — no other target invalidates a
+/// bare `Foo` document if the trait impl's own behavior later changes.
+/// Any other shape (real fields, an inherent impl, or more than one trait
+/// impl) leaves every trait impl in its own section, unchanged — that
+/// general case is deliberately left open, not decided here.
 fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
 
     // Short name -> index of a top-level type this file defines.
     let type_ix: HashMap<&str, usize> = syms
@@ -83,7 +98,8 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         .collect();
 
     // Inherent-impl block index -> the index of the type it merges into.
-    let merge_into: HashMap<usize, usize> = syms
+    // Unconditional, as always.
+    let mut merge_into: HashMap<usize, usize> = syms
         .iter()
         .enumerate()
         .filter(|(_, s)| s.parent.is_none() && s.raw == "impl")
@@ -92,6 +108,34 @@ fn merge_inherent_impls(syms: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             Some((i, *type_ix.get(target.as_str())?))
         })
         .collect();
+
+    // Trait-impl block index -> its target type index, for every trait
+    // impl on a locally-defined type. Collected separately: eligibility
+    // here is conditional on the whole file's shape, not unconditional the
+    // way an inherent impl's fold is.
+    let trait_targets: Vec<(usize, usize)> = syms
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.parent.is_none() && s.raw == "impl")
+        .filter_map(|(i, s)| {
+            let target = trait_impl_target(&s.signature)?;
+            Some((i, *type_ix.get(target.as_str())?))
+        })
+        .collect();
+
+    let mut trait_target_counts: HashMap<usize, usize> = HashMap::new();
+    for &(_, ti) in &trait_targets {
+        *trait_target_counts.entry(ti).or_insert(0) += 1;
+    }
+    let inherent_targets: HashSet<usize> = merge_into.values().copied().collect();
+    for (i, ti) in trait_targets {
+        let is_degenerate = !inherent_targets.contains(&ti)
+            && syms[ti].children.is_empty()
+            && trait_target_counts.get(&ti) == Some(&1);
+        if is_degenerate {
+            merge_into.insert(i, ti);
+        }
+    }
 
     if merge_into.is_empty() {
         return syms;
@@ -517,6 +561,34 @@ fn inherent_impl_target(header: &str) -> Option<String> {
     }
     let after_generics = strip_leading_generics(before_where);
     let type_path = after_generics
+        .split(|c: char| c.is_whitespace() || c == '<')
+        .next()
+        .unwrap_or("");
+    let name = type_path.rsplit("::").next().unwrap_or(type_path);
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// The bare type name a *trait* `impl` header targets — the mirror image of
+/// [`inherent_impl_target`]. `impl Greeter for EnglishGreeter` -> `EnglishGreeter`,
+/// `impl<T> From<T> for Wrapper<T>` -> `Wrapper`, `impl fmt::Debug for S` ->
+/// `S`. `None` for an inherent impl (no ` for `) or an unparseable header.
+/// Finding `for` as a plain word-split, before stripping the impl's own
+/// leading generics, is safe the same way `inherent_impl_target`'s own
+/// existence-check already relies on: `for` is a reserved keyword, so it can
+/// never appear as a trait/type identifier inside a generic bound, however
+/// many spaces that bound itself contains (`<T: Iterator<Item = u8>>`).
+fn trait_impl_target(header: &str) -> Option<String> {
+    let header: String = header.split_whitespace().collect::<Vec<_>>().join(" ");
+    let rest = header.strip_prefix("impl")?;
+    if !rest.is_empty() && !rest.starts_with(|c: char| c.is_whitespace() || c == '<') {
+        return None;
+    }
+    let rest = rest.trim_start();
+    let before_where = rest.split(" where ").next().unwrap_or(rest);
+    let words: Vec<&str> = before_where.split(' ').collect();
+    let for_pos = words.iter().position(|&w| w == "for")?;
+    let after_for = words[for_pos + 1..].join(" ");
+    let type_path = after_for
         .split(|c: char| c.is_whitespace() || c == '<')
         .next()
         .unwrap_or("");
@@ -1137,6 +1209,30 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
         );
         assert_eq!(inherent_impl_target("impl std::fmt::Debug for S"), None);
         assert_eq!(inherent_impl_target("impl<T> From<T> for S"), None);
+    }
+
+    #[test]
+    fn trait_impl_target_parses_headers() {
+        assert_eq!(
+            trait_impl_target("impl Greeter for EnglishGreeter").as_deref(),
+            Some("EnglishGreeter")
+        );
+        assert_eq!(
+            trait_impl_target("impl std::fmt::Debug for S").as_deref(),
+            Some("S")
+        );
+        assert_eq!(
+            trait_impl_target("impl<T> From<T> for Wrapper<T>").as_deref(),
+            Some("Wrapper")
+        );
+        assert_eq!(
+            trait_impl_target("impl<T: Iterator<Item = u8>> Trait for Foo<T>").as_deref(),
+            Some("Foo")
+        );
+        // An inherent impl has no target -- the mirror image of
+        // `inherent_impl_target` returning `None` for a trait impl.
+        assert_eq!(trait_impl_target("impl Graph"), None);
+        assert_eq!(trait_impl_target("impl<T> Wrapper<T>"), None);
     }
 
     #[test]
