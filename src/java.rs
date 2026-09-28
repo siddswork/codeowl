@@ -646,13 +646,26 @@ fn cross_package_qualified_edges(
     existing: &[ResolvedImport],
     graph: &Graph,
 ) -> Vec<ResolvedImport> {
+    // Grouped once, up front -- the naive per-file `existing.iter().filter(...)`
+    // rescans every file's edges for every file, an avoidable O(files ×
+    // total_edges) cost the Rust sibling (`resolve_imports` above) doesn't
+    // pay, since it builds its own per-file `seen_targets` incrementally in
+    // one pass instead (code-review finding on the M21.h build PR).
+    let mut targets_by_file: HashMap<&str, std::collections::HashSet<SymbolId>> = HashMap::new();
+    for e in existing {
+        if let Some(id) = e.target {
+            targets_by_file
+                .entry(e.from_file.as_str())
+                .or_default()
+                .insert(id);
+        }
+    }
+
     let mut out = Vec::new();
     for (from_file, fi) in sorted_files {
-        let mut seen: std::collections::HashSet<SymbolId> = existing
-            .iter()
-            .filter(|e| &e.from_file == *from_file)
-            .filter_map(|e| e.target)
-            .collect();
+        let mut seen = targets_by_file
+            .remove(from_file.as_str())
+            .unwrap_or_default();
         for qr in &fi.qualified_refs {
             let Some(id) = resolve_explicit(&qr.specifier, &qr.imported_name, file_imports, graph)
             else {
