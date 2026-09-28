@@ -547,7 +547,51 @@ pub fn extract_imports(source: &str, _rel_path: &str) -> FileImports {
             imported_name: name,
         });
     }
+    extract_qualified_refs(root, source, &mut fi.qualified_refs);
     fi
+}
+
+/// `ARCHITECTURE.md` open question 14 / `ROADMAP.md` M21.h: a cross-package
+/// fully-qualified reference (`a.b.C`, used with no `import` at all --
+/// Java's own resolution rules let this coexist with an `import` of some
+/// *other* class sharing the same simple name, which is exactly why one
+/// can't just be written instead) needs its own scan, since the top-level
+/// loop above only reads `import_declaration`s. Walks the whole tree for a
+/// dotted `scoped_type_identifier` (type position, e.g. a parameter type),
+/// a dotted `scoped_identifier` (an `import`'s own path -- excluded below
+/// -- or an annotation name), or a dotted `field_access` (expression
+/// position: tree-sitter-java parses `a.b.C.method(...)` as
+/// `method_invocation { object: field_access("a.b.C"), name: "method" }`,
+/// never as a `scoped_identifier` -- confirmed by inspecting the real
+/// parse tree rather than assumed from the import-declaration shape),
+/// skipping `package_declaration`/`import_declaration` subtrees. A doc
+/// comment (`/** {@code a.b.C} */`) is a comment token, never parsed into
+/// this tree at all, so this can't repeat the Javadoc false-positive a
+/// text scan hit during M21.h's measurement phase. A `field_access` whose
+/// prefix is a local variable, not a package (`t.value`), simply fails to
+/// resolve later (`fqn_to_file` finds no matching file) -- no filtering
+/// needed here, resolution is the filter.
+fn extract_qualified_refs(node: Node, source: &str, out: &mut Vec<ImportRef>) {
+    if matches!(node.kind(), "package_declaration" | "import_declaration") {
+        return;
+    }
+    if matches!(
+        node.kind(),
+        "scoped_identifier" | "scoped_type_identifier" | "field_access"
+    ) {
+        let fqn = text(node, source);
+        if let Some((specifier, name)) = fqn.rsplit_once('.') {
+            out.push(ImportRef {
+                specifier: specifier.to_string(),
+                imported_name: name.to_string(),
+            });
+        }
+        return; // this node's own dotted text is already consumed either way
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_qualified_refs(child, source, out);
+    }
 }
 
 /// Resolve every file's `import`s to a target `SymbolId` and append the
@@ -576,6 +620,55 @@ pub fn resolve_imports(
         }
     }
     out.extend(same_package_edges(root, &sorted, graph));
+    out.extend(cross_package_qualified_edges(
+        &sorted,
+        file_imports,
+        &out,
+        graph,
+    ));
+    out
+}
+
+/// ARCHITECTURE.md open question 14 / ROADMAP.md M21.h: resolve each
+/// file's cross-package fully-qualified refs the same way an explicit
+/// `import` already resolves (`resolve_explicit` is kind-agnostic, same
+/// reasoning `same_package_edges` already documents for the same-package
+/// case) -- no new resolution logic. Skips a same-file target (never a
+/// blind spot -- the `bat` false start from measurement, ported to Java's
+/// own shape) and a target already reachable from this file via an
+/// explicit import or a same-package edge, by *target id*, not by simple
+/// name: `FightApiMapper`'s two distinct `Fight` classes must both get an
+/// edge even though they share a simple name and Java's own same-package
+/// shadowing rule (`same_package_edges` above) doesn't apply to either.
+fn cross_package_qualified_edges(
+    sorted_files: &[(&String, &FileImports)],
+    file_imports: &HashMap<String, FileImports>,
+    existing: &[ResolvedImport],
+    graph: &Graph,
+) -> Vec<ResolvedImport> {
+    let mut out = Vec::new();
+    for (from_file, fi) in sorted_files {
+        let mut seen: std::collections::HashSet<SymbolId> = existing
+            .iter()
+            .filter(|e| &e.from_file == *from_file)
+            .filter_map(|e| e.target)
+            .collect();
+        for qr in &fi.qualified_refs {
+            let Some(id) = resolve_explicit(&qr.specifier, &qr.imported_name, file_imports, graph)
+            else {
+                continue;
+            };
+            if graph.owning_file_id(id) == from_file.as_str() || !seen.insert(id) {
+                continue;
+            }
+            out.push(ResolvedImport {
+                from_file: (*from_file).clone(),
+                specifier: qr.specifier.clone(),
+                imported_name: qr.imported_name.clone(),
+                target: Some(id),
+            });
+        }
+    }
     out
 }
 
@@ -1169,6 +1262,97 @@ public interface Sized {\n\
             g.string_id(e.target.unwrap()),
             "src/main/java/com/ex/Check.java::Check::ok"
         );
+    }
+
+    #[test]
+    fn cross_package_fully_qualified_reference_with_no_import_gets_an_edge() {
+        // The real `quarkus-super-heroes` shape (`ARCHITECTURE.md` open
+        // question 14 / `ROADMAP.md` M21.h): two classes named `Fight` in
+        // two different packages -- Java can't `import` both under the
+        // same simple name in one file, so a mapper between them fully
+        // qualifies both instead. Neither has an `import`, and they're not
+        // same-package siblings of the mapper or of each other, so this is
+        // exactly the blind spot `same_package_edges` doesn't cover.
+        let dir = std::env::temp_dir().join(format!("codeowl-java-xpkg-{}", std::process::id()));
+        let domain_dir = dir.join("src/main/java/com/ex/fight");
+        let api_dir = dir.join("src/main/java/com/ex/fight/api/model");
+        let mapper_dir = dir.join("src/main/java/com/ex/mapper");
+        std::fs::create_dir_all(&domain_dir).unwrap();
+        std::fs::create_dir_all(&api_dir).unwrap();
+        std::fs::create_dir_all(&mapper_dir).unwrap();
+        let domain = "package com.ex.fight;\npublic class Fight {}\n";
+        let api = "package com.ex.fight.api.model;\npublic class Fight {}\n";
+        let mapper = "package com.ex.mapper;\n\
+                      public class FightApiMapper {\n\
+                      com.ex.fight.api.model.Fight toApi(com.ex.fight.Fight f) { return null; }\n\
+                      }\n";
+        std::fs::write(domain_dir.join("Fight.java"), domain).unwrap();
+        std::fs::write(api_dir.join("Fight.java"), api).unwrap();
+        std::fs::write(mapper_dir.join("FightApiMapper.java"), mapper).unwrap();
+
+        let (_, edges) = resolved(
+            &dir,
+            &[
+                ("src/main/java/com/ex/fight/Fight.java", domain),
+                ("src/main/java/com/ex/fight/api/model/Fight.java", api),
+                ("src/main/java/com/ex/mapper/FightApiMapper.java", mapper),
+            ],
+        );
+
+        let hits: Vec<_> = edges
+            .iter()
+            .filter(|e| {
+                e.from_file == "src/main/java/com/ex/mapper/FightApiMapper.java"
+                    && e.imported_name == "Fight"
+            })
+            .collect();
+        assert_eq!(
+            hits.len(),
+            2,
+            "expected two distinct Fight edges (domain + api model), got {hits:?}"
+        );
+        let targets: std::collections::HashSet<_> = hits.iter().filter_map(|e| e.target).collect();
+        assert_eq!(
+            targets.len(),
+            2,
+            "the two Fights must resolve to distinct symbols"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_javadoc_example_fqn_is_not_mistaken_for_a_reference() {
+        // The exact false start the M21.h measurement phase hit against
+        // `commons-lang`'s `Streams.java`: a `{@code}` Javadoc example
+        // mentioning a real, resolvable FQN must not produce an edge --
+        // it's a comment, never parsed into the expression/type tree at
+        // all, so an AST walk (unlike the text scan that caused the
+        // measurement bug) can't match it in the first place.
+        let dir = std::env::temp_dir().join(format!("codeowl-java-javadoc-{}", std::process::id()));
+        let pkg = dir.join("src/main/java/com/ex/other");
+        std::fs::create_dir_all(&pkg).unwrap();
+        let other = "package com.ex.other;\npublic class Thing {}\n";
+        let user = "package com.ex.user;\n\
+                    /**\n * Example: {@code com.ex.other.Thing t = null;}\n */\n\
+                    public class Doc {}\n";
+        std::fs::write(pkg.join("Thing.java"), other).unwrap();
+        std::fs::create_dir_all(dir.join("src/main/java/com/ex/user")).unwrap();
+        std::fs::write(dir.join("src/main/java/com/ex/user/Doc.java"), user).unwrap();
+
+        let (_, edges) = resolved(
+            &dir,
+            &[
+                ("src/main/java/com/ex/other/Thing.java", other),
+                ("src/main/java/com/ex/user/Doc.java", user),
+            ],
+        );
+        assert!(
+            !edges.iter().any(|e| e.imported_name == "Thing"),
+            "a Javadoc {{@code}} example must not produce a reference edge"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
