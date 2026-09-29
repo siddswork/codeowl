@@ -256,7 +256,10 @@ fn visit_container(
                 // since they aren't a discardable "value" the way a
                 // field's assignment is.
                 SymbolKind::Callable => {
-                    let is_pub_method = if raw == "interface" {
+                    // `@interface` too (code-review finding): an annotation
+                    // type's elements are implicitly public under the same
+                    // JLS rule, and can't legally be `private` at all.
+                    let is_pub_method = if matches!(raw, "interface" | "@interface") {
                         !s.signature.split_whitespace().any(|tok| tok == "private")
                     } else {
                         is_pub_or_protected_field_signature(&s.signature)
@@ -1183,6 +1186,24 @@ public @interface JsonProperty {\n\
         let b = extract_file(
             "interface Greeter {\n    String greet(boolean loud, int times);\n}\n",
             "g.java",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn an_annotation_types_element_type_change_moves_its_interface_hash() {
+        // Code-review finding on the M21.i PR: an `@interface`'s elements
+        // are implicitly public exactly like an interface's methods (the
+        // JLS forbids any other access modifier on them), and idiomatic
+        // style never writes `public` -- the same shape as plain
+        // interfaces, just under a different container kind.
+        let a = extract_file(
+            "public @interface JsonProperty {\n    String value() default \"\";\n}\n",
+            "j.java",
+        );
+        let b = extract_file(
+            "public @interface JsonProperty {\n    boolean value() default false;\n}\n",
+            "j.java",
         );
         assert_ne!(a[0].interface_hash, b[0].interface_hash);
     }
