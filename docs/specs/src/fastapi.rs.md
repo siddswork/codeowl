@@ -3,8 +3,7 @@ kind: file
 source_paths: [src/fastapi.rs]
 file: { source_hash: d90d9b829608442c1e9c1d0228a8015e905c55ff2f5b651dddb005653d7ed289, deps_hash: 9387546cb07bf2cc010f9c026b64690319273fa3f0ca1dd931603df137d47058, spec_hash: 40acd33e2540504603c9c0e0d6d0d386d96bd22897df4d097f96071b9b316830 }
 symbols:
-  src/fastapi.rs::FastApiFeatureModel: { source_hash: 448fdb07ff965cddcb310e44a0e9f1fb042b2f491920a09421cab94bd8f89180, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 7e41c8b613754c226d0193b5924766de2562c63f8b252c6d8d82d28009235b30 }
-  src/fastapi.rs::impl FeatureModel for FastApiFeatureModel: { source_hash: 6254a7fcbd8ece0de15626fdd5a32358b3539496e7a2c25400e3b40cd8a2e3e4, deps_hash: 9387546cb07bf2cc010f9c026b64690319273fa3f0ca1dd931603df137d47058, spec_hash: 9c0c9212eddc6f3a04f68f46c42cf29260509b68c93271d338f45b324a71b0b7 }
+  src/fastapi.rs::FastApiFeatureModel: { source_hash: 31a83efd92d037cac7a86f3539f5f32833f738a89c1b7c20a5cc5389f77bd767, deps_hash: cb322701c2dd0dfee7b88e34b3b239381a81f7ff2976458500d6c28b1333b889, spec_hash: 598c7902e956e05a098788045e9a456b643ddf0cd4892e3390cd3f66e39f2ad2 }
   src/fastapi.rs::parse_route_decorator: { source_hash: c03313a7e32fca7abb97b8404fb7bbd8998f9a25dc1fd8849b39fd3eb9e49a91, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: dd1ae72cddd2edae365701bd3c87f914c7d86f1abf6ca0c08ef052e8c00f0971 }
   src/fastapi.rs::first_string_literal: { source_hash: 8316a508e0fce80ad33966c5f1e9c043a6b50579ffefc6c7d2565c7e6a025f60, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6f1079426852ad2542c09da0aac452cc17ce0f7da175513c41b102c62cfc2c08 }
   src/fastapi.rs::router_prefix: { source_hash: 0131a7541de47d0534dc41d7b77a3638c2324dc73041498cc79bc1b96563c484, deps_hash: c7b3c780b3d5f3a7c9ea5d71f7ffa53a1413d36c92a0a62889c9e0d64c51cb94, spec_hash: b7a6ddc045602d3d5b51d31942b18b19855985b93fa5ec2cf5e804a773a4a532 }
@@ -23,23 +22,15 @@ This file is FastAPI's feature model — the second stack CodeOwl knows how to f
 ## `FastApiFeatureModel`
 `pub struct FastApiFeatureModel`
 ### Summary
-A marker type that lets the rest of the program treat FastAPI (a Python web framework) as one of the stacks it knows how to find feature entry points in — its `@router`-decorated route functions.
+A marker type (empty — it carries no data of its own) that tells CodeOwl how to find "features" in a FastAPI (a Python framework for building HTTP services) codebase: its HTTP and WebSocket routes, and which other files belong alongside each one when writing that feature's documentation.
 ### Behavior
-`FastApiFeatureModel` carries no fields and no data of its own; it exists only to have the `FeatureModel` trait (the shared interface every supported stack implements to describe "what counts as a feature entry point here") implemented on it elsewhere in this file. The actual logic for recognizing FastAPI route functions lives in that trait implementation — this declaration is just the zero-sized handle those methods hang off of.
-### Depends on
-- (none)
+Two methods do the real work.
 
-## `impl FeatureModel for FastApiFeatureModel`
-`impl FeatureModel for FastApiFeatureModel`
-### Summary
-FastAPI's rules for "what counts as a feature": every route-decorated function becomes an entry point, and a file is pulled into that route's feature spec if it looks like shared CRUD (create/read/update/delete) code or touches the same database schema.
-### Behavior
-`enumerate_entry_points` scans every `Callable` symbol in the graph (the extracted map of the repo's declarations and their references) for one whose markers include a recognized route decorator (`parse_route_decorator`, e.g. `@router.get(...)`), extracting the HTTP verb and the raw path. For each match, it looks up that route's file's router prefix (`router_prefix`, from the file's `APIRouter(prefix=...)` call) and joins it with the raw path to get the route's full path (`join_route`). Since every route in the same file shares the same prefix, the prefix lookup is memoized per file (in `prefix_cache`) for the duration of this one call, so a file with several routes doesn't repeat that scan once per route. Websocket routes get `kind: "websocket"`, everything else `kind: "http"`; each entry point gets a slug (`route_slug`) and a human-readable title (`"GET /path"`-style). Results are sorted by `(id, file)` for a stable order, then run through `disambiguate_colliding_slugs` to resolve any two routes that would otherwise produce the same slug.
+`enumerate_entry_points` walks every declared function in the whole codebase and keeps the ones whose annotations mark them as a route (an `@app.get(...)`/`@router.post(...)`-style decorator, parsed by `parse_route_decorator`). For each match, it looks up that function's file's router prefix (its `APIRouter(prefix=...)` declaration, if any) — computed once per file and cached, since every route in the same file shares the same prefix — and joins it with the route's own path to get the full URL. A `"websocket"` verb is kept as its own entry-point kind, distinct from ordinary `"http"` routes. Results are sorted into a stable order, and any two entry points that would collide on the same slug are disambiguated before the list is returned.
 
-`admits_to_core` decides whether a given file should be pulled into a route's feature spec: `true` if the file is a recognized CRUD module (`is_crud_module`) or if it touches the same database schema the route's own code queries (`file_touches_schema`) — the `_entry` parameter itself is unused, so this decision never varies by which specific route is asking, only by the candidate file.
+`admits_to_core` decides whether a given file belongs in a feature's supporting file set: yes if it's a CRUD module (recognized by `is_crud_module`) or if it touches the database schema (`file_touches_schema`), no otherwise.
 ### Depends on
 - `src/features.rs::EntryPoint` — crate::features
-- `src/features.rs::FeatureModel` — crate::features
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolKind` — crate::symbol
 - externals: std

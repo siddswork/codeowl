@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/features.rs]
-file: { source_hash: 61f378d056693664aadd68f3bd235e62e9ae5f14e8432958375880e18989ef49, deps_hash: d26e7b92551b276f7105d2a391aca55c75979d28e3114b2f2c6e2ff7d465adef, spec_hash: a11b732c3676ddd55698e111979af9ed8d2e4918f18d7d6e3dc548930c1f4294 }
+file: { source_hash: 61f378d056693664aadd68f3bd235e62e9ae5f14e8432958375880e18989ef49, deps_hash: 9c95e172dc3a1177a3b65641b1d7dc08ba0ee4b506fbc4a2b7bb0a034d7e7fa2, spec_hash: 4dc839bae62683d9813e330e42f5dc04e23df6186a0b2121770d91d0de726258 }
 symbols:
   src/features.rs::RouteLiteral: { source_hash: d7e4f32edfd30a779fb2647dda0a8b602a17b6d94eddb16e1caeb397a6a0c672, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0c9e5b6514887bf29a0463c06e517c5d3a2a948503a59e28aefc9c2c7489d881 }
   src/features.rs::extract_route_literals: { source_hash: 015937105e99f9bae9eff259e3fc6ce15962516f3e776e20cf8ce7987baf47cf, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 34ad8aa56f43b2d6cc9c2f9de69b6d8f227b697502a3426578522ef207fc9abf }
@@ -27,10 +27,9 @@ symbols:
   src/features.rs::is_colocated: { source_hash: 4910d4eede771b8b81193d569b11bc4b0beca325fb19f9974cf879c10f4ba610, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d906a941c418103d8eeedc88e13f4f054c726ee4538d06eb801879aa96b2a7f8 }
   src/features.rs::EntryPoint: { source_hash: e9a78fbd8ea6896f5669332c918968c1651df69a8c2fa5ed7f2c6388365679f4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 14310da16b5d25452474b693f600d997e68941243081af421bb5694d59be8ff7 }
   src/features.rs::FeatureModel: { source_hash: 5d8016218b72d79bdab048db932382dbfb6bdc6fe10aa18147377772c4c29756, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: 87628930bb7a64eba986f9b28e266b301042ecafc12ff5ecce5340b8e8969df3 }
-  src/features.rs::TypeScriptNextFeatureModel: { source_hash: 65402d2c9af83dd6cf50f85aea171d715a8b9e9f39ead03b67ee90b33c2d63e7, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8062137ce86edc1ca2ed1ab99fb34110ea7190af3d5f9df0fbc82e2d82678d06 }
-  src/features.rs::impl FeatureModel for TypeScriptNextFeatureModel: { source_hash: 29411cad6ad63e986d3673b0f69d7c8484bf6b12734f50877e96154b3790ddfc, deps_hash: baad53d385b014dca083e64f140204ed5585c42dd2a9b99f4c41d5c3acc36700, spec_hash: cebe687b4d6e33a430304cc43629aaddc9c1617ee37155cb56e2577adba65cea }
+  src/features.rs::TypeScriptNextFeatureModel: { source_hash: 66747a45513930ab9da9171131ef9d33b35a5651bd757c3f71c9dd5f3e3d47e8, deps_hash: baad53d385b014dca083e64f140204ed5585c42dd2a9b99f4c41d5c3acc36700, spec_hash: 15589d89c3b4999c21d6a15707231fa73c18757a29cfa2e3a9d4ddde2ec987fb }
   src/features.rs::default_feature_model: { source_hash: c40e36eddb78a13af1f6cf5bc50152f53b4ab0e93b5460c85a6229e82b7bca95, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3541dcb3b43cb96c26541cb8e18834671254ae85be1eba5572687870b2f4bda4 }
-  src/features.rs::feature_model_for: { source_hash: 4d2a3d5fdbf79640569bd6597bc27b964db51f1f54587ea7e977e7c79b9090c5, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: 2db48fa15aad434657088996f22c2c6581f9108528d9baa516b522c14a0fceec }
+  src/features.rs::feature_model_for: { source_hash: 4d2a3d5fdbf79640569bd6597bc27b964db51f1f54587ea7e977e7c79b9090c5, deps_hash: 98eb6f2b1bd07e621c3e51e4629b3495644a64198498c468bf714c11001ea778, spec_hash: bedeb52bdb0dc68e9702609c135131f2931e1a6c33369aeebf850cbcf821d29d }
   src/features.rs::enumerate_entry_points: { source_hash: 0e088455650a81e947a6091adc4287372c0ad40b8834ba4d326cc9172b742d69, deps_hash: ee77b035e2f7c16b2c679cd98bc49dd24c46dbc6b624a3953b2ffac99e848e31, spec_hash: 75ea8369c46685db3c0cd93e34d49a627e16e7f6c23494716c8df3282e3a9696 }
   src/features.rs::is_page: { source_hash: 26dc4abe5b739a2fc258007f539f3697a0846504097b95cf8faf947ade4eb93e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2ceaca3e3858d4becb652742fc08aa9afe75cc74f9fc8211b5676783edae0259 }
   src/features.rs::is_api_route: { source_hash: 21a66b688e02081894c337c50a8ed23288e0935f65a3704d6fddf7879e9f5601, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 99d7cd2beb4db2f934dccfa0a72663c87074df5e86c2b87bf932a87bcf262208 }
@@ -41,7 +40,7 @@ symbols:
 ---
 # src/features.rs
 ## Summary
-This file is CodeOwl's feature layer — the part that recognizes a stack's runtime entry points (a Next.js page, an orphan API route, or whatever a stack's own conventions expose), resolves the extra connections a plain import graph can't see (a `fetch("/api/...")` call, a `.from("table")` query, a rendered `<Component/>` matched back to its import), and assembles each feature's full participant set (`core`/`dependencies`/`data`) for spec generation. It's deliberately narrow rather than general call-graph analysis: only these specific, framework-convention-shaped patterns are resolved, nothing else. The walk that assembles participants (`assemble_participants`) is fully generic across stacks — it only follows flow edges and one-hop imports off the graph — while everything specific to one framework (recognizing a page, turning its path into a slug, deciding which other files belong in its `core` set) lives behind the `FeatureModel` trait, implemented here for TypeScript + Next.js by `TypeScriptNextFeatureModel`. A stack with no comparable runtime entry surface (a CLI, a library) simply has no feature model and no feature layer at all.
+This file implements CodeOwl's "feature" layer — the mechanism that groups a codebase's code around the entry points a person actually interacts with (a page, an API route), not just around its file structure. It looks past plain declarations and import statements into a few specific, narrow patterns: a `fetch("/api/...")` call naming an API route by its literal path, a `.from("table")` call naming a database table by its literal name, and a `<Component/>` tag matched back to the import that brought it in. Resolving these patterns to the real files/tables they name is what lets a feature's documentation include things a plain import-following walk would never see. Most of this file is generic — `assemble_participants` walks flow edges and one-hop imports to build a feature's full supporting file/table set, the same way regardless of which framework produced the graph. The one framework-specific piece is `TypeScriptNextFeatureModel`, which teaches this generic machinery what counts as a "feature" in a Next.js codebase specifically (a page, or an orphan API route) and which files should be pulled into one's supporting set.
 
 ## `RouteLiteral`
 `pub struct RouteLiteral`
@@ -265,20 +264,13 @@ Two methods, deliberately minimal (design decision 8 — a second impl doesn't a
 ## `TypeScriptNextFeatureModel`
 `pub struct TypeScriptNextFeatureModel`
 ### Summary
-The Next.js-specific answer to "what counts as a feature" — a feature is a page (`app/**/page.tsx`), or an API route with no page pointing at it, plus everything that page or route actually reaches: its rendered components and the API routes it calls.
+A marker type (empty — it carries no data of its own) that tells CodeOwl how to find "features" in a Next.js (a React framework with file-based routing) codebase: each page, plus any API route not already reached from one, and which other files belong alongside each as its supporting set.
 ### Behavior
-This is a marker type (no fields) that implements CodeOwl's generic `FeatureModel` trait — it's the whole of the Next-specific feature concept, kept out of the generic walk that drives feature-spec generation itself. Three things live entirely inside this type rather than the generic core: recognizing what counts as a page in the first place (`is_page`), turning a page's file path into the slug its feature spec is named after (a route-path slug — e.g. `app/submit/page.tsx` → `submit`), and the admission rule that decides which other files belong in a feature's `core` set — a file counts if it's co-located with the entry point (`is_colocated`) or if it does real data work (`does_data_work`), rather than every file the entry point transitively touches.
-### Depends on
-- (none)
+Two methods do the real work.
 
-## `impl FeatureModel for TypeScriptNextFeatureModel`
-`impl FeatureModel for TypeScriptNextFeatureModel`
-### Summary
-The Next.js implementation of the two `FeatureModel` judgments — enumerating page and orphan-API-route entry points, and deciding which reached files join a feature's `core`.
-### Behavior
-`enumerate_entry_points` first collects the set of API-route files that some `route-literal` flow edge resolves to (the "targeted" set). It then emits an `EntryPoint { kind: "page" }` for every `is_page` file, followed by an `EntryPoint { kind: "api-route" }` for every `is_api_route` file *not* in the targeted set — a route with no page calling it (a webhook, a cron target) is a feature in its own right; one that a page fetches is folded into that page's feature instead. Slugs come from `feature_slug`, titles from `entry_route_path`.
+`enumerate_entry_points` first collects every API route file that's already reached by a resolved `fetch("/api/...")` literal elsewhere in the codebase (a "route-literal" flow edge) — those are handled as part of the page that calls them, not as their own separate entry point. It then builds one entry point per page file (`app/**/page.tsx`), titled with that page's own route path, plus one entry point per API route file that *isn't* already targeted that way — an "orphan" route with no page calling it directly.
 
-`admits_to_core` is called by the generic walk for every resolved file edge. It admits the candidate if it's an API route (`route-literal` targets are always `app/api/**/route.ts`, so this reproduces M11's "route targets join unconditionally"), or it's co-located with the entry point's directory, or it does data work. Component targets (`.tsx`) therefore fall through to exactly the co-location / data-work test M11 defined.
+`admits_to_core` decides whether a given file belongs in a feature's supporting file set: yes if it's an API route file, or if it's co-located with the entry point (lives in the same part of the file tree), or if it does real data work (queries the database) — no otherwise. This mirrors what the generic containment walk used to do directly (an API-route target always joined, a rendered-component target only conditionally), just expressed as one rule instead of two different code paths.
 ### Depends on
 - `src/graph.rs::FlowTarget` — crate::graph
 - `src/graph.rs::Graph` — crate::graph
@@ -296,11 +288,12 @@ A borrow of the unit struct with `'static` lifetime (it's a ZST, so no allocatio
 ## `feature_model_for`
 `pub fn feature_model_for(graph: &Graph) -> Option<&'static dyn FeatureModel>`
 ### Summary
-The feature model for whichever stack built a given graph, or `None` when that stack has no feature layer — the M14 completion of what M13 stubbed as `default_feature_model()`.
+Looks up the feature model for whichever stack (Rust, Java, Python, TypeScript+Next.js) built a given graph, so a caller doesn't need to already know or thread through which stack that is. Returns `None` if that stack has no feature layer at all — a plain library has no routes or jobs to enumerate.
 ### Behavior
-Reads `graph.pack_name()`, recovers the `StackPack` via `stack::for_name`, and returns its `feature_model()`. So a graph built by `TypeScriptNextStack` yields `Some(TypeScriptNextFeatureModel)` and one built by `RustStack` yields `None`. Doing it off the persisted pack name means a pure-read caller (`spec.rs`, `mcp.rs`) doesn't need the pack threaded down through every call. Every feature-related path (`next_feature_task`, `submit_feature`, `feature_status`, the MCP feature handlers) guards on the `None` this can return.
+Reads the graph's own recorded pack name and looks up that stack's implementation, then asks it for its feature model.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
+- `src/stack.rs::for_name` — crate::stack
 
 ## `enumerate_entry_points`
 `pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint>`

@@ -8,7 +8,31 @@
 
 use codeowl::graph::{FileExtraction, Graph};
 use codeowl::hash::hash_text;
+use codeowl::imports::FileImports;
 use codeowl::spec::{SpecTask, next_task, read_file_spec, render, submit};
+
+/// Multi-file variant of `rust_graph` below — needed for M21.h's cross-file
+/// qualified-ref edge, which (unlike M21.g's same-file synthetic edge) only
+/// exists between two distinct files.
+fn rust_graph_multi(files: &[(&str, &str)]) -> Graph {
+    let extractions: Vec<FileExtraction> = files
+        .iter()
+        .map(|(p, s)| FileExtraction {
+            rel_path: p.to_string(),
+            source_hash: hash_text(s),
+            symbols: codeowl::rust::extract_file(s, p),
+        })
+        .collect();
+    let mut graph = Graph::build(extractions);
+    let file_imports: std::collections::HashMap<String, FileImports> = files
+        .iter()
+        .map(|(p, s)| (p.to_string(), codeowl::rust::extract_imports(s, p)))
+        .collect();
+    let resolved =
+        codeowl::rust::resolve_imports(std::path::Path::new("/unused"), &file_imports, &graph);
+    graph.set_resolved_imports(resolved);
+    graph
+}
 
 const SRC: &str = "\
 use std::fmt;\n\
@@ -382,6 +406,112 @@ fn a_types_own_field_change_invalidates_its_trait_impls_document_without_folding
         3,
         "still three separate sections after the fix -- linking staleness never folds \
          them into one document:\n{rendered2}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// M21.h (`ARCHITECTURE.md` open question 14): `read` calls
+// `crate::target::Target` with no `use crate::target;` at all -- unlike
+// M21.g's same-file case, this is a genuine cross-file reference that the
+// ordinary `use` scan never sees. Proves the exact validation
+// `ROADMAP.md`'s M21.h section names: the edge appears in the rendered
+// dependency list (the same data `get_callees` reads), and a change to
+// `Target`'s own public field -- which moves its `interface_hash`, not
+// just `source_hash` -- actually invalidates `read`'s document even
+// though `read`'s own text never changed a byte.
+fn target_src(field_decl: &str) -> String {
+    format!("pub struct Target {{\n    {field_decl}\n}}\n")
+}
+
+const CALLER_SRC: &str = "\
+pub fn read(t: &crate::target::Target) -> u32 {\n    t.value\n}\n";
+
+#[test]
+fn a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change() {
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-rust-spec-{}-qualified",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+
+    let v1 = target_src("pub value: u32,");
+    std::fs::write(dir.join("src/target.rs"), &v1).unwrap();
+    std::fs::write(dir.join("src/caller.rs"), CALLER_SRC).unwrap();
+    let graph1 = rust_graph_multi(&[("src/target.rs", &v1), ("src/caller.rs", CALLER_SRC)]);
+
+    for file in ["src/target.rs", "src/caller.rs"] {
+        let file_id = graph1.find(file).unwrap();
+        while let Some(task) = next_task(&graph1, &dir, file_id).unwrap() {
+            match task {
+                SpecTask::Symbol { id, .. } => {
+                    submit(
+                        &graph1,
+                        &dir,
+                        &id,
+                        "### Summary\nA deliberate unit of behaviour.\n\
+                         ### Behavior\nDoes exactly what the name says and nothing more.\n",
+                    )
+                    .unwrap();
+                }
+                SpecTask::File { id, .. } => {
+                    submit(&graph1, &dir, &id, "A target type and a reader.").unwrap();
+                }
+            }
+        }
+    }
+
+    let caller_file_id1 = graph1.find("src/caller.rs").unwrap();
+    let caller_spec1 = read_file_spec(&dir, "src/caller.rs").unwrap().unwrap();
+    let rendered1 = render(&graph1, &dir, caller_file_id1, &caller_spec1);
+    let read_section = section(&rendered1, "read");
+    assert!(
+        read_section.contains("`src/target.rs::Target` — crate::target"),
+        "the qualified call must render as a real dependency with the real \
+         module path as its specifier, not a `same file` placeholder:\n{read_section}"
+    );
+
+    // Add a second public field to Target. Moves its interface_hash;
+    // `read`'s own text is byte-for-byte unchanged.
+    let v2 = target_src("pub value: u32,\n    pub label: String,");
+    std::fs::write(dir.join("src/target.rs"), &v2).unwrap();
+    let graph2 = rust_graph_multi(&[("src/target.rs", &v2), ("src/caller.rs", CALLER_SRC)]);
+
+    let mut offered2 = Vec::new();
+    for file in ["src/target.rs", "src/caller.rs"] {
+        let file_id = graph2.find(file).unwrap();
+        while let Some(task) = next_task(&graph2, &dir, file_id).unwrap() {
+            if let SpecTask::Symbol { id, .. } = &task {
+                offered2.push(id.clone());
+            }
+            match task {
+                SpecTask::Symbol { id, .. } => {
+                    submit(
+                        &graph2,
+                        &dir,
+                        &id,
+                        "### Summary\nA deliberate unit of behaviour, refreshed.\n\
+                         ### Behavior\nDoes exactly what the name says and nothing more.\n",
+                    )
+                    .unwrap();
+                }
+                SpecTask::File { id, .. } => {
+                    submit(&graph2, &dir, &id, "A target type and a reader.").unwrap();
+                }
+            }
+        }
+    }
+
+    assert!(
+        offered2.contains(&"src/target.rs::Target".to_string()),
+        "Target's own text changed, so it must be regenerated: {offered2:?}"
+    );
+    assert!(
+        offered2.contains(&"src/caller.rs::read".to_string()),
+        "read's cross-file qualified dependency moved underneath it even \
+         though read's own text didn't change at all -- this is exactly the \
+         silent false-negative ARCHITECTURE.md open question 14 describes: \
+         {offered2:?}"
     );
 
     std::fs::remove_dir_all(&dir).ok();

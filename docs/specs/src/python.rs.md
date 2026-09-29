@@ -1,13 +1,13 @@
 ---
 kind: file
 source_paths: [src/python.rs]
-file: { source_hash: 3572fc0b357d84878003d84fec0f5a1264302e634b00a72938e9203488abcda7, deps_hash: 5fb0e8e3cb4e5e798503452df6313d0b83c2ac5958be3b4101cc27068602ea07, spec_hash: b4caf755acde854fdfeb51232db73e3b7495bc53106c3947e0206aa429487300 }
+file: { source_hash: c33c469f14a1ac5c21eefbd41d481d0a8dbdbb1e91db968b03d145bc70d38211, deps_hash: 0805eb799f720002e7948fb004d16134809fa2651b900df6ac266684c07ade7d, spec_hash: e3c4feba172bd8ab1e614a96b07a4e1f0f97c869bc85de4df0c5148696952a21 }
 symbols:
-  src/python.rs::extract_file: { source_hash: 59974196dd2cf50b00421a15d9b5030eb2ee7d960dc875f5f733c6cbe9c2b404, deps_hash: ce7d9d7fc16420378d45b890370f2eb5a11a122aee5b39ac6d807d291364fb0f, spec_hash: 82a6a0fad0e6d8f7017a02baa3672ad345600738fe751f27ee3191d20b7338f9 }
-  src/python.rs::visit_item: { source_hash: eb85669b5b47d710290e08c6f92c1a5aa993f7705a1dfeda581597238af5ced2, deps_hash: ce7d9d7fc16420378d45b890370f2eb5a11a122aee5b39ac6d807d291364fb0f, spec_hash: 6413554c74dd1e09a73507df7fe5cddff946ce0a4aee641b06765b4ac7ad2bda }
-  src/python.rs::visit_container: { source_hash: 5d1c7e50ccf8bc445f222e23eb44bfa6cd0e435e6081017b0f9f6903d146c686, deps_hash: d4034a9cbee7900a1fbe5e4401fc040618db110c2395b587568f12985ac649df, spec_hash: 835ffe71479a0c0450ead76b674ee7f850af5c0db5d81d4e13c37a0c9496511b }
-  src/python.rs::push_callable: { source_hash: 3eaf742941a54f9ac1dd81d2d5538fc3867ae58f8bc15abd4ba34680c50aa879, deps_hash: d4034a9cbee7900a1fbe5e4401fc040618db110c2395b587568f12985ac649df, spec_hash: 34c1a435a6eeeb522375ec3dea588fb2c28e13a8504971b1c73875f9a1a38b57 }
-  src/python.rs::visit_module_assignment: { source_hash: cbffad134f95f1e0d88cce05af14089f76446632458d23e0bef5aa14f5616e8c, deps_hash: d4034a9cbee7900a1fbe5e4401fc040618db110c2395b587568f12985ac649df, spec_hash: 2febea1aab37546e6c62b3724b7a895bc57a39ae66a00d2bcc8cfe3c722d1eae }
+  src/python.rs::extract_file: { source_hash: 59974196dd2cf50b00421a15d9b5030eb2ee7d960dc875f5f733c6cbe9c2b404, deps_hash: 57b36ccf02abf241d59cf027b8af996e4e37cdf048813be00047a453efba7ce6, spec_hash: 5f61bc6964133701193c7ac45b3a929640181ac76b7f445a4163cc886a312ab8 }
+  src/python.rs::visit_item: { source_hash: a7053d66598730e80e40891e9d8f689c63bafd364d264cbfb587e1d0b310ace3, deps_hash: 57b36ccf02abf241d59cf027b8af996e4e37cdf048813be00047a453efba7ce6, spec_hash: 729fb64225150443d3af709083cbca861079c0e02a3f1c9fa91c010fce71420b }
+  src/python.rs::visit_container: { source_hash: b063732f8517594275394ecfd7d7c0ce8e3422f4083c484fe4318c201cef2a4a, deps_hash: 0e880d10f3fefab70ccb4ef78b8afba1ceb00621182c351fb69f55fb78ffbb24, spec_hash: 53da0137af7c4d204088ecb46e475ea8d0ae116fd2e4a8ad905ae255ab46f6ad }
+  src/python.rs::push_callable: { source_hash: 3eaf742941a54f9ac1dd81d2d5538fc3867ae58f8bc15abd4ba34680c50aa879, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 792a08eff6562bc0e648596acb64d1bab13a0759eed8a4f43a7acabd99aff0c0 }
+  src/python.rs::visit_assignment: { source_hash: 655e3c134f64490d543150c240b16c1bc98d01261723ae7b2b9a73e5debbe3d1, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 1efe4167193edbf9f01fdfae80782486cfd56a707e643863979d3a72fb7d3bcf }
   src/python.rs::collect_decorators: { source_hash: ef63546613156efe28bd5b40ceaaa48610b65c89ab7f54f7f0212fc698c92d50, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9446dcf3d2b08930f2649ce5e0af63cafbc4e836a47f462dffff55b1130507f1 }
   src/python.rs::signature_before_body: { source_hash: 74f3f55ff59666ce5d0ba0c57f038d0a32b1a3d53572ea26a8cd0fc8c87f4da3, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 5ba4651a607b3c2f430c23c9ec335ec2882060934a2d602feb1bf73f0c60b6c0 }
   src/python.rs::docstring: { source_hash: 8e2782f5a02171f978dba2e6d3ecea580013c92cda82879b4527d19d17109bfa, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b20b5fcaf555797dd43b9831dfb561c1e907735fcd7576580f9a069ace074ee0 }
@@ -15,32 +15,28 @@ symbols:
   src/python.rs::field_text: { source_hash: 2a5140d871a8f94a462c9ede1e35d0cc3fc4e40157ee85e7866651beb6747233, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 5a7dd3e9fff91f5509b2d450516358abe90b57177d59f6d7c51d1a3e829ef045 }
   src/python.rs::text: { source_hash: f2f836c691a8002927cc493e38650603f8fc64232d33afeb1b8f41f9279d1f2f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 5b7b1b23b4c01d158faade41b2b5268e324382a65f0d292a63b670d875b22a65 }
   src/python.rs::node_lines: { source_hash: 30cdd2645c25a8d4ce9ab107ed17c80f226a84814ba9d5294ac6d3666e6cd0f9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 528f4ab1748cfdf556a27d8f276151cad0382ad65aa537679652468eb7efc85d }
-  src/python.rs::extract_imports: { source_hash: d237d0f18bbb0917c29576a2d4b71ca18cbc07f03e567f9f4db53415e29383b9, deps_hash: 22aa2aaa6e20b4c017d8f6f877c561b2ecb0f92dd5a9aed9501b75b77eb9d449, spec_hash: 6d5b4587632a28eb4066dca099ccc1ae9a3272038e7ddbaa265d9622a2865f40 }
+  src/python.rs::extract_imports: { source_hash: d237d0f18bbb0917c29576a2d4b71ca18cbc07f03e567f9f4db53415e29383b9, deps_hash: f061bd826c213ddba4e29f75faea4a3333bdb06a0683178a4fb2b4c9a0011bac, spec_hash: a7bc79597e74ea27d52284d26735b4c2cd36488012aaa240f7cdcf452aa4cc5c }
   src/python.rs::dotted_of: { source_hash: bdd7410ec31163f38896717d03790df3e270f94396022c087f3d209bfe161e18, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e6a5eacbc17c2503618b2eca04be6c91fb0bafefe6516a1e8d3f1e2a35cdf092 }
   src/python.rs::module_specifier: { source_hash: 9b0772c894ed2d469fcf0813ee2f4714a9a64faa7d27041641e1f57bb1a54990, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 21f2b042697c9e1499af3818d1aeb4e2901c9e123f8c856c7364f376350ce8ef }
-  src/python.rs::resolve_imports: { source_hash: de3140f13f11aeef067bb212c305807b8b995079d1e279b587a29358b8d9a0a7, deps_hash: 425349a55a358b0e520062e61caad128bd4e42128a1fb8269b93153b0bb70d5e, spec_hash: 20125ff12ee812f813706b4f32644c647272975dcb01e4d80f770bac6ec5c22b }
-  src/python.rs::resolve_one: { source_hash: 3ad11e23374fbc233af50620f14d23f25a71df7c9bb12faa8021efac61237a62, deps_hash: 2dc9684a80741e34b3ffd4549cd0cf8c54ddf39b72942a96621673bde276cf67, spec_hash: e4b84938de04007e34a85eb7aa3bc1a86bf9564885f65c8550c3683c4e8c4c41 }
+  src/python.rs::resolve_imports: { source_hash: de3140f13f11aeef067bb212c305807b8b995079d1e279b587a29358b8d9a0a7, deps_hash: f978a6cd828729aa0334e8c71c14b6fe48536045e40061c8f3fef349883d78f1, spec_hash: b894befbc37307e0cfec54c79725e5405bcfc1b15bac5365a161767bb2ce87a2 }
+  src/python.rs::resolve_one: { source_hash: 3ad11e23374fbc233af50620f14d23f25a71df7c9bb12faa8021efac61237a62, deps_hash: 5091a42a49b19206f0a974c51e400b57f9e2a2726618840731cf973ec2a3b763, spec_hash: 5bc5db4b2464d62321e1ffe76b4fef6c7cfa0ebe38b12171e6c2ad98852035a8 }
   src/python.rs::module_path: { source_hash: a51c2a6186611411a509c69e57384b4f26e3d2247366e6b5683c0152771e4721, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 7c648dad444a020a716172dfb0b331e6e645542f8744e2e80f38c4a23a96d240 }
-  src/python.rs::pick_file: { source_hash: 1798debbf9dff8a37fc1b904068bb81ff3426e9932dd1e7cd82b3d2b2bce0133, deps_hash: 8fcd29bb9cdbe400a1c914b64ea9a910b9aae08ec252f1e91a7f090f6fb6e82c, spec_hash: 976cbf4e00a034edfd464c6b6d3dadb5966de9c6c215a6aa5b2f69100ea79d7a }
-  src/python.rs::extract_flow_edges: { source_hash: a7e6e96ba04e52feb027dfa421353057432e7dea7643e188265e9adf54491af5, deps_hash: 7593878ddd6d0149005c350c3c958ef0e172ba9ee7216fe159e74a9b21c0a313, spec_hash: 5115497be0b3d1d08f36cfc10e401fd4d8f81576250475d6610bb369c1ed5003 }
+  src/python.rs::pick_file: { source_hash: 1798debbf9dff8a37fc1b904068bb81ff3426e9932dd1e7cd82b3d2b2bce0133, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: 40d4dcc9b7b196ef4b3cd95ac133d35a9ee5fe2ac8ca99570298ff540432f385 }
+  src/python.rs::extract_flow_edges: { source_hash: a7e6e96ba04e52feb027dfa421353057432e7dea7643e188265e9adf54491af5, deps_hash: db6901984ad273d947383eb404c69c006c63274caa3b433b981a5237a822060e, spec_hash: 4ad41d34f3f37efddcd15c38bb8901838a82c943842d5d197755c719cc691bf7 }
   src/python.rs::is_route_decorated: { source_hash: 38a7354a9f018ae74714cfac443f91ade00b2e7f9935b0f20e3343e412f2b615, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: df26c0360b9c21db3a18506009a81ddfabf9bd76455928c7af9fca9401f155dd }
-  src/python.rs::collect_route_deps: { source_hash: f797e94d810536b1ba61bb1b92f263a563e6f1421e5aa5f9362143dba37356ff, deps_hash: 7593878ddd6d0149005c350c3c958ef0e172ba9ee7216fe159e74a9b21c0a313, spec_hash: 1bb6bfbc41a98673b2aaa3e9e253a92f9505d1e41d0955492aec3e36880fb047 }
-  src/python.rs::resolve_flow_edge: { source_hash: e2771b453681c8e2ba217b223a766f56d3e3d32d8293d58dd963ade25ec14fd3, deps_hash: 46a92f0a310b6a7dc516945d87493138b1c04c056f384b90b6791b2bf3a009ae, spec_hash: 043c16de71a6c54bcb1d8d34601cd2c6090f34b3422c393d74edb343f8aeae0b }
+  src/python.rs::collect_route_deps: { source_hash: f797e94d810536b1ba61bb1b92f263a563e6f1421e5aa5f9362143dba37356ff, deps_hash: db6901984ad273d947383eb404c69c006c63274caa3b433b981a5237a822060e, spec_hash: 19203b3d206c27e8ab72f824e805313306c681b5cde5e13233e798ab7c37122d }
+  src/python.rs::resolve_flow_edge: { source_hash: e2771b453681c8e2ba217b223a766f56d3e3d32d8293d58dd963ade25ec14fd3, deps_hash: 73c2355ea5374df2dd4dedcff9c973bf7d63cac9449978644a81ecc13aa222b2, spec_hash: f737183e4f80d12a15d6c9bf60c0d2e3841d79e1dd126a256b787246596ed54a }
 ---
 # src/python.rs
 ## Summary
-This file is CodeOwl's Python language stack — the same role `rust.rs`/`java.rs` play for their languages. It walks a `.py` file's module-level declarations (classes, functions, and simple `NAME = value` assignments) with tree-sitter, staying one level deep the same way the other extractors do: a function's own body, a class's field assignments, and comprehension internals aren't turned into their own symbols. Python's visibility is inferred purely from naming convention (a leading underscore means private, a `__dunder__` is still public API) rather than a keyword, since Python has none. Decorators are captured verbatim as `markers` — this matters beyond documentation, since it's how the file's second half, the FastAPI feature model, later recognizes a function as a web route handler.
-
-The rest of the file handles Python's import system: parsing `import`/`from ... import` statements (including relative imports with leading dots, and wildcard imports, which are recorded but never resolved to anything specific) and resolving each one to a real declaration by treating CodeOwl's indexed root as the Python project root and mapping dotted module paths onto files — following at most one `__init__.py` re-export hop, since Python's "barrel" pattern (re-exporting a submodule's name through a package's `__init__.py`) is common enough to be worth one level of indirection but not worth chasing indefinitely.
-
-Finally, this file extracts and resolves FastAPI-specific "flow edges" (see `GLOSSARY.md`): for each route-decorated function (`@router.get(...)` and similar), it records every `Depends(x)` dependency and every bare-name dependency-typed parameter, then resolves each one to the file that actually declares it — trying a same-file declaration first, then whatever the route's own file imported under that name, and only then falling back to a best-effort repo-wide search — so that a route's real dependencies (a `deps.py`, a CRUD module) can be pulled into its feature spec even though CodeOwl never executes the code to see the true call graph.</content>
+This file walks a Python source file and pulls out its declarations — the Python counterpart to the extraction files for Rust, TypeScript, and Java. It captures module-level classes and functions, a class's own methods and nested classes, and any `NAME = ...` assignment at module or class scope (since Python has no distinct grammar node for a class field, this is how model fields from frameworks like SQLModel, SQLAlchemy, Django, and Pydantic get captured too). A class's own hash folds together its own signature and every one of its members', the same Merkle-style aggregation the other language extractors use. Decorators are captured verbatim, arguments included, so the FastAPI feature model elsewhere in this project can read a route decorator like `@router.get("/items/{id}")` back out. Beyond extraction, this file also resolves Python's own `import`/`from ... import` statements to the declarations they name, and separately recognizes a FastAPI route's dependencies — an explicit `Depends(...)` call or a bare-identifier parameter type — as flow edges to be resolved against the rest of the graph.
 
 ## `extract_file`
 `pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol>`
 ### Summary
-Parses one Python file's source text and pulls out its module-level declarations (functions and classes) plus their members — the Python stack's entry point for turning a file's text into structured data, the same role `extract_file` plays for Rust and `extract_symbols` plays for TypeScript.
+Parses a Python file's contents and pulls out its module-level declarations (functions, classes, and their members) as the graph's own extracted-symbol shape.
 ### Behavior
-Loads a fresh tree-sitter parser (the parser library CodeOwl uses to build a syntax tree from source text) with the Python grammar and parses the source; an unparseable file returns an empty list rather than erroring. It then walks only the root node's direct children — top-level statements — dispatching each to `visit_item` with no parent and an empty decorator list to start. The parsed tree itself is never returned or stored past this function, since its `Node` values only live as long as the tree that produced them (see `CLAUDE.md`'s Rust conventions).</content>
+Parses the source with the Python grammar; if parsing fails outright, returns an empty list rather than erroring. Otherwise walks every top-level item in the file (never descending into a `Node` beyond this function — the parsed tree owns everything each node borrows from, and none of it survives past this call), delegating each one to `visit_item` to extract it and, where applicable, its members.
 ### Depends on
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - externals: tree_sitter
@@ -55,9 +51,9 @@ Loads a fresh tree-sitter parser (the parser library CodeOwl uses to build a syn
     out: &mut Vec<ExtractedSymbol>,
 )`
 ### Summary
-Looks at one syntax-tree node from a parsed Python file and, if it's a kind of statement CodeOwl extracts, turns it into a symbol (or, for a class, recurses into its members). The dispatcher `extract_file` calls once per top-level statement, and that classes call again for their own bodies.
+Handles one Python statement during extraction, dispatching it to the right handler based on what kind of statement it is.
 ### Behavior
-Matches on the tree-sitter node's kind. A `decorated_definition` (a function or class wrapped in one or more `@decorator` lines) collects those decorators first via `collect_decorators`, then re-visits the actual definition underneath, passing the collected decorators along as `markers` so they end up attached to the resulting symbol. A `class_definition` recurses via `visit_container`, treating the class as a container and its body as one level of nested members. A `function_definition` becomes a `Callable` symbol via `push_callable`. A module-level `expression_statement` — a plain assignment like `NAME = ...` or an annotated one like `NAME: T = ...` — is only handled when there's no `parent_id` (i.e. it's at the top of the file, not inside a class body); it's passed to `visit_module_assignment` and becomes a `Value` symbol. A class body's own assignments (model fields, a nested `Config` class, and the like) are deliberately *not* extracted as their own symbols this way — they stay folded into the class as a whole, the same stance the Rust extractor takes toward a struct's fields. Any other statement kind is silently ignored.</content>
+A `@decorator`-wrapped definition first collects its decorators, then re-visits the definition underneath with those decorators attached as markers. A class definition is handled as a container (its own members extracted too); a function definition becomes a callable. A plain `NAME = ...` (or `NAME: T = ...`) assignment becomes a value member — this covers both a module-level constant and a class-body attribute (a model field, in frameworks like SQLModel/SQLAlchemy/Django/Pydantic that declare fields as ordinary assignments), since Python's grammar has no separate "field" node kind the way Rust, TypeScript, and Java each do. Any other statement kind is ignored.
 ### Depends on
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - externals: tree_sitter
@@ -72,15 +68,15 @@ Matches on the tree-sitter node's kind. A `decorated_definition` (a function or 
     out: &mut Vec<ExtractedSymbol>,
 )`
 ### Summary
-Extracts a Python `class` as a `Container` symbol: builds its id, recurses into its body to extract its members, then assembles the class's own symbol around them. Unlike the Rust extractor (which only goes one level deep into a container), a nested class inside this class is itself fully recursed into as another container.
+Extracts a Python class: recurses into its body to extract each member, then folds all of them together into the class's own declaration.
 ### Behavior
-Reads the class's name (falling back to the placeholder `"<anon>"` if somehow missing) and builds its id from the parent container's id, or the file path if it's top-level. It walks the class body, calling `visit_item` on each child with this class's id as the new `parent_id` and a fresh empty decorator list (decorators only apply to the item they directly precede, not inherited by the whole body). After recursion, it filters `out` for symbols whose `parent` is exactly this class's id (its direct members, not deeper-nested grandchildren) to compute the member id list and the Merkle-folded `source_hash` (a hash combining several hashes into one so any change underneath is reflected in the combined value — see `GLOSSARY.md`) — starting from the class's own signature text and folding in each direct member's hash, so editing a member also counts as editing the class, matching the same pattern the Java and Rust extractors use.
-
-`is_exported` is only `true` for a top-level class (no `parent_id`) whose name passes `is_public_name` — Python's convention that a name starting with `_` is considered private/internal. A nested class (commonly a Pydantic/Django-style `Meta` or `Config` inner class) is never independently exported, since it isn't reachable except through its containing class. `interface_hash` (a hash of just the signature, for detecting only public-surface changes) is computed only when the class is exported. The finished class symbol is inserted into `out` *before* its members, keeping declaration order parent-then-children.</content>
+Visits every statement in the class body (delegating to `visit_item`), which extracts nested classes, methods, and attribute assignments as the class's own members. Afterward, it disambiguates any id collision among those direct members — Python allows a class attribute and a method to share the same bare name (`self.x` vs `self.x()`), which would otherwise compute to the same id and let one silently overwrite the other; whichever was extracted first (in declaration order) keeps the plain id, and a later collision gets a `#2`, `#3`, … suffix instead. The class's own `source_hash` is a fold of its own signature plus every direct member's `source_hash` (matching how a Rust or Java container folds its members). A top-level class (not itself nested in another class) is considered exported if its name is public by Python's leading-underscore convention; only an exported class also computes an `interface_hash`, folding in each public-by-convention attribute's own signature (with its assigned value stripped out, since the value isn't part of the class's public shape) — methods are left out of that fold entirely.
 ### Depends on
+- `src/graph.rs::Graph` — crate::graph
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - `src/symbol.rs::SymbolKind` — crate::symbol
+- `src/text.rs::strip_value_for_fold` — crate::text
 - externals: tree_sitter
 
 ## `push_callable`
@@ -93,21 +89,27 @@ Reads the class's name (falling back to the placeholder `"<anon>"` if somehow mi
     out: &mut Vec<ExtractedSymbol>,
 )`
 ### Summary
-Builds an `ExtractedSymbol` for a `def` — either a module-level function or a class method — and appends it to the output. The leaf-item counterpart to `visit_container` for callables.
+Extracts a Python function or method (a `def`) as one callable symbol.
 ### Behavior
-Reads the function's name; if missing, the item is silently skipped. Its id is the parent class's id plus `::name` when it's a method, or the file path plus `::name` at module level. `is_exported` is only ever `true` for a module-level function (no `parent_id`) whose name passes `is_public_name` (Python's leading-underscore-means-private convention) — a method is never treated as independently exported, since it can't be imported on its own the way a module-level function can. `source_hash` hashes the function's full text; `interface_hash` (a hash of just the signature, for detecting only public-surface changes) is computed only when the function is exported. `docstring` and `markers` (the decorators collected by the caller) are attached as given.</content>
+Reads the function's name and signature, builds its id from the enclosing class (or the file, if it's a module-level function), and records its full body as its `source_hash`. Only a module-level function whose name is public by convention is considered exported — a method is never independently imported by name, so it's never treated as exported regardless of its own name.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - `src/symbol.rs::SymbolKind` — crate::symbol
 - externals: tree_sitter
 
-## `visit_module_assignment`
-`fn visit_module_assignment(stmt: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>)`
+## `visit_assignment`
+`fn visit_assignment(
+    stmt: Node,
+    parent_id: Option<&str>,
+    source: &str,
+    file: &str,
+    out: &mut Vec<ExtractedSymbol>,
+)`
 ### Summary
-Turns a module-level assignment statement — `NAME = ...` or an annotated `NAME: T = ...` — into a `Value` symbol, one per plainly-named binding.
+Extracts a `NAME = ...` (or `NAME: T = ...`) assignment, at either module scope or class scope, as one value member — this is how a model field (SQLModel/SQLAlchemy/Django/Pydantic) and an ordinary module constant both get captured, since Python has no distinct grammar node for a class field the way other languages do.
 ### Behavior
-Looks at the statement's children for an `assignment` node, then checks its left-hand side: only a plain single `identifier` target is extracted. A tuple-unpacking assignment (`a, b = ...`) or an attribute assignment (`obj.attr = ...`) is skipped entirely — neither names a single top-level declaration the way a plain `NAME = ...` does. For a matching assignment, the symbol's `signature` is just the first line of the assignment's text (so a multi-line value like a dict literal doesn't sprawl across the signature field), and `is_exported` follows Python's leading-underscore-means-private convention via `is_public_name`. Both `source_hash` and (when exported) `interface_hash` hash the assignment's full text — unlike a function or class, there's no separate "signature vs. body" split for a plain value assignment, so both hashes cover the same text.</content>
+Looks for an `assignment` child of the given statement whose left-hand side is a plain identifier — a tuple target (`a, b = ...`) or an attribute target (`obj.attr = ...`) is skipped, since neither is a declaration. The full assignment text, value included, is kept as the member's signature at both module and class scope — deliberately not stripped, since other real readers (a router-prefix reader, and the LLM-facing large-class reduction) depend on seeing a value like `Field(primary_key=True)` or a full `APIRouter(prefix=...)` call. A module-level assignment is exported if its name is public by convention; a class attribute is never independently exported, the same as a method or nested class.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
@@ -180,9 +182,9 @@ Converts tree-sitter's zero-based row positions to the one-based line numbers a 
 ## `extract_imports`
 `pub fn extract_imports(source: &str, _rel_path: &str) -> FileImports`
 ### Summary
-Parses a Python file's `import` and `from ... import` statements into a list of tracked imports, so they can be resolved later against the rest of the repo.
+Parses a Python file's `import` and `from ... import` statements into CodeOwl's shared import-record shape, so they can later be resolved to the actual symbols they name.
 ### Behavior
-Parses the file fresh with the Python grammar (returning an empty result on failure) and walks only its top-level `import_statement` and `import_from_statement` nodes — imports nested inside a function body or conditional aren't tracked. For a plain `import a.b.c`, the dotted path is split at its last segment: everything before becomes the `specifier` (the module path) and the last piece becomes the `imported_name` — so `import a.b.c` records specifier `"a.b"`, name `"c"`; if there's no dot at all, the specifier is empty and the whole name is used. For `from a.b import x, y`, the module named after `from` becomes the specifier (via `module_specifier`, which also handles a relative import like `from ..pkg import x`, keeping its leading dots so the actual target can be resolved later relative to the importing file's own location), and each name listed after `import` becomes its own `ImportRef` sharing that specifier. A wildcard import (`from x import *`) is recorded as a single entry with `imported_name` set to the literal string `"*"`, rather than trying to enumerate what it actually pulls in.</content>
+Handles two statement shapes. A plain `import a.b.c` splits into a module specifier (`"a.b"`) and the imported name (`"c"`). A `from a.b import x` keeps `"a.b"` as the specifier and `"x"` as the imported name directly; a relative import (`from ..pkg import x`) keeps its leading dots in the specifier as-is, left for later resolution against the importing file's own location. A `from x import *` records a single entry with `"*"` as the imported name, since it names no single declaration.
 ### Depends on
 - `src/imports.rs::FileImports` — crate::imports
 - `src/imports.rs::ImportRef` — crate::imports
@@ -213,9 +215,9 @@ For an ordinary absolute module (a plain `dotted_name`, like `app.models`), retu
     graph: &Graph,
 ) -> Vec<ResolvedImport>`
 ### Summary
-Resolves every file's tracked Python imports across the whole repo to the actual symbol (or file) they point at — Python's counterpart to the Rust and TypeScript import resolvers.
+Resolves every Python file's imports to the actual declaration they point at, wherever that's possible.
 ### Behavior
-Walks files in a deterministic (path-sorted) order so the persisted set of resolved edges comes out the same way on every run, which keeps the on-disk cache diffable — the same reasoning `resolve::resolve_imports` and `java::resolve_imports` use. For each file's tracked imports, it calls `resolve_one` (starting at recursion depth 0, since resolving a Python import can itself require following module-level re-exports) to find the target, and records a `ResolvedImport` regardless of whether resolution succeeded — an unresolved import (standard library, a third-party package, a `*` wildcard, or anything that doesn't map to a file this repo indexed) still gets an entry, with `target: None`. Unlike the Rust resolver, the `root` filesystem path isn't used here either — resolution works entirely off the already-collected `file_imports` map.</content>
+Walks every file in a stable, sorted order, and for each of its recorded imports, calls `resolve_one` to find the matching declaration. An import stays unresolved if it names something outside this repo (a standard-library or third-party package), a wildcard (`*`) import, or a broken reference.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/imports.rs::FileImports` — crate::imports
@@ -232,9 +234,9 @@ Walks files in a deterministic (path-sorted) order so the persisted set of resol
     hop: u8,
 ) -> Option<SymbolId>`
 ### Summary
-Resolves a single Python import to the symbol it actually refers to, trying three possibilities in order: a declaration defined directly in the named module, the imported name being itself a submodule/subpackage, or — as a last resort — following one `__init__.py` re-export hop.
+Resolves one import's specifier and name to the actual symbol it refers to, trying every way Python's import system can name something.
 ### Behavior
-A wildcard import (`name == "*"`) is never resolved to anything specific. Otherwise it converts the specifier to a repo-relative module path (`module_path`, which also handles a relative import's dots), then looks for the module as either `<path>.py` or `<path>/__init__.py` (Python's two ways a module can exist — a single file, or a package directory). (1) If that module file exists, it first tries to find `name` as a declaration inside it (`<module_file>::name`). (2) If not found there, it checks whether `name` is actually a submodule or subpackage nested under the specifier's path — joined as `<mod_path>/<name>`, with a guard for the case where `mod_path` is empty (a bare top-level `import app`), since naively joining with `/` there would produce a bogus leading-slash path that could never match a real file. (3) If still unresolved, and the hop count hasn't exceeded `MAX_REEXPORT_HOPS`, and the module file is an `__init__.py` (a package's own module), it checks whether that `__init__.py` itself imports something under the same name — Python's common re-export pattern of exposing a submodule's item through the package's `__init__.py` — and if so, recursively resolves *that* import instead, one hop deeper. Returns `None` if none of the three possibilities pan out (standard library, third-party, or genuinely broken import).</content>
+A wildcard (`*`) import never resolves — it names no single declaration. Otherwise, tries three things in order: (1) the name is a declaration inside the specifier's own module file (`a/b.py` or `a/b/__init__.py`); (2) the name is itself a submodule or subpackage nested under the specifier — handling the edge case where a bare single-segment `import app` produces an empty module path, so the submodule name is used directly rather than joined with a spurious leading slash; (3) if the module is a package's `__init__.py` and it re-exports something under that name, one more hop follows the re-export to wherever it actually points, up to a fixed hop limit. Returns `None` if none of the three ever finds a match.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::graph
@@ -256,9 +258,9 @@ For an absolute specifier (doesn't start with `.`), simply replaces every `.` wi
     candidates: &[String],
 ) -> Option<&'a str>`
 ### Summary
-Given a list of candidate file paths (in preference order), finds the first one that actually corresponds to a file CodeOwl walked — trying both an exact match and, failing that, a path-suffix match, so imports still resolve when CodeOwl was pointed at a subdirectory rather than the true project root.
+Finds the first candidate file path that's actually part of this repo, trying each candidate in order.
 ### Behavior
-For each candidate in order, first checks for an exact key match in `file_imports` (the map of every walked file's imports). If no exact match exists, it falls back to looking for any walked file path that *ends with* `/<candidate>` — this covers the case where the repo-relative module path computed by the resolver (say, `app/models.py`) is actually a suffix of the real walked path (like `backend/app/models.py`, if CodeOwl's root doesn't line up exactly with the Python package root). When more than one file matches by suffix, the matches are sorted and the first (alphabetically earliest) one is used, for deterministic behavior rather than depending on hash-map iteration order. Returns `None` if no candidate matches either way.</content>
+For each candidate, first checks for an exact match among the walked files. If none, tries a path-suffix match instead — this covers the case where CodeOwl was pointed at a directory above the actual project root, so the candidate's full path doesn't match exactly but still ends with it. On a suffix match with more than one hit, the alphabetically first is returned, for a stable result.
 ### Depends on
 - `src/imports.rs::FileImports` — crate::imports
 - externals: std
@@ -266,9 +268,9 @@ For each candidate in order, first checks for an exact key match in `file_import
 ## `extract_flow_edges`
 `pub fn extract_flow_edges(source: &str, rel_path: &str) -> Vec<UnresolvedFlowEdge>`
 ### Summary
-Finds every FastAPI route-handler function in a file and records one "flow edge" (see `GLOSSARY.md`) per dependency it has — a `Depends(x)` in its parameters, or a parameter typed as another model. This is how CodeOwl learns that a route reaches beyond its own function body, which the plain import graph alone can't show.
+Finds every route-decorated function in a FastAPI file and records what each one depends on, as an unresolved flow edge to be matched up against the graph later.
 ### Behavior
-Parses the file (returning an empty list on failure) and does a full tree walk — using an explicit stack rather than recursion — over every node, looking for any `decorated_definition` whose decorators mark it as a route (`is_route_decorated`). For each one found, `collect_route_deps` gathers its dependency edges into the output list. Once the whole file has been walked, the collected edges are sorted by `(kind, raw)` and de-duplicated on that same pair — so if the same dependency (e.g. the same `Depends(get_db)`) shows up on more than one route in the file, it's only recorded once, and the output order is deterministic regardless of where in the file the routes appeared.</content>
+Walks the whole parse tree looking for a decorated function whose decorator marks it as a route. For each one found, collects its dependencies (via `collect_route_deps`) into the output list. The results are sorted and deduplicated before being returned, so the same dependency reported by more than one route doesn't appear twice.
 ### Depends on
 - `src/graph.rs::UnresolvedFlowEdge` — crate::graph
 - externals: tree_sitter
@@ -285,9 +287,9 @@ Scans the node's decorators and returns `true` if any decorator's text contains 
 ## `collect_route_deps`
 `fn collect_route_deps(node: Node, source: &str, file: &str, out: &mut Vec<UnresolvedFlowEdge>)`
 ### Summary
-Walks one route handler's syntax subtree looking for its two recognized dependency shapes — FastAPI's `Depends(x)` pattern and a bare-name parameter type annotation — and records each one as an unresolved flow edge.
+Walks a route function's body looking for its FastAPI dependencies: an explicit `Depends(...)` call and a parameter typed as a bare, non-primitive name.
 ### Behavior
-Does a full tree walk (via an explicit stack) over the route function's subtree. For a `call` node whose callee is exactly the bare identifier `Depends`, it takes the first identifier found among its arguments and records it as a `"depends"`-kind edge — this is FastAPI's dependency-injection convention, `def handler(db = Depends(get_db))`. For a `type` node — a parameter's type annotation — that consists of exactly one bare identifier (not a generic or a qualified type), it records a `"dep-type"`-kind edge with that name, *unless* the name is one of the known primitive types (`PRIMITIVE_TYPES`, presumably things like `int`, `str`, `bool`) — this catches FastAPI's other common pattern of typing a parameter as an injected dependency alias, like `session: SessionDep`, without also firing on ordinary primitive-typed parameters. Both edge kinds are tagged with the file they came from and left unresolved (raw text only) for `resolve_flow_edge` to resolve against the graph later.</content>
+Finds every `Depends(<name>)` call anywhere in the function and records the name inside it as a `"depends"` edge. Also finds every parameter whose type annotation is a single bare identifier — like `session: SessionDep` — and, if that name isn't one of the recognized primitive types (`int`, `str`, and similar), records it as a `"dep-type"` edge. Either shape can point at a dependency that's declared elsewhere and needs to be resolved against the graph afterward.
 ### Depends on
 - `src/graph.rs::UnresolvedFlowEdge` — crate::graph
 - externals: tree_sitter
@@ -295,15 +297,9 @@ Does a full tree walk (via an explicit stack) over the route function's subtree.
 ## `resolve_flow_edge`
 `pub fn resolve_flow_edge(graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget`
 ### Summary
-Resolves a `"depends"` or `"dep-type"` flow edge (FastAPI's `Depends(x)` or a bare-name dependency type) to the file that actually declares the named thing, following the same name-lookup precedence Python itself would — this is what lets `deps.py`/`models.py`-style modules join a feature's `core` set (see `features.rs`) even though CodeOwl never runs Python code to see the real dependency graph.
+Resolves one FastAPI dependency reference (a `Depends(...)` name, or a bare-identifier parameter type) to the file that actually declares it.
 ### Behavior
-Only `"depends"` and `"dep-type"` edge kinds are handled; anything else returns `Unresolved` immediately. Resolution tries three things in order, stopping at the first that succeeds:
-
-1. **A same-name declaration inside the route's own file wins first** — matching Python's own scoping rules, where a name resolves locally before considering anything else, and specifically fixing a case where a per-router local helper (like a locally-defined `get_db`) needs to resolve to itself rather than to a same-named helper elsewhere that happens to sort first alphabetically.
-2. **Failing that, whatever the route's file actually imported under that name** — the real disambiguator when two *different* files each declare something with the same name (e.g. a per-router local `get_db` next to the "real" one in `app/api/deps.py`, before any consolidation). Since this function's job is to return a *file* target, an import that resolved to a specific symbol is traced back to the file that declares that symbol, rather than returned as a symbol reference.
-3. **Only if neither of those applies** (a wildcard import, or the name genuinely isn't declared or importable anywhere findable) does it fall back to a best-effort global search across every symbol in the whole graph whose short name matches, with ties broken alphabetically by file path for determinism.
-
-If none of the three finds anything, the edge stays `Unresolved` — expected for a standard-library type, an inline `Depends()` call with no simple identifier argument, or a genuine typo.</content>
+Returns unresolved immediately for any edge kind other than `"depends"`/`"dep-type"`. Otherwise tries, in order, the same precedence Python's own name lookup would use: first, a declaration right in the route's own file — a per-router local dependency must resolve to itself, not to a same-named one elsewhere that happens to sort first; second, whatever the route's file actually imported under that name — the real disambiguator when two different files each declare a dependency with the same name; and only if neither applies, a best-effort search across every declaration in the graph sharing that name, tie-broken alphabetically for a stable, deterministic result. Returns unresolved if none of the three finds anything — a standard-library type, an inline `Depends()` call with no name, or a genuine typo.
 ### Depends on
 - `src/graph.rs::FlowTarget` — crate::graph
 - `src/graph.rs::Graph` — crate::graph

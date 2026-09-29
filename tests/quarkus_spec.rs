@@ -611,6 +611,62 @@ fn an_injected_application_scoped_panache_repository_joins_core() {
 }
 
 #[test]
+fn a_cross_package_fully_qualified_call_with_no_import_still_joins_dependencies() {
+    // `ARCHITECTURE.md` open question 14 / `ROADMAP.md` M21.h, the real
+    // `quarkus-super-heroes` shape: a helper reached from an entry point
+    // calls into a *different* package with no `import` at all. Before
+    // M21.h this dependency was invisible to `assemble_participants` --
+    // exactly the silent false-negative the open question describes: a
+    // feature spec would report `current` even after this uncaptured
+    // dependency's real public interface changed underneath it.
+    let dir =
+        std::env::temp_dir().join(format!("codeowl-quarkus-spec-{}-xpkg", std::process::id()));
+    std::fs::create_dir_all(dir.join("src/main/java/org/acme/util")).unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/util/Labeler.java"),
+        "package org.acme.util;\n\
+         \n\
+         public class Labeler {\n\
+         \x20   public static String label(String s) { return s; }\n\
+         }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src/main/java/org/acme/GreetingResource.java"),
+        "package org.acme;\n\
+         \n\
+         import jakarta.ws.rs.GET;\n\
+         import jakarta.ws.rs.Path;\n\
+         \n\
+         @Path(\"/hello\")\n\
+         public class GreetingResource {\n\
+         \n\
+         \x20   @GET\n\
+         \x20   public String hello() { return org.acme.util.Labeler.label(\"Hello\"); }\n\
+         }\n",
+    )
+    .unwrap();
+
+    let (_index, graph, _catch_up) = RepoIndex::open(&dir).unwrap();
+    let fm = codeowl::features::feature_model_for(&graph).expect("JavaStack has a feature model");
+    let ep = fm
+        .enumerate_entry_points(&graph)
+        .into_iter()
+        .find(|e| e.id == "http-get-hello")
+        .expect("the GET /hello route");
+
+    let p = codeowl::features::assemble_participants(&graph, fm, &ep);
+    assert!(
+        p.dependencies
+            .contains(&"src/main/java/org/acme/util/Labeler.java::Labeler".to_string()),
+        "the cross-package fully-qualified call must surface as a dependency \
+         participant, the same as an explicit import would: {p:?}"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn a_plain_unannotated_helper_class_stays_a_one_hop_dependency() {
     // The negative case ROADMAP.md calls out: a referenced class with no
     // CDI scope and no Panache shape (a plain POJO/util class, the same

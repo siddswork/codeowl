@@ -60,6 +60,22 @@ pub struct FileImports {
     pub re_exports: Vec<ReExport>,
     #[serde(default)]
     pub default_imports: Vec<DefaultImport>,
+    /// A fully-qualified same-crate/package reference with no `use`/
+    /// `import` statement at all (`ARCHITECTURE.md` open question 14,
+    /// `ROADMAP.md` M21.h) -- Rust's `crate::a::b::Item` and Java's
+    /// cross-package FQN both reach another module without ever naming it
+    /// at the top of the file, so `imports`/`re_exports` alone miss them.
+    /// Kept as its own field rather than folded into `imports`: Java's
+    /// same-package scan (`java.rs::same_package_edges`) treats an
+    /// explicit `imports` entry for a simple name as shadowing a
+    /// same-package guess for that name, and a fully-qualified reference
+    /// to a *different* same-named type must not trigger that shadow
+    /// (`FightApiMapper`'s two distinct `Fight` classes -- the real case
+    /// this exists for). TypeScript and Python never populate this: ES
+    /// modules and Python modules have no dotted global-path syntax that
+    /// reaches another module without naming it at the use site.
+    #[serde(default)]
+    pub qualified_refs: Vec<ImportRef>,
 }
 
 /// Parse `source` (the contents of `rel_path`) and extract its named

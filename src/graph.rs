@@ -210,8 +210,15 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// the real trigger was `stack.rs::JavaStack`/`PythonStack`/`RustStack`/
 /// `TypeScriptNextStack` and `quarkus.rs`/`fastapi.rs`'s
 /// `QuarkusFeatureModel`/`FastApiFeatureModel`, all zero-field marker
-/// types in this repo).
-pub const FORMAT_VERSION: u32 = 14;
+/// types in this repo). 15 = M21.h (Rust + Java: a fully-qualified
+/// same-crate/cross-package reference with no `use`/`import` statement at
+/// all now becomes an edge too — `FileImports` gains `qualified_refs`,
+/// populated at extraction time, not resolve time, unlike M21.g's
+/// same-file trait-impl edge, which needed no cache-shape change and so
+/// correctly bumped nothing. Without this, a pre-fix cache would silently
+/// keep every such reference invisible to `get_callees` and to feature
+/// dependency-freshness checks forever, with nothing to invalidate it).
+pub const FORMAT_VERSION: u32 = 15;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

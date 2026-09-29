@@ -832,7 +832,7 @@ fn node_lines(node: Node) -> [usize; 2] {
 // produces. `mod foo;` is structural, not a symbol reference — skipped.
 // ---------------------------------------------------------------------------
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::graph::{Graph, SymbolId};
@@ -885,7 +885,77 @@ pub fn extract_imports(source: &str, _rel_path: &str) -> FileImports {
             }
         }
     }
+    extract_qualified_refs(root, source, &mut fi.qualified_refs);
     fi
+}
+
+/// `ARCHITECTURE.md` open question 14 / `ROADMAP.md` M21.h: a same-crate
+/// fully-qualified reference (`crate::a::b::Item`) needs no `use`
+/// statement, so the loop above -- which only reads top-level
+/// `use_declaration`s -- never sees it. Walks the *whole* tree (every
+/// expression and type position, not just the top level) looking for a
+/// `crate`-rooted `scoped_identifier` / `scoped_type_identifier`, skipping
+/// `use_declaration` subtrees (already covered above) and not recursing
+/// into a matched node's own children (its path text is already fully
+/// consumed as the one reference it represents). Comments and string
+/// literals are never visited at all -- they're leaf tokens, not
+/// expression nodes -- so this can't repeat the Javadoc/`import static`
+/// false-positive shape the M21.h measurement phase hit for a text scan.
+fn extract_qualified_refs(node: Node, source: &str, out: &mut Vec<ImportRef>) {
+    if node.kind() == "use_declaration" {
+        return;
+    }
+    if matches!(node.kind(), "scoped_identifier" | "scoped_type_identifier") {
+        if let Some((specifier, name)) = crate_qualified_target(node, source) {
+            out.push(ImportRef {
+                specifier,
+                imported_name: name,
+            });
+        }
+        return; // this node's own path/name is already consumed either way
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        extract_qualified_refs(child, source, out);
+    }
+}
+
+/// A `crate`-rooted qualified node -> `(module-path, item-name)`, or `None`
+/// if it isn't rooted at `crate` (an external crate, or `self::`/`super::`
+/// -- out of scope for this phase; only `crate::` was actually measured).
+/// `scoped_identifier` whose own `path` is itself a `scoped_type_identifier`
+/// is the "one segment short" shape measured in `mcp.rs`/`quarkus.rs`
+/// (`crate::symbol::SymbolKind::Callable`, an enum-variant/associated-item
+/// access) -- the real dependency is the *type* one level up
+/// (`SymbolKind`), not `Callable`, which isn't a symbol of its own.
+fn crate_qualified_target(node: Node, source: &str) -> Option<(String, String)> {
+    let path = node.child_by_field_name("path")?;
+    let name = node.child_by_field_name("name")?;
+    if node.kind() == "scoped_identifier" && path.kind() == "scoped_type_identifier" {
+        let inner_path = path.child_by_field_name("path")?;
+        let inner_name = path.child_by_field_name("name")?;
+        return crate_rooted(inner_path, source).then(|| {
+            (
+                text(inner_path, source).to_string(),
+                text(inner_name, source).to_string(),
+            )
+        });
+    }
+    crate_rooted(path, source).then(|| {
+        (
+            text(path, source).to_string(),
+            text(name, source).to_string(),
+        )
+    })
+}
+
+/// Whether a qualified path's prefix is rooted at `crate` -- a node's own
+/// text span is always the exact source substring it covers, so checking
+/// the leading word is enough; no need to walk the nested `path` fields
+/// down to the `crate` leaf by hand.
+fn crate_rooted(path: Node, source: &str) -> bool {
+    let t = text(path, source);
+    t == "crate" || t.starts_with("crate::")
 }
 
 /// `(module-path, item-name)` pairs for one `use` argument node.
@@ -950,12 +1020,45 @@ pub fn resolve_imports(
             .iter()
             .map(|i| (&i.specifier, &i.imported_name))
             .chain(fi.re_exports.iter().map(|r| (&r.specifier, &r.source_name)));
+        let mut seen_targets: HashSet<SymbolId> = HashSet::new();
         for (specifier, name) in each {
+            let target = resolve_one(&src, from_file, specifier, name, file_imports, graph);
+            if let Some(id) = target {
+                seen_targets.insert(id);
+            }
             out.push(ResolvedImport {
                 from_file: from_file.clone(),
                 specifier: specifier.clone(),
                 imported_name: name.clone(),
-                target: resolve_one(&src, from_file, specifier, name, file_imports, graph),
+                target,
+            });
+        }
+        // ARCHITECTURE.md open question 14 / M21.h: only add a qualified-ref
+        // edge that resolves to a *real, new* target -- unlike an explicit
+        // `use`, an unresolved qualified ref is noise, not a declared intent
+        // worth recording; a same-file target was never a blind spot at all
+        // (the `bat` false start from measurement); and a target already
+        // covered by an explicit `use` above would otherwise duplicate in
+        // `get_callees`, which does no dedup of its own.
+        for qr in &fi.qualified_refs {
+            let Some(id) = resolve_one(
+                &src,
+                from_file,
+                &qr.specifier,
+                &qr.imported_name,
+                file_imports,
+                graph,
+            ) else {
+                continue;
+            };
+            if graph.owning_file_id(id) == from_file.as_str() || !seen_targets.insert(id) {
+                continue;
+            }
+            out.push(ResolvedImport {
+                from_file: from_file.clone(),
+                specifier: qr.specifier.clone(),
+                imported_name: qr.imported_name.clone(),
+                target: Some(id),
             });
         }
         out.extend(same_file_trait_impl_edges(from_file, graph));
@@ -1833,6 +1936,94 @@ pub use crate::stack::RustStack;\n";
         assert!(edges.iter().any(|e| e.imported_name == "Graph"
             && e.specifier == "crate::graph"
             && e.target.is_some()));
+    }
+
+    #[test]
+    fn fully_qualified_crate_call_with_no_use_gets_an_edge() {
+        // ARCHITECTURE.md open question 14 / M21.h: `crate::rust::extract_file`
+        // called with no `use crate::rust;` -- exactly `stack.rs`'s own real
+        // shape, measured pre-build. No `use` means the ordinary import scan
+        // (`extract_imports`) sees nothing; this is the blind spot.
+        let edges = resolved(&[
+            ("src/rust.rs", "pub fn extract_file() -> u32 { 0 }\n"),
+            (
+                "src/stack.rs",
+                "pub fn go() -> u32 { crate::rust::extract_file() }\n",
+            ),
+        ]);
+        let e = edges
+            .iter()
+            .find(|e| e.from_file == "src/stack.rs" && e.imported_name == "extract_file")
+            .expect("fully-qualified call should produce an edge");
+        assert!(
+            e.target.is_some(),
+            "crate::rust::extract_file should resolve"
+        );
+        assert_eq!(e.specifier, "crate::rust");
+    }
+
+    #[test]
+    fn fully_qualified_type_one_segment_short_resolves_to_the_type_not_the_member() {
+        // The measured "one segment short" shape: `crate::symbol::SymbolKind::Callable`
+        // (an enum-variant / associated-item access) -- the real dependency is
+        // `SymbolKind`, not a `Callable` item that doesn't exist as its own symbol.
+        let edges = resolved(&[
+            ("src/symbol.rs", "pub enum SymbolKind { Callable, Value }\n"),
+            (
+                "src/mcp.rs",
+                "pub fn k() -> crate::symbol::SymbolKind { crate::symbol::SymbolKind::Callable }\n",
+            ),
+        ]);
+        let e = edges
+            .iter()
+            .find(|e| e.from_file == "src/mcp.rs" && e.imported_name == "SymbolKind")
+            .expect("qualified reference should target the type, not the variant");
+        assert!(e.target.is_some());
+        assert_eq!(e.specifier, "crate::symbol");
+        assert!(
+            !edges.iter().any(|e| e.imported_name == "Callable"),
+            "no edge should target the nonexistent `Callable` item"
+        );
+    }
+
+    #[test]
+    fn same_file_fully_qualified_reference_is_not_a_blind_spot() {
+        // The `bat` false start from measurement: a same-file fully-qualified
+        // reference never needed a `use` in the first place, so it's not a
+        // gap -- must not produce an edge (would be a spurious self-file dep).
+        let edges = resolved(&[(
+            "src/vscreen.rs",
+            "pub struct Attributes;\nimpl Attributes {\n    \
+             pub fn new() -> crate::vscreen::Attributes { Attributes }\n}\n",
+        )]);
+        assert!(
+            edges.iter().all(|e| e.imported_name != "Attributes"),
+            "a same-file qualified reference must not produce an edge"
+        );
+    }
+
+    #[test]
+    fn fully_qualified_reference_already_use_imported_is_not_duplicated() {
+        // `get_callees` does no dedup of its own (mcp.rs) -- an explicit
+        // `use` for a name must shadow the qualified-ref scan for the same
+        // target, or the caller sees the same dependency listed twice.
+        let edges = resolved(&[
+            ("src/graph.rs", "pub struct Graph;\n"),
+            (
+                "src/app.rs",
+                "use crate::graph::Graph;\n\
+                 pub fn run() -> crate::graph::Graph { crate::graph::Graph }\n",
+            ),
+        ]);
+        let hits: Vec<_> = edges
+            .iter()
+            .filter(|e| e.from_file == "src/app.rs" && e.imported_name == "Graph")
+            .collect();
+        assert_eq!(
+            hits.len(),
+            1,
+            "expected exactly one Graph edge, got {hits:?}"
+        );
     }
 
     #[test]
