@@ -949,18 +949,22 @@ Deliberately **not** designed ahead of data, per the owner's explicit call — s
 - ✅ A fixture proving the previously-invisible dependency appears in `get_callees`'s data source (`tests/rust_spec.rs`'s `a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change`) and in `assemble_participants`'s participant list (`tests/quarkus_spec.rs`'s `a_cross_package_fully_qualified_call_with_no_import_still_joins_dependencies`), and that changing the referenced symbol's `interface_hash` actually invalidates the referencing file's document even though its own text never changed.
 - ✅ Confirmed against CodeOwl's own real dogfood data, not just synthetic fixtures: `quarkus.rs`'s `crate::symbol::Symbol` blind spot (named present-tense in the measurement phase above) now resolves; `mcp.rs`'s fully-qualified calls into `crate::spec` collapse to 51 distinct, non-duplicated edges.
 
-##### M21.i — Method signatures in `interface_hash` (`ARCHITECTURE.md` open question 13) — MEASURED, NOT YET DECIDED
+##### M21.i — Method signatures in `interface_hash` (`ARCHITECTURE.md` open question 13) — DECIDED, NOT YET BUILT
 
 The same shape open question 12 was before M21.a measured it, and — like M21.h above — deliberately not decided from the framing alone. Repeats M21.a's own playbook, this time for a `Callable`'s signature instead of a `Value`'s: a cost table (how many importers a method-signature-change cascade would actually invalidate, worst case, across CodeOwl's own repo plus the dogfooded pilots M21.a already has numbers for) and a correctness table (what fraction of real generated specs already state a dependency's method signature precisely enough that a real signature change would falsify them, the same measure M21.a used for fields).
 
 **Measured, 2026-09-29 — real numbers, not estimated, confirming the instrumentation generalized rather than needing a rebuild** (`examples/measure_signature_fold.rs`, parameterized on `SIGNAL: SymbolKind` — the one thing changed from M21.a's own version). Full tables, the correctness-table correction, and the method-overload id-collision finding are in `ARCHITECTURE.md` open question 13 — not duplicated here. Headline: a bounded cost (worst case 13 importers, the same order of magnitude as M21.a's field-fold worst case of 11) and a correctness case that's *stronger* for methods than fields on two fronts real hits actually evidenced (parameter-type claims, return-type claims) that fields never had a category for at all. One new, real, non-blocking wrinkle specific to methods: Java allows overloading, and a real hand-written file (`quarkus-super-heroes`'s own `FightApiMapper.java`) has several method names each colliding onto one shared symbol id — doesn't block a container-level fold, would block a future per-method one.
 
+**Decided, 2026-09-29: fold a public method's signature into its container's `interface_hash`, all 4 packs, one hop, signature text only.** The owner's call, from the real numbers: bounded cost (worst case 13, same order of magnitude as M21.a's field-fold worst case of 11) against a correctness case that's stronger for methods than fields on two fronts (real hits evidenced parameter-type and return-type claims fields never had a category for). Full reasoning in `ARCHITECTURE.md` open question 13.
+
 **Size:** S–M · **Builds on:** M21.h.
+
+**Two design questions the build phase must still settle** (`ARCHITECTURE.md` open question 13 names both, neither resolved by the decision itself): whether to normalize a method's signature text before folding, the way the field fold strips a value first (lean: don't, until real noise shows up); and stating explicitly, in a test, that the method-overload id-collision finding (confirmed real on `quarkus-super-heroes`'s `FightApiMapper.java`) doesn't block this container-level fold.
 
 **Validation:**
 - ✅ A real, reported cost-table delta and correctness-table percentage for method signatures, on the same repos M21.a measured for fields — done, `ARCHITECTURE.md` open question 13.
-- **Still open:** the owner's decision recorded against `ARCHITECTURE.md` open question 13 — the data is in, the call itself isn't made yet.
-- (Conditional on the decision) If methods fold into `interface_hash`: a fixture proving a method signature change moves the container's `interface_hash` and invalidates exactly its direct importers, one hop, never further — the same shape M21.b's own field-fold test already proves, extended to `SymbolKind::Callable`. If they don't: no new test, the existing exclusion behavior is already covered by M21.c item 4.
+- ✅ The owner's decision recorded against `ARCHITECTURE.md` open question 13 — done: fold, all 4 packs.
+- **Still open, build phase:** a fixture proving a method signature change moves the container's `interface_hash` and invalidates exactly its direct importers, one hop, never further — the same shape M21.b's own field-fold test already proves, extended to `SymbolKind::Callable`. `FORMAT_VERSION` bump required (this changes what `interface_hash` covers, the exact shape the bump exists for).
 
 #### Definition of done
 
