@@ -290,6 +290,28 @@ fn merge_inherent_impls(
             rollup.push_str(h);
         }
         ty.source_hash = hash_text(&rollup);
+        // M21.i: an inherent impl's public method signatures are the
+        // type's own public surface too, folded into `interface_hash` the
+        // same self-chaining way `source_hash` just was above -- these
+        // methods don't exist yet when `visit_container` first computes
+        // the type's `interface_hash` (they're still a separate impl
+        // block's members at that point), so they can only be folded in
+        // here, once merged. `None` stays `None`: an unexported type has
+        // no public surface to extend regardless of what its methods are.
+        // No `strip_value_for_fold` -- same reasoning as the trait-method
+        // case in `visit_container`, Rust has no default-parameter-value
+        // syntax to strip, and no normalization beyond that (open
+        // question 13's own lean).
+        if let Some(existing) = ty.interface_hash.take() {
+            let mut iface_rollup = existing;
+            for m in &f.methods {
+                if is_pub_field_signature(&m.signature) {
+                    iface_rollup.push('\n');
+                    iface_rollup.push_str(&m.signature);
+                }
+            }
+            ty.interface_hash = Some(hash_text(&iface_rollup));
+        }
         for marker in f.markers {
             if !ty.markers.contains(&marker) {
                 ty.markers.push(marker);
@@ -509,13 +531,36 @@ fn visit_container(
     let mut iface_rollup = sig.clone();
     if is_exported {
         for s in &direct {
-            if s.kind == SymbolKind::Value && is_pub_field_signature(&s.signature) {
-                iface_rollup.push('\n');
-                if s.raw == "type" {
-                    iface_rollup.push_str(&s.signature);
-                } else {
-                    iface_rollup.push_str(strip_value_for_fold(&s.signature));
+            match s.kind {
+                SymbolKind::Value if is_pub_field_signature(&s.signature) => {
+                    iface_rollup.push('\n');
+                    if s.raw == "type" {
+                        iface_rollup.push_str(&s.signature);
+                    } else {
+                        iface_rollup.push_str(strip_value_for_fold(&s.signature));
+                    }
                 }
+                // M21.i: a trait method's signature is public surface too
+                // (`raw == "trait"` here -- a trait's methods are its
+                // whole contract). Reaches only a *trait's own* methods:
+                // an inherent impl's methods are folded separately, in
+                // `merge_inherent_impls`, since they're a different
+                // symbol at this point in the walk (the impl block, not
+                // yet merged into its type). A trait method never carries
+                // an explicit `pub` -- it's public because the trait
+                // itself is, the same JLS-style implicit-visibility case
+                // Java's interface methods have -- so this checks the
+                // container kind, not the member's own text, unlike the
+                // field case above. No `strip_value_for_fold`: a
+                // `fn`/`function_signature_item`'s stored signature has
+                // no default-parameter-value syntax in Rust to strip in
+                // the first place, and no normalization beyond that
+                // (`ARCHITECTURE.md` open question 13's own lean).
+                SymbolKind::Callable if raw == "trait" => {
+                    iface_rollup.push('\n');
+                    iface_rollup.push_str(&s.signature);
+                }
+                _ => {}
             }
         }
     }
@@ -1550,6 +1595,56 @@ impl std::fmt::Debug for S {\n    fn fmt(&self) {}\n}\n";
             "a.rs",
         );
         assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_inherent_methods_signature_change_moves_the_structs_interface_hash() {
+        // M21.i: the fold extended to methods -- an inherent impl's
+        // public method signature is public surface too, folded in only
+        // once `merge_inherent_impls` reparents the method onto the type
+        // (it isn't the type's own member before that merge happens).
+        let a = extract_file(
+            "pub struct P;\n\nimpl P {\n    pub fn touch(&self, x: u32) {}\n}\n",
+            "a.rs",
+        );
+        let b = extract_file(
+            "pub struct P;\n\nimpl P {\n    pub fn touch(&self, x: u64) {}\n}\n",
+            "a.rs",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_inherent_methods_signature_change_does_not_move_interface_hash() {
+        // Same reasoning as a private field: not public surface, under
+        // either regime.
+        let a = extract_file(
+            "pub struct P;\n\nimpl P {\n    fn touch(&self, x: u32) {}\n}\n",
+            "a.rs",
+        );
+        let b = extract_file(
+            "pub struct P;\n\nimpl P {\n    fn touch(&self, x: u64) {}\n}\n",
+            "a.rs",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_pub_traits_method_signature_change_moves_the_traits_interface_hash() {
+        // M21.i: a trait method never carries an explicit `pub` -- it's
+        // public because the trait itself is -- so this has to be gated
+        // on the container's own kind (`raw == "trait"`), not the
+        // member's own text, the same JLS-implicit-visibility shape
+        // Java's interface methods have.
+        let a = extract_file(
+            "pub trait Greeter {\n    fn greet(&self, loud: bool);\n}\n",
+            "a.rs",
+        );
+        let b = extract_file(
+            "pub trait Greeter {\n    fn greet(&self, loud: bool, times: u32);\n}\n",
+            "a.rs",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
     }
 
     #[test]

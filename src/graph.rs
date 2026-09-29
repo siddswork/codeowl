@@ -218,7 +218,14 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// correctly bumped nothing. Without this, a pre-fix cache would silently
 /// keep every such reference invisible to `get_callees` and to feature
 /// dependency-freshness checks forever, with nothing to invalidate it).
-pub const FORMAT_VERSION: u32 = 15;
+/// 16 = M21.i (all 4 packs: a public method's own signature now folds
+/// into its container's `interface_hash`, the same way a public field's
+/// already does — `ARCHITECTURE.md` open question 13. Moves
+/// `interface_hash` for every exported container with at least one real
+/// public method, in every pack, in one bump rather than M21.b's
+/// four-separate-bumps precedent, since this shipped as one session
+/// rather than a staggered timeline).
+pub const FORMAT_VERSION: u32 = 16;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

@@ -178,9 +178,28 @@ fn visit_container(
     if is_exported {
         for s in &direct {
             let attr_name = s.id.rsplit("::").next().unwrap_or(&s.id);
-            if s.kind == SymbolKind::Value && is_public_name(attr_name) {
-                iface_rollup.push('\n');
-                iface_rollup.push_str(strip_value_for_fold(&s.signature));
+            if !is_public_name(attr_name) {
+                continue;
+            }
+            match s.kind {
+                SymbolKind::Value => {
+                    iface_rollup.push('\n');
+                    iface_rollup.push_str(strip_value_for_fold(&s.signature));
+                }
+                // M21.i: a method's signature is public surface too, the
+                // same reasoning as a field's. Not stripped the way a
+                // field's value is: `strip_value_for_fold` cuts at the
+                // first top-level `=`, safe for one field's one value but
+                // wrong for a method with several default-valued
+                // parameters (`def foo(x=1, y=2)` would lose `y`
+                // entirely, not just its default). No normalization at
+                // all for now (`ARCHITECTURE.md` open question 13's own
+                // lean) -- hash the signature exactly as captured.
+                SymbolKind::Callable => {
+                    iface_rollup.push('\n');
+                    iface_rollup.push_str(&s.signature);
+                }
+                _ => {}
             }
         }
     }

@@ -205,15 +205,25 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
 
     // M21.b: interface_hash folds in each *public* field's own signature
     // (name+type, no docstring, no value -- exactly `signature`, per
-    // ROADMAP.md's decision table). Methods stay excluded, unchanged.
-    // Skipped entirely for a non-exported class (code-review finding: it
-    // was built unconditionally, then discarded by `.then()` below) --
+    // ROADMAP.md's decision table). M21.i extends the same fold to a
+    // public method's signature (`ARCHITECTURE.md` open question 13) --
+    // `is_pub_field_signature` is name-misleading now but behaviorally
+    // exactly right unchanged: "not `private`, not a `#`-private name"
+    // is the correct public check for a method too, and a method's
+    // `signature` is already body-free (`signature_text`'s own "up to
+    // the first `{`" cut), so no stripping is needed for it the way a
+    // field's default value once needed `strip_value_for_fold` -- no
+    // normalization at all, per open question 13's own lean. Skipped
+    // entirely for a non-exported class (code-review finding: it was
+    // built unconditionally, then discarded by `.then()` below) --
     // wasted allocation and iteration on every reparse otherwise, and
     // the watcher reparses on every save.
     let mut iface_rollup = signature.clone();
     if is_exported {
         for m in &member_symbols {
-            if m.kind == SymbolKind::Value && is_pub_field_signature(&m.signature) {
+            if matches!(m.kind, SymbolKind::Value | SymbolKind::Callable)
+                && is_pub_field_signature(&m.signature)
+            {
                 iface_rollup.push('\n');
                 iface_rollup.push_str(&m.signature);
             }

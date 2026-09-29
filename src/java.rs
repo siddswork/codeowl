@@ -222,12 +222,51 @@ fn visit_container(
     let mut iface_rollup = sig.clone();
     if is_exported {
         for s in &direct {
-            let declaration_only = strip_value_for_fold(&s.signature);
-            let is_pub_field =
-                s.raw == "constant" || is_pub_or_protected_field_signature(declaration_only);
-            if s.kind == SymbolKind::Value && is_pub_field {
-                iface_rollup.push('\n');
-                iface_rollup.push_str(declaration_only);
+            match s.kind {
+                SymbolKind::Value => {
+                    let declaration_only = strip_value_for_fold(&s.signature);
+                    let is_pub_field = s.raw == "constant"
+                        || is_pub_or_protected_field_signature(declaration_only);
+                    if is_pub_field {
+                        iface_rollup.push('\n');
+                        iface_rollup.push_str(declaration_only);
+                    }
+                }
+                // M21.i: a method's signature is public surface too, the
+                // same reasoning as a field's. Same JLS-implicit-visibility
+                // case as `raw == "constant"` above, for methods this
+                // time: every interface method is implicitly public
+                // unless explicitly `private` (Java 9+ private interface
+                // methods), and the idiomatic style omits the redundant
+                // `public` keyword entirely -- requiring an explicit
+                // token here would silently exclude real public surface
+                // the same way it once did for interface fields. No
+                // `strip_value_for_fold` here: Java methods have no
+                // default parameter values, so there's no top-level `=`
+                // to strip in the first place, and no normalization
+                // beyond that (`ARCHITECTURE.md` open question 13's own
+                // lean) -- hash the signature exactly as captured. Known,
+                // accepted imprecision (not yet seen in any dogfooded
+                // repo): a string-literal annotation argument containing
+                // the standalone word "public"/"protected" could produce
+                // a false positive here the same way an unstripped
+                // field's own string value once did -- the field case
+                // fixed this by stripping the value; a method's
+                // annotation arguments aren't stripped the same way,
+                // since they aren't a discardable "value" the way a
+                // field's assignment is.
+                SymbolKind::Callable => {
+                    let is_pub_method = if raw == "interface" {
+                        !s.signature.split_whitespace().any(|tok| tok == "private")
+                    } else {
+                        is_pub_or_protected_field_signature(&s.signature)
+                    };
+                    if is_pub_method {
+                        iface_rollup.push('\n');
+                        iface_rollup.push_str(&s.signature);
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -1127,6 +1166,79 @@ public @interface JsonProperty {\n\
         let a = extract_file("class C {\n    int x;\n}\n", "c.java");
         let b = extract_file("class C {\n    String x;\n}\n", "c.java");
         assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn an_interface_methods_signature_change_moves_the_interfaces_interface_hash_with_no_modifier()
+    {
+        // M21.i: an interface method never carries an explicit `public`
+        // -- it's public because the JLS makes every interface method
+        // implicitly public (unless explicitly `private`, Java 9+) -- the
+        // same implicit-visibility shape `raw == "constant"` already
+        // handles for interface fields, extended to methods here.
+        let a = extract_file(
+            "interface Greeter {\n    String greet(boolean loud);\n}\n",
+            "g.java",
+        );
+        let b = extract_file(
+            "interface Greeter {\n    String greet(boolean loud, int times);\n}\n",
+            "g.java",
+        );
+        assert_ne!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn a_private_interface_methods_signature_change_does_not_move_interface_hash() {
+        // Java 9+ allows a `private` interface method (must carry a
+        // body) -- the one explicit exception to "every interface method
+        // is implicitly public".
+        let a = extract_file(
+            "interface Greeter {\n    private String helper(boolean loud) { return \"x\"; }\n}\n",
+            "g.java",
+        );
+        let b = extract_file(
+            "interface Greeter {\n    private String helper(boolean loud, int n) { return \"x\"; }\n}\n",
+            "g.java",
+        );
+        assert_eq!(a[0].interface_hash, b[0].interface_hash);
+    }
+
+    #[test]
+    fn two_overloaded_methods_sharing_one_id_both_still_fold_into_interface_hash() {
+        // ARCHITECTURE.md open question 13's own finding: Java overloads
+        // collide onto one shared symbol id (confirmed real on
+        // `FightApiMapper.java`). The fold loop here iterates `direct` by
+        // *parent*, never deduplicating by id, so neither overload's
+        // contribution is silently dropped -- confirmed here, not just
+        // asserted, per ROADMAP.md M21.i's own stated validation.
+        let base = "class C {\n    public String map(int x) { return \"\"; }\n    public String map(String x) { return x; }\n}\n";
+        let first_changed = "class C {\n    public String map(long x) { return \"\"; }\n    public String map(String x) { return x; }\n}\n";
+        let second_changed = "class C {\n    public String map(int x) { return \"\"; }\n    public String map(Object x) { return x.toString(); }\n}\n";
+
+        let base_syms = extract_file(base, "c.java");
+        // Sanity check: the two overloads really do collide onto one id --
+        // otherwise this test wouldn't be exercising the collision at all.
+        let map_count = base_syms
+            .iter()
+            .filter(|s| s.raw == "method" && s.id.ends_with("::map"))
+            .count();
+        assert_eq!(
+            map_count, 2,
+            "expected both overloads to share the id C::map"
+        );
+
+        let base_hash = base_syms[0].interface_hash.clone();
+        assert_ne!(
+            base_hash,
+            extract_file(first_changed, "c.java")[0].interface_hash,
+            "changing the first overload's signature must move interface_hash"
+        );
+        assert_ne!(
+            base_hash,
+            extract_file(second_changed, "c.java")[0].interface_hash,
+            "changing the second overload's signature must move interface_hash too -- \
+             it must not be shadowed by the first overload sharing its id"
+        );
     }
 
     #[test]

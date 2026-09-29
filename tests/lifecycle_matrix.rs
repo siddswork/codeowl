@@ -62,13 +62,10 @@ struct Fixture {
     /// with no separate fixture string needed for the reverse case.
     owner_field_added: &'static str,
     /// `touch`'s own signature changes (a new parameter), its message/
-    /// body stays byte-identical. M21.c item 4: the premise this item
-    /// started from ("method signature changes cascade") turned out
-    /// false once checked in source -- every pack's fold is gated on
-    /// `kind == Value`, a `Callable` is never folded in, signature or
-    /// not. This isolates signature specifically, distinct from
-    /// `owner_body_edit`'s message-only change, to prove that
-    /// explicitly rather than leave it inferred.
+    /// body stays byte-identical. Isolates signature specifically,
+    /// distinct from `owner_body_edit`'s message-only change: a public
+    /// method's signature folds into Widget's interface_hash (M21.i), so
+    /// this cascades to the consumer where the body edit doesn't.
     owner_method_signature_change: &'static str,
     consumer_src: &'static str,
     /// A file referencing neither `Widget` nor `count`/`secret` at all --
@@ -507,9 +504,13 @@ fn run_lifecycle(fx: &Fixture) {
         fx.stack
     );
 
-    // --- 2e. Method signature change: local only, same as a body edit. ---
-    // M21.c item 4. Re-establish a clean baseline first, same reasoning
-    // as every prior scenario's own setup.
+    // --- 2e. Public method signature change: cascades, like a field's. ---
+    // M21.c item 4 originally proved the opposite (every pack's fold was
+    // gated on `kind == Value`); M21.i reversed that decision
+    // (`ARCHITECTURE.md` open question 13), so a public method's signature
+    // now folds into its container's interface_hash too. Re-establish a
+    // clean baseline first, same reasoning as every prior scenario's own
+    // setup.
     write_file(&dir, fx.owner_path, fx.owner_v1);
     let graph = reindex(&dir);
     let owner_id = owner_file_id(&graph, fx);
@@ -533,13 +534,12 @@ fn run_lifecycle(fx: &Fixture) {
          Widget symbol -- its source_hash moved",
         fx.stack
     );
+    let consumer_offered = drain_symbol_task_ids(&graph, &dir, consumer_id);
     assert!(
-        is_fully_current(&graph, &dir, consumer_id),
-        "{}: a method signature change must NOT cross the interface_hash fold \
-         -- every pack's fold is gated on kind == Value, a Callable is never \
-         folded in at all, signature or body. This was the premise M21.c item \
-         4 set out to verify, not assume, and it turned out to be exactly \
-         this: local only, same as scenario 1's body-only edit",
+        consumer_offered.contains(&fx.consumer_symbol_id.to_string()),
+        "{}: a public method's signature change must cascade to the consumer \
+         -- it now folds into Widget's interface_hash, the same way a public \
+         field's already does. Offered: {consumer_offered:?}",
         fx.stack
     );
     assert!(
