@@ -1,6 +1,6 @@
 # CodeOwl — working conventions
 
-CodeOwl extracts a structural graph from a codebase and serves LLM-authored specs (the semantic layer) over MCP. Design lives in `ARCHITECTURE.md` (how it's built) and `REQUIREMENTS.md` (what and for whom); `ROADMAP.md` has the build sequence and test repos; `GLOSSARY.md` defines the static-analysis / graph / CodeOwl-coined vocabulary the rest use (symbol, spec-bearing, flow edge, fan-in, the four hashes, "the socket held", …). Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
+CodeOwl extracts a structural graph from a codebase and serves LLM-authored specs (the semantic layer) over MCP. Design lives in `ARCHITECTURE.md` (how it's built), `DECISIONS.md` (why: the open-question reasoning trail and its index lives in ARCHITECTURE.md) and `REQUIREMENTS.md` (what and for whom); `ROADMAP.md` has the build sequence and test repos; `GLOSSARY.md` defines the static-analysis / graph / CodeOwl-coined vocabulary the rest use (symbol, spec-bearing, flow edge, fan-in, the four hashes, "the socket held", …). Read those before proposing design changes — most "obvious" improvements have already been argued through and resolved there.
 
 ## Last Session (2026-09-30 — M21.h finished end to end including a real-repo Java verification the prior session's build had skipped; M21.i taken all the way from measurement through decision through build through two rounds of `/code-review` fixes through real four-repo dogfooding. `master` is at `76cfdaf`. One branch, `m21i-method-signature-fold`, fully pushed with PR #74 **open, not yet merged** — waiting on the owner.)
 
@@ -93,14 +93,14 @@ This is a deliberate Rust learning project. When writing or reviewing Rust here,
 
 ## Pending decisions
 
-Deliberately unresolved, to revisit when implementation makes them concrete. Design-level open questions live in ARCHITECTURE.md's "Open questions" list (tree-sitter vs. LSP, the token-budget threshold, polyglot/non-code artifacts); these are the scope-trimming ones that don't belong there:
+Deliberately unresolved, to revisit when implementation makes them concrete. Design-level open questions are indexed in ARCHITECTURE.md's "Open questions" section, with the full reasoning in `DECISIONS.md` (tree-sitter vs. LSP, the token-budget threshold, polyglot/non-code artifacts); these are the scope-trimming ones that don't belong there:
 
 - **MCP tool surface — resolved by inaction, worth noting rather than reopening.** The shipped surface is 9 tools (`get_symbol`, `get_source`, `get_callers`, `get_callees`, `get_spec`, `get_next_spec_task`, `submit_spec`, `search_code`, `get_spec_coverage` — `get_source` shipped under the agent-reliance track's M20, between the session that first wrote this note and the one that corrected it) — `trace_path`, `get_tests_for`, `get_dependencies` were sketched but never built, simply because nothing has needed them yet; `impact_analysis` was never built either, but for a different reason — `get_callers` already answers "what breaks if I change this," so there was never a separate tool to build. See `ARCHITECTURE.md` §7 for the full current reference. Revisit only when something real calls for one of the three still-deferred tools.
 - **Spec-regeneration commit hygiene.** Specs live in git, so a `/codeowl generate` run mid-feature drags spec diffs into an unrelated PR. Explicit generation (rather than silent) already makes this avoidable; the convention that makes it reliable — regenerate as its own commit, or as a deliberate pre-PR step — should be settled once there's a real workflow to test it against.
 
 ## Docs
 
-Design decisions go in `ARCHITECTURE.md` / `REQUIREMENTS.md`, not in commit messages or code comments. When resolving an open question, update the open-questions list *and* the section it affects — leaving a resolved question listed as open is the drift this project exists to prevent.
+Design decisions go in `ARCHITECTURE.md` / `REQUIREMENTS.md`, not in commit messages or code comments. When resolving an open question, update the index in `ARCHITECTURE.md`, the entry in `DECISIONS.md`, *and* the section it affects — leaving a resolved question listed as open is the drift this project exists to prevent.
 
 When a doc or comment coins or leans on a domain term (static-analysis, graph-theory, or CodeOwl-specific), it belongs in `GLOSSARY.md` — keep that file in step as the vocabulary grows.
 

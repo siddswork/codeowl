@@ -138,6 +138,7 @@ secondary-language subtrees in the same repo. See `ROADMAP.md`.
 
 - **What & why:** [`REQUIREMENTS.md`](REQUIREMENTS.md)
 - **How it's built:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Why, and what's undecided:** [`DECISIONS.md`](DECISIONS.md)
 - **Vocabulary:** [`GLOSSARY.md`](GLOSSARY.md)
 - **Build sequence:** [`ROADMAP.md`](ROADMAP.md)
 - **Wire it into your own repo:** [`setup/README.md`](setup/README.md)
