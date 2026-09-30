@@ -729,6 +729,7 @@ mod tests {
             source_hash: String::new(),
             interface_hash: None,
             markers: vec![],
+            extra_spans: Vec::new(),
             parent: None,
             children: vec![],
         };
@@ -764,6 +765,7 @@ mod tests {
             source_hash: String::new(),
             interface_hash: None,
             markers: markers.iter().map(|m| m.to_string()).collect(),
+            extra_spans: Vec::new(),
             parent: None,
             children: vec!["org/acme/X.java::X::name".into()],
         };

@@ -218,6 +218,7 @@ fn visit_container(
             source_hash: hash_text(&rollup),
             interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: markers.to_vec(),
+            extra_spans: Vec::new(),
             parent: parent_id.map(str::to_string),
             children: member_ids,
         },
@@ -256,6 +257,7 @@ fn push_callable(
         source_hash: hash_text(text(node, source)),
         interface_hash: is_exported.then(|| hash_text(&sig)),
         markers: markers.to_vec(),
+        extra_spans: Vec::new(),
         parent: parent_id.map(str::to_string),
         children: Vec::new(),
     });
@@ -334,6 +336,7 @@ fn visit_assignment(
             source_hash: hash_text(text(child, source)),
             interface_hash: is_exported.then(|| hash_text(&sig)),
             markers: Vec::new(),
+            extra_spans: Vec::new(),
             parent: parent_id.map(str::to_string),
             children: Vec::new(),
         });

@@ -444,6 +444,7 @@ pub(crate) fn merged_symbol_spans(graph: &Graph, sym: &Symbol) -> Vec<[usize; 2]
             spans.push(c.lines);
         }
     }
+    spans.extend(sym.extra_spans.iter().copied());
     spans.sort_by_key(|s| s[0]);
     // Merge spans that touch or overlap (a blank line or two between a
     // `struct` and its `impl` shouldn't split the block).
@@ -3637,6 +3638,131 @@ impl Counter {\n\
             "folded method body missing from span text:\n{text}"
         );
         assert!(text.contains("pub struct Counter"), "struct decl missing");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Build a one-file Rust graph and return that file's span text for `name`.
+    fn rust_span_text(src: &str, name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-hdr-{}",
+            std::process::id(),
+            name
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/t.rs"), src).unwrap();
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/t.rs".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::rust::extract_file(src, "src/t.rs"),
+        }]);
+        let sym = graph
+            .get_symbol(graph.find(&format!("src/t.rs::{name}")).unwrap())
+            .unwrap();
+        let text = symbol_span_text(&dir, &graph, "src/t.rs", sym).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        text
+    }
+
+    #[test]
+    fn span_text_covers_a_folded_trait_impl_header_with_several_methods() {
+        // Open question 19: a degenerate-fold type's impl header
+        // (`impl Greeter for Polite {`) is the one line naming the trait,
+        // and sits outside both the struct's span and the methods' spans.
+        // The blank line after the struct matters: without it the
+        // gap-merge (<= 1 line apart) would cover the header by accident.
+        let src = "\
+use crate::greeter::Greeter;\n\n\
+pub struct Polite;\n\n\
+impl Greeter for Polite {\n\
+    fn greet(&self) -> String {\n        \"Good day\".to_string()\n    }\n\n\
+    fn farewell(&self) -> String {\n        \"Goodbye\".to_string()\n    }\n\
+}\n";
+        let text = rust_span_text(src, "Polite");
+        assert!(
+            text.contains("impl Greeter for Polite"),
+            "impl header missing:\n{text}"
+        );
+        assert!(text.contains("fn farewell"), "second method missing");
+    }
+
+    #[test]
+    fn span_text_covers_an_empty_trait_impl() {
+        let src = "\
+use crate::marker::Auditable;\n\n\
+pub struct LoginEvent;\n\n\
+impl Auditable for LoginEvent {}\n";
+        let text = rust_span_text(src, "LoginEvent");
+        assert!(
+            text.contains("impl Auditable for LoginEvent"),
+            "empty impl block missing:\n{text}"
+        );
+    }
+
+    #[test]
+    fn span_text_covers_an_inherent_impl_header_with_a_generic_bound() {
+        let src = "\
+use crate::render::Render;\n\n\
+pub struct Panel<T> {\n    pub inner: T,\n}\n\n\
+impl<T: Render> Panel<T> {\n\
+    pub fn show(&self) -> String {\n        self.inner.render()\n    }\n\
+}\n";
+        let text = rust_span_text(src, "Panel");
+        assert!(
+            text.contains("impl<T: Render> Panel<T>"),
+            "inherent impl header missing:\n{text}"
+        );
+    }
+
+    #[test]
+    fn a_degenerate_fold_type_depends_on_the_trait_its_impl_header_names() {
+        // Open question 19, end to end: the resolved `Polite -> Greeter`
+        // import exists, but before the header span was carried it never
+        // scoped onto `Polite`, so `Greeter`'s contract changing could not
+        // invalidate `Polite`'s document.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-q19", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let greeter = "pub trait Greeter {\n    fn greet(&self) -> String;\n}\n";
+        let people = "\
+use crate::greeter::Greeter;\n\n\
+pub struct Polite;\n\n\
+impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new()\n    }\n}\n";
+        std::fs::write(dir.join("src/greeter.rs"), greeter).unwrap();
+        std::fs::write(dir.join("src/people.rs"), people).unwrap();
+
+        let mut graph = Graph::build(vec![
+            crate::graph::FileExtraction {
+                rel_path: "src/greeter.rs".to_string(),
+                source_hash: hash_text(greeter),
+                symbols: crate::rust::extract_file(greeter, "src/greeter.rs"),
+            },
+            crate::graph::FileExtraction {
+                rel_path: "src/people.rs".to_string(),
+                source_hash: hash_text(people),
+                symbols: crate::rust::extract_file(people, "src/people.rs"),
+            },
+        ]);
+        graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+            from_file: "src/people.rs".to_string(),
+            specifier: "crate::greeter".to_string(),
+            imported_name: "Greeter".to_string(),
+            target: graph.find("src/greeter.rs::Greeter"),
+        }]);
+
+        let file_id = graph.find("src/people.rs").unwrap();
+        let polite = graph
+            .get_symbol(graph.find("src/people.rs::Polite").unwrap())
+            .unwrap();
+        let deps = dependency_lines(&graph, &dir, file_id, polite);
+        assert!(
+            deps.iter().any(|d| d.contains("greeter.rs::Greeter")),
+            "Polite must depend on Greeter, got {deps:?}"
+        );
+        assert!(
+            !dependency_hash(&graph, &dir, file_id, polite).is_empty(),
+            "dependency_hash must fold in Greeter's interface"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

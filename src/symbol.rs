@@ -108,6 +108,9 @@ pub struct Symbol {
     /// TypeScript+Next pack in M13; populated from M14 on.
     #[serde(default)]
     pub markers: Vec<String>,
+    /// See [`ExtractedSymbol::extra_spans`].
+    #[serde(default)]
+    pub extra_spans: Vec<[usize; 2]>,
     pub parent: Option<SymbolId>,
     pub children: Vec<SymbolId>,
 }
@@ -142,6 +145,13 @@ pub struct ExtractedSymbol {
     /// carries it straight through to the arena `Symbol`.
     #[serde(default)]
     pub markers: Vec<String>,
+    /// Extra line ranges (1-based, inclusive) that belong to this symbol
+    /// but sit outside its own `lines` and its children's: the whole block
+    /// of each impl folded into a Rust type, so the `impl Trait for Type`
+    /// header (the one place the trait is named) is scanned for dependencies
+    /// and shown as source. Empty for every other symbol.
+    #[serde(default)]
+    pub extra_spans: Vec<[usize; 2]>,
     pub parent: Option<String>,
     pub children: Vec<String>,
 }
