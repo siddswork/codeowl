@@ -961,11 +961,18 @@ The same shape open question 12 was before M21.a measured it, and — like M21.h
 
 **Built, 2026-09-29.** No signature normalization (the lean this section named). The method-overload id-collision question resolved as predicted — non-blocking, confirmed by a dedicated test. Two real correctness cases caught in plan review before coding, not found by a failing test after the fact: Rust trait methods / Java interface methods carry no explicit visibility keyword at all (gated on the container's own kind instead), and a Rust inherent-impl method doesn't exist as the type's own member until `merge_inherent_impls` reparents it — the fold for those methods lives there, not in `visit_container`. Full reasoning in `ARCHITECTURE.md` open question 13.
 
+**Two more instances of that same implicit-visibility shape, caught by `/code-review high` on the build PR before merge, not by the tests written before coding:** a Java `@interface`'s elements (implicitly public under the identical JLS rule, just a different container kind than `interface`) and a Rust trait impl merged into a zero-field type by M21.e's degenerate-case rule (its methods carry no `pub` either, for the same reason a plain trait's methods don't). Both fixed the same way as the originals — decided by container/block kind, not the member's own text — each with a failing test written first.
+
+**Dogfooded on real data across all four pilot repos, 2026-09-29, not just unit-tested:** regenerated a real, already-stale spec on CodeOwl's own repo (`fastapi.rs`, invalidated by `Graph`'s newly-folded public methods) and on `quarkus-super-heroes` (`TopWinnerStatsChannelHolder.java`, invalidated by `Score`'s record constructor) — both confirmed via a real pre/post `interface_hash` diff, not assumed, and both regenerated back to `current`. Generated a first-ever spec corpus slice on `talentTrail` (no prior corpus existed), then simulated a real signature edit and watched the cascade fire live before reverting it. Confirmed the fold applies correctly on `full-stack-fastapi-template` too (`Settings::emails_enabled`), though that repo has no real importer to demonstrate a cascade against — a structural fact about that repo (its SQLModel classes have zero methods), not a gap in the fix.
+
+**One real bug found by that dogfooding, not caused by this milestone — logged as `ARCHITECTURE.md` open question 19, not fixed here:** tracing *why* `fastapi.rs` went stale, `FeatureModel` was the first suspect and turned out to be wrong — it never enters the dependency scan at all, because `merge_inherent_impls` never extends a degenerate-fold type's own line range to cover the trait impl's header line (the one place the trait's name actually appears). Pre-existing, from M21.e's era; M21.i's dogfooding is what surfaced it.
+
 **Validation:**
 - ✅ A real, reported cost-table delta and correctness-table percentage for method signatures, on the same repos M21.a measured for fields — done, `ARCHITECTURE.md` open question 13.
 - ✅ The owner's decision recorded against `ARCHITECTURE.md` open question 13 — done: fold, all 4 packs.
 - ✅ A fixture proving a method signature change moves the container's `interface_hash` and invalidates exactly its direct importers, one hop, never further — `tests/lifecycle_matrix.rs` scenario 2e, flipped to its new expected behavior, across all 4 stacks.
 - ✅ `FORMAT_VERSION` 15 → 16.
+- ✅ Confirmed on real data, not just fixtures — see the dogfooding note above.
 
 #### Definition of done
 
