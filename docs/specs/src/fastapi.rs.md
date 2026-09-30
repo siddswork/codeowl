@@ -3,7 +3,7 @@ kind: file
 source_paths: [src/fastapi.rs]
 file: { source_hash: d90d9b829608442c1e9c1d0228a8015e905c55ff2f5b651dddb005653d7ed289, deps_hash: 10eb184a75d80e06e76611e3097e17a4620c4d6401d9ba8ad079c56c908e5f61, spec_hash: 3aceb79843aec7285fd147d7e82825b36aa2bab0e192e8f50c5d9d0f72d5188d }
 symbols:
-  src/fastapi.rs::FastApiFeatureModel: { source_hash: 31a83efd92d037cac7a86f3539f5f32833f738a89c1b7c20a5cc5389f77bd767, deps_hash: c4ba0b6acf1b86b2c7cd4f0f61415d7ecbf37de6b272db0b0148bf8a6549218f, spec_hash: 598c7902e956e05a098788045e9a456b643ddf0cd4892e3390cd3f66e39f2ad2 }
+  src/fastapi.rs::FastApiFeatureModel: { source_hash: 31a83efd92d037cac7a86f3539f5f32833f738a89c1b7c20a5cc5389f77bd767, deps_hash: 10eb184a75d80e06e76611e3097e17a4620c4d6401d9ba8ad079c56c908e5f61, spec_hash: a9c2918784dbcfe08af41e878ad8f8a1ac577a4ea8c611b9edb86283387ad662 }
   src/fastapi.rs::parse_route_decorator: { source_hash: c03313a7e32fca7abb97b8404fb7bbd8998f9a25dc1fd8849b39fd3eb9e49a91, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: dd1ae72cddd2edae365701bd3c87f914c7d86f1abf6ca0c08ef052e8c00f0971 }
   src/fastapi.rs::first_string_literal: { source_hash: 8316a508e0fce80ad33966c5f1e9c043a6b50579ffefc6c7d2565c7e6a025f60, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6f1079426852ad2542c09da0aac452cc17ce0f7da175513c41b102c62cfc2c08 }
   src/fastapi.rs::router_prefix: { source_hash: 0131a7541de47d0534dc41d7b77a3638c2324dc73041498cc79bc1b96563c484, deps_hash: c26f9d6a3e6974e2d667c28f724f82f43d77dfdb43054409f1e8e28bc6038944, spec_hash: 508fb2e243d48c32d7f66df3a90a1a8b4ce6d08f78bfc38e4cd1ca57ae4d1f0a }
@@ -22,15 +22,16 @@ FastAPI's feature model, the second stack CodeOwl knows how to find features in 
 ## `FastApiFeatureModel`
 `pub struct FastApiFeatureModel`
 ### Summary
-A marker type (empty — it carries no data of its own) that tells CodeOwl how to find "features" in a FastAPI (a Python framework for building HTTP services) codebase: its HTTP and WebSocket routes, and which other files belong alongside each one when writing that feature's documentation.
+A marker type (empty — it carries no data of its own) that plugs FastAPI (a Python framework for building HTTP services) into CodeOwl's feature discovery. It implements `FeatureModel` (the contract every framework has to fill in so CodeOwl can find "features" without knowing the framework), answering two questions for a FastAPI codebase: which functions are HTTP or WebSocket routes, and which other files belong alongside each route when writing its documentation.
 ### Behavior
-Two methods do the real work.
+The two methods are the two halves of the `FeatureModel` contract.
 
-`enumerate_entry_points` walks every declared function in the whole codebase and keeps the ones whose annotations mark them as a route (an `@app.get(...)`/`@router.post(...)`-style decorator, parsed by `parse_route_decorator`). For each match, it looks up that function's file's router prefix (its `APIRouter(prefix=...)` declaration, if any) — computed once per file and cached, since every route in the same file shares the same prefix — and joins it with the route's own path to get the full URL. A `"websocket"` verb is kept as its own entry-point kind, distinct from ordinary `"http"` routes. Results are sorted into a stable order, and any two entry points that would collide on the same slug are disambiguated before the list is returned.
+`enumerate_entry_points` walks every function in the whole codebase and keeps the ones whose decorators mark them as a route (an `@app.get(...)` / `@router.post(...)`-style line, parsed by `parse_route_decorator`). For each match it looks up that file's router prefix (its `APIRouter(prefix=...)` declaration, if any) and joins it with the route's own path to get the full URL — so `@router.get("/items")` in a file declaring `prefix="/api"` becomes `GET /api/items`. The prefix is computed once per file and cached, since every route in the same file shares it. A `"websocket"` verb is kept as its own entry-point kind, distinct from ordinary `"http"` routes. Results are sorted into a stable order, and any two entry points that would collide on the same slug are disambiguated before the list is returned.
 
-`admits_to_core` decides whether a given file belongs in a feature's supporting file set: yes if it's a CRUD module (recognized by `is_crud_module`) or if it touches the database schema (`file_touches_schema`), no otherwise.
+`admits_to_core` decides whether a given file belongs in a feature's supporting file set: yes if it is a CRUD module (recognized by `is_crud_module`) or if it touches the database schema (`file_touches_schema`), no otherwise. It ignores which route is asking, so the same files qualify for every feature.
 ### Depends on
 - `src/features.rs::EntryPoint` — crate::features
+- `src/features.rs::FeatureModel` — crate::features
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolKind` — crate::symbol
 - externals: std
