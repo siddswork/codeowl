@@ -1,23 +1,23 @@
 ---
 kind: file
 source_paths: [src/fastapi.rs]
-file: { source_hash: d90d9b829608442c1e9c1d0228a8015e905c55ff2f5b651dddb005653d7ed289, deps_hash: 9387546cb07bf2cc010f9c026b64690319273fa3f0ca1dd931603df137d47058, spec_hash: 40acd33e2540504603c9c0e0d6d0d386d96bd22897df4d097f96071b9b316830 }
+file: { source_hash: d90d9b829608442c1e9c1d0228a8015e905c55ff2f5b651dddb005653d7ed289, deps_hash: 10eb184a75d80e06e76611e3097e17a4620c4d6401d9ba8ad079c56c908e5f61, spec_hash: 3aceb79843aec7285fd147d7e82825b36aa2bab0e192e8f50c5d9d0f72d5188d }
 symbols:
-  src/fastapi.rs::FastApiFeatureModel: { source_hash: 31a83efd92d037cac7a86f3539f5f32833f738a89c1b7c20a5cc5389f77bd767, deps_hash: cb322701c2dd0dfee7b88e34b3b239381a81f7ff2976458500d6c28b1333b889, spec_hash: 598c7902e956e05a098788045e9a456b643ddf0cd4892e3390cd3f66e39f2ad2 }
+  src/fastapi.rs::FastApiFeatureModel: { source_hash: 31a83efd92d037cac7a86f3539f5f32833f738a89c1b7c20a5cc5389f77bd767, deps_hash: c4ba0b6acf1b86b2c7cd4f0f61415d7ecbf37de6b272db0b0148bf8a6549218f, spec_hash: 598c7902e956e05a098788045e9a456b643ddf0cd4892e3390cd3f66e39f2ad2 }
   src/fastapi.rs::parse_route_decorator: { source_hash: c03313a7e32fca7abb97b8404fb7bbd8998f9a25dc1fd8849b39fd3eb9e49a91, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: dd1ae72cddd2edae365701bd3c87f914c7d86f1abf6ca0c08ef052e8c00f0971 }
   src/fastapi.rs::first_string_literal: { source_hash: 8316a508e0fce80ad33966c5f1e9c043a6b50579ffefc6c7d2565c7e6a025f60, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6f1079426852ad2542c09da0aac452cc17ce0f7da175513c41b102c62cfc2c08 }
-  src/fastapi.rs::router_prefix: { source_hash: 0131a7541de47d0534dc41d7b77a3638c2324dc73041498cc79bc1b96563c484, deps_hash: c7b3c780b3d5f3a7c9ea5d71f7ffa53a1413d36c92a0a62889c9e0d64c51cb94, spec_hash: b7a6ddc045602d3d5b51d31942b18b19855985b93fa5ec2cf5e804a773a4a532 }
+  src/fastapi.rs::router_prefix: { source_hash: 0131a7541de47d0534dc41d7b77a3638c2324dc73041498cc79bc1b96563c484, deps_hash: c26f9d6a3e6974e2d667c28f724f82f43d77dfdb43054409f1e8e28bc6038944, spec_hash: 508fb2e243d48c32d7f66df3a90a1a8b4ce6d08f78bfc38e4cd1ca57ae4d1f0a }
   src/fastapi.rs::kwarg_string_literal: { source_hash: 2c51c23cb52a4f256dbc75171e6a9c50c977a0b28b474a773f0b2eed69804b02, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8b3593407b4c2b3b2b78b2f3618ba5fef4ba2365f17eb222ac30bfa274568f27 }
   src/fastapi.rs::is_ident_byte: { source_hash: ad2053043283aaf6db6169ca16e4a244fbd9d7e421fd8aedc21f4efa1bee4fb2, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b1b30c332e2c31f32baea2b97d26dc70e9b703cebf743a6c35073a1e0b629bcc }
   src/fastapi.rs::join_route: { source_hash: 05e9c0981198a8d0a9658d5ce41118aabf6e74bba2784794513263d66e027270, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: cf57071828897c7aa4dbfa701a192f98166e760dd2eb7a1ed9860302d0d61ff8 }
   src/fastapi.rs::route_slug: { source_hash: 01919af3cc42ea93e2c7dc73bcc319cfb078b5d904f142fb7d151349adc51350, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 06f42a05b94a8dd8980c611a2a81604ed49134329920f2734789a9f154ed4711 }
   src/fastapi.rs::disambiguate_colliding_slugs: { source_hash: 6ca57c0e07fc6cb6f77d6250d901b84c7234d0a98293a540cf13bb5e95c15ab8, deps_hash: dd79b8c0fa0f64d9f5c2fd7ffee003186005ce19f3443d1b51fb6d0fd60f5c6d, spec_hash: 8a00f3fa6065b197f7d72117889b931f28ff9cd7268073cb7fb2214b61b2ca9a }
   src/fastapi.rs::is_crud_module: { source_hash: cf448b80ac00375ba3d4c48a78dd429800ebe0fed130bce4e4866474d5bc8c10, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b3b3ffc166b257f6093d4d27e565d596c56e9bd583cd080509b90a5e55dcffd8 }
-  src/fastapi.rs::file_touches_schema: { source_hash: 73390117722264f5f7194345c4c2ada05444ad7d7f3541e11eed5e9da9d10f11, deps_hash: c7b3c780b3d5f3a7c9ea5d71f7ffa53a1413d36c92a0a62889c9e0d64c51cb94, spec_hash: 4abcab6d151aa4bdcc71157974dc0cd23f3564a1f8631b7cfba82d16b12298c0 }
+  src/fastapi.rs::file_touches_schema: { source_hash: 73390117722264f5f7194345c4c2ada05444ad7d7f3541e11eed5e9da9d10f11, deps_hash: c26f9d6a3e6974e2d667c28f724f82f43d77dfdb43054409f1e8e28bc6038944, spec_hash: c572422da4435eabbee4300f215778ba3ed0b3962b08a8613cf4e11e8a0515d8 }
 ---
 # src/fastapi.rs
 ## Summary
-This file is FastAPI's feature model — the second stack CodeOwl knows how to find features in, and the first that isn't a Next.js-style file-routing framework. Here, a "feature" is an HTTP route: any function decorated with `@router.get(...)`, `.post`, `.put`, and similar, discovered without caring what the decorator's receiver is named (`router`, `app`, `api_router` all count). Most of this file's work is small text-parsing on decorator and constructor call text — pulling the HTTP verb and path out of a route decorator, resolving a router's own `prefix="..."` from its `APIRouter(...)` construction call, joining that prefix onto a route's path, and turning the result into a stable, filename-safe slug. A file gets pulled into a route's feature spec if it looks like shared CRUD (create/read/update/delete) code or touches the same database schema the route itself queries. A plain Python library with no `@router`-decorated functions produces zero entry points here, which is the intended, non-error outcome — such a repo simply gets symbol/file/rollup/system specs only, no feature layer.
+FastAPI's feature model, the second stack CodeOwl knows how to find features in — HTTP and WebSocket routes, and the files that belong alongside each one.
 
 ## `FastApiFeatureModel`
 `pub struct FastApiFeatureModel`
@@ -58,7 +58,7 @@ Scans for the first `"` or `'` character, treats that as the opening quote, then
 ### Summary
 Finds a file's `APIRouter(prefix="...")` declaration and returns its prefix path — the segment FastAPI prepends to every route defined on that router, e.g. `router = APIRouter(prefix="/items", tags=[...])` gives `"/items"`.
 ### Behavior
-Searches the graph for a `Value`-kind symbol in the given file whose signature contains the text `APIRouter(`, then extracts its `prefix` keyword argument as a string literal (via `kwarg_string_literal`). Returns `None` if the file has no such declaration, or if it does but the `prefix` argument isn't a plain string literal — for example `prefix=settings.API_PREFIX`, a value that can't be known just by reading the source text. In that case, the route ends up reported without any prefix rather than with a wrong one, which is the safer failure mode.</content>
+Searches the graph for a `Value`-kind symbol in the given file whose signature contains the text `APIRouter(`, then extracts its `prefix` keyword argument as a string literal (via `kwarg_string_literal`). Returns `None` if the file has no such declaration, or if it does but the `prefix` argument isn't a plain string literal — for example `prefix=settings.API_PREFIX`, a value that can't be known just by reading the source text. In that case, the route ends up reported without any prefix rather than with a wrong one, which is the safer failure mode.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolKind` — crate::symbol
@@ -122,7 +122,7 @@ Checks the file's bare filename against a fixed set of conventional names (`crud
 ### Summary
 Checks whether a file "does data work" — either declaring a database table itself, or importing one from elsewhere — the other half of `admits_to_core`'s check alongside `is_crud_module`.
 ### Behavior
-Returns `true` if either: the file itself declares a symbol of kind `Schema` (a database table — already tagged that way earlier in extraction by `is_schema_symbol`, so this is a plain lookup, no re-analysis); or the file imports something that resolves to a `Schema`-kind symbol elsewhere. Both checks are simple graph lookups off already-computed symbol kinds and import edges — no call-graph analysis is involved, since CodeOwl doesn't trace actual query execution.</content>
+Returns `true` if either: the file itself declares a symbol of kind `Schema` (a database table — already tagged that way earlier in extraction by `is_schema_symbol`, so this is a plain lookup, no re-analysis); or the file imports something that resolves to a `Schema`-kind symbol elsewhere. Both checks are simple graph lookups off already-computed symbol kinds and import edges — no call-graph analysis is involved, since CodeOwl doesn't trace actual query execution.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolKind` — crate::symbol
