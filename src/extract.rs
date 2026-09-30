@@ -106,6 +106,7 @@ fn visit_function(
         docstring: leading_doc(outer, source),
         is_exported,
         markers: Vec::new(),
+        extra_spans: Vec::new(),
         parent: None,
         children: Vec::new(),
     });
@@ -145,6 +146,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
                     source_hash: m_source_hash.clone(),
                     interface_hash: None,
                     markers: Vec::new(),
+                    extra_spans: Vec::new(),
                     parent: Some(class_id.clone()),
                     children: Vec::new(),
                 });
@@ -174,6 +176,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
                     source_hash: f_source_hash.clone(),
                     interface_hash: None,
                     markers: Vec::new(),
+                    extra_spans: Vec::new(),
                     parent: Some(class_id.clone()),
                     children: Vec::new(),
                 });
@@ -242,6 +245,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
         docstring: leading_doc(outer, source),
         is_exported,
         markers: Vec::new(),
+        extra_spans: Vec::new(),
         parent: None,
         children: member_ids,
     });
@@ -319,6 +323,7 @@ fn visit_lexical(
             docstring: leading_doc(outer, source),
             is_exported,
             markers: Vec::new(),
+            extra_spans: Vec::new(),
             parent: None,
             children: Vec::new(),
         });

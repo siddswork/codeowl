@@ -225,7 +225,7 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// public method, in every pack, in one bump rather than M21.b's
 /// four-separate-bumps precedent, since this shipped as one session
 /// rather than a staggered timeline).
-pub const FORMAT_VERSION: u32 = 16;
+pub const FORMAT_VERSION: u32 = 17;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
@@ -361,6 +361,7 @@ impl Graph {
                     source_hash: sym.source_hash,
                     interface_hash: sym.interface_hash,
                     markers: sym.markers,
+                    extra_spans: sym.extra_spans,
                     parent,
                     children: sym
                         .children
@@ -657,6 +658,7 @@ mod tests {
             source_hash: hash_text("x"),
             interface_hash: Some(hash_text("function handler()")),
             markers: vec!["#[tool]".into(), "#[derive(Debug)]".into()],
+            extra_spans: Vec::new(),
             parent: None,
             children: Vec::new(),
         };

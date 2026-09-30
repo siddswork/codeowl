@@ -211,6 +211,11 @@ fn merge_inherent_impls(
         // impl's methods never carry `pub`; they're public because the
         // trait is).
         public_sigs: Vec<String>,
+        // Each folded block's own full line range, so the `impl ... {`
+        // header (the only line naming the trait, or an inherent impl's
+        // generic bounds) stays visible to dependency scoping and
+        // `get_source` after the block symbol itself is dropped.
+        block_spans: Vec<[usize; 2]>,
     }
     let mut folded: HashMap<usize, Folded> = HashMap::new();
     let mut dropped = vec![false; syms.len()];
@@ -285,6 +290,7 @@ fn merge_inherent_impls(
         );
         entry.methods.extend(methods);
         entry.block_hashes.push(block_hash);
+        entry.block_spans.push(syms[i].lines);
         entry.markers.extend(block_markers);
     }
 
@@ -330,6 +336,7 @@ fn merge_inherent_impls(
             }
         }
         ty.children.extend(f.methods.iter().map(|m| m.id.clone()));
+        ty.extra_spans.extend(f.block_spans);
         out.push(ty);
         out.extend(f.methods);
     }
@@ -593,6 +600,7 @@ fn visit_container(
             source_hash: hash_text(&rollup),
             interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: attributes(node, source),
+            extra_spans: Vec::new(),
             parent: parent_id.map(str::to_string),
             children: member_ids,
         },
@@ -632,6 +640,7 @@ fn push_leaf(
         source_hash: hash_text(text(node, source)),
         interface_hash: is_exported.then(|| hash_text(&sig)),
         markers: attributes(node, source),
+        extra_spans: Vec::new(),
         parent: parent_id.map(str::to_string),
         children: Vec::new(),
     });

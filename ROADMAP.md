@@ -974,6 +974,18 @@ The same shape open question 12 was before M21.a measured it, and — like M21.h
 - ✅ `FORMAT_VERSION` 15 → 16.
 - ✅ Confirmed on real data, not just fixtures — see the dogfooding note above.
 
+##### M21.j — Degenerate-fold dependency scope (`ARCHITECTURE.md` open question 19) — SHIPPED
+
+**Size:** S · **Builds on:** M21.e, M21.i.
+
+**Built, 2026-09-30.** `extra_spans` carries each folded impl block's full line range so the `impl Trait for Type {` header is scanned for dependencies and shown by `get_source`; `FORMAT_VERSION` 16 -> 17. Design and the reasons the two originally logged candidates were rejected are in `ARCHITECTURE.md` open question 19. Measured on CodeOwl's own repo: 4 of 19 merged types gain a dependency (incl. `FastApiFeatureModel`/`QuarkusFeatureModel` -> `FeatureModel`, the real trigger).
+
+**Validation:**
+- ✅ Failing tests first: a cross-file trait impl with several methods and a blank line before the impl (without the blank line the gap-merge covers the header by accident), an empty impl, an inherent impl with a generic bound, and an end-to-end `Polite -> Greeter` dependency check.
+- ✅ `FORMAT_VERSION` 16 -> 17.
+- ✅ Real-repo measurement on CodeOwl's own tree, not just fixtures.
+- Not covered: a same-file trait (no import edge exists; noted in question 19).
+
 #### Definition of done
 
 M21 is not complete when field extraction merely lands. It requires all of:
