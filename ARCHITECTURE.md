@@ -442,6 +442,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [15](DECISIONS.md#q15) | `submit_spec` has no upper bound on content | Logged, not scheduled |
 | [17](DECISIONS.md#q17) | `get_spec_coverage` doesn't report files skipped as unreadable | Logged, not scheduled |
 | [18](DECISIONS.md#q18) | Whether to build a call graph (`Callable → Callable` edges) | Logged, not built; revisit on a measured multi-hop miss |
+| [20](DECISIONS.md#q20) | Rust resolution assumes one crate root per repo: a multi-crate workspace resolves `crate::` against an arbitrary crate, non-deterministically | Open, confirmed on `ripgrep`; fix not built |
 
 **Resolved**
 
