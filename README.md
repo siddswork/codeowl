@@ -68,6 +68,21 @@ Edit `hash_text`, and this spec flips to `stale` the instant it's asked
 for — naming exactly what moved, so nobody ever reads a stale claim as
 current.
 
+## Quick start
+
+Needs a Rust toolchain (Linux or macOS) and Claude Code or VS Code + Copilot.
+
+```sh
+cargo build --release          # -> ./target/release/codeowl
+./target/release/codeowl serve <your-repo>   # your agent's MCP config runs this
+/codeowl-generate --all                      # from your agent, once, to write the corpus
+```
+
+Your agent gets nine tools: `get_symbol`, `get_source`, `get_callers`,
+`get_callees`, `search_code`, `get_spec`, `get_spec_coverage`, plus
+`get_next_spec_task` / `submit_spec` for generation. Full wiring:
+[`setup/README.md`](setup/README.md).
+
 ## How it stays honest
 
 CodeOwl extracts a structural graph once — symbols, containment, resolved
@@ -78,17 +93,8 @@ dependencies' interface hashes), never from the prose itself. The graph is
 scaffolding, not the deliverable — it exists so spec generation is cheap,
 scoped, and checkable, not the other way around.
 
-Two rules shape everything: CodeOwl **never calls an LLM** — it assembles
-context, the calling agent writes the prose, CodeOwl persists and
-invalidates — and it **never hashes prose** for invalidation, only the
-deterministic graph.
-
 ## Why it holds up
 
-- **Specs don't rot.** Every spec's staleness key is computed from the
-  graph — a symbol's signature hash, its resolved dependencies' interface
-  hashes — never from the prose. Change the code and the specs it touches
-  flip to `stale` immediately, naming exactly what moved.
 - **Bootstrap once, not forever.** Spec-driven development assumes your
   code already has good specs — a brownfield repo doesn't. Run `--all`
   once to write the whole corpus; after that, a change only regenerates
@@ -101,12 +107,10 @@ deterministic graph.
 - **Committed to git.** Specs live in `docs/specs/` as plain Markdown —
   reviewable in a PR, browsable on GitHub, versioned with the code.
 - **No LLM in the loop, ever.** CodeOwl holds no API keys and makes no
-  model calls. It's a deterministic index; the calling agent writes spec
-  text through `get_next_spec_task` → `submit_spec`. Nothing to hallucinate
-  in the parts CodeOwl owns — and no new privacy exposure either: CodeOwl
-  itself never sends your source anywhere. Whatever your coding agent
-  already sends its own model to write spec prose is a trust relationship
-  you already have; CodeOwl doesn't add a second one.
+  model calls, and it never hashes prose — only the deterministic graph. The
+  calling agent writes spec text through `get_next_spec_task` →
+  `submit_spec`, so nothing CodeOwl owns can hallucinate, and CodeOwl adds no
+  new place your source is sent.
 - **Sees what grep can't.** Framework conventions become real edges — a
   `fetch("/api/x")` resolves to its route file, a `.from("payments")`
   resolves to the `CREATE TABLE`, a `<Form/>` resolves to its component.
@@ -126,15 +130,15 @@ automatically.
 | **Java** | `class` / `interface` / `enum` / `record` / `@interface` → containers, with their methods, constructors, and fields; Javadoc docstrings; `@Annotation` markers; `import a.b.C` resolved by path-suffix match (Maven, Gradle, or bare layout) plus same-package implicit references. No feature layer for a plain library; a **Quarkus** feature model when the service conventions are there — heterogeneous entry-point kinds coexisting in one service (JAX-RS `@Path` + verb, Kafka `@Incoming`/`@Outgoing`, `@Scheduled`, `@GrpcService`), CDI-shaped core admission, a JPA/Panache schema idiom, and cross-service flow edges carried by string (`@RegisterRestClient`). |
 | **Python** | `class` / `def` / module-level assignments; decorators captured verbatim (with arguments) as markers; `"""docstrings"""`; dotted-module and relative `import` resolution; a symbol-level schema seam (SQLModel / SQLAlchemy `table=True` → schema nodes); a **FastAPI** feature model (route enumeration, `APIRouter` prefix threading, `Depends()` → flow edges). No feature layer for a plain library. |
 
-Next up: entry points hidden behind build-generated interfaces (OpenAPI
-codegen, `.proto` stubs), then a polyglot mode — one primary stack plus
-secondary-language subtrees in the same repo, mixing TypeScript, Rust,
-Java, and Python freely instead of just one per repo. See `ROADMAP.md`.
+Next up: verifying build-generated-interface entry points under Gradle
+(Maven is confirmed), then a polyglot mode — one primary stack plus
+secondary-language subtrees in the same repo. See `ROADMAP.md`.
 
 ## Docs
 
 - **What & why:** [`REQUIREMENTS.md`](REQUIREMENTS.md)
 - **How it's built:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Why, and what's undecided:** [`DECISIONS.md`](DECISIONS.md)
 - **Vocabulary:** [`GLOSSARY.md`](GLOSSARY.md)
 - **Build sequence:** [`ROADMAP.md`](ROADMAP.md)
 - **Wire it into your own repo:** [`setup/README.md`](setup/README.md)

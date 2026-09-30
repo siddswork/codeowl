@@ -17,8 +17,9 @@ detection assumes **App Router** conventions (`app/**/page.tsx`,
 decorators (`@router.get(...)`) and `Depends()`. A CLI/library stack (Rust,
 or plain Java) gets symbols, file specs, and rollups but no feature layer.
 A repo that looks like two stacks at once is rejected rather than
-guessed. Quarkus (heterogeneous service entry points on the Java pack) is
-in progress. See `REQUIREMENTS.md` / `ROADMAP.md`.
+guessed. The Java pack also carries a Quarkus feature model (HTTP, Kafka,
+scheduled and gRPC entry points in one service). See `REQUIREMENTS.md` /
+`ROADMAP.md`.
 
 ---
 
