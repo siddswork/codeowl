@@ -442,7 +442,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [15](DECISIONS.md#q15) | `submit_spec` has no upper bound on content | Logged, not scheduled |
 | [17](DECISIONS.md#q17) | `get_spec_coverage` doesn't report files skipped as unreadable | Logged, not scheduled |
 | [18](DECISIONS.md#q18) | Whether to build a call graph (`Callable → Callable` edges) | Logged, not built; revisit on a measured multi-hop miss |
-| [20](DECISIONS.md#q20) | Rust resolution assumes one crate root per repo: a multi-crate workspace resolves `crate::` against an arbitrary crate, non-deterministically | Open, confirmed on `ripgrep`; fix not built |
+| [21](DECISIONS.md#q21) | TypeScript extraction skips `interface`/`type`/`enum` and destructured exports, so imports of them create no edge (141 of 858 unresolved in `talentTrail`); Java picks one of several path matches unchecked | Open, measured; not built |
 
 **Resolved**
 
@@ -457,6 +457,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [14](DECISIONS.md#q14) | Fully-qualified calls with no import statement | Detection built for Rust and Java |
 | [16](DECISIONS.md#q16) | Zero-field marker type and its trait impl as unlinked nodes | Degenerate case folded; general case gets an impl → type edge |
 | [19](DECISIONS.md#q19) | A folded impl's header invisible to dependency scoping | Fixed for cross-file traits; same-file trait gap measured, not built |
+| [20](DECISIONS.md#q20) | Rust resolution assumed one crate root per repo (wrong and non-deterministic in workspaces; crate-name `use` never resolved) | `crate::` is per-file; library crate names resolved from `Cargo.toml`. Test-crate roots and nested-brace re-exports not covered |
 
 ## Non-goals (for now)
 

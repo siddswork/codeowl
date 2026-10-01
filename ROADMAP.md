@@ -986,6 +986,20 @@ The same shape open question 12 was before M21.a measured it, and — like M21.h
 - ✅ Real-repo measurement on CodeOwl's own tree, not just fixtures.
 - Not covered: a same-file trait (no import edge exists; noted in question 19).
 
+##### M21.k — Rust crate roots and crate-name imports (`ARCHITECTURE.md` open question 20) — SHIPPED
+
+**Size:** M · **Builds on:** M14, M21.h.
+
+**Found by looking at the graph, 2026-09-30/10-01.** `examples/graph_stats.rs` showed `ripgrep` with 3 file edges across 110 files, and a visualization of CodeOwl's own graph showed `main.rs` and every test file isolated. Both came from Rust resolution reading only `crate::`, `self::` and `super::`, against one repo-wide crate root chosen by `HashMap` iteration order.
+
+**Built, 2026-10-01.** `rust_crates.rs::CrateMap`: `crate::` is the root of the file's own crate (nearest `lib.rs`/`main.rs` directory), and a path starting with a library crate's name resolves into that crate, with names read from `Cargo.toml` via the new `toml` dependency. `FORMAT_VERSION` 17 -> 18 (and the missing 17 entry added to its comment).
+
+**Validation:**
+- ✅ Failing tests first: two workspace crates each defining `Error`, a sibling crate named in a `use`, a hyphenated package name, a `[lib] name` override, a binary with its own modules, resolution identical across 25 runs, an unknown crate staying external.
+- ✅ `ripgrep`: 3 to 9 random edges -> 54, identical on four runs. CodeOwl: isolated files 12 -> 0.
+- ✅ Staleness cost measured on CodeOwl's own specs: one spec moved, `src/main.rs`, `current` -> `stale`.
+- Not covered, logged in question 20: integration-test crate roots (`tests/tests.rs`), nested-brace and multi-hop re-exports, dependency renames.
+
 #### Definition of done
 
 M21 is not complete when field extraction merely lands. It requires all of:
