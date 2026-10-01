@@ -139,6 +139,15 @@ why CodeOwl cares.
   (`@router.get("/items")`) are captured the same way, arguments included,
   and drive the FastAPI feature model (M17).
 
+**`extra_spans`**
+: Extra line ranges attached to a Rust type that absorbed an `impl` block:
+  the block's whole range, including its `impl Trait for Type {` header.
+
+  A type's own `lines` covers only the struct, and its merged methods carry
+  their own ranges, so without this the header — the one line that names
+  the trait — would sit outside everything CodeOwl scans for dependencies
+  and shows in `get_source`. The type's reported `lines` don't change.
+
 **Extraction**
 : The first pass CodeOwl runs on each file: parse it with tree-sitter, walk
   the parse tree, and collect the symbols. This pass is **syntax only** —
@@ -215,6 +224,23 @@ why CodeOwl cares.
   dependent specs come out better. (The opposite direction, **fan-out** —
   how many things *this* file imports — is rarely what CodeOwl cares
   about.)
+
+**Hub**
+: A file with unusually high fan-in. The graphs CodeOwl builds are
+  hub-and-spoke: on CodeOwl's own repo `symbol.rs` is imported by 21 of 35
+  files, and in one TypeScript app a single Supabase client module is
+  imported by about 30% of all files.
+
+  Because the staleness cascade is one hop, the cost of changing a hub's
+  public shape equals its fan-in: every importer's spec goes stale.
+
+**Isolated file**
+: A file with no edges in either direction in the reference graph. It is
+  either genuinely unconnected, or a sign that resolution missed something:
+  CodeOwl's own `main.rs` and test files looked isolated until Rust
+  resolution learned to follow a `use` of the package's own library crate.
+  A high isolated-file count on a repo that plainly has structure is worth
+  investigating, not trusting.
 
 **Flow edge**
 : A "this file reaches that thing" connection that the import graph
@@ -393,8 +419,11 @@ a change to its signature should.
   changes.
 
 **`interface_hash`**
-: Hash of a symbol's *public shape only* — its signature, and nothing else
-  (not the body, not the docstring).
+: Hash of a symbol's *public shape only* — its signature, and for a
+  container (a class, struct, interface) the signatures of its **public
+  fields and public methods** too, so adding, renaming or retyping a
+  public member moves it. Never the body, the docstring, a private member,
+  or a field's default value.
 
   This is what a **reference edge** keys on. If module B changes how a
   function works internally but the signature is identical, then everything
@@ -598,10 +627,26 @@ checking that the socket didn't have to change shape to fit them.
 
 **`FORMAT_VERSION`**
 : A single integer stamped into the `.codeowl/` cache on disk. It's bumped
-  whenever the saved data structure changes in a way that would make an old
-  cache give *wrong* answers rather than just missing ones. On startup, if
+  whenever the saved data structure changes, *or* a pack's extraction or
+  resolution logic changes what it produces for the same input, in a way
+  that would make an old cache give *wrong* answers rather than just
+  missing ones. On startup, if
   the cache's version isn't the current one, CodeOwl throws the whole cache
   away and rebuilds from scratch — safer than trying to migrate it.
+
+**Crate root**
+: The file Cargo treats as the top of a Rust crate — `lib.rs` for a
+  library, `main.rs` for a binary. In Rust, `crate::` inside any file means
+  "the root of *this file's* crate", so the Rust pack has to know which
+  crate a file belongs to.
+
+  A repo can hold several crates (a workspace, or one package with both a
+  library and a binary), each with its own root. CodeOwl takes a file's
+  root to be the nearest enclosing directory holding a `lib.rs` or
+  `main.rs` (or a `[lib] path` from `Cargo.toml`), falling back to the
+  owning package's `src`. A `use` that starts with a library crate's own
+  name (`use codeowl::index::RepoIndex`) is resolved into that crate's root
+  too, which is how a binary or test links to the library it exercises.
 
 ---
 
