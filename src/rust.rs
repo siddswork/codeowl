@@ -1228,10 +1228,10 @@ fn module_path_to_file(
 ) -> Option<String> {
     let segs: Vec<&str> = specifier.split("::").collect();
     let exists = |p: &str| file_imports.contains_key(p);
-    let src = crates.crate_root(from_file, file_imports);
+    let first = *segs.first()?;
 
-    let (base, rest): (String, &[&str]) = match *segs.first()? {
-        "crate" => (src.clone(), &segs[1..]),
+    let (base, rest): (String, &[&str]) = match first {
+        "crate" => (crates.crate_root(from_file, file_imports), &segs[1..]),
         "self" => (module_dir_of(from_file), &segs[1..]),
         "super" => {
             let ups = segs.iter().take_while(|s| **s == "super").count();
@@ -1243,16 +1243,18 @@ fn module_path_to_file(
             }
             (dir, &segs[ups..])
         }
-        // A library crate that lives in this repo, named by its crate name:
-        // a workspace sibling, or the package's own library as seen from a
-        // binary, test or example. Resolves like `crate::` inside that crate.
-        first if crates.lib_root(first).is_some() => {
-            (crates.lib_root(first)?.to_string(), &segs[1..])
-        }
-        // An external crate (`anyhow`, `std`, `tree_sitter`) — or, in 2018
-        // style, a bare top-level module. Try the latter under `src`; if
-        // no such file was walked, it's external -> unresolved.
-        _ => (src, &segs[..]),
+        _ => match crates.lib_root(first) {
+            // A library crate that lives in this repo, named by its crate
+            // name: a workspace sibling, or the package's own library as
+            // seen from a binary, test or example. Resolves like `crate::`
+            // inside that crate.
+            Some(dir) => (dir.to_string(), &segs[1..]),
+            // An external crate (`anyhow`, `std`, `tree_sitter`) — or, in
+            // 2018 style, a bare top-level module. Try the latter under the
+            // file's crate root; if no such file was walked, it's external
+            // -> unresolved.
+            None => (crates.crate_root(from_file, file_imports), &segs[..]),
+        },
     };
 
     let joined = if rest.is_empty() {
@@ -2197,6 +2199,56 @@ pub use crate::stack::RustStack;\n";
             target_of(&edges, "src/bin/tool/app.rs", "Cfg"),
             "src/bin/tool/cfg.rs::Cfg"
         );
+    }
+
+    #[test]
+    fn a_workspace_members_test_file_falls_back_to_its_own_packages_src() {
+        // Code review: a file under no lib.rs/main.rs directory fell back to
+        // a literal top-level `src`, so crates/a/tests/it.rs resolved
+        // `crate::helpers` into the *repo-root* package. The fallback is the
+        // owning package's own src.
+        let base: &[(&str, &str)] = &[
+            ("Cargo.toml", "[package]\nname = \"root\"\n"),
+            ("src/lib.rs", "pub mod helpers;\n"),
+            ("src/helpers.rs", "pub struct X;\n"),
+            ("crates/a/Cargo.toml", "[package]\nname = \"a\"\n"),
+            ("crates/a/src/lib.rs", "pub mod helpers;\n"),
+            ("crates/a/tests/it.rs", "use crate::helpers::X;\n"),
+        ];
+        // a has no helpers module: must NOT borrow the root package's.
+        let edges = resolved_with_cargo("tests-fallback-none", base);
+        assert_eq!(
+            target_of(&edges, "crates/a/tests/it.rs", "X"),
+            "<unresolved>"
+        );
+        // a has its own: resolves there, not to the root package.
+        let mut with_own = base.to_vec();
+        with_own.push(("crates/a/src/helpers.rs", "pub struct X;\n"));
+        let edges = resolved_with_cargo("tests-fallback-own", &with_own);
+        assert_eq!(
+            target_of(&edges, "crates/a/tests/it.rs", "X"),
+            "crates/a/src/helpers.rs::X"
+        );
+    }
+
+    #[test]
+    fn a_lib_path_with_a_custom_root_file_name_is_its_crate_root() {
+        // `[lib] path = "lib/core.rs"`: the crate's modules live in `lib/`,
+        // which holds no lib.rs/main.rs, so only the manifest says it is a
+        // crate root.
+        let edges = resolved_with_cargo(
+            "lib-path",
+            &[
+                (
+                    "Cargo.toml",
+                    "[package]\nname = \"pkg\"\n\n[lib]\npath = \"lib/core.rs\"\n",
+                ),
+                ("lib/core.rs", "pub mod thing;\npub mod user;\n"),
+                ("lib/thing.rs", "pub struct T;\n"),
+                ("lib/user.rs", "use crate::thing::T;\n"),
+            ],
+        );
+        assert_eq!(target_of(&edges, "lib/user.rs", "T"), "lib/thing.rs::T");
     }
 
     #[test]

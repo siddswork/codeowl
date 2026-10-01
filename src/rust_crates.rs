@@ -14,11 +14,17 @@ use std::path::Path;
 
 use crate::imports::FileImports;
 
-/// Importable library crates in the repo: crate name -> the directory that
-/// holds the crate's root file.
+/// Importable library crates in the repo (crate name -> the directory that
+/// holds the crate's root file), plus the package directories and library
+/// root directories `crate_root` falls back on.
 #[derive(Debug, Default)]
 pub struct CrateMap {
     libs: HashMap<String, String>,
+    /// Directories holding a `Cargo.toml` with a `[package]`.
+    package_dirs: BTreeSet<String>,
+    /// Directories holding a library crate root, including a `[lib] path`
+    /// whose file is not named `lib.rs`.
+    lib_dirs: BTreeSet<String>,
 }
 
 /// `"crates/a/src/x.rs"` -> `"crates/a/src"`; a top-level file -> `""`.
@@ -56,6 +62,8 @@ impl CrateMap {
         }
 
         let mut libs = HashMap::new();
+        let mut package_dirs = BTreeSet::new();
+        let mut lib_dirs = BTreeSet::new();
         for dir in dirs {
             let Ok(text) = std::fs::read_to_string(root.join(&dir).join("Cargo.toml")) else {
                 continue;
@@ -70,6 +78,7 @@ impl CrateMap {
             else {
                 continue; // a workspace-only manifest has no package
             };
+            package_dirs.insert(dir.clone());
             let lib = doc.get("lib");
             let name = lib
                 .and_then(|l| l.get("name"))
@@ -83,10 +92,15 @@ impl CrateMap {
                     .unwrap_or("src/lib.rs"),
             );
             if files.contains_key(&lib_file) {
+                lib_dirs.insert(parent_dir(&lib_file));
                 libs.entry(name).or_insert_with(|| parent_dir(&lib_file));
             }
         }
-        Self { libs }
+        Self {
+            libs,
+            package_dirs,
+            lib_dirs,
+        }
     }
 
     /// The directory holding the root of library crate `name`, if the repo
@@ -97,18 +111,35 @@ impl CrateMap {
     }
 
     /// The directory `crate::` means for `file`: the nearest enclosing
-    /// directory that holds a `lib.rs` or `main.rs`. That makes a binary
-    /// with its own modules (`src/bin/tool/main.rs` plus siblings) resolve
-    /// inside the binary, and two workspace crates each inside themselves.
-    /// A file under no such directory falls back to `src`.
+    /// directory that holds a `lib.rs` or `main.rs`, or that a manifest
+    /// declares as a library root (`[lib] path`). That makes a binary with
+    /// its own modules (`src/bin/tool/main.rs` plus siblings) resolve inside
+    /// the binary, and two workspace crates each inside themselves.
+    ///
+    /// A file under no such directory (a `tests/` or `examples/` file)
+    /// falls back to the `src` of the package that owns it, never another
+    /// package's; with no `Cargo.toml` above it, to a top-level `src`.
     pub fn crate_root(&self, file: &str, files: &HashMap<String, FileImports>) -> String {
         let mut dir = parent_dir(file);
         loop {
-            if ["lib.rs", "main.rs"]
-                .iter()
-                .any(|root| files.contains_key(&join(&dir, root)))
+            if self.lib_dirs.contains(&dir)
+                || ["lib.rs", "main.rs"]
+                    .iter()
+                    .any(|root| files.contains_key(&join(&dir, root)))
             {
                 return dir;
+            }
+            if dir.is_empty() {
+                break;
+            }
+            dir = parent_dir(&dir);
+        }
+        // Nearest enclosing package: walk up again, stop at the first
+        // directory that holds a `[package]` manifest.
+        let mut dir = parent_dir(file);
+        loop {
+            if self.package_dirs.contains(&dir) {
+                return join(&dir, "src");
             }
             if dir.is_empty() {
                 return "src".to_string();

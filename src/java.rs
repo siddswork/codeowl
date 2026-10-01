@@ -641,9 +641,10 @@ fn extract_qualified_refs(node: Node, source: &str, out: &mut Vec<ImportRef>) {
 /// Resolve every file's `import`s to a target `SymbolId` and append the
 /// same-package implicit reference edges. Iterates files in path-sorted
 /// order so the persisted edge list is diffable (same reasoning as
-/// `resolve::resolve_imports`). `root` *is* read here — unlike the Rust
-/// pack — because the same-package scan needs each file's source text, and
-/// the graph doesn't retain bodies.
+/// `resolve::resolve_imports`). `root` *is* read here because the
+/// same-package scan needs each file's source text, and the graph doesn't
+/// retain bodies. (The Rust pack also reads `root` now, but only for its
+/// `Cargo.toml` files.)
 pub fn resolve_imports(
     root: &Path,
     file_imports: &HashMap<String, FileImports>,
