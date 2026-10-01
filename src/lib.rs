@@ -12,6 +12,7 @@ pub mod python;
 pub mod quarkus;
 pub mod resolve;
 pub mod rust;
+pub mod rust_crates;
 pub mod schema;
 pub mod search;
 pub mod spec;

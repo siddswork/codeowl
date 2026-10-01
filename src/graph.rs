@@ -224,8 +224,15 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// `interface_hash` for every exported container with at least one real
 /// public method, in every pack, in one bump rather than M21.b's
 /// four-separate-bumps precedent, since this shipped as one session
-/// rather than a staggered timeline).
-pub const FORMAT_VERSION: u32 = 17;
+/// rather than a staggered timeline). 17 = M21.j (`Symbol`/
+/// `ExtractedSymbol` gain `extra_spans`: a Rust type that absorbs an impl
+/// block keeps that block's full line range, so the `impl Trait for Type {`
+/// header stays in its dependency scan — open question 19). 18 = M21.k
+/// (Rust import resolution: `crate::` is the root of the file's own crate,
+/// and a `use` naming a library crate in the repo resolves into it, read
+/// from `Cargo.toml` — open question 20. No shape change, but it moves
+/// which imports resolve, so a cache built before it is stale).
+pub const FORMAT_VERSION: u32 = 18;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

@@ -904,6 +904,7 @@ use std::path::Path;
 use crate::graph::{Graph, SymbolId};
 use crate::imports::{FileImports, ImportRef, ReExport};
 use crate::resolve::ResolvedImport;
+use crate::rust_crates::CrateMap;
 
 /// Parse a `.rs` file's `use` declarations. A `pub use` is a re-export
 /// (the barrel pattern — `lib.rs` is all of these); a plain `use` is an
@@ -1075,7 +1076,7 @@ pub fn resolve_imports(
     file_imports: &HashMap<String, FileImports>,
     graph: &Graph,
 ) -> Vec<ResolvedImport> {
-    let src = crate_src_dir(file_imports);
+    let crates = CrateMap::load(root, file_imports);
     let mut sorted: Vec<_> = file_imports.iter().collect();
     sorted.sort_by(|a, b| a.0.cmp(b.0));
 
@@ -1088,7 +1089,7 @@ pub fn resolve_imports(
             .chain(fi.re_exports.iter().map(|r| (&r.specifier, &r.source_name)));
         let mut seen_targets: HashSet<SymbolId> = HashSet::new();
         for (specifier, name) in each {
-            let target = resolve_one(&src, from_file, specifier, name, file_imports, graph);
+            let target = resolve_one(&crates, from_file, specifier, name, file_imports, graph);
             if let Some(id) = target {
                 seen_targets.insert(id);
             }
@@ -1108,7 +1109,7 @@ pub fn resolve_imports(
         // `get_callees`, which does no dedup of its own.
         for qr in &fi.qualified_refs {
             let Some(id) = resolve_one(
-                &src,
+                &crates,
                 from_file,
                 &qr.specifier,
                 &qr.imported_name,
@@ -1129,7 +1130,6 @@ pub fn resolve_imports(
         }
         out.extend(same_file_trait_impl_edges(from_file, graph));
     }
-    let _ = root; // resolution is off the walked file set, not the FS
     out
 }
 
@@ -1176,43 +1176,26 @@ fn same_file_trait_impl_edges(file: &str, graph: &Graph) -> Vec<ResolvedImport> 
 }
 
 fn resolve_one(
-    src: &str,
+    crates: &CrateMap,
     from_file: &str,
     specifier: &str,
     name: &str,
     file_imports: &HashMap<String, FileImports>,
     graph: &Graph,
 ) -> Option<SymbolId> {
-    let target_file = module_path_to_file(src, from_file, specifier, file_imports)?;
+    let target_file = module_path_to_file(crates, from_file, specifier, file_imports)?;
     if let Some(id) = graph.find(&format!("{target_file}::{name}")) {
         return Some(id);
     }
-    // One hop through a `pub use` in the target module.
+    // One hop through a `pub use` in the target module. The hop is resolved
+    // from the *target's* crate, which may differ from `from_file`'s.
     let rx = file_imports
         .get(&target_file)?
         .re_exports
         .iter()
         .find(|r| r.exported_as == name)?;
-    let hop = module_path_to_file(src, &target_file, &rx.specifier, file_imports)?;
+    let hop = module_path_to_file(crates, &target_file, &rx.specifier, file_imports)?;
     graph.find(&format!("{hop}::{}", rx.source_name))
-}
-
-/// The directory the crate root lives in — `"src"` for the usual layout,
-/// `""` for a crate rooted at the repo root. Taken from the walked file
-/// set so it needs no filesystem access.
-fn crate_src_dir(file_imports: &HashMap<String, FileImports>) -> String {
-    for f in file_imports.keys() {
-        if let Some(dir) = f
-            .strip_suffix("/lib.rs")
-            .or_else(|| f.strip_suffix("/main.rs"))
-        {
-            return dir.to_string();
-        }
-        if f == "lib.rs" || f == "main.rs" {
-            return String::new();
-        }
-    }
-    "src".to_string()
 }
 
 /// The module a file *is* — `src/graph.rs` is module `crate::graph`, and a
@@ -1232,20 +1215,23 @@ fn module_dir_of(file: &str) -> String {
     file.strip_suffix(".rs").unwrap_or(file).to_string()
 }
 
-/// A `crate::` / `self::` / `super::` module path -> the repo-relative
-/// file that module's items live in, or `None` for an external crate or an
-/// unresolvable path.
+/// A `crate::` / `self::` / `super::` module path, or one starting with the
+/// name of a library crate in this repo, -> the repo-relative file that
+/// module's items live in, or `None` for an external crate or an
+/// unresolvable path. `crate::` means the root of `from_file`'s own crate
+/// (`CrateMap::crate_root`), not one root for the whole repo.
 fn module_path_to_file(
-    src: &str,
+    crates: &CrateMap,
     from_file: &str,
     specifier: &str,
     file_imports: &HashMap<String, FileImports>,
 ) -> Option<String> {
     let segs: Vec<&str> = specifier.split("::").collect();
     let exists = |p: &str| file_imports.contains_key(p);
+    let src = crates.crate_root(from_file, file_imports);
 
     let (base, rest): (String, &[&str]) = match *segs.first()? {
-        "crate" => (src.to_string(), &segs[1..]),
+        "crate" => (src.clone(), &segs[1..]),
         "self" => (module_dir_of(from_file), &segs[1..]),
         "super" => {
             let ups = segs.iter().take_while(|s| **s == "super").count();
@@ -1257,10 +1243,16 @@ fn module_path_to_file(
             }
             (dir, &segs[ups..])
         }
+        // A library crate that lives in this repo, named by its crate name:
+        // a workspace sibling, or the package's own library as seen from a
+        // binary, test or example. Resolves like `crate::` inside that crate.
+        first if crates.lib_root(first).is_some() => {
+            (crates.lib_root(first)?.to_string(), &segs[1..])
+        }
         // An external crate (`anyhow`, `std`, `tree_sitter`) — or, in 2018
         // style, a bare top-level module. Try the latter under `src`; if
         // no such file was walked, it's external -> unresolved.
-        _ => (src.to_string(), &segs[..]),
+        _ => (src, &segs[..]),
     };
 
     let joined = if rest.is_empty() {
@@ -2042,6 +2034,185 @@ pub use crate::stack::RustStack;\n";
         assert!(edges.iter().any(|e| e.from_file == "src/other.rs"
             && e.imported_name == "Leaf"
             && e.target.is_some()));
+    }
+
+    /// Like `resolved`, but writes the fixture to a real temp dir first so
+    /// `Cargo.toml` files (which resolution reads from disk) take part.
+    /// Returns, per `.rs` import, `(from_file, imported_name, target id)`,
+    /// sorted so two runs compare directly.
+    fn resolved_with_cargo(tag: &str, files: &[(&str, &str)]) -> Vec<(String, String, String)> {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-rust-crates-{}-{tag}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (p, content) in files {
+            let path = dir.join(p);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, content).unwrap();
+        }
+        let rs: Vec<&(&str, &str)> = files.iter().filter(|(p, _)| p.ends_with(".rs")).collect();
+        let graph = Graph::build(
+            rs.iter()
+                .map(|(p, src)| crate::graph::FileExtraction {
+                    rel_path: (*p).to_string(),
+                    source_hash: crate::hash::hash_text(src),
+                    symbols: extract_file(src, p),
+                })
+                .collect(),
+        );
+        let file_imports: HashMap<String, FileImports> = rs
+            .iter()
+            .map(|(p, src)| ((*p).to_string(), extract_imports(src, p)))
+            .collect();
+        let mut out: Vec<(String, String, String)> = resolve_imports(&dir, &file_imports, &graph)
+            .into_iter()
+            .map(|e| {
+                let target = e.target.map_or("<unresolved>".to_string(), |t| {
+                    graph.string_id(t).to_string()
+                });
+                (e.from_file, e.imported_name, target)
+            })
+            .collect();
+        out.sort();
+        std::fs::remove_dir_all(&dir).ok();
+        out
+    }
+
+    fn target_of(edges: &[(String, String, String)], from: &str, name: &str) -> String {
+        edges
+            .iter()
+            .find(|(f, n, _)| f == from && n == name)
+            .map(|(_, _, t)| t.clone())
+            .unwrap_or_else(|| format!("<no such import {from}:{name}>"))
+    }
+
+    const WORKSPACE: &[(&str, &str)] = &[
+        (
+            "Cargo.toml",
+            "[workspace]\nmembers = [\"crates/a\", \"crates/b\"]\n",
+        ),
+        ("crates/a/Cargo.toml", "[package]\nname = \"a\"\n"),
+        ("crates/a/src/lib.rs", "pub mod inner;\npub struct Error;\n"),
+        (
+            "crates/a/src/inner.rs",
+            "use crate::Error;\npub fn f(_e: Error) {}\n",
+        ),
+        ("crates/b/Cargo.toml", "[package]\nname = \"b\"\n"),
+        (
+            "crates/b/src/lib.rs",
+            "pub mod other;\npub struct Error;\nuse a::Error as AError;\n",
+        ),
+        (
+            "crates/b/src/other.rs",
+            "use crate::Error;\npub fn g(_e: Error) {}\n",
+        ),
+    ];
+
+    #[test]
+    fn workspace_crate_paths_resolve_inside_their_own_crate() {
+        // Open question 20: two crates both define `Error` in their own
+        // lib.rs. `crate::Error` must mean *this* crate's, whichever
+        // crate's lib.rs the walk happened to meet first.
+        let edges = resolved_with_cargo("ws-own", WORKSPACE);
+        assert_eq!(
+            target_of(&edges, "crates/a/src/inner.rs", "Error"),
+            "crates/a/src/lib.rs::Error"
+        );
+        assert_eq!(
+            target_of(&edges, "crates/b/src/other.rs", "Error"),
+            "crates/b/src/lib.rs::Error"
+        );
+    }
+
+    #[test]
+    fn a_workspace_sibling_named_in_a_use_resolves_to_its_lib() {
+        let edges = resolved_with_cargo("ws-sibling", WORKSPACE);
+        assert_eq!(
+            target_of(&edges, "crates/b/src/lib.rs", "Error"),
+            "crates/a/src/lib.rs::Error"
+        );
+    }
+
+    #[test]
+    fn workspace_resolution_is_deterministic_across_runs() {
+        // The old root choice came from `HashMap` iteration order, which is
+        // random per map: identical input gave 3..9 edges on ripgrep.
+        let first = resolved_with_cargo("ws-det", WORKSPACE);
+        for _ in 0..25 {
+            assert_eq!(resolved_with_cargo("ws-det", WORKSPACE), first);
+        }
+    }
+
+    #[test]
+    fn a_binary_and_a_test_link_to_their_own_packages_library_by_name() {
+        // A package name with a hyphen is the underscored crate name.
+        let edges = resolved_with_cargo(
+            "own-lib",
+            &[
+                ("Cargo.toml", "[package]\nname = \"my-pkg\"\n"),
+                ("src/lib.rs", "pub mod thing;\n"),
+                ("src/thing.rs", "pub struct X;\n"),
+                ("src/main.rs", "use my_pkg::thing::X;\nfn main() {}\n"),
+                ("tests/it.rs", "use my_pkg::thing::X;\n#[test]\nfn t() {}\n"),
+            ],
+        );
+        assert_eq!(target_of(&edges, "src/main.rs", "X"), "src/thing.rs::X");
+        assert_eq!(target_of(&edges, "tests/it.rs", "X"), "src/thing.rs::X");
+    }
+
+    #[test]
+    fn a_lib_name_override_is_the_crate_name() {
+        let edges = resolved_with_cargo(
+            "lib-name",
+            &[
+                (
+                    "Cargo.toml",
+                    "[package]\nname = \"pkg\"\n\n[lib]\nname = \"renamed\"\n",
+                ),
+                ("src/lib.rs", "pub struct S;\n"),
+                ("src/main.rs", "use renamed::S;\nfn main() {}\n"),
+            ],
+        );
+        assert_eq!(target_of(&edges, "src/main.rs", "S"), "src/lib.rs::S");
+    }
+
+    #[test]
+    fn a_binary_with_its_own_modules_resolves_crate_paths_inside_the_binary() {
+        // `bat`'s shape: src/lib.rs plus src/bin/tool/main.rs with sibling
+        // modules. `crate::cfg` from src/bin/tool/app.rs is the *binary's*
+        // module, not src/cfg.rs.
+        let edges = resolved_with_cargo(
+            "bin-mods",
+            &[
+                ("Cargo.toml", "[package]\nname = \"tool\"\n"),
+                ("src/lib.rs", "pub struct L;\n"),
+                ("src/bin/tool/main.rs", "mod app;\nmod cfg;\nfn main() {}\n"),
+                (
+                    "src/bin/tool/app.rs",
+                    "use crate::cfg::Cfg;\npub fn run(_c: Cfg) {}\n",
+                ),
+                ("src/bin/tool/cfg.rs", "pub struct Cfg;\n"),
+            ],
+        );
+        assert_eq!(
+            target_of(&edges, "src/bin/tool/app.rs", "Cfg"),
+            "src/bin/tool/cfg.rs::Cfg"
+        );
+    }
+
+    #[test]
+    fn an_unknown_crate_name_stays_external() {
+        let edges = resolved_with_cargo(
+            "external",
+            &[
+                ("Cargo.toml", "[package]\nname = \"pkg\"\n"),
+                ("src/lib.rs", "pub struct S;\n"),
+                ("src/main.rs", "use serde::Deserialize;\nfn main() {}\n"),
+            ],
+        );
+        assert_eq!(
+            target_of(&edges, "src/main.rs", "Deserialize"),
+            "<unresolved>"
+        );
     }
 
     #[test]
