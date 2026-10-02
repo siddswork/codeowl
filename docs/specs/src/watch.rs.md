@@ -1,34 +1,34 @@
 ---
 kind: file
 source_paths: [src/watch.rs]
-file: { source_hash: 5a233068bb9858d0af025543cd933f7a6552e39e98d4b90ae1326c5bb2f369b3, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: 094482d1a876dce40fbb4c6a7a60e5ef963f7525391bf09babb611fe56bc1dfa }
+file: { source_hash: 5a233068bb9858d0af025543cd933f7a6552e39e98d4b90ae1326c5bb2f369b3, deps_hash: aec1102fdf89ae067eb2fba4cc0acad666f9a5a607fcab4c157bffe92cd5df8c, spec_hash: a7ae84be14cfb921e9ac29247c20b5e01ba39281e4c0a3cafad0a8da3c327268 }
 symbols:
-  src/watch.rs::RepoWatcher: { source_hash: 4d5c0ef544e0b633a82d64c394c500df4fd0f9397e8a1bd09afcb6070c84d039, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8125586fc161a88292dc53d8556ed1dfb57c4eb9ecc0b787265362ebbb13f435 }
-  src/watch.rs::spawn: { source_hash: 53d8e42152c83bbfe3e230d000b76a3dce79065de996cb02eaf4701a8b0ef227, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: 54a13ba501e76251fa5f9b020f209a34ce2340f6668484e4b67b6db366406a74 }
-  src/watch.rs::watch_loop: { source_hash: 4675d570d6ecc15f05360defd6042e9abd01623b76a48dd77d3d3203c8737d45, deps_hash: 1df7f35b02744f999ddbf18fea87295874dd064996241e6d9206828184ddc205, spec_hash: 46f78b5351c8bf39363da85649a41503db1191b633c2439c3aa69c59f602400c }
+  src/watch.rs::RepoWatcher: { source_hash: a687f77bc819f3760626650217f2d7c9c795170040e5025d942fe9944ac9c958, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 746dc158da21a87299078a7c1a531a8a5157294aac3a0964c4081037cb01fe98 }
+  src/watch.rs::spawn: { source_hash: 53d8e42152c83bbfe3e230d000b76a3dce79065de996cb02eaf4701a8b0ef227, deps_hash: aec1102fdf89ae067eb2fba4cc0acad666f9a5a607fcab4c157bffe92cd5df8c, spec_hash: cc326badc569dd861fd22a2afe7b73eb1b461ae03d67d2eece89a725f2f1c63b }
+  src/watch.rs::watch_loop: { source_hash: 4675d570d6ecc15f05360defd6042e9abd01623b76a48dd77d3d3203c8737d45, deps_hash: aec1102fdf89ae067eb2fba4cc0acad666f9a5a607fcab4c157bffe92cd5df8c, spec_hash: 6d60fa759bbffed5f9c610ccad0f739b0bd8d221898ffac59979d1a5cdabf73b }
   src/watch.rs::collect: { source_hash: 10e08326e50f6e590691b7444d3662ed876c843287a218626b1deccba260249a, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: be0985e33d578cb512fef6ac0f6cb693a3d0c8fa23eafef1e6f4f25ca12c98dc }
 ---
 # src/watch.rs
 ## Summary
-The in-session file watcher. While `codeowl serve` is running, this keeps the served graph in step with the working directory as the developer edits — so the MCP tools behave like a language server across a long session rather than something you re-run. `spawn` starts a background thread; that thread drains filesystem events, waits a short debounce (300 ms) so a burst of editor saves becomes a single rebuild, hands the changed paths to `RepoIndex::apply_changes`, and — only if something actually changed — swaps the freshly rebuilt graph into the atomic cell the server reads from, so request handlers never block on the watcher. A directory created mid-session is picked up and watched on the fly. `RepoWatcher` is the handle that keeps the thread and the OS watch alive; dropping it (when `serve` exits) stops watching.
+This is the in-session file watcher. While `codeowl serve` runs, it keeps the served graph in step with the working directory as the developer edits, so the tools behave like a language server across a long session, not something to re-run. `spawn` starts a background thread, and that thread collects file-system events and waits a short moment (300 milliseconds) after the last one, so a burst of saves from an editor becomes a single update. It hands the changed paths to `RepoIndex::apply_changes`, which re-reads only what changed, and, only if something really changed, swaps the freshly rebuilt graph into a shared atomic cell that the server reads. Request handlers therefore never wait for the watcher and never see a half-built graph, and each works from one consistent snapshot. Watches are placed on each folder in the ignore-aware tree one by one, not recursively on the repo root, because a recursive watch would also cover `node_modules` and exceed the operating system's limit on watches in a real project. A folder created mid-session is picked up and watched on the spot, and a failed update is reported to standard error without stopping later ones. `RepoWatcher` is a handle to the thread. Dropping it only detaches the thread, which runs until the process ends, so it should be read as a keep-alive and not a stop switch, even though a comment elsewhere describes it as stopping the watcher.
 
 ## `RepoWatcher`
 `pub struct RepoWatcher`
 ### Summary
-The handle to the background file-watcher thread. Held by `main.rs` for the life of a `serve` process so the thread isn't dropped.
+A handle to the background thread that watches the repo for edits while the server runs.
 ### Behavior
-Wraps only a `JoinHandle`, prefixed `_` because nothing joins it — the thread owns the OS watch and runs until the process exits. There is no clean-shutdown path in Phase 1: `serve` ends only when the client closes stdin. Dropping a `RepoWatcher` detaches the thread rather than stopping it.
+Holds the join handle of the watcher thread, which owns the operating system's file watch and runs for the life of the process. Dropping the handle does not stop the thread; it simply detaches it, because there is no clean-shutdown path at present: `serve` only ends when the client closes its input and the process exits, which ends the thread with it. The comment in `main.rs` says the watcher stops when the handle drops, which does not match this, so the handle should be read as a keep-alive marker and not as a stop switch. `main.rs` keeps it bound to a variable so it is not discarded immediately. The struct is created only by `spawn` and has no methods.
 ### Depends on
 - (none)
 
 ## `spawn`
 `pub fn spawn(root: PathBuf, graph: Arc<ArcSwap<Graph>>, index: RepoIndex) -> Result<RepoWatcher>`
 ### Summary
-Starts the background file-watcher. From here on, whenever a source file in the repo changes, CodeOwl re-indexes just that file and swaps the updated graph in — so the served data stays live across a long session without a restart.
+Starts watching the repo for file changes in the background and keeps the server's graph up to date as source files are edited, so the tools behave like a language server across a long session.
 ### Behavior
-Canonicalizes `root` first (resolving symlinks) so the directories it watches are named the same way the operating system will report events under them — without this, a symlinked root would make every event fail to match and get dropped.
+Makes the root path absolute and symlink-free first, so the folders it registers watches on are under the same path the operating system will report events for, and so it matches the form the index strips off event paths. If canonicalising fails it uses the root as given. It creates a channel and a recommended file watcher from the `notify` library whose callback just sends each event into the channel; a failed send only means the loop has already exited and is ignored. It registers a non-recursive watch on every folder returned by `RepoIndex::watchable_dirs`, which uses the repo's ignore rules, so a `node_modules` folder is never watched. Each one is registered separately, and a failure to watch any folder is returned with the folder named.
 
-Sets up a filesystem watcher (the `notify` crate) whose callback forwards each raw event down a channel. Registers a *non-recursive* watch on every directory in the repo, from `RepoIndex::watchable_dirs` (which honors `.gitignore`) — non-recursive on purpose, because a recursive watch on the root would also cover `node_modules` and blow past the OS's per-process watch limit on a real project. Then spawns a background thread running `watch_loop`, which drains events, collapses a burst of editor saves into one rebuild, calls `RepoIndex::apply_changes`, and publishes the fresh graph. The returned `RepoWatcher` keeps the thread and the OS watch alive; dropping it (when `serve` exits) stops watching.
+It then starts a thread named `codeowl-watch` that runs the watch loop, handing it the receiving end of the channel, the watcher itself so the watch stays alive, the shared graph cell, and the index, which the thread takes ownership of and updates in place on every change. It returns a handle holding that thread. Errors creating the watcher, registering a watch, or starting the thread are returned with context. The watch loop is what debounces bursts of saves and swaps in the rebuilt graph.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/index.rs::RepoIndex` — crate::index
@@ -42,9 +42,13 @@ Sets up a filesystem watcher (the `notify` crate) whose callback forwards each r
     mut index: RepoIndex,
 )`
 ### Summary
-The watcher thread's body: batch filesystem events through a debounce window, apply them to the index, and atomically republish the graph.
+The background loop that waits for file changes, groups a quick burst of them into one update, re-reads only what changed, and publishes the refreshed graph so the server sees it immediately.
 ### Behavior
-Blocks on `rx.recv()` for the first event, then drains every further event within a `DEBOUNCE` window that *resets on each new event* — so one editor save-burst becomes one rebuild, not many. Events are accumulated into a `HashSet<PathBuf>` (dedup). The batch goes to `index.apply_changes`: `Some((rebuilt, caught))` → `graph.store` the new graph (the atomic swap every MCP handler reads through) and log the count; `None` → nothing spec-relevant changed, no swap; `Err` → logged, loop continues. A `Disconnected` channel ends the thread. `watcher` is moved into this function and explicitly `drop`ped at the end to make the ownership requirement visible — it must outlive the loop or event delivery stops.
+Blocks until the first event arrives, then adds the paths from it to a set (`collect`, which also starts watching any directory newly created mid-session). It then keeps draining events that arrive within the debounce window, restarting the wait for each new one, so one editor save burst, which can write several times, produces a single rebuild. If the wait times out it stops collecting, and if the sending side has disconnected it exits the thread.
+
+With the batch of paths it calls `index.apply_changes`. If at least one change really affected an input, it receives a rebuilt graph and the list of what changed, swaps the new graph into the shared cell so every request handler sees it from then on, and prints how many files were re-indexed to standard error. If nothing relevant changed, such as a touched non-source file or identical text, nothing happens. An error is printed to standard error and the loop continues, so one failed update does not stop later ones. Request handlers never block on this thread, because they read the graph snapshot atomically.
+
+The watcher is passed in and kept alive for the whole loop, since event delivery would stop if it were dropped. The end of the function, which drops it explicitly, is not reachable in practice, because the callback holds the only sender and lives inside the watcher, but it makes that ownership visible. Nothing is returned.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/index.rs::RepoIndex` — crate::index

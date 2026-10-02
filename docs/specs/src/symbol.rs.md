@@ -1,16 +1,16 @@
 ---
 kind: file
 source_paths: [src/symbol.rs]
-file: { source_hash: de25bd0e2225ae1bd8aa539ad35d10320f2cfff71c214ed2acd067ea53c13356, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 14d0ad65af303877f03964f52020458875c7a8edb1bc331e1431e02b810d1585 }
+file: { source_hash: 746dff979be7a41f0b0612a5bb91f0d92453056fc2d26f6135a015f6f483dedf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 23ac758132e751b7ca3328c51a0697f8ffd9a3c307b15b6d4f1b5bc05bcf653e }
 symbols:
   src/symbol.rs::SymbolId: { source_hash: cab1efc8ff00e70ad0c6359952a0420cae2340e091c301f98b90ac8e001b5c9f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9b39ef07757da2546307644d89bbbf944473e6d63e4855a63faeb48e16412626 }
   src/symbol.rs::SymbolKind: { source_hash: 705c2902ac4016a078c0207dc562b429c21c755363ceab9dfc3608825ebc7fab, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3aaa3a5c23a61c4d6c074cf71da5ce649410d1c66e26997bbfd1dc21f4248cdb }
-  src/symbol.rs::Symbol: { source_hash: d82ceb579f7fd83d883bf9d1caa0000a477d38a090cd9dba730c676936321cf4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e685a1c6502fd8954805fda0869a5ae1df62e5d2d450c8ce9641fa0929efa977 }
-  src/symbol.rs::ExtractedSymbol: { source_hash: 96029ac8433be50559b951023304717ee398ff259d7d3efddc3366b8ef694c49, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 20fb63bdbc56052f18a2eddd1379c3edbfe10cd09dcd3b7c9916aee2342ed255 }
+  src/symbol.rs::Symbol: { source_hash: 88f53fca6a62bd30841a69a0271c293ff3bdbf1d1f6d077e3114d48f33a648e0, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b6049042cacbe4f7b2cf040f5a3b48b7f6f36fbd18e6de3103684971beafe214 }
+  src/symbol.rs::ExtractedSymbol: { source_hash: 9fb194a436a02228480ad52aa3687bdc04d4f195e80be377fd6e023ab9e10249, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ca8004af72a0baea77572b6f4a1f4270abf8613dd55ea2afc5040ca484dc4d3b }
 ---
 # src/symbol.rs
 ## Summary
-Defines the graph's node vocabulary. `SymbolId` is the arena-index newtype every containment link uses; `SymbolKind` is the stack-neutral `Container | Callable | Value | Schema` set the granularity rules key on; `Symbol` is one declaration as it lives in a built `Graph`; `ExtractedSymbol` is the same shape a pack's extractor produces per-file before a `Graph` exists, with string containment links `Graph::build` later resolves to `SymbolId`s. Together these are the boundary between "parsed a file" and "built the arena" — every type here is owned data with no tree-sitter lifetimes escaping.
+Defines the vocabulary the whole graph is made of. `SymbolId` is a small wrapper around a number: a node's position in the graph's arena (the one flat list holding every node), used for every parent and child link. It is only meaningful inside the graph that produced it, which is why anything that leaves the process uses the text id instead. `SymbolKind` is the four stack-neutral categories (`Container`, `Callable`, `Value`, `Schema`) that the rules for which things get a spec are written against, so those rules work the same for every language. `Symbol` is one declaration as it lives in a built graph, and `ExtractedSymbol` is the same declaration straight out of a single-file parse, with its links still as plain text until the graph is built. Everything here is owned data with no parser lifetimes attached, so it can be cached and serialised freely.
 
 ## `SymbolId`
 `pub struct SymbolId`
@@ -33,31 +33,21 @@ A `Copy` enum, serialized `snake_case` (`"container"`, `"callable"`, …) into `
 ## `Symbol`
 `pub struct Symbol`
 ### Summary
-The record for one declaration (a function, class, method, struct, etc.) once it's been placed into the graph (CodeOwl's in-memory structure holding every extracted symbol — see the `SymbolId` spec). It carries everything CodeOwl knows about that declaration: where it lives, its signature, its documentation, and the content hashes that drive staleness detection.
+One declaration (a function, type, constant or table) as it lives in the built graph, with everything CodeOwl knows about it: where it is, its signature, its fingerprints, and how it connects to its parent and children.
 ### Behavior
-`id` is a deterministic string like `"src/graph.rs::Graph"` (or `"src/graph.rs::Graph.build"` for a method) — the stable handle used everywhere outside the graph's arena (an MCP tool response, a spec file's frontmatter, a human re-running extraction), since a `SymbolId` is only valid for the specific `Graph` that produced it.
+Identity and place: `id` is a stable text handle, `<file>::<name>`, or `<file>::<class>.<method>` for a method, and is what MCP replies and spec files use, because a `SymbolId` (the arena index) only means something inside the graph that produced it. `file` and `lines` (1-based, inclusive) say where it sits. `kind` is the stack-neutral category and `raw` the language's own word for it (`fn`, `struct`, `class`, `table`, ...), kept for display and for pack-internal logic; the generic core never branches on `raw`. `signature` and `docstring` come from extraction.
 
-`kind` is CodeOwl's own generic classification (roughly: callable, container, or value); `raw` is the pack's own grammar-level label for the same declaration (`"function"` / `"class"` / `"struct"`, `"table"` for a SQL table, and so on) — kept only for display and pack-internal logic, never branched on by the generic core.
+Fingerprints: `source_hash` covers the whole span and, for a container, folds in its members in order, so any edit inside changes it. `interface_hash` covers only the public shape, so edits to a body leave it alone. It is `None` for anything not exported, since nothing outside the file can import it. Note that for some TypeScript type declarations the shape hashed is the whole declaration's tokens, not just the signature line.
 
-`file` and `lines` locate the declaration in its source file (`lines` is a 1-indexed `[start, end]` pair, inclusive). `signature` and `docstring` are pulled straight from the source text.
-
-`is_exported` says whether another file could `import` this declaration at all — always `false` for a method, since a method is only reached through an already-imported class, never imported on its own.
-
-`source_hash` is a content hash over the declaration's entire span (signature and body); it changes on any edit inside it, and rolls up Merkle-style for a container (a class's hash folds in each of its methods' hashes, in order — see `GLOSSARY.md`'s "Merkle fold"). `interface_hash` is a narrower hash over just the exported *shape* — the signature, never the docstring or body — so an implementation-only edit leaves it unchanged; it's `None` when `is_exported` is `false`, since nothing outside the file could depend on its shape yet. Together these two hashes let CodeOwl distinguish "this file changed" from "this file's public contract changed" (see `ARCHITECTURE.md`'s "Caching and invalidation").
-
-`markers` holds any stack-specific decorations verbatim, exactly as the pack's extractor recorded them — a Rust `#[derive(...)]`, a Java `@Entity`, a Python `@app.route`. The generic core never interprets these itself; a `StackPack` reads its own back out later.
-
-`parent` and `children` place this symbol in the containment tree using `SymbolId` (not the string `id`) — every symbol has a parent now that files are graph nodes too. A top-level declaration's parent is its file; only a file with no directory node above it has no parent at all.
+Other fields: `is_exported` says whether another file can import it (always false for methods, which are reached through their class). `markers` holds language decorations verbatim (`#[derive(...)]`, `@Path`, `@app.route`) for the pack to read back. `extra_spans` holds extra line ranges, such as folded `impl` blocks. `parent` and `children` are arena ids for containment; a top-level declaration's parent is its file. The older fields `raw`, `markers` and `extra_spans` default when absent so old caches still load, and a format-version bump forces a rebuild anyway.
 ### Depends on
 - (none)
 
 ## `ExtractedSymbol`
 `pub struct ExtractedSymbol`
 ### Summary
-The same declaration record as `Symbol`, but in the form a pack's extractor produces straight off the syntax tree (the structure `tree-sitter` builds from the source text), before a `Graph` exists to place it in the arena (the one flat list that owns every graph node).
+The form a declaration takes straight after a single file has been parsed, before the repo-wide graph exists. It carries the same facts as `Symbol` except that its links to other symbols are still plain text names.
 ### Behavior
-`ExtractedSymbol` carries the same fields as `Symbol` (id, kind, raw, file, lines, signature, docstring, is_exported, source_hash, interface_hash, markers), except containment is expressed with plain strings rather than `SymbolId`: `parent: Option<String>` and `children: Vec<String>` instead of `SymbolId`-typed fields. This is deliberate — extraction runs one file at a time with no cross-file knowledge (see `ARCHITECTURE.md`'s "Extractors"), so there's no arena yet to hand out numeric positions from.
-
-`parent: None` here means "top-level in this file, not contained by another *symbol*" — it does **not** mean "has no container at all." `Graph::build` is the step that resolves every string id into a real `SymbolId` and gives top-level symbols their containing file as a parent, once every file's symbols (and the files themselves) are known together and an arena can exist.
+Extraction looks at one file at a time and cannot know about other files, so it has no arena (the graph's flat list of nodes) to hand out positions from. `parent` and `children` are therefore string ids. A `parent` of `None` means "top-level in this file, not inside another symbol", not "has no container at all". `Graph::build` later turns every string id into a real `SymbolId` and gives top-level symbols their file as parent, once all the files are known together. The other fields (`id`, `kind`, `raw`, `file`, `lines`, `signature`, `docstring`, `is_exported`, `source_hash`, `interface_hash`, `markers`) have the same meaning as on `Symbol` and are carried across unchanged. `extra_spans` holds additional line ranges that belong to the symbol but lie outside its own range and its children's. The case today is each `impl` block folded into a Rust type, so the `impl Trait for Type` header, the one place the trait is named, is scanned for dependencies and shown as source. It is empty for every other symbol. `raw`, `markers` and `extra_spans` default when absent so older cached data still loads. The struct is plain data, serialised to the cache.
 ### Depends on
 - (none)

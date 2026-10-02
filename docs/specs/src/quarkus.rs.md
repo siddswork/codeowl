@@ -1,20 +1,20 @@
 ---
 kind: file
 source_paths: [src/quarkus.rs]
-file: { source_hash: 6537e38e374bcd339e400e129f91ad267ecb1ed898cd1216a5af2b0cee45249f, deps_hash: 25a6a2648007d1931541b43b8f158fb7b23be9b88fa7692d1f554f64cf6233c4, spec_hash: 13116e8a485471e4c464dd94be989b30a6cc6cc4e36c3fb84eb156a9dda2c88f }
+file: { source_hash: 6537e38e374bcd339e400e129f91ad267ecb1ed898cd1216a5af2b0cee45249f, deps_hash: c4215c8e937e41b84e2437b2769aa5be82fefe70f7758fdd57c0dec540e638af, spec_hash: acd695696d625f89bd7e339092b6ca15bbeaa0c95238f7188f8c3000f4cbe8e6 }
 symbols:
   src/quarkus.rs::QuarkusFeatureModel: { source_hash: 361d7a5471c4700aeff3df58b0ff884c5987ac7aef485d946be582d0dc85ec1d, deps_hash: ea1a40529c9c27cee6cc587fb897a66fceba62dc48d39f3b7d6a706216ff8483, spec_hash: b5952c54b8e27e04d207ffbfa1beb7f1942ae0c8f2bd6e6c89fe93484c764f66 }
-  src/quarkus.rs::is_cdi_managed: { source_hash: 1a4fa3a5622317b5c477975617a04e8974f61c38b5f2f348dfbff0bda8fcae3d, deps_hash: 3f020ad9a958ab8d579a2087acfde4debe848a98ea126621dd23f3e3f3927e1e, spec_hash: ec3b809d326a734fad1c8d27fa84413fa315019308685fd2d9f9825282affba1 }
+  src/quarkus.rs::is_cdi_managed: { source_hash: 1a4fa3a5622317b5c477975617a04e8974f61c38b5f2f348dfbff0bda8fcae3d, deps_hash: 34a95995527dc5f673d09639b70c27217984732249263b23f878b003a1bf1598, spec_hash: 8afbcfef54c48b1057f7d4d68bd6da11bc5f46c94a3e46c9f8c15f81c6c151fe }
   src/quarkus.rs::is_admitting_annotation: { source_hash: bf97a2404b7a67972ce68244dd30d0bbf7ffe0337d4f8a368a6b66e0614c397c, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: c525713d95b5259878252fb83be17ac3b06c1f5d334997a6c71cffc5f495f7d5 }
   src/quarkus.rs::parse_verb: { source_hash: 6db1a58f1f5ef49e0b9bf0964918cc5c675c0e1bec5bddffea5ce6e5c534e3dd, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: ecff650bcf861d4a501fa79978f26a9e36bc350d4bd3a747fd59bf7481b3b7fb }
   src/quarkus.rs::parse_path_annotation: { source_hash: 58fa3456ebc174a9fddb2c9e2c113197831d8ca2a7e76a992c8f5a4fb1243c19, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: db94fb9d3a67589029522b56977acb2a9e587e4079ef2f09e6bf42217428472a }
   src/quarkus.rs::first_string_literal: { source_hash: dfa93a877f1cd80f68bb118d289a0f51dc1ec9a8a712a101ec082c64b59a4018, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9b377db3ebecfb82a02cea24fe6d15455e7f79deed470b58bd5c2cda751a4bd8 }
-  src/quarkus.rs::class_path_for: { source_hash: fbe46ae59ec2f61b443f60934d3c36bea78374fc874d045534710f822afe103a, deps_hash: c335ae0e0e925cb69b66229f557b3d099ce0be0d0c9199d8cb977a3bc4aaca36, spec_hash: 1f7bdf9a16d1a6a57db6d74a72bbf1da719c98d0e11fef8166c24ecaad6bb574 }
-  src/quarkus.rs::generated_interface_for: { source_hash: fc83bff5b92c40c0d8c68e2f8ce8946895ece365799a11f6caba3c5a1acf4532, deps_hash: c335ae0e0e925cb69b66229f557b3d099ce0be0d0c9199d8cb977a3bc4aaca36, spec_hash: 16b061ab0ea8c93edef1516f565aa48f0abffd441bb5b471d0a23351a5fd8af3 }
-  src/quarkus.rs::resolve_interface_name: { source_hash: 39f2a585b1f4f51747ad0ddac9bbf6c78752d2202eae2b274be27d9f350cef3c, deps_hash: ae61a0097b99f613e573c542897c761faf275630d627b51c24490ff8ce086107, spec_hash: 0b8dad26554b5edd9c632aba01e02633aec7d7cb345a0fed38b02d6bf8d55e21 }
+  src/quarkus.rs::class_path_for: { source_hash: fbe46ae59ec2f61b443f60934d3c36bea78374fc874d045534710f822afe103a, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 6cf66cb42758cb3808f0e04b8a7ba97803cc177d803774f5f31b91f59a425ada }
+  src/quarkus.rs::generated_interface_for: { source_hash: fc83bff5b92c40c0d8c68e2f8ce8946895ece365799a11f6caba3c5a1acf4532, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 35544b5e6059f81d18895e3123192bc227ca820586fcfc1ec770cb559784ac3b }
+  src/quarkus.rs::resolve_interface_name: { source_hash: 39f2a585b1f4f51747ad0ddac9bbf6c78752d2202eae2b274be27d9f350cef3c, deps_hash: a748f7f4e848d95ce62b2bbc54156b30e91ec42a2969c2deae579404b6011c61, spec_hash: dcffa2134f2841963e42fe4871d9d32e345ed28341444f9ed425f0ec39353ef2 }
   src/quarkus.rs::implemented_interface_names: { source_hash: 85e061653e434a7ed75837dfa21a2d3cc1900b4b6e4b365e04973420efdb6d8c, deps_hash: 302730f1942310128eef45df367a0238da029262c0ba13043652c7d88cbe6b8f, spec_hash: 284b4344bb9776ef9cfed7c14fc37a906be923e9896c401a02d876c07677dc46 }
-  src/quarkus.rs::interface_method_by_name: { source_hash: 10d4275b3d60232997cc959eb01b2ffc0dbcd87e65e732210039ca8a278a8c70, deps_hash: c335ae0e0e925cb69b66229f557b3d099ce0be0d0c9199d8cb977a3bc4aaca36, spec_hash: dfc9b45350175f723efe81dd82fdb5d04ee87bd87c130f6400ee6ea72f0dc22b }
-  src/quarkus.rs::is_register_rest_client: { source_hash: 3dd92508b43e0dc3cc7dd78418f79267342791786df6596f474ee562797d0fa8, deps_hash: c566622f103110dec16a82d21f3e6e8cc3e8926d97cd4b38f6832b76ef7ab238, spec_hash: d9dfd743fecb52dc1bfd47029789b2b5e0948cac584fd813524c136ba4112d78 }
+  src/quarkus.rs::interface_method_by_name: { source_hash: 10d4275b3d60232997cc959eb01b2ffc0dbcd87e65e732210039ca8a278a8c70, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 20b9919f6883c19560012cf0304a6b6dc335c4de54bbb75f82223f7fe9e61962 }
+  src/quarkus.rs::is_register_rest_client: { source_hash: 3dd92508b43e0dc3cc7dd78418f79267342791786df6596f474ee562797d0fa8, deps_hash: b7a36441efb966394ebc7a6eb8706b4c98a33b05dca00dad338059e7f0d78aba, spec_hash: 3222300a1f3c424da07dad927dccf1fee71d1200d53d91f6d5cc234368b460ad }
   src/quarkus.rs::join_jaxrs_path: { source_hash: 5f11c3edd79cab8c01d6b534fff5f71afc73c8f58d8ca670949a390fc5855ff5, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ef263efca25b7da8911341d57b9baa2417558ab487199d042ceee4a8fa467c1c }
   src/quarkus.rs::ascii_words: { source_hash: f8e1deb9ee627daeedd32713218afc3d9f2b03fa2515520fe3e09d4e26bf7c46, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fd7dfa793d840022a05fff7a2485c3431690804d30d24efe8be069af9d256e78 }
   src/quarkus.rs::kind_slug: { source_hash: 0d923782a25bb11f921e1a5d8e1d690fd2dd4e3cc99157435184a57f2a4678d7, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8b66e22c793a79074710cbadd27f8e32590412724f27e382a063729b7d41e6c6 }
@@ -25,7 +25,7 @@ symbols:
   src/quarkus.rs::attr_value: { source_hash: c243b0b3cb4fd45952d3c33ebfa0f19d9abb9e9498eee04e6bd91ea87141d2c4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a64f35ce870ce54405084a67b67ef3fb9f1e697cd5ea2272f822f0e686cdc456 }
   src/quarkus.rs::split_top_level_commas: { source_hash: 8cbd1d082ee08f7f7f2ca1bd7608b351544d3b05d8d0c5725fb57fbad5451ca6, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 719738fb1c50ca9bd174da72438377d46a865df6649c4e1ee862b04d37707f45 }
   src/quarkus.rs::scheduled_detail: { source_hash: 85cd5fc0c435cf6ee68530eb73ffce053d0fb68f1115777a3b2af61dcdf1d2f8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6de36568c5ce1acba0d7291a426d3656598530fe575a74f194be80e661da71d7 }
-  src/quarkus.rs::is_grpc_service_class: { source_hash: a75b999ac9a29c77da55d057ac24906c4a87471759a7de6806c5fbf0f141f368, deps_hash: c566622f103110dec16a82d21f3e6e8cc3e8926d97cd4b38f6832b76ef7ab238, spec_hash: 031febc31ec659b0170f25e2b9dfd7924020e27ad282d2b22975d159c41f79a5 }
+  src/quarkus.rs::is_grpc_service_class: { source_hash: a75b999ac9a29c77da55d057ac24906c4a87471759a7de6806c5fbf0f141f368, deps_hash: b7a36441efb966394ebc7a6eb8706b4c98a33b05dca00dad338059e7f0d78aba, spec_hash: 201b0362321608e3d8d6af4ec3fbbb8fd2a1f29b1b4d751ecdd70893e0b2e271 }
   src/quarkus.rs::is_public_signature: { source_hash: d7c925fb41911b6145e317fde1d659894412a5dcc279666a4b3742363e022d8b, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fad5bd63565b2a2f6dbb9f550c638e3f43f0d7484c12c6b677a7335a472f6a6e }
   src/quarkus.rs::matching_close_paren: { source_hash: 1e44380b10b1136cca044afa162f50dc40b4f46961fa10694f2805a53cbbca90, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 62430fae09ac6615d1ac84ac77aa8c7f719c7aea47699dc50c632a51319c6d65 }
   src/quarkus.rs::grpc_slug: { source_hash: 0cd15311706dd640620500c506281c6cf6a3ae9c310891f4a5e73b8f0f355b57, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ecc609d307dce0b6adde9ad2761c108cbabdc44a4651e5e29ffe42038f3e5398 }
@@ -33,12 +33,12 @@ symbols:
   src/quarkus.rs::channel_arg: { source_hash: e0a06091ceef0372848d22634a2e54d017a34cac6009a559e323ee75cc2671dd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c2cc7ebf7d817a7bc2c95cb91a095b30bce52ae853cb28732ccdc0ef9171260e }
   src/quarkus.rs::incoming_channel: { source_hash: 1335917d7e3d3bdb2afd7bf795f74d67278ada7b87df589885f3b5005631590f, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: 100bc72738e56acfc75886d7b1063a2be1076a69bae1669b5a759e60a24bea95 }
   src/quarkus.rs::outgoing_channel: { source_hash: 6400f5033caa959a0e6276ea735b1501c8e3e47b732ecd57f59c997ba27c23b7, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: a68d068eabe0ab100069cba15fe34701c331cd0080015041f186203ffbc75c19 }
-  src/quarkus.rs::resolve_channel_name: { source_hash: 049c2e73dd43431332ffbb831dcff62bb4e86c6db32282e5af762f5d99fa86e1, deps_hash: 0a72659c44e434ffc5343541620cf4f54e58b5f2e3598031349f9220fe443890, spec_hash: a8d2233b085b0728ca0e9a49603d91a29e83d2d6b06398e9b567abb4d2556e14 }
+  src/quarkus.rs::resolve_channel_name: { source_hash: 049c2e73dd43431332ffbb831dcff62bb4e86c6db32282e5af762f5d99fa86e1, deps_hash: 1026699fa1108e005260d77a5f9109b5f21748ce8056f4b7ccf581455d7f79c7, spec_hash: 61e550cfc502ff2de48fdbfc2a7bbaaf5f6699db1ac7127a3d6c389b7e0005db }
   src/quarkus.rs::disambiguate_colliding_slugs: { source_hash: 6ca57c0e07fc6cb6f77d6250d901b84c7234d0a98293a540cf13bb5e95c15ab8, deps_hash: dd79b8c0fa0f64d9f5c2fd7ffee003186005ce19f3443d1b51fb6d0fd60f5c6d, spec_hash: b03d34d2aee1283cde79ee02f4671f362fa1c52e594c7638d7e1dec4af330991 }
 ---
 # src/quarkus.rs
 ## Summary
-This file teaches CodeOwl how to find "features" in a Quarkus (a Java framework for building HTTP services) codebase, so it's the Java counterpart to the FastAPI feature model used elsewhere in this project. It recognizes four different kinds of entry point — an HTTP route (JAX-RS `@Path` plus a verb annotation like `@GET`/`@POST`), a Kafka message handler (`@Incoming`/`@Outgoing`), a scheduled job (`@Scheduled`, including Spring's compatible annotation of the same name), and a gRPC method (any public method on an `@GrpcService`-annotated class) — checked in that priority order so a method is never counted as more than one kind at once. Most of the file is small, focused helper functions: parsing one annotation's arguments, building a stable and collision-safe slug for each entry-point kind, and a handful of Java-syntax utilities (matching balanced parentheses, splitting on top-level commas, reading a quoted string) that the annotation parsing relies on. It also decides which files belong alongside a feature's entry point in its supporting documentation: a class Quarkus's dependency injection actually manages (a scope-annotated bean or a database-backed repository) joins that set, while an outbound REST client interface describing a call to another service is deliberately excluded from being treated as this service's own entry point.
+This file teaches CodeOwl how to find features in a Quarkus project (a Java framework for building web services), the Java counterpart to the FastAPI support for Python. It recognises four kinds of entry point, checked in priority order so a method is never counted as more than one: an HTTP route (a JAX-RS `@Path` plus a verb annotation like `@GET` or `@POST`), a Kafka message handler (`@Incoming` or `@Outgoing`), a scheduled job (`@Scheduled`, including Spring's compatible annotation of the same name), and a gRPC method (any public method of a class marked `@GrpcService`). The route's path and its verb are two independent annotations that can appear in either order with others between them, so they are read separately from a method's annotations, with the class-level `@Path` read from the containing class. When a class carries no annotations of its own because they live on a generated interface it implements, as happens with APIs generated from a contract, the interface's annotations are used. A Kafka channel name that is written as a constant in the same class is looked up there, and falls back to the identifier as written, so an entry point is never dropped over an unresolved name. A scheduled job is identified by its method name, with the schedule detail only enriching its title, since two jobs can share an identical schedule. An interface marked `@RegisterRestClient` describes an outbound call to another service, not something this service serves, so it is deliberately not treated as an entry point. Tracing such calls across several hops would be call-level analysis, which this project has repeatedly declined to build. The file also decides which classes join a feature's core: those the framework manages (an `@ApplicationScoped` or `@Singleton` bean, or a Panache repository), judged by what a resolved reference points at and not by where files sit on disk, with database entities handled as data instead. The rest is small helpers for reading one annotation's arguments, building a stable, collision-safe name for each kind of entry point, and a few Java text routines such as matching balanced parentheses, splitting on top-level commas, and reading a quoted string.
 
 ## `QuarkusFeatureModel`
 `pub struct QuarkusFeatureModel`
@@ -68,9 +68,9 @@ An HTTP route's title is `VERB /full/path` (class `@Path` joined with method `@P
 ## `is_cdi_managed`
 `fn is_cdi_managed(sym: &crate::symbol::Symbol) -> bool`
 ### Summary
-Checks whether a given class declaration is one Quarkus's dependency-injection system (the framework machinery that wires components together without manual constructor calls) actually manages — a scope-annotated bean or a database-backed repository — so it can be pulled into a feature's supporting files alongside the code that uses it.
+Says whether a Java class is one the Quarkus framework creates and wires up itself, namely a bean marked `@ApplicationScoped` or `@Singleton`, or a Panache repository. A class like that belongs with the feature that uses it, because it is where that feature's real work happens.
 ### Behavior
-Returns `true` if either is true: one of the declaration's annotations is recognized by `is_admitting_annotation` as a CDI scope annotation such as `@ApplicationScoped`/`@Singleton` (the markers Quarkus uses to say "manage an instance of this for me"), or its signature text contains `"PanacheRepository"`, meaning it implements Quarkus's Panache repository interface (a database-backed repository class). A plain data entity (a class annotated `@Entity` with no service logic) is deliberately excluded — that's a different role, described elsewhere in this file. An injected framework class this repo doesn't define itself (like `Config` or `ObjectMapper`) never reaches this check at all, since it has no matching declaration in this repo's own graph to test in the first place.
+Returns true if any of the class's annotations passes `is_admitting_annotation`, or if its signature contains the text `PanacheRepository`, which covers a class declared as implementing a Panache repository. A database entity is deliberately excluded and is handled as data instead. A framework class that is injected, such as `Config` or `ObjectMapper`, never reaches this check, because it is an external class with no resolved link into this repo's graph in the first place. The repository check is a plain text search of the signature, so a class whose signature merely mentions the name in another way would also match. It cannot fail.
 ### Depends on
 - `src/symbol.rs::Symbol` — crate::symbol
 
@@ -113,9 +113,9 @@ Finds the first `"` character, then the next `"` after it, and returns everythin
 ## `class_path_for`
 `fn class_path_for(graph: &Graph, class_id: SymbolId) -> Option<String>`
 ### Summary
-Finds the URL path prefix a class's routes all share — its own `@Path` annotation if it has one, or, failing that, the path from a build-generated interface it implements.
+Finds the web address prefix (`@Path`) that applies to a Java class, so each of its endpoint methods can be given its full route. If the class has none of its own, it looks at the generated interface the class implements.
 ### Behavior
-Looks up the class's own annotations first for a `@Path`. If none is found, falls back to the generated interface the class implements (via `generated_interface_for`) and reads *that* interface's `@Path` instead. This covers the real shape where a hand-written class implementing a build-generated interface carries no annotations of its own at all — every one lives on the interface it implements. Returns `None` if neither the class nor its generated interface (if any) has a `@Path`.
+Looks at the class's own annotations and returns the first `@Path` value that parses. If the class has none, it finds the generated interface the class implements, using `generated_interface_for`, and returns that interface's `@Path` instead. The second case is the real shape in projects whose API is generated from a contract: a class such as `HeroResource implements HeroesResource` carries no annotations of its own at all, class or method level, and every one lives on the generated `HeroesResource`. The class's parent link is already an arena id, so the class itself is a direct lookup. It returns `None` if neither the class nor an interface it implements has a `@Path`, or if the id is not a symbol. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -123,9 +123,11 @@ Looks up the class's own annotations first for a `@Path`. If none is found, fall
 ## `generated_interface_for`
 `fn generated_interface_for(graph: &Graph, class_id: SymbolId) -> Option<SymbolId>`
 ### Summary
-Finds the build-generated interface a hand-written class implements, if it implements one — the source of the JAX-RS annotations that class inherits rather than declaring itself.
+Finds the machine-generated interface that a Java class implements, if any. Projects that generate their API from a contract put all the route annotations on that generated interface, so the class's endpoints can only be found by looking there.
 ### Behavior
-Reads every interface name in the class's own `implements` clause, in declaration order, and returns the first one that resolves (through the same import-resolution machinery that already builds the reference graph) to a file CodeOwl has tagged as build-generated. Only one hop is followed — it doesn't walk further up an interface's own ancestors. Returns `None` if the class implements only hand-written interfaces, or none at all.
+Reads the names in the class's `implements` clause, in declaration order, using `implemented_interface_names` on its signature. For each, `resolve_interface_name` tries to resolve it through the import links the graph already has, so no new resolution mechanism is involved. The first name that resolves to an interface in a file whose role is generated code is returned. A class implementing several interfaces, with the generated one not listed first, still works, since every name is tried in order. The real case is a resource class and its generated interface in different packages, which is a genuine resolved import and not the same-package guess.
+
+Only one hop is followed: it does not walk the interface's own parents. It returns `None` if the class implements only hand-written interfaces, implements none, or is not a symbol. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -133,9 +135,13 @@ Reads every interface name in the class's own `implements` clause, in declaratio
 ## `resolve_interface_name`
 `fn resolve_interface_name(graph: &Graph, from_file: &str, name: &str) -> Option<SymbolId>`
 ### Summary
-Resolves one name from a class's `implements` clause to the actual interface declaration it names, so its `@Path`/JAX-RS annotations can be read — but only if that interface lives in a build-generated file.
+Takes an interface name written in a class's `implements` clause and finds the matching declaration in the repo, but only if it lives in a machine-generated file. Anything else gives nothing.
 ### Behavior
-Handles two shapes. If the name is dotted (a fully-qualified reference written out inline, because a plain `import` would collide with the class's own simple name — the real shape when a hand-written class shares its simple name with the interface it implements), it's resolved directly by matching the file whose path ends with that dotted path, then looking up the type inside it. If the name is a bare, unqualified identifier — the ordinary case — it's resolved through the already-built import graph instead, by finding the matching `import` from the class's own file. Either way, the result is discarded (returns `None`) unless the resolved interface's own file is tagged build-generated — this function only ever answers "does this implement a generated interface," never a hand-written one.
+There are two shapes.
+- A dotted name is a fully-qualified reference written inline. This is a real case: a hand-written class shares its simple name with the interface it implements (`NarrationResource implements ...narration.api.resources.NarrationResource`), which forces the interface to be spelled out in full right there, since an import of the same simple name would collide with the enclosing class. No import link exists to look up. So it turns the name into a path ending, replacing dots with slashes and adding `.java`, finds the first file whose path ends with it, and looks up the symbol with the simple name in that file. This follows the same path-suffix rule as the Java import code, kept as a separate copy here on purpose, since each language pack owns its own parsing.
+- A bare name is the ordinary case, and is resolved through the import links the graph already has: the target of the importing file's import of that name.
+
+In either case it then checks that the target's file has the generated-code role, and returns the target only if so. A name that resolves to a hand-written file, or does not resolve at all, gives `None`. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/lang.rs::FileRole` — crate::lang
@@ -157,9 +163,11 @@ Strips any generic type arguments first (e.g. `PanacheRepository<Fruit>` becomes
     method_name: &str,
 ) -> Option<SymbolId>`
 ### Summary
-Finds the method on a given interface that shares a given name, so a hand-written override's missing annotations can fall back to it.
+Finds the method on a generated interface that has the same name as a method on the class implementing it, so the class's endpoint can read its route annotations from the interface, where they actually live.
 ### Behavior
-Returns `None` immediately if no interface was given (`interface_id` is `None`) or that interface declares no method of that name. Otherwise looks the method up by joining the interface's own id with the method name. Doesn't disambiguate between overloaded methods of the same name on the interface — two such methods would collide on one id — but build-generated interfaces don't produce overloaded methods in any repo this has been checked against, so that's a known, accepted limitation rather than something handled here.
+Takes the interface's id, already resolved by the caller, not the class id, so a caller that remembered that lookup per class does not repeat it for each method. It returns `None` if the interface id is `None` or is not a symbol. Otherwise it looks in the graph for a symbol with the id `<interface id>::<method name>` and returns it if present, or `None` if the interface declares no method with that name.
+
+It is not told apart by parameter list. Two overloaded methods of the same name on the interface share one id, which is an existing limit of the Java extractor's id scheme, and this is the first place that resolves across files purely by that name. It was logged and not fixed, because the generated interfaces from API contracts have not produced overloaded methods in any project this tool has been run on. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -167,9 +175,9 @@ Returns `None` immediately if no interface was given (`interface_id` is `None`) 
 ## `is_register_rest_client`
 `fn is_register_rest_client(graph: &Graph, class_id: SymbolId) -> bool`
 ### Summary
-Checks whether a class is annotated `@RegisterRestClient` — the marker for an outbound call this service makes to *another* service's endpoint, not a route this service itself serves.
+Says whether a Java class is an outbound web client, an interface describing a call this service makes to another service, as opposed to a real server resource. The two look the same in code, with the same `@Path` and verb annotations, so this is how they are told apart.
 ### Behavior
-Returns `false` if the class id doesn't resolve to a real declaration. Otherwise checks the class's own annotations for one whose bare name (stripped of `@` and any package qualification) is exactly `"RegisterRestClient"`.
+Looks up the class and returns false if the id is not a symbol. Otherwise it returns true if any of the class's own annotations has the plain name `RegisterRestClient`, after stripping the `@` and any package qualifier with `bare_annotation_name`, so `@RegisterRestClient(configKey = "x")` and a fully-qualified spelling both count. Only the class's own declaration is checked, not an interface it implements. A client interface is deliberately not treated as this service's own entry point, since it describes something this service calls, not something it serves. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -268,9 +276,9 @@ Tries a fixed list of attribute names in priority order — `cron` first (the mo
 ## `is_grpc_service_class`
 `fn is_grpc_service_class(graph: &Graph, class_id: SymbolId) -> bool`
 ### Summary
-Checks whether a class is annotated `@GrpcService`, the marker for a class whose public methods implement a gRPC (a remote-procedure-call framework) service.
+Says whether a Java class is marked as a gRPC service with a class-level `@GrpcService`. Its public methods are then treated as the service's remote entry points.
 ### Behavior
-Returns `false` if the class id doesn't resolve to a real declaration. Otherwise checks the class's own annotations for one whose bare name is exactly `"GrpcService"`. Unlike JAX-RS or Kafka annotations, gRPC's marker lives only on the class, never on individual methods — the actual RPC method shapes come from a generated `.proto`-derived interface this project doesn't parse, so a `@GrpcService` class's public methods are treated as entry points without needing any per-method annotation.
+Looks up the class and returns false if the id is not a symbol. Otherwise it returns true if any of the class's own annotations has the plain name `GrpcService`, after stripping the `@` and any package qualifier. Unlike web routes and message handlers, a gRPC service's marker lives only on the class, and the methods are shaped by a generated interface from a `.proto` file, which this tool does not parse at all. So the entry-point finder treats every public method of such a class as an entry point and does not require the `@Override` marker on each, because this project has declined to walk interface hierarchies for inherited annotations. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -347,9 +355,11 @@ Returns `None` if the annotation's bare name isn't exactly `"Outgoing"`. Otherwi
     class_constants_cache: &mut HashMap<SymbolId, Vec<&'g crate::symbol::Symbol>>,
 ) -> String`
 ### Summary
-Turns a Kafka channel-name annotation argument into its actual string value, looking up a same-class constant by name if the argument wasn't already a literal string.
+Works out the real name of a Kafka message channel from what is written in a handler's annotation. The name may be a string written directly, or a reference to a constant defined in the same class.
 ### Behavior
-A literal argument resolves to itself. A bare constant-name argument is looked up among the containing class's own constant declarations for one whose name matches, and the first string literal inside *that* constant's own declaration text is extracted as the channel name — the same "read what's already captured" approach used elsewhere in this file, deliberately not a general interpreter: it only ever looks within the same class, never following a reference into another file. A class's constants are looked up once and cached, since several methods on the same class can each need the same lookup. If no matching constant is found, falls back to the raw identifier text rather than failing outright — an entry point is never silently dropped over an unresolved reference, just less nicely named.
+If the argument is a literal string, that string is returned as is. If it is a reference to a constant, it looks among the same class's own value members (fields and constants) for one whose id ends with that name, then takes the first string literal found in that member's signature, which for a field is its whole declaration including the initial value, and returns it. This is a text scan within a known scope, in the same style as the same-package link finder, and deliberately not a general interpreter: it reads the same class only and does not follow the constant into another file. If no matching constant is found, or it holds no string literal, it falls back to the identifier as written, so an entry point is never dropped over an unresolved reference, only less nicely named.
+
+The list of a class's constants is built once per class and remembered in the provided cache, in the same way other per-class lookups are, so the whole symbol list is not scanned again on every call. It cannot fail.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
