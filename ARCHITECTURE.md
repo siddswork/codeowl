@@ -405,7 +405,7 @@ A 4th sketched tool, `impact_analysis(symbol)` ("what breaks if this changes"), 
 
 ### 8. Human-facing viewer
 
-A browser for BAs/QA/SREs who aren't working inside an IDE — primarily a **spec reader** (the feature and system specs are written for exactly this audience), with a Cytoscape.js-style graph view (as in MemoLink) alongside it. REST API backing it, same shape as MemoLink's (`/api/graph`, `/api/search`, `/api/traverse/{id}`), plus spec retrieval. Phase 2, but moved to the front of it once Phase 1's framing settled on the specs being the product for a human audience co-equal with the agent one — see `ROADMAP.md`.
+A browser for BAs/QA/SREs who aren't working inside an IDE — primarily a **spec reader** (the feature and system specs are written for exactly this audience), with a Cytoscape.js-style graph view (as in MemoLink) alongside it. REST API backing it, same shape as MemoLink's (`/api/graph`, `/api/search`, `/api/traverse/{id}`), plus spec retrieval. Phase 2, but moved to the front of it once Phase 1's framing settled on the specs being the product, written for a human audience — see `ROADMAP.md`.
 
 ### 9. Implementation stack
 
