@@ -1,10 +1,10 @@
 ---
 kind: file
 source_paths: [src/schema.rs]
-file: { source_hash: c34c1f94ae51e2c4d1bcd4b6797be073a26ba196a240d661e9de89b1189a88b0, deps_hash: d4034a9cbee7900a1fbe5e4401fc040618db110c2395b587568f12985ac649df, spec_hash: 93e68edf1f9574e108df2e4917292b84706b505f5f2b0693b37de0cdfc2beb9e }
+file: { source_hash: 0d9fb8dd4ba8bb517dc5766830b7ab3d9109addb64405150a32db02e400bdf90, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: fe774de27dba288d8c428227aaa0d100bc46c034949797a70f936b9682710cb2 }
 symbols:
-  src/schema.rs::Table: { source_hash: 0a79b1c50c0f737b984d05f06a58ecc8934822a7ec3f0cec9d1dd28d9abbb7f5, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e04d6b2db72b776ba56b1331712332aa716bc867a0565031023716294c223d67 }
-  src/schema.rs::extract_tables: { source_hash: d2c5790e88026e33641f1fd141cd3057c44ce543cf3656be36830d5c2834d9df, deps_hash: d4034a9cbee7900a1fbe5e4401fc040618db110c2395b587568f12985ac649df, spec_hash: 26710492f6d5b75a84c1fc74f62fd292c3ef820c70878eca607ed504eb4c33d3 }
+  src/schema.rs::Table: { source_hash: 99a6815c88acf037a161e04393937b9a1b4c1af1b2c958f4909de4ef75416a4e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3e1d055df01adea599ef6a08242efaf0464aaa0c90c4f767f53cc56587c6c558 }
+  src/schema.rs::extract_tables: { source_hash: 0b826ecaef84c1a0014c55feb5933c776a199718a312c7ca9c0cb0b13fd782b0, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: d19555c4cbff372b454ff7eb8c3e30086fbbc5ab7271fa150798998ea78a7ef2 }
   src/schema.rs::parse_tables: { source_hash: 7dd142db3d8994d80572549d9106e392efbb4ce379c72b4c58ee96a5815be54f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d7172cad79fbaacccb7ca6b5aab4af1874c90d3782ab4d0c8f739f3189e46554 }
   src/schema.rs::table_from_node: { source_hash: 6918e83166852058c5919cc0adfb9053cd8bb244a9e685c5215530498f21ddde, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: bc69c5c794c6e190177ccfc10dadb8d1cc8277da1ef6ee85dd3d4e48e079d24b }
   src/schema.rs::unqualified_name: { source_hash: 74a28cd49d2c5f13012d57088d32c119add3acae2c125bafcf79545ddf1676e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4e5b86a0dc3c4ff9d6fa7b5cd636d0e58a87be85b085da134a5e5a4adae6c4b4 }
@@ -15,23 +15,25 @@ symbols:
 ---
 # src/schema.rs
 ## Summary
-SQL schema extraction (M10) — the SQL pack's counterpart to `extract.rs`. Parses `CREATE TABLE` statements out of a `.sql` schema or migration file into `SymbolKind::Schema` table nodes, so a `.from("table")` call in application code has something to resolve to and a feature spec's "Data touched" section can name real tables. Deliberately shallow: only `CREATE TABLE` (no views, functions, triggers, RLS), column *names* only (no types or foreign keys). Two passes — `parse_tables` (tree-sitter-sequel) for structure, and `backstop_from_headers` (a plain line scan of `CREATE TABLE` headers) to guarantee the table *set* is complete even when the grammar chokes on pg_dump CHECK-constraint exotica and drops a whole statement node. `unqualified_name` is what makes `.from("payments")` match `CREATE TABLE public.payments`. A Phase-2 seam — its `.sql`-file assumption is generalised at M18 for annotation-based ORMs.
+This file reads database schema files. It parses the `CREATE TABLE` statements in a `.sql` file into table symbols, so that a `.from("table")` call in application code has a real table to link to, and so a feature description's "Data touched" section can name actual tables and columns. It is deliberately shallow: only `CREATE TABLE` is read, never views, functions, triggers or access-policy rules, and only column names are kept, not types or foreign keys. It works in two passes. A SQL grammar parses the statements for structure, taking each table's name and columns. A plain line scan of `CREATE TABLE` header lines then guarantees the set of tables is complete even when the grammar fails, which happens with some unusual constraint syntax in database dumps, where it drops the whole statement and loses that table's columns. A table found only by the scan has just its name and header line. A schema-qualified name such as `public.payments` is reduced to `payments`, which is what lets a query on `payments` match it, and quote marks around names are removed. Each table is recorded with a signature of the name plus its column list, and a fingerprint of its own lines, so adding, dropping or renaming a column marks any feature that touches the table as stale.
 
 ## `Table`
 `struct Table`
 ### Summary
-The private intermediate a `CREATE TABLE` parses to before becoming an `ExtractedSymbol` — its name, column names, and line span.
+A scratch record of one database table found in a schema file: its name, its column names, and where it sits in the file. It is used while parsing and is turned into the table symbols the rest of CodeOwl sees.
 ### Behavior
-Plain data, not exported. `columns` is the column *names* only, no types (M10 scope). `lines` is 1-indexed inclusive but only as accurate as the parse path allowed — the tree-sitter path gives the full statement span, the line-scan fallback only knows the header line.
+`name` is the table's name, which may be schema-qualified as written, and `columns` is the list of column names. Only names are kept, not types or foreign keys. `lines` is a 1-based, inclusive pair of start and end lines, as far as it is known: the full statement span when the grammar parsed it, but only the header line when the table was found by the plain line-scan fallback, since that scan sees nothing beyond the `CREATE TABLE` line. It is private to the module and plain data with no logic.
 ### Depends on
 - (none)
 
 ## `extract_tables`
 `pub fn extract_tables(source: &str, rel_path: &str) -> Vec<ExtractedSymbol>`
 ### Summary
-The schema extractor — turns a `.sql` file's `CREATE TABLE`s into arena-ready symbols: one `SymbolKind::Schema` (raw `"table"`) per table, id `<file>::<table>`, signature `name(col, col, …)`. The `SourceKind::Schema` branch of `lang::extract_symbols`.
+Reads a `.sql` file and returns one table symbol for each `CREATE TABLE` in it, with the table's column names, so that a `.from("payments")` query in application code has something to link to and a feature description can name real columns.
 ### Behavior
-Runs `parse_tables` (tree-sitter) then `backstop_from_headers` — a line-scan pass that adds any `CREATE TABLE` the grammar missed. Each `Table` becomes an `ExtractedSymbol`: `signature` is the rendered column list, `source_hash` is a hash of the statement's line span, and `is_exported` / `interface_hash` / `docstring` / `markers` / `parent` / `children` are all empty — a table is resolvable and queryable (via `get_callers`) but never spec-bearing.
+First it parses the file's table statements with `parse_tables`, a real SQL grammar. Then `backstop_from_headers`, a plain line scan of `CREATE TABLE` headers, adds any table the grammar missed, which can happen when it chokes on an unusual statement such as a `pg_dump` check constraint and drops the whole statement, so the set of tables is always complete.
+
+Each table becomes a symbol of kind `Schema` with raw kind `table`, the id `<path>::<table name>`, and a signature that is the table name followed by its column list, such as `payments(id, amount, user_id)`. The line range comes from the parse, or only the header line for a table found by the fallback. `source_hash` hashes the table's own lines, so adding, dropping or renaming a column marks anything that depends on it stale. The table is not exported and has no public-surface hash, since there is no separate public shape to track and the source hash is the staleness key. It has no docstring, markers, parent or children. Only column names are recorded, not types or constraints. It cannot fail, and a file with no tables gives an empty list.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol

@@ -1,13 +1,21 @@
 ---
 kind: file
 source_paths: [src/extract.rs]
-file: { source_hash: cfa79a2066adb6ad8fc7c02d512cf52027f25741899b64f0a6e1835a2a40ec6a, deps_hash: 284c15f24db2f6014d2611ba2fb4ee5b7b64ef2580a8a7284456379b8a7ac426, spec_hash: c85687eb4b90a769e529c1167e16c54abe3253d513a6679e7e4d3b7a93d900a9 }
+file: { source_hash: 5a092b27253793bd1f357b81de71d601df24b6d758ef1461457d3913e795f97a, deps_hash: a469f3de54636f1fa8782176580650d4a3355b3ae9a24c031a5b28b7243baf17, spec_hash: 6e48d00a5e29e00d9b69de93d01f5afbe57e0ad8a58d9a9f3f1a4a20e7de3499 }
 symbols:
-  src/extract.rs::extract_file: { source_hash: 0f80395f2d0895f891b54861868cd690539d694d6d078d92f5a259097e41129a, deps_hash: 7a249fa56fb8f71895f3311c45ae988dd0d5426fe72cd08f212c8d33029b1253, spec_hash: 279969477ef8721fea255ee14212e68963dc06b4a240e69dbe147b94a9bba0bb }
-  src/extract.rs::visit_top_level: { source_hash: b3494f71abb74cf7a8026cae0f59dba426184803ab1f71dcbc82e43f6275f6e8, deps_hash: 57b36ccf02abf241d59cf027b8af996e4e37cdf048813be00047a453efba7ce6, spec_hash: 1dd94bea92fd0545b5f38902f2e10ffd1b1caa3be50f1d90dede5779a7826f70 }
-  src/extract.rs::visit_function: { source_hash: 9ad2d57f1d77239149dba7a198136947d6450d6d458235f2b4ee71bf1344f292, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 3ed706af3b63d5c82ecaad80ec7bed1da6c783fbf1b319572cabceb26ad4d82e }
-  src/extract.rs::visit_class: { source_hash: e51d518d683ec6a2c7313b3f5c560726a401ef0dd2ff81aa8baa686848512947, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 0aa92348644fca449bef76f23e19b29417bb15d148f936d7cbecc203cf009690 }
-  src/extract.rs::visit_lexical: { source_hash: e7406937d062fe58270abf2f9af8753d60b92117c086b4f91015b0ccf13ddbd4, deps_hash: 05b2db27555b24c9f8b2464bb5722a3dae6651742c01cb85432c3f1b12383bb5, spec_hash: 8ba13ca7d441674d2d130a206075ba5d502ae512ff75ad760b592eb6ba99f20c }
+  src/extract.rs::extract_file: { source_hash: 7efdd390846a2ea39f69360dd415b183bdcbed6111ad9392f8d418a5dee89834, deps_hash: 77295d7d860d5edbd3856fe14543fec6cde0a8c182294d14f65c1da6345256ed, spec_hash: 145afeb2888aecb46115bcc866cff76bc2220b905f88f50cfc7e932bfcde1fad }
+  src/extract.rs::clause_exported_names: { source_hash: 6e8803c0b7912cd3d0b7f373d5fa3030d2b4e4655300c0624159c6ed444b9aa9, deps_hash: bd2d238e8bdadefcbda29c5a455a659e20696152b094e543f74a86f23397dc0d, spec_hash: 3942497753fe0e6e7fbf16dd5f81b12840755e885345c9a7cef52a346e20d542 }
+  src/extract.rs::is_declaration_exported: { source_hash: ad3ff83e6f51ece33d3608b9c074c7d6b61b5cfae239afbf7b7f88155ccacb65, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6d99468d7dc29352d212aa655cf670201f7f0b7f4165fd0090094a1aa3a9b42c }
+  src/extract.rs::visit_top_level: { source_hash: af007c46c1e271ea969e16a0826d1db46ae183a1e6d30f3ff7c88d6d82238322, deps_hash: 2f2d813cb41bd73f13411f197c03a6eeb3990c05207868c8d2422e2775913c15, spec_hash: 3da30aa6e6d17857494ac058b677144cb007febf643d5027e57534a8b8f14cbd }
+  src/extract.rs::visit_type_decl: { source_hash: acf5cd8ce4c08997a7ba8f9a5b861199a967f3efbd4dab06ea4ded65d1063a2b, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: a862a5ff4b9fd8a4de2749dee58164d967378bda3da63845a6592b23e84a2bb2 }
+  src/extract.rs::declaration_tokens: { source_hash: 91b326cf627227ce4a704c0577f3ce9176f7e052c3022fa52cc86a8ea68cb3b6, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d974823f42be64f3bded260c3a29b56a159e7f023bd91f7f2ff62d8640b73434 }
+  src/extract.rs::collect_tokens: { source_hash: 48e0e8177383458a3e698ee6b22ce371af176a23275535fc10ecfd7ead565938, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4a158c5d9e3d7c5f6398103aeafd4e4a1c2b5df4cfc589a0d50c4dfcd1a47f31 }
+  src/extract.rs::fold_same_id: { source_hash: 652e9ede2e59df8cc7696985b3f726cc4cc150b15d3a83bb94816e6e1c2b241c, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: f858517271145338ffacf6f35328071eb3d165eafef52dbd634977b4dbefc875 }
+  src/extract.rs::visit_function: { source_hash: 3c57ed05f57a4535eb82cd92f99e5ab1cf0209593e9be882f1a1fd9ccb2c86e2, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: a93d3d7eede000ab983f70c80d6c1f7fceeac07c8a45046e71ec3c71fbc7127f }
+  src/extract.rs::visit_class: { source_hash: 974bd38cecd8f8272c69ec32d3fd040eb3855521f828b151c5eda7694cbf416d, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: 727ac1318a6cc8163d1db985ce1168c3d614b9ccb8479a930501082577a6c322 }
+  src/extract.rs::visit_lexical: { source_hash: 113057ea6cbed99a83b4315b8a3e0e1470923f1f446aa9b003e3ba2e7aec1ac9, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: 4c3c50d140b6006a3f1450fec012a6fc86804c9790fedf350b245bf84e09a843 }
+  src/extract.rs::bound_names: { source_hash: 982c37aff3d748e3cff4cdd7736c826e705a7bd2bee2485863a2db3e51bce58c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3073418f46751c564dc1f1e9b8c21bc75ec29437b915c6caeb4def03c08ca5f9 }
+  src/extract.rs::collect_bound_names: { source_hash: 26b6a1c04a0e09e7270b645800c8b69e6e83a078d08222b24cd2726a99f9eecc, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: bbcd3e8434582324424888e5556cdfcbddd3791319d7b6edddc4e2375f50f7b4 }
   src/extract.rs::signature_text: { source_hash: 9596e4dcd49fc9e8ea493b1420cff5c22b200725f73ff1b6a7d2b2d82ecd097b, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b0cae5ed6ae3bd5f730fac83830eef5216066e4a6cf4707566b12e75523e96b4 }
   src/extract.rs::dedupe_member_id: { source_hash: 9a34977327474d191fabc285ae9a1038a86e53363347cb4b4f339492911249be, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0a87580bde3bddf6df8d5fcab656f0486f1cb255b485728a3f6abbf3125d08b7 }
   src/extract.rs::is_pub_field_signature: { source_hash: b13808da443685e9f773a33f684d01e3f3f00339a6bb6eedaa19aff2dc691783, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e5eb5c96f124a1a43b1ad128f4b243d8dfb17bde271a0d023d41319a2d56db4e }
@@ -20,32 +28,116 @@ symbols:
 ---
 # src/extract.rs
 ## Summary
-This file is the TypeScript/TSX extractor: given one file's source text, it uses tree-sitter (the parsing library that turns source text into a navigable tree) to find every top-level declaration — functions, classes (and their methods and fields), and `const` values — and turns each into an `ExtractedSymbol` the rest of CodeOwl can build a graph from. It deliberately only looks at top-level declarations and, for a class, one level into its body; nested closures and callbacks are never extracted, since CodeOwl only generates specs for declarations, not every piece of syntax. Along the way it computes each symbol's `signature` (the declaration text with its body/value stripped) and decides which symbols get an `interface_hash` — only exported functions/values and, differently, none of a class's individual members, since a method or field is never independently exported or imported on its own.
+This file is the TypeScript and TSX extractor. Given one file's text, it uses tree-sitter (a library that turns source text into a syntax tree) to find the declarations and turns each into a symbol the rest of CodeOwl builds its graph from. It looks only at the file's top-level statements, unwrapping `export` wrappers, and, for a class, one level into its body. Functions and arrow-function constants are callables, classes are containers holding their methods and fields, plain constants are values, and each name bound by a destructuring such as `const { auth } = NextAuth()` is its own value. Interfaces, type aliases and enums are recorded as values too, so that importing them resolves to something and a change to one marks its importers stale. Nested closures and callbacks are never extracted, since CodeOwl writes specs for declarations only. A name counts as exported if it carries the `export` keyword or is listed in a separate `export { name }` line, but a renamed one (`export { a as b }`) is not handled. Two fingerprints are computed for each symbol. A function's public-surface fingerprint covers its signature, so editing the body does not mark importers stale. A type's covers its whole declaration as a list of tokens, since its body is its contract, and ignoring comments and layout so reformatting does not either. A class's covers its own signature plus its public members' signatures. Declarations that share a name, such as a class and an interface of the same name, are merged into one symbol so neither overwrites the other, with the strongest kind kept so a class stays documented.
 
 ## `extract_file`
 `pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol>`
 ### Summary
-The TypeScript extractor's entry point: parses one file's source text and returns its list of top-level declarations.
+Reads one TypeScript or TSX file and returns the declarations in it: functions, classes with their methods and fields, constants, and type-level declarations such as interfaces, type aliases and enums.
 ### Behavior
-Picks a parser grammar based on `rel_path`'s extension (`.tsx` gets JSX support, everything else parses as plain TypeScript), then parses `source` into a syntax tree (the structure `tree-sitter` produces from source text). If parsing fails outright, it returns an empty list rather than erroring. Otherwise it walks each of the tree's top-level children and hands them to `visit_top_level` to build up the symbol list.
+Picks the tree-sitter grammar (the parser that turns text into a syntax tree) from the file extension: `.tsx` gets JSX support, anything else parses as plain TypeScript. If the text cannot be parsed it returns an empty list. First it collects the names exported by local `export { X }` lines (`clause_exported_names`), so a declaration exported that way is recognised as exported. Then it walks the top-level statements in order, calling `visit_top_level` for each, which appends symbols.
 
-The parsed tree itself never escapes this function — every value pushed into the result is an owned `String`/`usize` extracted while the tree is still alive, not a reference into it. That's deliberate: the tree's node type only exists validly as long as the tree that produced it is alive, so returning one (or a struct holding one) would tie the caller's lifetime to this function's internal parse tree, which extraction across a whole repo can't afford.
+Two clean-up steps follow. `fold_same_id` merges declarations that share an id, such as a class and an interface of the same name, or an overload list, into one symbol, keeping the strongest kind. Then, since type declarations compute an `interface_hash` whether or not they are exported (so a private half and an exported half can be combined during the merge), any symbol that is not exported has its `interface_hash` cleared at the end, because only exported symbols keep one. No syntax-tree node escapes the function; the result is plain owned symbols. Statements inside function bodies are not extracted.
 ### Depends on
 - `src/lang.rs::ts_parser` — crate::lang
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - externals: tree_sitter
 
-## `visit_top_level`
-`fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>)`
+## `clause_exported_names`
+`fn clause_exported_names(root: Node, source: &str) -> HashSet<String>`
 ### Summary
-Handles one direct child of the file's top level: unwraps an `export` if present, works out what kind of declaration it actually is, and extracts whatever symbols it produces.
+Collects the names that a file exports with a separate `export { A, B };` line, so a function or class declared earlier in the file without the `export` keyword is still recognised as exported. Without it, importers of such a name could not be linked, and a change to it could not mark them stale.
 ### Behavior
-If the node is an `export_statement`, it looks for the inner declaration it wraps. Some export forms have no declaration to find at all — `export { X } from './y'`, `export * from './y'`, or an anonymous `export default <expr>` (an arrow function, a bare identifier, a literal) — since nothing new is actually declared there; a barrel file (a file whose only job is forwarding names from elsewhere) is made up entirely of this shape, so this function simply returns without extracting anything for it. A *named* default export (`export default function Page() {}`, `export default class Foo {}`) does have an inner declaration and falls through to ordinary handling like any other declaration — this matters because a Next.js page or route component is routinely written exactly this way, so it needs to be extracted, not skipped.
+Looks at the file's top-level statements and keeps only bare export clauses, those with no `from`, because `export { a } from './x'` forwards another module's name and says nothing about a local one. From each clause it reads the listed names and keeps only the ones not renamed. `export { a as b }` publishes `b`, which is not the declaration's id, so importers could not find it by name, and that case is deliberately not handled since no repo measured had it. The names are returned as a set of strings. A name that is not declared in this file is harmless, since nothing will match it. It cannot fail.
+### Depends on
+- `src/imports.rs::bare_export_clause` — crate::imports
+- `src/imports.rs::export_specs` — crate::imports
+- externals: std, tree_sitter
 
-Once it has the actual declaration node (whether or not it was wrapped in an export), it dispatches on its kind: a function declaration, class declaration, or lexical declaration (`let`/`const`/`var`) each go to their own dedicated visitor. Any other declaration kind is silently ignored.
+## `is_declaration_exported`
+`fn is_declaration_exported(outer: Node, name: &str, clause_exported: &HashSet<String>) -> bool`
+### Summary
+Decides whether a top-level declaration counts as exported, either because it was written with the `export` keyword or because a separate `export { name }` line lists it.
+### Behavior
+Returns true if the statement that wraps the declaration is an export statement, or if the declaration's name is in the set of names collected from bare export clauses. Otherwise false. It is the single place that makes this decision, so no visitor for functions, classes, constants or type declarations can forget the clause half, which was the cause of missing links for names exported only through a clause. Pure function with no failure mode.
+### Depends on
+- externals: std, tree_sitter
+
+## `visit_top_level`
+`fn visit_top_level(
+    node: Node,
+    source: &str,
+    file: &str,
+    exported: &HashSet<String>,
+    out: &mut Vec<ExtractedSymbol>,
+)`
+### Summary
+Looks at one top-level statement of a TypeScript file and records the declaration it contains, if any: a function, a class, a constant, or a type, interface or enum.
+### Behavior
+If the statement is an `export` wrapper, it unwraps it to the declaration inside. A wrapper with no declaration, namely `export { X } from './y'`, `export * from './y'`, or an anonymous `export default <expression>` (an arrow function, an identifier, a literal), declares nothing new and is skipped; barrel files consist of exactly these. A named default export such as `export default function Page() {}` does have a declaration and is processed like any other, which matters because Next.js pages and routes routinely have that shape and the feature layer relies on them being extracted.
+
+It then dispatches on the declaration's kind: a function goes to `visit_function`, a class to `visit_class`, a `const` or `let` to `visit_lexical`, and a type alias, interface or enum to `visit_type_decl` with the matching label. Type-level declarations carry no runtime behavior, but an importer depends on their shape just as on a function's signature, and without a symbol an `import { User }` resolved to nothing and a change to `User` could not mark anything stale. Each of these receives the set of clause-exported names so it can decide whether the declaration counts as exported. Any other statement is ignored. It appends to `out` and returns nothing.
 ### Depends on
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- externals: std, tree_sitter
+
+## `visit_type_decl`
+`fn visit_type_decl(
+    decl: Node,
+    outer: Node,
+    raw: &str,
+    source: &str,
+    file: &str,
+    exported: &HashSet<String>,
+    out: &mut Vec<ExtractedSymbol>,
+)`
+### Summary
+Records a TypeScript `type`, `interface` or `enum` declaration as a single value symbol, so that importing it resolves to something and a change to its shape marks the files that use it as stale.
+### Behavior
+Reads the declaration's name and returns without adding anything if there is none. The signature, the short header that `get_symbol` shows, depends on the form. For an interface or enum it is everything before the body, so `interface User extends Base` stops at the `{`. A type alias has no body, only a value after the `=`, so its header runs from the start to the end of its type parameters if it has any, otherwise to the end of its name, and not at the `=`, which a comment or a `=` inside the parameters (`type Box<T = {}>`) would confuse. An alias with no value returns nothing.
+
+Whether it is exported comes from `is_declaration_exported`. The symbol is kind `Value`, a leaf like a plain constant: an import target with a fingerprint, but with no spec section of its own, since only functions and containers get one. The raw kind is the label passed in.
+
+Fingerprints differ from a function's. A function's contract is its signature, but a type's contract is its body: adding, renaming or retyping a member can break an importer. So `interface_hash` covers the whole declaration as a list of tokens, which ignores comments and formatting, so reformatting does not mark importers stale. It is always computed here, even for a non-exported type, because a later merge may combine a private half with an exported half, and `extract_file` clears it for any symbol that ends up not exported. `source_hash` is a hash of the declaration's raw text. It also records the line range and the doc comment before it, with no markers, parent or children. It appends to `out` and returns nothing.
+### Depends on
+- `src/hash.rs::hash_text` — crate::hash
+- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- `src/symbol.rs::SymbolKind` — crate::symbol
+- externals: std, tree_sitter
+
+## `declaration_tokens`
+`fn declaration_tokens(node: Node, source: &str) -> String`
+### Summary
+Turns a declaration into a normalized string of its tokens, leaving out comments and layout, so that two versions that differ only in comments or formatting give the same string and therefore the same fingerprint.
+### Behavior
+Collects the text of every leaf node under the given node (a leaf is a single token, such as a name, keyword or punctuation mark), skipping comments, and joins them with single spaces. Hashing this instead of the raw text means that neither a comment edit nor a reformat (changed indentation, line wrapping, a comment that sat between two tokens) changes the hash, while a real change to any token does. It works on the syntax tree and not on text patterns, so a `//` inside a string literal type is correctly kept as part of a token and not mistaken for a comment. A change in token spacing within one token, such as inside a string literal, still counts as a change. It cannot fail.
+### Depends on
 - externals: tree_sitter
+
+## `collect_tokens`
+`fn collect_tokens<'a>(node: Node, source: &'a str, out: &mut Vec<&'a str>)`
+### Summary
+Gathers the individual tokens, the smallest pieces of source text, under one syntax node, in order, skipping comments. It is the walk behind the normalized token string used for fingerprints.
+### Behavior
+Recursive. A comment node returns at once and contributes nothing, and neither do its children. A node with no children is a leaf, and its text is pushed onto the output if it is non-empty. Any other node recurses into its children in order. The result borrows slices directly from the source text, so nothing is copied, and the order matches the order in the file. Empty tokens, which some grammars produce for missing parts, are dropped. It appends to the provided list and returns nothing.
+### Depends on
+- externals: tree_sitter
+
+## `fold_same_id`
+`fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol>`
+### Summary
+Merges top-level declarations that share a name into one symbol. TypeScript allows several declarations with the same name, and two symbols with one id would overwrite each other in the graph.
+### Behavior
+Examples of same-name declarations are a `const` and a `type` (`export const Status = {...} as const; export type Status = ...`), two interfaces that merge, or an interface merged into a class. It goes through the symbols in order and keeps the first with each id. When another arrives with the same id, it is folded into the first.
+
+The stronger declaration wins and supplies the kind, signature and main line range: a container beats a callable, which beats a value, so a class merged with an interface stays a container that gets a spec section. On a tie the first written wins. The one folded in is merged as follows: its doc comment is used only if the survivor has none; its source hash is combined into the survivor's by hashing the two together; its public-surface hash is combined the same way when both have one, and otherwise whichever exists is kept, so a private half still counts as part of the merged type; the result is exported if any of the declarations is; its line range and any extra ranges are added to the survivor's extra spans; and its children are added.
+
+Order of first appearance is preserved and the result has one symbol per id. It cannot fail. A folded symbol's hash depends on the order the declarations were written, so reordering them counts as a change.
+### Depends on
+- `src/hash.rs::hash_text` — crate::hash
+- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- `src/symbol.rs::SymbolKind` — crate::symbol
+- externals: std
 
 ## `visit_function`
 `fn visit_function(
@@ -53,37 +145,43 @@ Once it has the actual declaration node (whether or not it was wrapped in an exp
     outer: Node,
     source: &str,
     file: &str,
+    exported: &HashSet<String>,
     out: &mut Vec<ExtractedSymbol>,
 )`
 ### Summary
-Turns a `function` declaration node into an `ExtractedSymbol`.
+Records a top-level TypeScript function as a callable symbol, with its signature and the two fingerprints that decide when its spec and its importers go stale.
 ### Behavior
-If the declaration has no body at all, it's skipped (nothing is pushed) — this guards against a malformed or incomplete parse rather than a real code shape. Otherwise it reads the function's name (falling back to `"<anonymous>"` if none), builds its `id` as `"<file>::<name>"`, and computes its signature text from the declaration node up to (but not including) the body.
+A function with no body, such as an overload declaration or an ambient `declare function`, returns without adding anything. The name comes from the declaration, or `<anonymous>` if there is none. The signature is the text from the start of the declaration to the start of its body, taken from the declaration itself and not the `export` wrapper, so the keyword `export` or `export default` is not part of it; whether it is exported is recorded separately. The id is `<file>::<name>` and the raw kind `function`.
 
-Whether the symbol is exported is read from the *outer* node (whether this declaration sits inside an `export_statement`), but the signature text itself is taken from the declaration node alone, deliberately excluding any `export`/`export default` prefix — this keeps it consistent with how a const/arrow-function declaration's signature is computed, where leaving the prefix off is simply the cheaper choice. `source_hash` covers the whole declaration's text; `interface_hash` is only computed (as a hash of just the signature) when the function is exported — an unexported function isn't a valid target for cross-file resolution, so it has no public shape worth tracking separately from its full source. The docstring is read from whatever comment immediately precedes the *outer* node (so a comment above `export function foo()` is still picked up, not just one directly above `function foo()`).
+Exported status comes from `is_declaration_exported`, which counts either the `export` keyword or a name listed in a bare `export { name }` line. `source_hash` hashes the whole declaration, body included, so any edit changes it. `interface_hash`, present only when exported, hashes the signature alone, so edits inside the body leave importers current. Also recorded are the line range and the doc comment before the declaration, including one that sits before an `export` keyword. No markers, parent or children. It appends to `out` and returns nothing.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - `src/symbol.rs::SymbolKind` — crate::symbol
-- externals: tree_sitter
+- externals: std, tree_sitter
 
 ## `visit_class`
-`fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>)`
+`fn visit_class(
+    decl: Node,
+    outer: Node,
+    source: &str,
+    file: &str,
+    exported: &HashSet<String>,
+    out: &mut Vec<ExtractedSymbol>,
+)`
 ### Summary
-Turns a `class` declaration into an `ExtractedSymbol` container, plus one member symbol for each of its methods and fields, folding those members' hashes into the class's own — this is the piece that makes editing a method or field register as a real change to the class that contains it.
+Records a top-level TypeScript class as a container, together with its methods and fields, and computes the two fingerprints that decide when its spec and its importers go stale: one over everything in the class, and one over only its public surface.
 ### Behavior
-If the class has no body, it's skipped entirely. Otherwise it reads the class name (falling back to `"<anonymous>"`), builds the class's own id as `"<file>::<name>"`, and walks the class body once, producing one member symbol per method (`method_definition`) and per field (`public_field_definition` — this grammar node covers plain fields, JS-private `#`-prefixed fields, and `private`-modified fields alike; a member's own visibility never makes it independently exported). Each member's id is `"<class_id>.<member_name>"`, deduplicated against sibling members that would otherwise collide on the same name. A method with no body is skipped the same way the class itself would be. Every member is `is_exported: false` — a method or field is never independently importable on its own, only reached through an already-imported class — and every member's `parent` points back at the class's id.
+A class with no body returns without adding anything; the name defaults to `<anonymous>`. The id is `<file>::<Name>` and members are `<file>::<Name>.<member>`. It goes through the class body and records two kinds of member. A method with a body becomes a callable with raw kind `method`. A declared field becomes a value with raw kind `property`, including `#private` fields, which look the same to the grammar. A member is never exported on its own, whatever its visibility, so members have no `interface_hash`. Methods without a body, such as overload signatures, are skipped. If two members would share an id, such as a getter and a setter, `dedupe_member_id` gives the later one a distinct id so nothing overwrites anything.
 
-A field's `signature` is computed by a dedicated helper that strips its initializer value off, keeping only its name and type; a method's signature is its declaration text up to its body, the same as a top-level function's.
+Whole-class fingerprint (`source_hash`): the class signature (text up to the body) plus each member's source hash, in declaration order, hashed together. Editing any member moves both that member's hash and the class's, and reordering members counts as a change.
 
-Once every member is collected, two separate rollups are built. `source_hash` folds the class's own signature together with every member's `source_hash`, in declaration order — reordering members is itself treated as a real change, not just editing one. That's what makes hash propagation up the containment chain work: editing one member moves both that member's own `source_hash` and the class's. `interface_hash` — computed only when the class itself is exported, since an unexported class has no public shape to track — folds in only each *public* field's own signature (name and type, never the docstring or the initializer value), skipping every method and skipping any field that isn't public; this rollup is built lazily, only once the class is known to be exported, since building it unconditionally would waste an allocation and a full member scan on every reparse of every non-exported class, and the file watcher reparses on every save.
-
-The class symbol itself is pushed first, with `children` set to the ordered list of member ids, and its own members follow immediately after in the output list.
+Public-surface fingerprint (`interface_hash`), built only if the class is exported (the keyword or a bare export line): the signature plus each member's signature that passes the public check, meaning it is not `private` and its name does not start with `#`. This applies to fields, without values, and to methods, whose signatures already stop before the body. So renaming or retyping a public member marks importers stale, while a body edit does not. The class is recorded before its members, with its line range and the doc comment before the class or its `export`, and the members follow.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - `src/symbol.rs::SymbolKind` — crate::symbol
-- externals: tree_sitter
+- externals: std, tree_sitter
 
 ## `visit_lexical`
 `fn visit_lexical(
@@ -91,23 +189,48 @@ The class symbol itself is pushed first, with `children` set to the ordered list
     outer: Node,
     source: &str,
     file: &str,
+    exported: &HashSet<String>,
     out: &mut Vec<ExtractedSymbol>,
 )`
 ### Summary
-Picks up top-level `const` declarations in a JavaScript/TypeScript file — both plain values (`const PI = 3.14`) and arrow-function/function-expression assignments (`const foo = () => {...}`) — and records each one as a symbol CodeOwl can track.
+Records the top-level `const` declarations of a TypeScript file: arrow-function and function-expression constants as callables, and every other constant as a value, including each name bound by a destructuring such as `const { auth } = NextAuth()`.
 ### Behavior
-Only runs for `const` declarations — `let` and `var` are a different AST (the parse tree — the structure tree-sitter builds from source text — node kind entirely and aren't declarations this generates specs for, so the function returns immediately if the declaration's `kind` field isn't `"const"`.
+Only `const` is handled; `let` and `var` are not declarations CodeOwl writes specs for, and are skipped. A declaration can bind several names, and each declarator is handled in turn.
 
-For each `variable_declarator` child of the declaration:
-- A destructuring pattern (`const { a, b } = ...` or `const [a, b] = ...`) has no single name to attach a symbol to, so it's skipped rather than guessed at.
-- If the declared value is an arrow function or function expression, the symbol is recorded as `SymbolKind::Callable` with a signature built from the function's parameter list and return type (via `signature_text`), taking the function's body separately so the signature text doesn't include it.
-- Otherwise it's a plain value, recorded as `SymbolKind::Value`, whose signature is just `const <name>` plus its type annotation if one is present (e.g. `const PI: number`) — deliberately *not* including the literal value. This is what lets `interface_hash` (the hash used to decide whether a change to this symbol should ripple out to anything that references it — see `GLOSSARY.md`) ignore a value-only edit like changing `3.14` to `3.14159` while still catching a type change.
+Names: a plain identifier is one name. A destructuring pattern (`const { a, b } = ...` or `const [a, b] = ...`) binds several names at once, and each becomes its own symbol, because the name is what an importer asks for: `export const { auth } = NextAuth(...)` is imported as `auth`, never as the pattern.
 
-`interface_hash` itself is only set (`Some`) when the declaration is exported (`is_exported`, true when the enclosing node is an `export_statement`) — an unexported const can never be referenced from another file, so there's nothing for a hash-based staleness check to protect there. Each resulting `ExtractedSymbol` also carries its own `source_hash` (hashing the full declarator text, body included), line span, and any leading doc comment.
+For each name it picks a kind. If the declarator's value is an arrow function or a function expression, the symbol is a callable with raw kind `function`, and its signature is `const name = ` followed by the text up to the function body. Anything else is a value with raw kind `const`, and its signature is `const name` followed by the declared type annotation, if there is one, such as `const PI: number`. The literal value is deliberately not part of the signature, so a value-only edit leaves the public-surface hash alone while a type change moves it. For a destructured name the type annotation is ignored, because it types the whole pattern and not that one name, and the value is not inspected, so such names are plain values.
+
+Each symbol has the id `<file>::<name>`. Whether it is exported comes from `is_declaration_exported`. `source_hash` hashes the declarator text, and `interface_hash`, present only when exported, hashes the signature. It also records the line range and the doc comment before the statement, and no markers or children. It appends to `out` and returns nothing.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 - `src/symbol.rs::SymbolKind` — crate::symbol
+- externals: std, tree_sitter
+
+## `bound_names`
+`fn bound_names(pattern: Node) -> Vec<Node>`
+### Summary
+Lists the names a destructuring pattern creates, in source order. For `const { a, b: c, d = 1, e: { f }, ...g } = x` the names are `a`, `c`, `d`, `f` and `g`, and for `[x, , y, ...z]` they are `x`, `y` and `z`.
+### Behavior
+Starts with an empty list and fills it by walking the pattern with `collect_bound_names`, then returns the identifier nodes found. Only what the pattern binds counts. A property key such as `b` in `b: c` does not, because it is a field being read and not a new name, and neither does a default value such as the `1` in `d = 1`. Nested patterns are entered, and a rest element is included. Skipped positions in an array pattern bind nothing. It exists so that a constant declared by destructuring is recorded under each real name an importer could use. The returned nodes borrow from the syntax tree, so they must be used before the tree is dropped. It cannot fail.
+### Depends on
+- externals: tree_sitter
+
+## `collect_bound_names`
+`fn collect_bound_names<'a>(node: Node<'a>, names: &mut Vec<Node<'a>>)`
+### Summary
+The walk behind `bound_names`: it goes through a destructuring pattern and collects the identifier nodes that become new variable names, ignoring keys, defaults and comments.
+### Behavior
+Recursive, deciding by the kind of node it is given:
+- An identifier, or a shorthand property in an object pattern (`{ a }`), is a name and is added.
+- A `key: pattern` pair binds whatever its value side binds, so it recurses into the value and ignores the key.
+- A pattern with a default (`name = default`) binds whatever its left side binds, and the default is an expression, not a binding, so it is not entered.
+- A comment is skipped.
+- Any other node, such as an object pattern, array pattern, nested pattern or rest element, recurses into its named children in order.
+
+Names are therefore pushed in source order. The nodes added borrow from the syntax tree. It appends to the provided list and returns nothing.
+### Depends on
 - externals: tree_sitter
 
 ## `signature_text`

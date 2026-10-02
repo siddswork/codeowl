@@ -42,7 +42,7 @@ already made in `REQUIREMENTS.md`:
 
 | # | Parameter | Definition (what a 5 means) | Stance | KPIs |
 |---|---|---|---|---|
-| P1 | Verifiable freshness | A reader can tell mechanically, per section, whether a doc still matches the code, and what changed | defend | K1, K2, K3 |
+| P1 | Verifiable freshness | A reader can tell mechanically, per section, whether a doc still matches the code, and what changed | defend | K1a, K1b, K2, K3 |
 | P2 | Measured accuracy | Doc quality is measured on a public benchmark or a repeatable human check, not asserted | pursue | K4, K5 |
 | P3 | Language breadth | Works on any mainstream language and on polyglot repos | pursue | K6 |
 | P4 | Cross-cutting flows | Features that cross files and layers (UI → API → DB) are described from real edges, not guessed | defend | K6 |
@@ -118,7 +118,9 @@ see the table below). "?" means not enough information to score.
 | Vendor claims, not independently verified | Swimm: 2,000+ teams, Team plan $11/user/month ([toolradar](https://toolradar.com/tools/swimm/calculator)). DeepWiki: 50k+ public repos pre-indexed ([guide](https://codersera.com/blog/deepwiki-complete-guide-2026/amp/)). Augment: Context Engine as MCP, "+70 %" agent performance ([blog](https://www.augmentcode.com/blog/context-engine-mcp-now-live)). |
 
 No benchmark found measures whether generated docs *stay* correct as code
-changes. K1 is designed to be that number.
+changes. K1a is designed to be the deterministic half of that number
+(dependency tracking, checked against a compiler); K1b, whether the prose
+itself is still true, needs a judge and comes later.
 
 Product references: [DeepWiki](https://codersera.com/blog/deepwiki-complete-guide-2026/amp/),
 [Google Code Wiki](https://infoq.com/news/2025/11/google-code-wiki/),
@@ -136,7 +138,8 @@ tooling that does not exist yet. A baseline is never guessed.
 
 | KPI | Parameter | Metric | Method | Baseline | Target |
 |---|---|---|---|---|---|
-| **K1** Staleness recall / precision | P1 | Of the specs that *should* go stale at a commit, the fraction that do (recall); of those that do, the fraction that should (precision) | Replay a reference repo's git history: generate specs at commit N, step through later commits, compare CodeOwl's stale set with a ground truth (an LLM-or-human judgment of whether each spec's claims still hold). Needs a harness | unmeasured | recall ≥ 95 %, precision ≥ 80 % |
+| **K1a** Dependency-tracking recall / precision | P1 | When an interface changes, the fraction of the files that truly depend on it that CodeOwl marks stale (recall), and the fraction of the files it marks stale that truly depend on it (precision). Measures *dependency tracking*, not prose correctness: a body-only change breaks nothing and correctly stales no dependent, yet a caller's prose may still be wrong | Fully deterministic, no LLM and no judgment. Replay a reference repo's commits (or apply scripted mutations: a signature change, a rename, a body-only edit, a dependency's interface change) and take as ground truth the files a compiler or type-checker rejects afterwards (`cargo check`, `tsc`, `javac`, `mypy`), which is independent of CodeOwl's own hashes. Dynamic edges (`fetch("/api/x")`, `.from("table")`, `@Incoming`) break no compile and need hand-written expected edges per fixture, or stay unmeasured. Needs a harness; Rust first, on CodeOwl's own history | unmeasured | recall ≥ 95 %, precision ≥ 80 % |
+| **K1b** Prose-truth recall | P1 | Of the specs whose *claims* a commit made false, the fraction CodeOwl flags stale | Needs a judgment of whether each spec's claims still hold: an LLM judge audited by a human on a sample. Not reproducible and costs tokens per run, hence separate from K1a. Deferred until K1a exists | unmeasured | none until a method exists |
 | **K2** Unresolved imports | P1 | Per stack, the fraction of imports that point at a walked file but resolve to no symbol | Extend `examples/graph_stats.rs`: count unresolved imports whose path suffix-matches a walked file | TypeScript (`talentTrail`): 141 / 858 = 16.4 %. Java (`commons-lang`, `quarkus-super-heroes`), Python: 0 real misses. Rust: not yet counted this way | < 2 % on every stack |
 | **K3** False isolated files | P1 | Files with no import edges in or out that do import, or are imported | `examples/graph_stats.rs` on the reference repos, then check each isolated file by hand | CodeOwl: 0 isolated (was 12 before the crate-root fix). `ripgrep`: 54 file edges, stable across runs | 0 on every reference repo |
 | **K4** Benchmark doc quality | P2 | CodeWikiBench overall score of CodeOwl's generated corpus | Generate the corpus for CodeWikiBench repos in a supported stack, run its rubric evaluation | unmeasured | ≥ 64 % (DeepWiki's published score) |
@@ -163,6 +166,11 @@ earlier row; a wrong row gets a correcting row below it.
 | 2026-10-02 | K5 | 3 current / 20 stale / 1 missing; freshness 13 %, weighted 5 % | `4f72f1f` | `get_spec_coverage`, scope `src` |
 | 2026-10-02 | K6 | 4 stacks, 3 feature models, no polyglot | `4f72f1f` | Count of implementations |
 | 2026-10-02 | K10 | 0 external users, 2 stars | `4f72f1f` | GitHub |
+| 2026-10-02 | K5 | Whole repo (`src`, `examples`, `tests`) before regeneration: 3 current / 21 stale / 13 missing of 37 documents; coverage 64.9 %, freshness 12.5 %, weighted freshness 5.2 %; 359 generate cycles needed. The earlier K5 row covers `src` only | `3edb52e` | `get_spec_coverage`, no scope |
+| 2026-10-02 | K5 | Whole repo after a full `/codeowl-generate --all`: **37 current / 0 stale / 0 missing; coverage 100 %, freshness 100 %, weighted freshness 100 %; 0 orphaned; 1 smelly** (`tests/quarkus_spec.rs`, `identical_dependencies_across_symbols`: every test there depends only on `RepoIndex`, judged a false positive of that check) | `adbfdf2` | `get_spec_coverage`, no scope |
+| 2026-10-02 | K5 | Cost of that run: 359 generate cycles, roughly 540k tokens in total (about 1.5k per cycle, including the coverage reports and file reads); 1 submission rejected by the quality check (a "see the source" phrase) out of about 365; about 25 file tasks hit the generation-task size cap, so those file summaries were written from symbol specs and a partial read; 2 of my own submissions were corrected afterwards for a claim the source did not support | `adbfdf2` | Counted during the run; the token figure is the difference in the session token counter, the cap count is approximate |
+| 2026-10-02 | K5 | Why the 18 stale `src` files (other than `spec.rs`, whose cause was lost) were stale before regeneration, file level: dependencies only 6, source only 2, both 10. Dependencies moved in 16 of 18. The file-level `changed` field does not say which dependency moved, so this does not separate a real shape change from over-staleness | `3edb52e` | `get_spec` `changed` per file, captured before regeneration |
+| 2026-10-02 | K1b | 7 doc comments or tool descriptions found contradicting the code while writing specs (for example `is_test_path` says it strips a prefix and does not; the `get_callees` tool description says types are not extracted, which has been false since the type-symbol change; `RepoWatcher` is said to stop on drop and does not). Found by reading, not by a judge | `adbfdf2` | Counted by hand during generation; a lower bound |
 
 ## 6. Re-scoring
 

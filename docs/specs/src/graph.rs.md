@@ -1,31 +1,29 @@
 ---
 kind: file
 source_paths: [src/graph.rs]
-file: { source_hash: 2dd78982dd0e6b18b620c29aa03aa0451e50adf16884c1a4e7462e1849a59504, deps_hash: 68bd5c6fdb871e097e8f32c4104ee86cf82fa1357ba42fe4f09949114805ab3f, spec_hash: d87ce3d9b4ca17796c36b9cd14484f662ab8103cc16711f657d15296bdcfbd16 }
+file: { source_hash: aa44aad6912940cc833c7c22d9d9d39764fd37c59d0f111e718daa84f610f93d, deps_hash: f9e7491287964d290209f3b34d9e5861fdc7d443ab6cb4b2a2bd78da2a4229d0, spec_hash: 443634927035e90e48251eaf358f999aaa147e8cb21657ccb39b0a96462fdd96 }
 symbols:
-  src/graph.rs::SymbolView: { source_hash: ca3259f0c9f3c6641e2a79400cc56590870eabe278c316c5c6f01767376629b5, deps_hash: b83160b92c2fec79f3d97a822ad50ca9a2484bae2a019246166efc86c573959c, spec_hash: beba6f15b9ac1762f07aa71a52346bfef92032462eda50e9bdc0f71561d38a0a }
-  src/graph.rs::FileNode: { source_hash: 1cb0e932df0ba6250e1e2f9a72576a667d908f5f70ebeb405ae82f825d777545, deps_hash: 6bfd686bea3a7eadb25bb4b6dadfaf6a93bea0e28872854d90268fc7b7daf993, spec_hash: 877ca36ce0292b88e271e61bdae192c78b9d8e062aba84a528cb27730c228825 }
-  src/graph.rs::Node: { source_hash: d54a33462ad83d4a30a907cbd652600809f5bb2bbda1968951e52c3e967f45c5, deps_hash: 3f020ad9a958ab8d579a2087acfde4debe848a98ea126621dd23f3e3f3927e1e, spec_hash: 6b6bdd1226e3cbde9b515bd93512390bb2308facecff20d925ea2eb50d470306 }
-  src/graph.rs::FileExtraction: { source_hash: ed79c4363575bcf427c97838ad5d310bf8e2724ed086fa6baaed390d8dbcf84c, deps_hash: 57b36ccf02abf241d59cf027b8af996e4e37cdf048813be00047a453efba7ce6, spec_hash: 1e80f3f5183e512702c2b4dfd716f9d7beba47a5bd9e627eaa1c142c63ef08c6 }
-  src/graph.rs::extract_and_hash: { source_hash: 90b73a4ee99da81bd1bf071b59a555179cedb73e224d9146186258778cd78f72, deps_hash: d7da40bd5b91baea3db803ad745a18c4adf9c2308a97b126dd894920bb84e365, spec_hash: ca69d203ed27f2cbe8c29e1be937dcfaaca88cc0686d9b93907d6f5ef1bdc4a5 }
+  src/graph.rs::SymbolView: { source_hash: ca3259f0c9f3c6641e2a79400cc56590870eabe278c316c5c6f01767376629b5, deps_hash: 75e597a386580b65084ca8f765b6795ac8743e4e1000eb34c14097f75222d25f, spec_hash: 0f2eca31bca89dd5b16a12aadfde121b04ecf9f2762c481331c1dbef1ec340f7 }
+  src/graph.rs::FileNode: { source_hash: 1cb0e932df0ba6250e1e2f9a72576a667d908f5f70ebeb405ae82f825d777545, deps_hash: d6f92d466688b754b386494c91e0b98c53e59b4ac03c775d21b69d67284b0b70, spec_hash: 441ac9483212e12f7eac5c49c7132b054d0cd191abf6af252252bc679cec8974 }
+  src/graph.rs::Node: { source_hash: d54a33462ad83d4a30a907cbd652600809f5bb2bbda1968951e52c3e967f45c5, deps_hash: 34a95995527dc5f673d09639b70c27217984732249263b23f878b003a1bf1598, spec_hash: aa4c78080483245326dcb447f34ea9c3f549720e25bb03fa5989daa5a232733b }
+  src/graph.rs::FileExtraction: { source_hash: ed79c4363575bcf427c97838ad5d310bf8e2724ed086fa6baaed390d8dbcf84c, deps_hash: 2f2d813cb41bd73f13411f197c03a6eeb3990c05207868c8d2422e2775913c15, spec_hash: 269dd7feb7865c625e2ede32fbd4885d8c0dc7d7b133374f188435534d111d94 }
+  src/graph.rs::extract_and_hash: { source_hash: 90b73a4ee99da81bd1bf071b59a555179cedb73e224d9146186258778cd78f72, deps_hash: dea75763eb06a70a4b24fa5e633ae7315ae0b2349ee4246fbb0ec52edb4dc9af, spec_hash: 643963be19a0907607eebde105c58aba43ea9e31b0c0b6d52a58ca56c9903f1a }
   src/graph.rs::FlowEdge: { source_hash: 8303f3f670978cf87fcfda541c910676baa4e577f2929431a880fe0c41551c36, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: d7756de2ae6c9cf6f564e63f12ce6a4b80f68f70018f3c8f6069cb1c3cd591d9 }
-  src/graph.rs::FlowTarget: { source_hash: 181f53cda8573f83b630a41747ca62f48694931c538e4c8e6f762ca4845088dc, deps_hash: ac583dfc44b8c03e1d77dc3191f47c59b6bb6a7b182fa0031e169bb47d564290, spec_hash: b2752135ad033bc9d3fef9a4115ce5e76bcee552b14e69d9521f90bb745de560 }
+  src/graph.rs::FlowTarget: { source_hash: 181f53cda8573f83b630a41747ca62f48694931c538e4c8e6f762ca4845088dc, deps_hash: 2c612d8ff3471f6990442eae121f91802b45c305137b9b48b06f2d44bc45a54c, spec_hash: 8799b33e1b7d587396d3e8f615fd180322cb8cd8c0fdf4692cb468d750a76ef3 }
   src/graph.rs::UnresolvedFlowEdge: { source_hash: 247d5a418c02e679b95f2a79f6b153fbe044257e740deca6380e82514abcb422, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1b08108bf64809c00a1e59025885a05382ab85ded5b10172af966abafa84f9fe }
-  src/graph.rs::Graph: { source_hash: 7abe8b3fd08b27724d4368093b04567ce9e68d6391d3f510179b4e9c533208ba, deps_hash: a9a1e579a0271250d774cce7b96ef742a85f88d6d15abff09c545cfc85e411cd, spec_hash: 72a25844b9a6d031c4b284d678211b6bc00a60c0fcf61d6954d72db101bcfa5b }
+  src/graph.rs::Graph: { source_hash: 481901ceff94a9240895681ab2d2dbd6fb74548c595980d2f08a9140eb769a75, deps_hash: 1363fd8e5ec54006f0090e49de57e85db19100cd42d3aa0580838e4897b516ec, spec_hash: 3113e6ab5d0b24ba9721b273635f7b06cbf9d42dae06f8d514edf4423c7e27b6 }
   src/graph.rs::build_graph_from_sources: { source_hash: dd5e3e0c36327ad645a76af4a2c9fd5bb8cbe4f36f51ed9217dc8a15a1d80028, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 55df20b1897ceed56015a0ace1c249b8db22646e47caf5beeb18422d4b6caa47 }
 ---
 # src/graph.rs
 ## Summary
-This file defines CodeOwl's graph — the arena (one flat list holding every node, referenced by position rather than by pointer) that turns per-file extraction output into something indexable and cross-referenceable. `extract.rs` only ever sees one file at a time and produces symbols with plain string containment; `Graph::build` is the one place that turns a whole repo's worth of those files into the real arena, assigning every file and every declaration a stable `SymbolId` and resolving all containment (parent/children) and cross-file references (imports, and the extra "flow edges" a pack finds beyond plain imports, like a `fetch("/api/…")` or a `.from("table")` query) against it. `SymbolView` is the external-safe copy of a declaration used whenever one needs to cross the process boundary — an MCP response, a spec's frontmatter — since a `SymbolId` itself is only meaningful within the graph that produced it. The graph also persists itself as plain JSON to `.codeowl/graph`, and every other module in this codebase reads its data through this file's lookup functions rather than walking the arena directly.
+This file defines CodeOwl's graph: the arena (one flat list holding every node, referenced by position rather than by pointer) that turns per-file extraction output into something indexable and cross-referenceable. Extraction only ever sees one file at a time and produces declarations whose links are plain text. `Graph::build` is the one place that turns a whole repo's worth of those into the real arena. It gives every file and every declaration a position, and resolves containment (a declaration's parent and children) against it. Imports, and the extra "flow edges" a language pack finds beyond plain imports, such as a `fetch("/api/...")` call or a `.from("table")` query, are attached afterwards, since resolving them needs the built graph. `SymbolView` is the safe copy of a declaration to hand outside the process (an MCP reply, `codeowl extract` output), because the internal arena position only means something inside the graph that produced it. The graph saves itself as plain JSON to `.codeowl/graph`, stamped with a format version so a cache from older logic is discarded and rebuilt rather than trusted. Nearly every other module reads its data through the lookup functions here rather than walking the arena directly.
 
 ## `SymbolView`
 `pub struct SymbolView`
 ### Summary
-The "safe to hand outside this process" version of a `Symbol` — same information, but with every internal `SymbolId` translated back to a stable string id first. It's what an MCP response, `codeowl extract`'s JSON output, or a spec file's frontmatter actually serializes.
+A copy of a symbol that is safe to hand outside the program, such as in an MCP reply, `codeowl extract` output or spec files. Its links to the parent and children are stable text names instead of internal numbers.
 ### Behavior
-`SymbolView` mirrors `Symbol` field-for-field, except `parent`/`children` are `String`/`Vec<String>` instead of `SymbolId`/`Vec<SymbolId>`. That substitution exists because a `SymbolId` is only a valid pointer within the specific `Graph` that produced it (see its own spec) — it must never leak into output a caller might hold onto after this process exits, since the next run's graph could assign that same numeric id to a completely different node.
-
-`from_graph(graph, id)` builds one: it looks the symbol up by `SymbolId`, returns `None` if that id doesn't resolve in this graph, and otherwise clones every plain field across as-is while converting `parent`'s `SymbolId` (and each entry in `children`) to its string id via `graph.string_id(...)`. Every place a `Symbol` needs to cross the process boundary should build a `SymbolView` this way rather than serializing a `Symbol` directly.
+Carries the same fields as `Symbol` (id, kind, raw kind, file, lines, signature, docstring, export flag, both hashes, markers) but with `parent` and `children` as string ids. The internal `SymbolId` is only valid for the graph that produced it, so it must never appear in output someone might keep past this process. It leaves out `extra_spans`, which is internal to dependency scanning. `SymbolView::from_graph(graph, id)` builds one: it returns `None` if the id is not a symbol (a file node, say), otherwise clones the fields and translates the parent and each child through `graph.string_id`. Any place a symbol crosses the process boundary should build one of these and never serialise a `Symbol` directly.
 ### Depends on
 - `src/symbol.rs::SymbolKind` — crate::symbol
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -33,11 +31,9 @@ The "safe to hand outside this process" version of a `Symbol` — same informati
 ## `FileNode`
 `pub struct FileNode`
 ### Summary
-A file's own entry in the graph's arena (the one flat list holding every node) — sitting alongside `Symbol` nodes, so a file can be pointed at by `SymbolId` and hold `children` just like any other container.
+A source file's own entry in the graph, holding its path, a fingerprint of its full text, and the list of its top-level declarations.
 ### Behavior
-`id` is the file's repo-relative path, using the same string scheme `Symbol::file` uses. `children` lists the file's top-level symbols, in declaration order, by `SymbolId`.
-
-`source_hash` is a hash of the file's *raw text*, not a Merkle-style rollup of its children's hashes the way a class folds in its methods. That's deliberate: a file's spec-relevant content — its imports, type annotations, comments outside any symbol's span — isn't fully captured by its declared symbols alone, and hashing the whole file's text is both simpler and strictly more sensitive to change than trying to reconstruct that from the children.
+`id` is the repo-relative path, the same naming `Symbol::file` uses. `source_hash` hashes the file's raw text as a whole, not a roll-up of its declarations' hashes the way a class's hash folds in its methods. A file's content that matters for a spec, such as imports, comments and type-only lines, is not fully captured by its declared symbols, and a whole-file hash is simpler and strictly more sensitive to change. `children` lists the file's top-level symbols in declaration order, as arena ids. Plain data, no logic.
 ### Depends on
 - `src/symbol.rs::Symbol` — crate::symbol
 - `src/symbol.rs::SymbolId` — crate::symbol
@@ -45,31 +41,31 @@ A file's own entry in the graph's arena (the one flat list holding every node) �
 ## `Node`
 `pub enum Node`
 ### Summary
-One entry in the graph's arena — the two-way union of everything the containment tree can hold: either a declaration (`Symbol`) or a file (`FileNode`).
+One entry in the graph's arena, which is either a declaration (`Symbol`) or a whole source file (`FileNode`). Files and declarations live in the same list so containment links can point at either.
 ### Behavior
-`Node` is a plain enum over the two possibilities. `Graph::build` is the only place `Node` values get constructed, when it assembles the arena from a repo's extracted files; everything else reads them back out through `get_symbol`/`get_file` (which unwrap to the specific variant) or the more general `get`, used when the caller genuinely doesn't care which kind it is — hashing code that just needs *a* node's `source_hash`, for instance.
-
-`string_id()` returns the node's stable string id regardless of variant — `Symbol::id` for a `Symbol`, `FileNode::id` for a file — so code that only needs the id (not the rest of the node) doesn't have to match on the variant itself.
+Two variants: `Node::Symbol(Symbol)` and `Node::File(FileNode)`. Only `Graph::build` creates them; everything else reads them back through `get_symbol` or `get_file`, which return an `Option` for the expected kind, or through `get` when the kind does not matter, for example when hashing. A private helper `string_id` returns the text id of either variant (the symbol's id or the file's path), so the graph can keep one lookup table from text id to arena position over both kinds. It has no failure mode.
 ### Depends on
 - `src/symbol.rs::Symbol` — crate::symbol
 
 ## `FileExtraction`
 `pub struct FileExtraction`
 ### Summary
-The result of walking one file, before that file becomes part of the graph — everything `Graph::build` needs to turn it into a `FileNode` plus its `Symbol` children.
+The result of parsing one file: its path, a fingerprint of its text, and the declarations found in it. It is the per-file input from which the graph is built.
 ### Behavior
-`rel_path` is the file's repo-relative path. `source_hash` is a hash of the file's raw text, computed once here rather than re-read later — it becomes the resulting `FileNode`'s own `source_hash` unchanged. `symbols` holds every top-level declaration a pack's extractor found in the file, still in `ExtractedSymbol` form (string-based containment, no `SymbolId` yet, since there's no arena to assign positions from at this stage). `Graph::build` consumes one `FileExtraction` per file to produce that file's `FileNode` and resolve its symbols into real arena `Symbol`s.
+Holds `rel_path` (the repo-relative path), `source_hash` (a hash of the file's raw text) and `symbols` (a list of `ExtractedSymbol`, whose links are still plain text). `Graph::build` takes a list of these for the whole repo and turns each into a file node and symbol nodes in the arena. Nothing here depends on other files, which is what lets extraction run per file and be cached per file. Plain data, no logic.
 ### Depends on
 - `src/symbol.rs::ExtractedSymbol` — crate::symbol
 
 ## `extract_and_hash`
 `pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction`
 ### Summary
-A test-only helper that reads a single file's source text and produces both its extracted symbols (the functions, classes, tables, etc. CodeOwl found in it) and a content hash in one call, so test fixtures don't have to do those two steps separately.
+A shortcut for tests: given a file's path and text, it parses the file and fingerprints it in one call, returning the per-file result the graph builder takes.
 ### Behavior
-Dispatches purely on file extension: a `.sql` path goes through `schema::extract_tables` (pulls out `CREATE TABLE` definitions), anything else goes through `lang::extract_symbols`, which only knows TypeScript/TSX and SQL — not the language-specific `StackPack` extractors used in production (Rust, Python, Java). That makes this fine for TS/SQL fixtures but wrong to reach for when testing another language's extraction. Returns a `FileExtraction` bundling the relative path, a hash of the raw source text (via `hash_text`), and the extracted symbol list. Real extraction in the running server goes through `RepoIndex::build`, which calls the detected stack's own `pack.extract_symbols` instead of this function.
+If the path ends in `.sql` it extracts tables with `schema::extract_tables`, otherwise it extracts declarations with the TypeScript extractor `lang::extract_symbols`. It then builds a `FileExtraction` with the path, a hash of the source text via `hash_text`, and the symbols. It is for test fixtures only: it always uses the TypeScript and SQL rules, not whichever language pack the repo was detected as, so it produces nothing useful for Rust, Java or Python text. Real extraction goes through `RepoIndex::build` and the detected pack. It cannot fail.
 ### Depends on
 - `src/hash.rs::hash_text` — crate::hash
+- `src/schema.rs::extract_tables` — crate::schema
+- `src/lang.rs::extract_symbols` — crate::lang
 
 ## `FlowEdge`
 `pub struct FlowEdge`
@@ -85,9 +81,9 @@ This struct replaces three separate ad hoc fields an earlier version of the extr
 ## `FlowTarget`
 `pub enum FlowTarget`
 ### Summary
-Where a resolved `FlowEdge` points: `Node(SymbolId)` for an edge that landed on an arena node (a file, or a schema table symbol), or `Unresolved` for a raw string that matched nothing.
+Says where a flow edge ends up: at a real node in the graph, or nowhere, when the text it named could not be matched to anything.
 ### Behavior
-An `Unresolved` edge is still meaningful — it counts as "this file does data work" for the feature model's `core` admission — it just has no destination to traverse. A `Copy` enum stored inline on each `FlowEdge`.
+Two variants. `Node(SymbolId)` means the edge resolved to a file or a schema (table) symbol. `Unresolved` means the raw string matched nothing, for example an external URL, a database view, a path built at runtime, or a typo. An unresolved edge is still kept, because it records that this file does data or network work; it just has no destination to follow. Plain data, no logic.
 ### Depends on
 - `src/symbol.rs::SymbolId` — crate::symbol
 
@@ -103,19 +99,23 @@ A `FlowEdge` before it's been resolved to a target — just the raw text a pack 
 ## `Graph`
 `pub struct Graph`
 ### Summary
-The whole codebase, once extracted: every file and every declaration inside it, held in one flat arena (a single list every node lives in, referenced by position rather than by pointer — see `SymbolId`) plus the cross-file connections between them (imports, and the extra "flow edges" a pack finds beyond plain imports). This is the thing CodeOwl builds once per repo and persists to `.codeowl/graph`, and almost every other module reads from it.
+The whole-repo index: every file and every declaration in one flat list (the arena), plus the links between files. Almost every other part of CodeOwl asks this type questions such as "what does this id point to", "what does this file import" and "which files touch this table".
 ### Behavior
-**Building.** `Graph::build(files)` takes every file's `FileExtraction` and produces a `Graph` in two passes: first it reserves one arena slot per node (a file, then each of its symbols, in declaration order) so every string id has a `SymbolId` to resolve to; then it builds the actual nodes, since any node's `parent`/`children` may need to reference another node that didn't have a slot yet on a single pass. `pack_name`/`set_pack_name` stamp which `StackPack` built this graph (e.g. `"typescript-next"`, `"rust"`) so a later read-only caller can recover the right pack for classification or feature-model logic without threading it through every function call; an empty `pack_name` (a test helper, or a cache from before this field existed) falls back to the TypeScript pack. `format_version` is a version stamp checked on `load` — a mismatch means the cache's shape is out of date and must be rebuilt, never trusted as-is.
+Contents: the arena of nodes (files and symbols), a map from text id to arena position, the resolved file-to-file import edges, pack-specific flow edges (a `fetch("/api/..")` call or a `.from("table")` query), resolved default imports (needed so a rendered `<Component/>` can be traced back to its file), the name of the language pack that built it, and a format version stamp. The id map is a sorted `BTreeMap` rather than a hash map so the saved cache is byte-for-byte identical between identical runs.
 
-**Cross-file edges.** Two kinds of file-to-file connection live here, both computed once at build time and persisted alongside the graph, since resolving either needs the graph to already exist: `imports` (plain `import`/`require` resolution — see `resolve.rs`) and `flow_edges` (the connections a structural import graph can't see at all — a `fetch("/api/…")`, a `.from("table")` query, a rendered `<Component/>` — see `FlowEdge`). `resolved_default_imports` is one more narrow, pack-specific piece of import-resolution plumbing: default imports (`import Name from './x'`) resolved to their target file, needed specifically because a React component is usually default-exported, so the ordinary named-import list can't resolve a `<Component/>` reference on its own.
+Building: `build(files)` works in two passes. The first reserves one slot per file and one per symbol, so every text id has a position to resolve to. The second builds the real nodes now that any node may refer to any other, turning every text parent and child link into an arena id, including each top-level symbol's membership in its file. Imports, flow edges and default imports start empty and are filled in later through the `set_` methods, because resolving them needs the built graph to look symbols up in.
 
-**Looking things up.** `get`/`get_symbol`/`get_file` fetch a node by its `SymbolId`, the latter two narrowing to one variant. `find` does the reverse — look up a node by its stable string id (`"<file>::<name>"`, or a bare path for a file). `string_id` translates a `SymbolId` back to that same stable string, which is how internal ids get made safe to hand to an external caller (a `SymbolId` is only valid within the `Graph` that produced it, and must never leak past this process — see its own spec). `parent_id`/`children_ids` walk the containment tree; only symbols carry a parent for now, since directory nodes don't exist yet. `owning_file_id` finds which file a node's source lives in — itself, for a file, or its `file` field, for a symbol — which any handler accepting "a symbol id or a bare file id" (`get_source`, `get_callees`) needs before doing anything specific to one kind. `file_role` looks up a repo-relative path's role (e.g. ordinary source vs. build-generated) under this graph's active pack — a lookup shared between `spec.rs`'s classification and `quarkus.rs`'s entry-point enumeration, so both stay in sync rather than each re-deriving it. `table_callers` answers "what app code touches this database table": every `(file, table-name)` pair whose flow edge resolved to the given schema table, surfaced through `get_callers`.
+Lookups: `get`, `get_symbol` and `get_file` return a node (the last two return `None` for the wrong kind). `find` turns a text id into an arena id, and `string_id` does the reverse; the arena id must never be handed outside the process. `parent_id`, `children_ids` and `owning_file_id` give containment, `symbols()` and `files()` iterate, and `file_role(path)` classifies a path under the current pack, which spec code and the Quarkus feature code both need. `table_callers` lists the files whose `.from("table")` query resolved to a given table. `pack_name` returns the pack that built the graph, where an empty name means the TypeScript pack, as for graphs built by test helpers or very old caches.
 
-**Persistence.** `save`/`load` write and read the whole arena as plain JSON at a given path (`.codeowl/graph` in the target repo). JSON rather than a binary format like bincode is a deliberate simplicity/inspectability tradeoff — being able to `cat`/`jq` the cache while working on this repo matters more than raw serialization speed at this scale.
+Persistence: `save` writes the arena as plain JSON (readable with `cat` or `jq`, which was judged worth more than a smaller binary format at this scale) and `load` reads it back. A cache written without a version stamp reads as version 0, which never equals the current one, so `load` rejects it and forces a rebuild. `save` and `load` return errors on file or parse failures.
 ### Depends on
 - `src/resolve.rs::ResolvedImport` — crate::resolve
 - `src/symbol.rs::Symbol` — crate::symbol
+- `src/symbol.rs::SymbolKind` — crate::symbol
 - `src/symbol.rs::SymbolId` — crate::symbol
+- `src/resolve.rs::ResolvedDefaultImport` — crate::resolve
+- `src/lang.rs::FileRole` — crate::lang
+- `src/stack.rs::for_name` — crate::stack
 - externals: anyhow, std
 
 ## `build_graph_from_sources`
