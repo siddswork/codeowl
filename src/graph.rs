@@ -231,8 +231,13 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// (Rust import resolution: `crate::` is the root of the file's own crate,
 /// and a `use` naming a library crate in the repo resolves into it, read
 /// from `Cargo.toml` — open question 20. No shape change, but it moves
-/// which imports resolve, so a cache built before it is stale).
-pub const FORMAT_VERSION: u32 = 18;
+/// which imports resolve, so a cache built before it is stale). 19 = TypeScript
+/// type-level symbols (open question 21: `interface`, `type` and `enum`
+/// declarations and each name bound by a destructured `const` now extract as
+/// `Value` symbols, and same-id top-level declarations fold into one. No
+/// shape change, but imports of those names now resolve, so a cache built
+/// before it keeps every one edge-less).
+pub const FORMAT_VERSION: u32 = 19;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

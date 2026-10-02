@@ -14,6 +14,8 @@
 //! generation only recurses containment edges between *symbols*, not every
 //! syntax node.
 
+use std::collections::HashMap;
+
 use tree_sitter::Node;
 
 use crate::hash::hash_text;
@@ -43,7 +45,16 @@ pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
     for child in root.children(&mut cursor) {
         visit_top_level(child, source, rel_path, &mut out);
     }
-    out
+    let mut folded = fold_same_id(out);
+    // A type declaration computes its `interface_hash` whether or not it is
+    // exported, so that `fold_same_id` can combine a private half with an
+    // exported one (see there). Only an exported symbol keeps it.
+    for sym in &mut folded {
+        if !sym.is_exported {
+            sym.interface_hash = None;
+        }
+    }
+    folded
 }
 
 /// Handle one direct child of `program`: unwrap an `export` wrapper if
@@ -73,8 +84,157 @@ fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<Extracted
         "function_declaration" => visit_function(decl, node, source, file, out),
         "class_declaration" => visit_class(decl, node, source, file, out),
         "lexical_declaration" => visit_lexical(decl, node, source, file, out),
+        // Type-level declarations. They carry no runtime behavior, but an
+        // importer depends on their shape exactly as it does on a
+        // function's signature -- without a symbol here, `import { User }`
+        // resolved to nothing and a change to `User` never staled anyone.
+        "type_alias_declaration" => visit_type_decl(decl, node, "type", source, file, out),
+        "interface_declaration" => visit_type_decl(decl, node, "interface", source, file, out),
+        "enum_declaration" => visit_type_decl(decl, node, "enum", source, file, out),
         _ => {}
     }
+}
+
+/// One `type X = …` / `interface X {…}` / `enum X {…}` as a single `Value`
+/// symbol -- a leaf, like a plain `const`, so it is an import target with an
+/// `interface_hash` but gets no spec section of its own (spec-bearing is
+/// `Callable`/`Container` only).
+///
+/// Unlike a function, whose contract is its signature and not its body, a
+/// type's contract *is* its body: add, rename or retype a member and an
+/// importer can break. So `interface_hash` covers the whole declaration,
+/// as its tokens (see `declaration_tokens`: no comments, no formatting),
+/// while `signature` stays the short header (`interface User`) that
+/// `get_symbol` shows.
+fn visit_type_decl(
+    decl: Node,
+    outer: Node,
+    raw: &str,
+    source: &str,
+    file: &str,
+    out: &mut Vec<ExtractedSymbol>,
+) {
+    let Some(name_node) = decl.child_by_field_name("name") else {
+        return;
+    };
+    let name = text(name_node, source);
+    // The header is everything before the body: `interface User extends
+    // Base` stops at the `{`. A type alias has no body, only a `value`
+    // after the `=`, so its header ends with its name or its type
+    // parameters (`type Box<T = {}>`) -- cut there, not at the `=`, which
+    // a comment or a `=` inside the parameters would otherwise confuse.
+    let signature = match decl.child_by_field_name("body") {
+        Some(body) => signature_text(decl, body, source),
+        None => {
+            if decl.child_by_field_name("value").is_none() {
+                return;
+            }
+            let header_end = decl
+                .child_by_field_name("type_parameters")
+                .unwrap_or(name_node)
+                .end_byte();
+            source[decl.start_byte()..header_end].to_string()
+        }
+    };
+    let is_exported = outer.kind() == "export_statement";
+    out.push(ExtractedSymbol {
+        id: format!("{file}::{name}"),
+        kind: SymbolKind::Value,
+        raw: raw.to_string(),
+        file: file.to_string(),
+        lines: node_lines(decl),
+        source_hash: hash_text(text(decl, source)),
+        // Always computed here; `extract_file` drops it for a symbol that
+        // ends up not exported.
+        interface_hash: Some(hash_text(&declaration_tokens(decl, source))),
+        signature,
+        docstring: leading_doc(outer, source),
+        is_exported,
+        markers: Vec::new(),
+        extra_spans: Vec::new(),
+        parent: None,
+        children: Vec::new(),
+    });
+}
+
+/// `node`'s tokens -- its leaf nodes' text, comments left out -- joined by
+/// single spaces. Hashing this instead of the raw text means neither a
+/// comment edit nor a reformat (indentation, line wrapping, a comment that
+/// used to sit between two tokens) moves the hash; only a change to the
+/// tokens themselves does. It works on the syntax tree, not a regex, so a
+/// `//` inside a string literal type is a token, not a comment.
+fn declaration_tokens(node: Node, source: &str) -> String {
+    let mut tokens = Vec::new();
+    collect_tokens(node, source, &mut tokens);
+    tokens.join(" ")
+}
+
+fn collect_tokens<'a>(node: Node, source: &'a str, out: &mut Vec<&'a str>) {
+    if node.kind() == "comment" {
+        return;
+    }
+    if node.child_count() == 0 {
+        let token = text(node, source);
+        if !token.is_empty() {
+            out.push(token);
+        }
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_tokens(child, source, out);
+    }
+}
+
+/// Merge top-level symbols that share an id into one.
+///
+/// TypeScript lets several declarations share a name: a `const` and a
+/// `type` (`export const Status = {…} as const; export type Status = …`),
+/// two `interface`s that merge, or an `interface` merged into a `class`.
+/// Two symbols with one id would overwrite each other in the graph's id
+/// map, so they fold -- the same move the Rust pack makes for an `impl`
+/// block. The declaration with the strongest kind (`Container`, then
+/// `Callable`, then `Value`) supplies the kind, signature and span, so a
+/// class merged with an interface stays a spec-bearing `Container`; ties go
+/// to the first. The others add their ranges to `extra_spans`, their hashes
+/// into both hashes (a private half counts: it is part of the merged type),
+/// and their children. The folded symbol is exported if any declaration is,
+/// and keeps whichever doc comment exists.
+fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
+    fn strength(kind: &SymbolKind) -> u8 {
+        match kind {
+            SymbolKind::Container => 2,
+            SymbolKind::Callable => 1,
+            SymbolKind::Value | SymbolKind::Schema => 0,
+        }
+    }
+
+    let mut folded: Vec<ExtractedSymbol> = Vec::with_capacity(symbols.len());
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for mut sym in symbols {
+        let Some(&at) = index.get(&sym.id) else {
+            index.insert(sym.id.clone(), folded.len());
+            folded.push(sym);
+            continue;
+        };
+        let first = &mut folded[at];
+        // The stronger declaration becomes the survivor; the other is
+        // folded into it below, whichever was written first.
+        if strength(&sym.kind) > strength(&first.kind) {
+            std::mem::swap(first, &mut sym);
+        }
+        first.docstring = first.docstring.take().or(sym.docstring);
+        first.source_hash = hash_text(&format!("{}\n{}", first.source_hash, sym.source_hash));
+        first.interface_hash = match (first.interface_hash.take(), sym.interface_hash) {
+            (Some(a), Some(b)) => Some(hash_text(&format!("{a}\n{b}"))),
+            (a, b) => a.or(b),
+        };
+        first.is_exported |= sym.is_exported;
+        first.extra_spans.push(sym.lines);
+        first.extra_spans.extend(sym.extra_spans);
+        first.children.extend(sym.children);
+    }
+    folded
 }
 
 fn visit_function(
@@ -270,63 +430,110 @@ fn visit_lexical(
         if declarator.kind() != "variable_declarator" {
             continue;
         }
-        // `const { a, b } = ...` / `const [a, b] = ...` destructure into
-        // patterns, not a single named symbol — skip rather than guess.
-        let Some(name_node) = declarator
-            .child_by_field_name("name")
-            .filter(|n| n.kind() == "identifier")
-        else {
+        let Some(name_node) = declarator.child_by_field_name("name") else {
             continue;
         };
-        let name = text(name_node, source);
-        let id = format!("{file}::{name}");
-        let value = declarator.child_by_field_name("value");
-
-        let (kind, raw, signature) = match value {
-            Some(v) if v.kind() == "arrow_function" || v.kind() == "function_expression" => {
-                let body = v.child_by_field_name("body").unwrap_or(v);
-                (
-                    SymbolKind::Callable,
-                    "function",
-                    format!("const {name} = {}", signature_text(v, body, source)),
-                )
-            }
-            // A plain const's "shape" is its declared type, if any — e.g.
-            // `const PI: number = 3.14` — not its literal value, which
-            // interface_hash should ignore (below) exactly like a
-            // function's body. Include the type annotation's own text
-            // (which already carries a leading ": "), so a type change is
-            // a real interface_hash change and a value-only edit isn't.
-            _ => {
-                let type_text = declarator
-                    .child_by_field_name("type")
-                    .map(|t| text(t, source))
-                    .unwrap_or("");
-                (
-                    SymbolKind::Value,
-                    "const",
-                    format!("const {name}{type_text}"),
-                )
-            }
+        // `const { a, b } = ...` / `const [a, b] = ...` bind several names
+        // at once. Each becomes its own plain `Value` (below): the names
+        // are what an importer asks for -- `export const { auth } =
+        // NextAuth(…)` is imported as `auth`, never as the pattern -- and
+        // nothing here knows each one's real type, so, like any `const`
+        // with a computed value, only its name is its interface.
+        let plain = name_node.kind() == "identifier";
+        let names = if plain {
+            vec![name_node]
+        } else {
+            bound_names(name_node)
         };
+        for name_node in names {
+            let name = text(name_node, source);
+            let id = format!("{file}::{name}");
+            let value = declarator.child_by_field_name("value").filter(|_| plain);
 
-        let is_exported = outer.kind() == "export_statement";
-        out.push(ExtractedSymbol {
-            id,
-            kind,
-            raw: raw.to_string(),
-            file: file.to_string(),
-            lines: node_lines(declarator),
-            source_hash: hash_text(text(declarator, source)),
-            interface_hash: is_exported.then(|| hash_text(&signature)),
-            signature,
-            docstring: leading_doc(outer, source),
-            is_exported,
-            markers: Vec::new(),
-            extra_spans: Vec::new(),
-            parent: None,
-            children: Vec::new(),
-        });
+            let (kind, raw, signature) = match value {
+                Some(v) if v.kind() == "arrow_function" || v.kind() == "function_expression" => {
+                    let body = v.child_by_field_name("body").unwrap_or(v);
+                    (
+                        SymbolKind::Callable,
+                        "function",
+                        format!("const {name} = {}", signature_text(v, body, source)),
+                    )
+                }
+                // A plain const's "shape" is its declared type, if any — e.g.
+                // `const PI: number = 3.14` — not its literal value, which
+                // interface_hash should ignore (below) exactly like a
+                // function's body. Include the type annotation's own text
+                // (which already carries a leading ": "), so a type change is
+                // a real interface_hash change and a value-only edit isn't.
+                _ => {
+                    // Not for a destructured name: the annotation types the
+                    // whole pattern (`const { a }: Props = x`), not `a`.
+                    let type_text = declarator
+                        .child_by_field_name("type")
+                        .filter(|_| plain)
+                        .map(|t| text(t, source))
+                        .unwrap_or("");
+                    (
+                        SymbolKind::Value,
+                        "const",
+                        format!("const {name}{type_text}"),
+                    )
+                }
+            };
+
+            let is_exported = outer.kind() == "export_statement";
+            out.push(ExtractedSymbol {
+                id,
+                kind,
+                raw: raw.to_string(),
+                file: file.to_string(),
+                lines: node_lines(declarator),
+                source_hash: hash_text(text(declarator, source)),
+                interface_hash: is_exported.then(|| hash_text(&signature)),
+                signature,
+                docstring: leading_doc(outer, source),
+                is_exported,
+                markers: Vec::new(),
+                extra_spans: Vec::new(),
+                parent: None,
+                children: Vec::new(),
+            });
+        }
+    }
+}
+
+/// The identifier nodes a destructuring pattern binds, in source order:
+/// `{ a, b: c, d = 1, e: { f }, ...g }` binds `a`, `c`, `d`, `f`, `g`, and
+/// `[x, , y, ...z]` binds `x`, `y`, `z`. Only what the pattern *binds* counts
+/// -- a property key (`b` in `b: c`) and a default value (`1`) don't.
+fn bound_names(pattern: Node) -> Vec<Node> {
+    let mut names = Vec::new();
+    collect_bound_names(pattern, &mut names);
+    names
+}
+
+fn collect_bound_names<'a>(node: Node<'a>, names: &mut Vec<Node<'a>>) {
+    match node.kind() {
+        "identifier" | "shorthand_property_identifier_pattern" => names.push(node),
+        // `key: pattern` binds whatever the right-hand side binds.
+        "pair_pattern" => {
+            if let Some(value) = node.child_by_field_name("value") {
+                collect_bound_names(value, names);
+            }
+        }
+        // `name = default`: the default is an expression, not a binding.
+        "object_assignment_pattern" | "assignment_pattern" => {
+            if let Some(left) = node.child_by_field_name("left") {
+                collect_bound_names(left, names);
+            }
+        }
+        "comment" => {}
+        _ => {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                collect_bound_names(child, names);
+            }
+        }
     }
 }
 
@@ -592,11 +799,330 @@ mod tests {
         assert!(symbols.is_empty());
     }
 
+    fn ids(symbols: &[ExtractedSymbol]) -> Vec<&str> {
+        symbols.iter().map(|s| s.id.as_str()).collect()
+    }
+
+    fn only(src: &str) -> ExtractedSymbol {
+        let mut symbols = extract_file(src, "a.ts");
+        assert_eq!(symbols.len(), 1, "expected one symbol from {src:?}");
+        symbols.remove(0)
+    }
+
+    // --- Question 21: type-level declarations and destructured exports.
+    // An import of one of these names used to resolve to nothing (no
+    // symbol to point at), so its importers never went stale.
+
     #[test]
-    fn destructured_const_is_skipped() {
-        let src = "export const { a, b } = getStuff();\n";
+    fn type_alias_is_a_value_symbol() {
+        let s = only("export type Status = 'open' | 'closed';\n");
+        assert_eq!(s.id, "a.ts::Status");
+        assert_eq!(s.kind, SymbolKind::Value);
+        assert_eq!(s.raw, "type");
+        assert_eq!(s.signature, "type Status");
+        assert!(s.is_exported);
+        assert!(s.interface_hash.is_some());
+        assert!(s.parent.is_none() && s.children.is_empty());
+    }
+
+    #[test]
+    fn interface_is_a_value_symbol() {
+        let s = only("export interface User {\n  id: string;\n  name: string;\n}\n");
+        assert_eq!(s.id, "a.ts::User");
+        assert_eq!(s.kind, SymbolKind::Value);
+        assert_eq!(s.raw, "interface");
+        assert_eq!(s.signature, "interface User");
+        assert_eq!(s.lines, [1, 4]);
+        assert!(s.is_exported);
+        assert!(s.interface_hash.is_some());
+    }
+
+    #[test]
+    fn interface_signature_keeps_generics_and_extends() {
+        let s = only("export interface Box<T> extends Base {\n  value: T;\n}\n");
+        assert_eq!(s.signature, "interface Box<T> extends Base");
+    }
+
+    #[test]
+    fn enum_is_a_value_symbol() {
+        let s = only("export enum Role {\n  Admin,\n  User,\n}\n");
+        assert_eq!(s.id, "a.ts::Role");
+        assert_eq!(s.kind, SymbolKind::Value);
+        assert_eq!(s.raw, "enum");
+        assert_eq!(s.signature, "enum Role");
+        assert!(s.interface_hash.is_some());
+    }
+
+    #[test]
+    fn const_enum_is_extracted_too() {
+        let s = only("export const enum Flag { On, Off }\n");
+        assert_eq!(s.id, "a.ts::Flag");
+        assert_eq!(s.raw, "enum");
+    }
+
+    #[test]
+    fn non_exported_type_declarations_have_no_interface_hash() {
+        for src in [
+            "type T = string;\n",
+            "interface T { a: string }\n",
+            "enum T { A }\n",
+        ] {
+            let s = only(src);
+            assert!(!s.is_exported, "{src}");
+            assert_eq!(s.interface_hash, None, "{src}");
+            assert!(!s.source_hash.is_empty(), "{src}");
+        }
+    }
+
+    #[test]
+    fn default_exported_interface_is_extracted_by_name() {
+        let s = only("export default interface Props { a: string }\n");
+        assert_eq!(s.id, "a.ts::Props");
+        assert!(s.is_exported);
+    }
+
+    #[test]
+    fn a_type_declaration_keeps_its_leading_doc_comment() {
+        let s = only("/** A user. */\nexport interface User { id: string }\n");
+        assert_eq!(s.docstring.as_deref(), Some("A user."));
+    }
+
+    #[test]
+    fn interface_member_edits_move_interface_hash() {
+        let before = only("export interface User {\n  id: string;\n}\n");
+        for after in [
+            "export interface User {\n  id: string;\n  email: string;\n}\n",
+            "export interface User {\n  id: number;\n}\n",
+            "export interface User {\n  uid: string;\n}\n",
+            "export interface User {\n  id?: string;\n}\n",
+        ] {
+            let after = only(after);
+            assert_ne!(before.interface_hash, after.interface_hash, "{after:?}");
+            assert_ne!(before.source_hash, after.source_hash);
+        }
+    }
+
+    #[test]
+    fn type_alias_and_enum_edits_move_interface_hash() {
+        let a = only("export type S = 'open' | 'closed';\n");
+        let b = only("export type S = 'open' | 'closed' | 'draft';\n");
+        assert_ne!(a.interface_hash, b.interface_hash);
+        let a = only("export enum R { A, B }\n");
+        let b = only("export enum R { A, B, C }\n");
+        assert_ne!(a.interface_hash, b.interface_hash);
+    }
+
+    #[test]
+    fn comments_inside_a_type_body_do_not_move_interface_hash() {
+        let plain = only("export interface User {\n  id: string;\n  name: string;\n}\n");
+        for commented in [
+            // a new comment line
+            "export interface User {\n  // the key\n  id: string;\n  name: string;\n}\n",
+            // a trailing comment
+            "export interface User {\n  id: string; // the key\n  name: string;\n}\n",
+            // a block comment on its own lines
+            "export interface User {\n  /** The key. */\n  id: string;\n  name: string;\n}\n",
+        ] {
+            let c = only(commented);
+            assert_eq!(plain.interface_hash, c.interface_hash, "{commented}");
+        }
+        // The raw source did change, so the symbol's own spec still goes
+        // stale; only its importers are spared.
+        let c = only("export interface User {\n  // the key\n  id: string;\n  name: string;\n}\n");
+        assert_ne!(plain.source_hash, c.source_hash);
+    }
+
+    #[test]
+    fn editing_an_existing_comment_in_a_type_body_does_not_move_interface_hash() {
+        let a = only("export type T = {\n  a: string; // one\n};\n");
+        let b = only("export type T = {\n  a: string; // two\n};\n");
+        assert_eq!(a.interface_hash, b.interface_hash);
+    }
+
+    #[test]
+    fn a_comment_marker_inside_a_string_literal_type_is_not_stripped() {
+        let a = only("export type U = 'http://a';\n");
+        let b = only("export type U = 'http://b';\n");
+        assert_ne!(a.interface_hash, b.interface_hash);
+    }
+
+    #[test]
+    fn destructured_object_const_yields_one_symbol_per_name() {
+        let symbols = extract_file("export const { a, b } = getStuff();\n", "a.ts");
+        assert_eq!(ids(&symbols), ["a.ts::a", "a.ts::b"]);
+        for s in &symbols {
+            assert_eq!(s.kind, SymbolKind::Value);
+            assert_eq!(s.raw, "const");
+            assert!(s.is_exported);
+            assert!(s.interface_hash.is_some());
+            assert_eq!(s.lines, [1, 1]);
+        }
+        assert_eq!(symbols[0].signature, "const a");
+        assert_eq!(symbols[1].signature, "const b");
+    }
+
+    #[test]
+    fn destructured_const_binds_the_local_name_not_the_property_key() {
+        let symbols = extract_file("export const { a: renamed, b = 1 } = x;\n", "a.ts");
+        assert_eq!(ids(&symbols), ["a.ts::renamed", "a.ts::b"]);
+    }
+
+    #[test]
+    fn destructured_const_handles_nested_rest_and_array_patterns() {
+        let symbols = extract_file(
+            "export const { a: { b }, ...rest } = x;\nexport const [first, , third, ...others] = y;\n",
+            "a.ts",
+        );
+        assert_eq!(
+            ids(&symbols),
+            [
+                "a.ts::b",
+                "a.ts::rest",
+                "a.ts::first",
+                "a.ts::third",
+                "a.ts::others"
+            ]
+        );
+    }
+
+    #[test]
+    fn destructured_const_that_is_not_exported_has_no_interface_hash() {
+        let symbols = extract_file("const { a } = x;\n", "a.ts");
+        assert_eq!(ids(&symbols), ["a.ts::a"]);
+        assert!(!symbols[0].is_exported);
+        assert_eq!(symbols[0].interface_hash, None);
+    }
+
+    #[test]
+    fn destructured_names_share_a_declaration_but_not_an_id() {
+        let src = "export const { a, b } = f(1);\n";
+        let one = extract_file(src, "a.ts");
+        let two = extract_file("export const { a, b } = f(2);\n", "a.ts");
+        // A value edit moves each name's source_hash, never its
+        // interface_hash -- the same rule a plain `const` follows.
+        assert_ne!(one[0].source_hash, two[0].source_hash);
+        assert_eq!(one[0].interface_hash, two[0].interface_hash);
+        assert_eq!(one[1].interface_hash, two[1].interface_hash);
+    }
+
+    #[test]
+    fn a_const_and_a_type_of_the_same_name_fold_into_one_symbol() {
+        // The common `as const` + derived-type pattern. Two symbols with
+        // one id would overwrite each other in the graph's id map.
+        let src = "export const Status = { Open: 'open' } as const;\nexport type Status = typeof Status[keyof typeof Status];\n";
         let symbols = extract_file(src, "a.ts");
-        assert!(symbols.is_empty());
+        assert_eq!(ids(&symbols), ["a.ts::Status"]);
+        let s = &symbols[0];
+        assert!(s.is_exported);
+        assert_eq!(s.extra_spans, [[2, 2]]);
+
+        // Either half changing moves the folded symbol's hashes.
+        let edited_type = extract_file(
+            "export const Status = { Open: 'open' } as const;\nexport type Status = keyof typeof Status;\n",
+            "a.ts",
+        );
+        assert_ne!(s.interface_hash, edited_type[0].interface_hash);
+        assert_ne!(s.source_hash, edited_type[0].source_hash);
+    }
+
+    #[test]
+    fn two_interfaces_of_the_same_name_merge_into_one_symbol() {
+        let src = "export interface W { a: string }\nexport interface W { b: string }\n";
+        let symbols = extract_file(src, "a.ts");
+        assert_eq!(ids(&symbols), ["a.ts::W"]);
+        assert_eq!(symbols[0].extra_spans, [[2, 2]]);
+        let one = only("export interface W { a: string }\n");
+        assert_ne!(one.interface_hash, symbols[0].interface_hash);
+    }
+
+    #[test]
+    fn a_fold_is_exported_if_any_declaration_is() {
+        let symbols = extract_file(
+            "interface W { a: string }\nexport interface W { b: string }\n",
+            "a.ts",
+        );
+        assert_eq!(symbols.len(), 1);
+        assert!(symbols[0].is_exported);
+        assert!(symbols[0].interface_hash.is_some());
+    }
+
+    // --- Code-review findings on the above.
+
+    #[test]
+    fn an_interface_and_a_class_of_the_same_name_keep_the_class_as_a_container() {
+        // Declaration merging. Whichever order they are written in, the
+        // folded symbol must stay a `Container`: a `Value` would make the
+        // file stop being spec-bearing and the class would lose its spec.
+        for src in [
+            "export interface Foo { a: string }\nexport class Foo { m(): void {} }\n",
+            "export class Foo { m(): void {} }\nexport interface Foo { a: string }\n",
+        ] {
+            let symbols = extract_file(src, "a.ts");
+            let foo = symbols.iter().find(|s| s.id == "a.ts::Foo").unwrap();
+            assert_eq!(foo.kind, SymbolKind::Container, "{src}");
+            assert_eq!(foo.raw, "class", "{src}");
+            assert_eq!(foo.children, ["a.ts::Foo.m"], "{src}");
+            assert_eq!(foo.extra_spans.len(), 1, "{src}");
+            assert_eq!(
+                ids(&symbols).iter().filter(|i| **i == "a.ts::Foo").count(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn a_fold_keeps_a_doc_comment_from_whichever_declaration_has_one() {
+        let s =
+            only("interface W { a: string }\n/** Merged. */\nexport interface W { b: string }\n");
+        assert_eq!(s.docstring.as_deref(), Some("Merged."));
+    }
+
+    #[test]
+    fn a_private_half_of_a_folded_type_still_moves_the_interface_hash() {
+        let before = only("interface W { a: string }\nexport interface W { b: string }\n");
+        let after = only("interface W { a: number }\nexport interface W { b: string }\n");
+        assert_ne!(before.interface_hash, after.interface_hash);
+    }
+
+    #[test]
+    fn reformatting_a_type_does_not_move_interface_hash() {
+        let compact = only("export interface U { id: string; tags: string[]; }\n");
+        let spread = only("export interface U {\n    id: string;\n    tags: string[];\n}\n");
+        let indented = only("export interface U {\n\tid: string;\n\n\ttags:\n\t\tstring[];\n}\n");
+        assert_eq!(compact.interface_hash, spread.interface_hash);
+        assert_eq!(compact.interface_hash, indented.interface_hash);
+        // A real edit still does.
+        let edited = only("export interface U { id: string; tags: number[] }\n");
+        assert_ne!(compact.interface_hash, edited.interface_hash);
+    }
+
+    #[test]
+    fn a_comment_after_the_equals_sign_does_not_move_interface_hash() {
+        let plain = only("export type A = 'x';\n");
+        let commented = only("export type A = // legacy\n  'x';\n");
+        assert_eq!(plain.interface_hash, commented.interface_hash);
+    }
+
+    #[test]
+    fn a_type_alias_signature_is_just_its_header() {
+        assert_eq!(
+            only("export type A = /* legacy */ 'x' | 'y';\n").signature,
+            "type A"
+        );
+        assert_eq!(
+            only("export type Box<T = {}> = { v: T };\n").signature,
+            "type Box<T = {}>"
+        );
+    }
+
+    #[test]
+    fn folding_does_not_touch_a_symbol_with_a_unique_name() {
+        let symbols = extract_file(
+            "export interface A { a: string }\nexport type B = number;\n",
+            "a.ts",
+        );
+        assert_eq!(ids(&symbols), ["a.ts::A", "a.ts::B"]);
+        assert!(symbols.iter().all(|s| s.extra_spans.is_empty()));
     }
 
     #[test]
