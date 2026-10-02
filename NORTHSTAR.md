@@ -42,7 +42,7 @@ already made in `REQUIREMENTS.md`:
 
 | # | Parameter | Definition (what a 5 means) | Stance | KPIs |
 |---|---|---|---|---|
-| P1 | Verifiable freshness | A reader can tell mechanically, per section, whether a doc still matches the code, and what changed | defend | K1, K2, K3 |
+| P1 | Verifiable freshness | A reader can tell mechanically, per section, whether a doc still matches the code, and what changed | defend | K1a, K1b, K2, K3 |
 | P2 | Measured accuracy | Doc quality is measured on a public benchmark or a repeatable human check, not asserted | pursue | K4, K5 |
 | P3 | Language breadth | Works on any mainstream language and on polyglot repos | pursue | K6 |
 | P4 | Cross-cutting flows | Features that cross files and layers (UI → API → DB) are described from real edges, not guessed | defend | K6 |
@@ -118,7 +118,9 @@ see the table below). "?" means not enough information to score.
 | Vendor claims, not independently verified | Swimm: 2,000+ teams, Team plan $11/user/month ([toolradar](https://toolradar.com/tools/swimm/calculator)). DeepWiki: 50k+ public repos pre-indexed ([guide](https://codersera.com/blog/deepwiki-complete-guide-2026/amp/)). Augment: Context Engine as MCP, "+70 %" agent performance ([blog](https://www.augmentcode.com/blog/context-engine-mcp-now-live)). |
 
 No benchmark found measures whether generated docs *stay* correct as code
-changes. K1 is designed to be that number.
+changes. K1a is designed to be the deterministic half of that number
+(dependency tracking, checked against a compiler); K1b, whether the prose
+itself is still true, needs a judge and comes later.
 
 Product references: [DeepWiki](https://codersera.com/blog/deepwiki-complete-guide-2026/amp/),
 [Google Code Wiki](https://infoq.com/news/2025/11/google-code-wiki/),
@@ -136,7 +138,8 @@ tooling that does not exist yet. A baseline is never guessed.
 
 | KPI | Parameter | Metric | Method | Baseline | Target |
 |---|---|---|---|---|---|
-| **K1** Staleness recall / precision | P1 | Of the specs that *should* go stale at a commit, the fraction that do (recall); of those that do, the fraction that should (precision) | Replay a reference repo's git history: generate specs at commit N, step through later commits, compare CodeOwl's stale set with a ground truth (an LLM-or-human judgment of whether each spec's claims still hold). Needs a harness | unmeasured | recall ≥ 95 %, precision ≥ 80 % |
+| **K1a** Dependency-tracking recall / precision | P1 | When an interface changes, the fraction of the files that truly depend on it that CodeOwl marks stale (recall), and the fraction of the files it marks stale that truly depend on it (precision). Measures *dependency tracking*, not prose correctness: a body-only change breaks nothing and correctly stales no dependent, yet a caller's prose may still be wrong | Fully deterministic, no LLM and no judgment. Replay a reference repo's commits (or apply scripted mutations: a signature change, a rename, a body-only edit, a dependency's interface change) and take as ground truth the files a compiler or type-checker rejects afterwards (`cargo check`, `tsc`, `javac`, `mypy`), which is independent of CodeOwl's own hashes. Dynamic edges (`fetch("/api/x")`, `.from("table")`, `@Incoming`) break no compile and need hand-written expected edges per fixture, or stay unmeasured. Needs a harness; Rust first, on CodeOwl's own history | unmeasured | recall ≥ 95 %, precision ≥ 80 % |
+| **K1b** Prose-truth recall | P1 | Of the specs whose *claims* a commit made false, the fraction CodeOwl flags stale | Needs a judgment of whether each spec's claims still hold: an LLM judge audited by a human on a sample. Not reproducible and costs tokens per run, hence separate from K1a. Deferred until K1a exists | unmeasured | none until a method exists |
 | **K2** Unresolved imports | P1 | Per stack, the fraction of imports that point at a walked file but resolve to no symbol | Extend `examples/graph_stats.rs`: count unresolved imports whose path suffix-matches a walked file | TypeScript (`talentTrail`): 141 / 858 = 16.4 %. Java (`commons-lang`, `quarkus-super-heroes`), Python: 0 real misses. Rust: not yet counted this way | < 2 % on every stack |
 | **K3** False isolated files | P1 | Files with no import edges in or out that do import, or are imported | `examples/graph_stats.rs` on the reference repos, then check each isolated file by hand | CodeOwl: 0 isolated (was 12 before the crate-root fix). `ripgrep`: 54 file edges, stable across runs | 0 on every reference repo |
 | **K4** Benchmark doc quality | P2 | CodeWikiBench overall score of CodeOwl's generated corpus | Generate the corpus for CodeWikiBench repos in a supported stack, run its rubric evaluation | unmeasured | ≥ 64 % (DeepWiki's published score) |
