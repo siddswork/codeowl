@@ -48,8 +48,8 @@ pub fn spec_path(root: &Path, source_path: &str) -> PathBuf {
 /// still shows "used by these tests"), but its specs sort to the very
 /// bottom of a `--all` run and it's never treated as a product module —
 /// documenting the test harness is rarely the point of a spec corpus, and
-/// whenever it is, it's safe to leave for last. Also strips a
-/// `rollup:`/`feature:` id prefix so it can be asked of a coverage id.
+/// whenever it is, it's safe to leave for last. The path is classified as
+/// given: a `rollup:`/`feature:` coverage id is not stripped here.
 pub fn is_test_path(graph: &Graph, path: &str) -> bool {
     matches!(classify_in(graph, path), FileRole::Test)
 }
