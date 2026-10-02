@@ -17,16 +17,16 @@
 
 </pre>
 
-**LLM-authored specs for your codebase, kept honest by a structural graph
-underneath — served to your coding agent, and your team, over MCP.**
+**LLM-authored specs for your codebase, written for the people who work
+on it and kept honest by a structural graph underneath.**
 
 ---
 
 A hand-maintained README or wiki page rots the moment nobody's watching
-it — and a coding agent dropped into a brownfield repo has no such page to
-trust anyway, so it rebuilds its mental model from scratch every time:
-grep, read files, guess how things connect, and hallucinate the edges it
-can't see (a `fetch()` to an API route, a `.from("table")` query).
+it — and a brownfield repo often has no such page to begin with, so
+whoever needs to know how something works rebuilds it from the code:
+grep, read files, guess how things connect, and miss the edges nobody
+wrote down (a `fetch()` to an API route, a `.from("table")` query).
 CodeOwl's answer isn't a smarter grep — it's a **spec**: a short writeup
 of what a piece of code does, in plain English, not a formal technical
 document. One per symbol, file, directory, "feature" (a cross-cutting flow
@@ -100,10 +100,11 @@ scoped, and checkable, not the other way around.
   once to write the whole corpus; after that, a change only regenerates
   the specs it actually invalidates, never the whole repo. Ongoing cost is
   upkeep, not a recurring LLM tax.
-- **One artifact, two readers.** A feature spec is a numbered,
-  BA-followable narrative of a capability end to end; the same document
-  gives an agent the exact files, dependencies, and tables it needs
-  without re-exploring.
+- **Written for people.** A feature spec is a numbered, BA-followable
+  narrative of a capability end to end; file and symbol specs give a
+  developer the exact files, dependencies, and tables involved. A coding
+  agent can read the same documents over MCP, but whether that helps it
+  is unmeasured, and CodeOwl makes no claim that it does.
 - **Committed to git.** Specs live in `docs/specs/` as plain Markdown —
   reviewable in a PR, browsable on GitHub, versioned with the code.
 - **No LLM in the loop, ever.** CodeOwl holds no API keys and makes no

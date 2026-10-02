@@ -1,9 +1,9 @@
 # Wiring CodeOwl into a repository
 
-CodeOwl runs as an MCP server that a coding agent queries for accurate
-structural facts and generated specs about a target repository, instead of
-re-exploring it on every task. This folder has everything needed to set
-that up against your own repo.
+CodeOwl runs as an MCP server. Your coding agent drives it to write the
+specs (CodeOwl itself never calls an LLM), and can also query the
+structural graph and the specs while it works. This folder has everything
+needed to set that up against your own repo.
 
 **This page covers [Claude Code](https://claude.com/claude-code).** For
 **VS Code + GitHub Copilot (Agent mode)**, see [`COPILOT.md`](COPILOT.md)
