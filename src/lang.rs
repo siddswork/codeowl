@@ -102,10 +102,10 @@ pub enum FileRole {
     /// `get_callers` still shows "used by these tests", but its specs sort
     /// last and it's never treated as a product module.
     Test,
-    /// Machine-generated code. Reserved: no Phase 1 path convention
-    /// produces this yet — a `StackPack` supplies the rule (Supabase's
-    /// `database.types.ts`, protobuf `*_pb.ts`, GraphQL codegen, …).
-    /// Treated like [`FileRole::Primitive`] until then.
+    /// Machine-generated code. A `StackPack` supplies the rule: the Java
+    /// pack assigns it under `target/generated-sources` and
+    /// `build/generated`, the Python pack to Alembic migration versions.
+    /// Never spec-bearing, since a spec describes hand-written code.
     Generated,
 }
 
@@ -210,7 +210,7 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
     match hits.as_slice() {
         [] => bail!(
             "no source files CodeOwl can extract were found under {} — it handles \
-             TypeScript/TSX (+ SQL schema), Rust, and Java (see ROADMAP.md)",
+             TypeScript/TSX (+ SQL schema), Rust, Java, and Python (see ROADMAP.md)",
             root.display()
         ),
         [(_, _, ctor)] => Ok(ctor()),

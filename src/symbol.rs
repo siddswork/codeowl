@@ -91,9 +91,13 @@ pub struct Symbol {
     /// in its methods' hashes, in order) — see `ARCHITECTURE.md`'s
     /// "Caching and invalidation". Changes on *any* edit inside the symbol.
     pub source_hash: String,
-    /// Content hash over just the exported *shape* — `signature`, never
-    /// `docstring` or body — so implementation-only edits leave it
-    /// unchanged. `None` when `is_exported` is `false`: nothing outside
+    /// Content hash over just the exported *shape*, so implementation-only
+    /// edits leave it unchanged. For a function that is its `signature`,
+    /// never `docstring` or body. For a container it is the signature plus
+    /// each public member's signature. For a TypeScript `type` / `interface`
+    /// / `enum` the shape is the whole declaration, hashed as tokens, so
+    /// comments and formatting don't move it. `None` when `is_exported` is
+    /// `false`: nothing outside
     /// this file could resolve to it, so it isn't a fixed reference-edge
     /// invalidation key that needs tracking yet. This is gap 2's fix (see
     /// `CLAUDE.md`'s hard invariants).

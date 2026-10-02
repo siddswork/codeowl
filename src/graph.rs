@@ -292,7 +292,8 @@ pub struct Graph {
     #[serde(default)]
     format_version: u32,
     /// The `StackPack::name()` of the pack that built this graph
-    /// (`"typescript-next"` / `"rust"`). Lets a pure-read caller
+    /// (`"typescript-next"` / `"rust"` / `"java"` / `"python"`). Lets a
+    /// pure-read caller
     /// (`spec.rs`, `mcp.rs`) recover the pack — for `classify` and the
     /// feature model — without threading it down, and lets `RepoIndex`
     /// reject a cache built by a different pack (M13 design decision 7).

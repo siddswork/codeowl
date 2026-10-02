@@ -91,8 +91,9 @@ async fn main() -> Result<()> {
             let server = CodeOwlServer::new(root.clone(), graph)
                 .with_generation_limits(Some(large_class_bytes), Some(max_spec_task_bytes))
                 .with_source_limit(Some(max_source_bytes));
-            // Keep the watcher alive for the whole session — it stops when
-            // this handle drops, which is when `serve` returns.
+            // Keep the handle bound for the whole session. Dropping it only
+            // detaches the watcher thread, which runs until the process
+            // exits, so this is a keep-alive and not a stop switch.
             let _watcher = codeowl::watch::spawn(root, server.graph_store(), index)
                 .context("starting the file watcher")?;
             let running = server
