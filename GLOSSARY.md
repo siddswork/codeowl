@@ -435,6 +435,32 @@ a change to its signature should.
   move, so no dependent spec needs regenerating. `None` for a symbol that
   isn't exported (nothing outside its file can refer to it).
 
+  Where a symbol has **no** `interface_hash` but is still imported by name,
+  its importers fall back to the symbol's whole `source_hash`: safe, but
+  *coarse*, because any edit inside it, a body-only one included, stales
+  every importer. That is the failure an unrecognized export form causes (see
+  **Export clause**), and the reason "is it exported" has to be decided
+  correctly.
+
+  For a TypeScript `type` alias, `interface` or `enum`, the whole declaration
+  is the shape (a type's contract is its body), hashed as its *tokens*, so a
+  comment edit or a reformat does not move it.
+
+**Export clause** (TypeScript)
+: A bare `export { X, Y }` statement with no `from`. It exports names the
+  file *already has*, instead of marking each declaration with the `export`
+  keyword, and has two meanings CodeOwl treats differently:
+  - If `X` is **declared in the file** (`function Button() {}` …
+    `export { Button }`, the shadcn component shape), `X` is exported exactly
+    as if it carried the keyword, with the same `interface_hash`.
+  - If `X` was **imported** (`import { X } from './y'; export { X }`), the
+    clause is a **re-export** of that import, and resolution follows it to
+    `./y`.
+
+  `export { X } from './y'` (with a `from`) is the other, already-understood
+  re-export form. A *renamed* clause export of a declared name
+  (`export { a as b }`) is not handled; see `DECISIONS.md` question 21.
+
 **`deps_hash`**
 : Hash of the list of `(dependency id, that dependency's current
   interface_hash)` pairs, for everything a symbol or file imports.

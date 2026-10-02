@@ -442,7 +442,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [15](DECISIONS.md#q15) | `submit_spec` has no upper bound on content | Logged, not scheduled |
 | [17](DECISIONS.md#q17) | `get_spec_coverage` doesn't report files skipped as unreadable | Logged, not scheduled |
 | [18](DECISIONS.md#q18) | Whether to build a call graph (`Callable → Callable` edges) | Logged, not built; revisit on a measured multi-hop miss |
-| [21](DECISIONS.md#q21) | TypeScript extraction skips `interface`/`type`/`enum` and destructured exports, so imports of them create no edge (141 of 858 unresolved in `talentTrail`); Java picks one of several path matches unchecked | Partly built: TypeScript `type`/`interface`/`enum` and destructured-export symbols (141 to 4 unresolved); a local `export { X }` re-export and the Java pick check still open |
+| [21](DECISIONS.md#q21) | TypeScript extraction skips `interface`/`type`/`enum` and destructured exports, so imports of them create no edge (141 of 858 unresolved in `talentTrail`); Java picks one of several path matches unchecked | Mostly built for TypeScript: `type`/`interface`/`enum` and destructured-export symbols, then export clauses (141 to 0 unresolved; 131 to 0 coarse-hash targets). Open: `abstract class`/`declare`/`namespace`, renamed clause exports, and the Java pick check |
 
 **Resolved**
 

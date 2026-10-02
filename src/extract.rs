@@ -14,11 +14,12 @@
 //! generation only recurses containment edges between *symbols*, not every
 //! syntax node.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
 use crate::hash::hash_text;
+use crate::imports::{bare_export_clause, export_specs};
 use crate::lang::ts_parser;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
 
@@ -41,9 +42,10 @@ pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
 
     let mut out = Vec::new();
     let root = tree.root_node();
+    let exported = clause_exported_names(root, source);
     let mut cursor = root.walk();
     for child in root.children(&mut cursor) {
-        visit_top_level(child, source, rel_path, &mut out);
+        visit_top_level(child, source, rel_path, &exported, &mut out);
     }
     let mut folded = fold_same_id(out);
     // A type declaration computes its `interface_hash` whether or not it is
@@ -57,10 +59,44 @@ pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
     folded
 }
 
+/// The local names a bare export clause exports: `function Button() {}`
+/// followed by `export { Button, buttonVariants };` exports `Button` just as
+/// `export function Button() {}` would. Only the clause with no `from`
+/// counts (`export { a } from './x'` forwards another module's `a`, and says
+/// nothing about a local one), and only an unrenamed name: `export { a as b }`
+/// publishes `b`, which is not this declaration's id, so importers could not
+/// find it by name anyway (deliberately not handled; no case in the repos
+/// measured). A name that is not declared in this file is harmless here.
+fn clause_exported_names(root: Node, source: &str) -> HashSet<String> {
+    let mut cursor = root.walk();
+    root.children(&mut cursor)
+        .filter_map(bare_export_clause)
+        .flat_map(|clause| export_specs(clause, source))
+        .filter(|spec| spec.alias.is_none())
+        .map(|spec| spec.name.to_string())
+        .collect()
+}
+
+/// Is a top-level declaration called `name`, written as (or inside) `outer`,
+/// exported: either it carries the `export` keyword itself, or a bare export
+/// clause names it. The one place that decides, so no visitor can forget the
+/// clause half.
+fn is_declaration_exported(outer: Node, name: &str, clause_exported: &HashSet<String>) -> bool {
+    outer.kind() == "export_statement" || clause_exported.contains(name)
+}
+
 /// Handle one direct child of `program`: unwrap an `export` wrapper if
 /// present, dispatch on the declaration kind, and push whatever symbols it
-/// produces onto `out`.
-fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>) {
+/// produces onto `out`. `exported` is the set of names a bare export clause
+/// exports (`clause_exported_names`); a declaration is exported if it carries
+/// the keyword itself or is named there.
+fn visit_top_level(
+    node: Node,
+    source: &str,
+    file: &str,
+    exported: &HashSet<String>,
+    out: &mut Vec<ExtractedSymbol>,
+) {
     let decl = if node.kind() == "export_statement" {
         match node.child_by_field_name("declaration") {
             Some(d) => d,
@@ -81,16 +117,20 @@ fn visit_top_level(node: Node, source: &str, file: &str, out: &mut Vec<Extracted
     };
 
     match decl.kind() {
-        "function_declaration" => visit_function(decl, node, source, file, out),
-        "class_declaration" => visit_class(decl, node, source, file, out),
-        "lexical_declaration" => visit_lexical(decl, node, source, file, out),
+        "function_declaration" => visit_function(decl, node, source, file, exported, out),
+        "class_declaration" => visit_class(decl, node, source, file, exported, out),
+        "lexical_declaration" => visit_lexical(decl, node, source, file, exported, out),
         // Type-level declarations. They carry no runtime behavior, but an
         // importer depends on their shape exactly as it does on a
         // function's signature -- without a symbol here, `import { User }`
         // resolved to nothing and a change to `User` never staled anyone.
-        "type_alias_declaration" => visit_type_decl(decl, node, "type", source, file, out),
-        "interface_declaration" => visit_type_decl(decl, node, "interface", source, file, out),
-        "enum_declaration" => visit_type_decl(decl, node, "enum", source, file, out),
+        "type_alias_declaration" => {
+            visit_type_decl(decl, node, "type", source, file, exported, out)
+        }
+        "interface_declaration" => {
+            visit_type_decl(decl, node, "interface", source, file, exported, out)
+        }
+        "enum_declaration" => visit_type_decl(decl, node, "enum", source, file, exported, out),
         _ => {}
     }
 }
@@ -112,6 +152,7 @@ fn visit_type_decl(
     raw: &str,
     source: &str,
     file: &str,
+    exported: &HashSet<String>,
     out: &mut Vec<ExtractedSymbol>,
 ) {
     let Some(name_node) = decl.child_by_field_name("name") else {
@@ -136,7 +177,7 @@ fn visit_type_decl(
             source[decl.start_byte()..header_end].to_string()
         }
     };
-    let is_exported = outer.kind() == "export_statement";
+    let is_exported = is_declaration_exported(outer, name, exported);
     out.push(ExtractedSymbol {
         id: format!("{file}::{name}"),
         kind: SymbolKind::Value,
@@ -242,6 +283,7 @@ fn visit_function(
     outer: Node,
     source: &str,
     file: &str,
+    exported: &HashSet<String>,
     out: &mut Vec<ExtractedSymbol>,
 ) {
     let Some(body) = decl.child_by_field_name("body") else {
@@ -249,7 +291,7 @@ fn visit_function(
     };
     let name = field_text(decl, "name", source).unwrap_or("<anonymous>");
     let signature = signature_text(decl, body, source);
-    let is_exported = outer.kind() == "export_statement";
+    let is_exported = is_declaration_exported(outer, name, exported);
     out.push(ExtractedSymbol {
         id: format!("{file}::{name}"),
         kind: SymbolKind::Callable,
@@ -272,7 +314,14 @@ fn visit_function(
     });
 }
 
-fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<ExtractedSymbol>) {
+fn visit_class(
+    decl: Node,
+    outer: Node,
+    source: &str,
+    file: &str,
+    exported: &HashSet<String>,
+    out: &mut Vec<ExtractedSymbol>,
+) {
     let Some(body) = decl.child_by_field_name("body") else {
         return;
     };
@@ -348,7 +397,7 @@ fn visit_class(decl: Node, outer: Node, source: &str, file: &str, out: &mut Vec<
     }
 
     let signature = signature_text(decl, body, source);
-    let is_exported = outer.kind() == "export_statement";
+    let is_exported = is_declaration_exported(outer, name, exported);
 
     // Merkle rollup: the class's own source_hash folds in each member's
     // source_hash (methods and, as of M21, fields), in declaration order
@@ -417,6 +466,7 @@ fn visit_lexical(
     outer: Node,
     source: &str,
     file: &str,
+    exported: &HashSet<String>,
     out: &mut Vec<ExtractedSymbol>,
 ) {
     // Only `const` is in scope — `let` (and `var`, a different node kind
@@ -481,7 +531,7 @@ fn visit_lexical(
                 }
             };
 
-            let is_exported = outer.kind() == "export_statement";
+            let is_exported = is_declaration_exported(outer, name, exported);
             out.push(ExtractedSymbol {
                 id,
                 kind,
@@ -1044,6 +1094,122 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert!(symbols[0].is_exported);
         assert!(symbols[0].interface_hash.is_some());
+    }
+
+    // --- A declaration exported by a bare `export { … }` clause, not by an
+    // `export` keyword on itself (the shadcn `function Button() {}` …
+    // `export { Button }` shape). It is exported just the same, and without
+    // an `interface_hash` its importers hash its whole source instead.
+
+    #[test]
+    fn a_declaration_exported_by_a_clause_is_exported_with_an_interface_hash() {
+        for (src, id) in [
+            ("function f(a: number): void {}\nexport { f };\n", "a.ts::f"),
+            ("class C { m(): void {} }\nexport { C };\n", "a.ts::C"),
+            ("const V = 1;\nexport { V };\n", "a.ts::V"),
+            (
+                "const g = (a: number): void => {};\nexport { g };\n",
+                "a.ts::g",
+            ),
+            ("type T = string;\nexport { T };\n", "a.ts::T"),
+            ("interface I { a: string }\nexport type { I };\n", "a.ts::I"),
+            ("enum E { A }\nexport { E };\n", "a.ts::E"),
+        ] {
+            let symbols = extract_file(src, "a.ts");
+            let s = symbols
+                .iter()
+                .find(|s| s.id == id)
+                .unwrap_or_else(|| panic!("{id}"));
+            assert!(s.is_exported, "{src}");
+            assert!(s.interface_hash.is_some(), "{src}");
+        }
+    }
+
+    #[test]
+    fn a_clause_export_hashes_like_the_same_declaration_with_an_export_keyword() {
+        for (clause, keyword) in [
+            (
+                "function f(a: number): void {}\nexport { f };\n",
+                "export function f(a: number): void {}\n",
+            ),
+            (
+                "class C { m(): void {} }\nexport { C };\n",
+                "export class C { m(): void {} }\n",
+            ),
+            (
+                "const V: number = 1;\nexport { V };\n",
+                "export const V: number = 1;\n",
+            ),
+            (
+                "type T = string;\nexport { T };\n",
+                "export type T = string;\n",
+            ),
+        ] {
+            let a = extract_file(clause, "a.ts");
+            let b = extract_file(keyword, "a.ts");
+            assert_eq!(a[0].interface_hash, b[0].interface_hash, "{clause}");
+        }
+    }
+
+    #[test]
+    fn a_body_only_edit_to_a_clause_exported_function_does_not_move_interface_hash() {
+        let before = only("function f(a: number): number { return a; }\nexport { f };\n");
+        let body = only("function f(a: number): number { return a + 1; }\nexport { f };\n");
+        let signature =
+            only("function f(a: number, b: number): number { return a; }\nexport { f };\n");
+        assert_ne!(before.source_hash, body.source_hash);
+        assert_eq!(before.interface_hash, body.interface_hash);
+        assert_ne!(before.interface_hash, signature.interface_hash);
+    }
+
+    #[test]
+    fn only_the_names_in_the_clause_are_exported() {
+        let symbols = extract_file(
+            "function a(): void {}\nfunction b(): void {}\nfunction c(): void {}\nexport {\n  a,\n  c,\n};\n",
+            "a.ts",
+        );
+        let exported: Vec<_> = symbols
+            .iter()
+            .map(|s| (s.id.as_str(), s.is_exported))
+            .collect();
+        assert_eq!(
+            exported,
+            [("a.ts::a", true), ("a.ts::b", false), ("a.ts::c", true)]
+        );
+        assert_eq!(symbols[1].interface_hash, None);
+    }
+
+    #[test]
+    fn a_clause_before_the_declaration_still_exports_it() {
+        let s = only("export { f };\nfunction f(): void {}\n");
+        assert!(s.is_exported);
+        assert!(s.interface_hash.is_some());
+    }
+
+    #[test]
+    fn a_reexport_clause_with_a_source_exports_nothing_local() {
+        // `export { a } from './x'` forwards *another module's* `a`; a local
+        // `a` of the same name stays private.
+        let s = only("function a(): void {}\nexport { a } from './x';\n");
+        assert!(!s.is_exported);
+        assert_eq!(s.interface_hash, None);
+    }
+
+    #[test]
+    fn an_alias_equal_to_the_name_is_not_a_rename() {
+        // `export { a as a }` publishes `a` under its own name.
+        let s = only("function a(): void {}\nexport { a as a };\n");
+        assert!(s.is_exported);
+        assert!(s.interface_hash.is_some());
+    }
+
+    #[test]
+    fn a_renamed_clause_export_is_not_treated_as_an_export_of_the_local_name() {
+        // Deliberately not handled: importers would ask for `b`, which is
+        // not this symbol's id, so marking `a` exported would change
+        // nothing for them (zero cases in the repos measured).
+        let s = only("function a(): void {}\nexport { a as b };\n");
+        assert!(!s.is_exported);
     }
 
     // --- Code-review findings on the above.
