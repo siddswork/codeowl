@@ -397,6 +397,52 @@ mod tests {
     }
 
     #[test]
+    fn a_name_re_exported_by_a_bare_export_clause_resolves_to_the_declaration() {
+        let (resolved, graph) = resolve_fixture(&[
+            ("src/consumer.ts", "import { X, Y } from './middle';\n"),
+            (
+                "src/middle.ts",
+                "import { X, Y as Z } from './real';\nexport { X };\nexport { Z as Y };\n",
+            ),
+            (
+                "src/real.ts",
+                "export function X(): void {}\nexport function Y(): void {}\n",
+            ),
+        ]);
+        for (name, target) in [("X", "src/real.ts::X"), ("Y", "src/real.ts::Y")] {
+            let edge = resolved
+                .iter()
+                .find(|r| r.from_file == "src/consumer.ts" && r.imported_name == name)
+                .unwrap();
+            assert!(edge.target.is_some(), "{name} did not resolve");
+            assert_eq!(edge.target, graph.find(target), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_function_exported_by_a_clause_is_an_import_target_with_an_interface_hash() {
+        // The shadcn shape: `function Button() {…}` then `export { Button }`.
+        let (resolved, graph) = resolve_fixture(&[
+            ("src/page.ts", "import { Button } from './button';\n"),
+            (
+                "src/button.ts",
+                "function Button(): void {}\nexport { Button };\n",
+            ),
+        ]);
+        let edge = resolved
+            .iter()
+            .find(|r| r.imported_name == "Button")
+            .unwrap();
+        let target = edge.target.expect("Button should resolve");
+        let sym = graph.get_symbol(target).unwrap();
+        assert!(sym.is_exported);
+        assert!(
+            sym.interface_hash.is_some(),
+            "importers would fall back to the whole source hash"
+        );
+    }
+
+    #[test]
     fn external_package_import_is_unresolved_not_an_error() {
         let (resolved, _graph) =
             resolve_fixture(&[("a.ts", "import { z } from 'some-external-package';\n")]);

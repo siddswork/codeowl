@@ -236,8 +236,13 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// declarations and each name bound by a destructured `const` now extract as
 /// `Value` symbols, and same-id top-level declarations fold into one. No
 /// shape change, but imports of those names now resolve, so a cache built
-/// before it keeps every one edge-less).
-pub const FORMAT_VERSION: u32 = 19;
+/// before it keeps every one edge-less). 20 = TypeScript export clauses
+/// (open question 21: a declaration named by a bare `export { X }` is now
+/// exported, so it carries an `interface_hash` and its importers stop
+/// hashing its whole source; and `import { X } …; export { X }` is a
+/// re-export that resolution follows. No shape change, but it moves
+/// `interface_hash` and which imports resolve, so an older cache is stale).
+pub const FORMAT_VERSION: u32 = 20;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
