@@ -156,6 +156,8 @@ earlier row; a wrong row gets a correcting row below it.
 |---|---|---|---|---|
 | 2026-10-01 | K2 | TypeScript 141 / 858 unresolved (`talentTrail`); Java and Python 0 real misses | during PR #79 (exact commit not recorded) | Throwaway counting script (deleted), same method as K2 |
 | 2026-10-01 | K3 | CodeOwl 0 isolated (from 12); `ripgrep` 54 edges, stable (from a random 3 to 9) | PR #79 | `examples/graph_stats.rs` |
+| 2026-10-02 | K2 | TypeScript (`talentTrail`): unresolved imports that name a walked file: **4 of 721 after the fix (0.6 %); 141 of 858 (16.4 %) before**. All 4 are one name, `VIEW_AS_JUDGE_COOKIE`, a local `export { X }` re-export | branch `ts-type-symbols` | Throwaway probe (path-suffix match against walked files), deleted |
+| 2026-10-02 | K3 | `talentTrail`: file edges 478 to 574, isolated files 56 to 42. Rust, Python, Java statistics byte-identical before and after | branch `ts-type-symbols` | `examples/graph_stats.rs`, master vs branch |
 | 2026-10-02 | K5 | 3 current / 20 stale / 1 missing; freshness 13 %, weighted 5 % | `4f72f1f` | `get_spec_coverage`, scope `src` |
 | 2026-10-02 | K6 | 4 stacks, 3 feature models, no polyglot | `4f72f1f` | Count of implementations |
 | 2026-10-02 | K10 | 0 external users, 2 stars | `4f72f1f` | GitHub |

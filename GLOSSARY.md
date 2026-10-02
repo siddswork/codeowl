@@ -301,7 +301,11 @@ why CodeOwl cares.
     ever — not deprioritized, invisible. See `ARCHITECTURE.md`'s
     granularity rules for the full reasoning).
   - A **method** is not — it's described inside its class's section.
-  - A **`const`** is not — it's mentioned in the file's summary.
+  - A **`const`** is not — it's mentioned in the file's summary. Neither
+    is a TypeScript `type` alias, `interface` or `enum`, nor a name bound by
+    a destructured `const`: each is a `Value` leaf, so it is an import target
+    with an `interface_hash` (a change to it stales its importers) without
+    getting a spec section of its own.
   - A **file** is spec-bearing only if it has at least one top-level
     function or class, exported or not. A file that just re-exports
     things from elsewhere (a "barrel") is not — it extracts to *zero*

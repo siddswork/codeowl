@@ -348,6 +348,55 @@ mod tests {
     }
 
     #[test]
+    fn imports_of_types_enums_and_destructured_names_resolve() {
+        // Question 21: none of these had a symbol to land on, so every
+        // import of one was an unresolved (edge-less) import.
+        let (resolved, graph) = resolve_fixture(&[
+            (
+                "app/page.ts",
+                "import { User, Status, Role } from '../types';\nimport { auth, signIn } from '../auth';\n",
+            ),
+            (
+                "types.ts",
+                "export interface User { id: string }\nexport type Status = 'open';\nexport enum Role { Admin }\n",
+            ),
+            (
+                "auth.ts",
+                "export const { handlers, auth, signIn } = NextAuth({});\n",
+            ),
+        ]);
+        for (name, target) in [
+            ("User", "types.ts::User"),
+            ("Status", "types.ts::Status"),
+            ("Role", "types.ts::Role"),
+            ("auth", "auth.ts::auth"),
+            ("signIn", "auth.ts::signIn"),
+        ] {
+            let edge = resolved
+                .iter()
+                .find(|r| r.from_file == "app/page.ts" && r.imported_name == name)
+                .unwrap_or_else(|| panic!("no import of {name}"));
+            assert!(edge.target.is_some(), "{name} did not resolve");
+            assert_eq!(edge.target, graph.find(target), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_type_re_exported_through_a_barrel_resolves_to_the_declaration() {
+        let (resolved, graph) = resolve_fixture(&[
+            ("pages/consumer.ts", "import { Shape } from './barrel';\n"),
+            ("pages/barrel.ts", "export type { Shape } from './shape';\n"),
+            (
+                "pages/shape.ts",
+                "export interface Shape { sides: number }\n",
+            ),
+        ]);
+        let edge = &resolved[0];
+        assert_eq!(edge.target, graph.find("pages/shape.ts::Shape"));
+        assert!(edge.target.is_some());
+    }
+
+    #[test]
     fn external_package_import_is_unresolved_not_an_error() {
         let (resolved, _graph) =
             resolve_fixture(&[("a.ts", "import { z } from 'some-external-package';\n")]);
