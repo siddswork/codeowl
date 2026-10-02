@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/symbol.rs]
-file: { source_hash: 746dff979be7a41f0b0612a5bb91f0d92453056fc2d26f6135a015f6f483dedf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 23ac758132e751b7ca3328c51a0697f8ffd9a3c307b15b6d4f1b5bc05bcf653e }
+file: { source_hash: c586c22ae6d62ca24a449ad921593e8b76ad58c195064735237d0bb6e0f5d04f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 23ac758132e751b7ca3328c51a0697f8ffd9a3c307b15b6d4f1b5bc05bcf653e }
 symbols:
   src/symbol.rs::SymbolId: { source_hash: cab1efc8ff00e70ad0c6359952a0420cae2340e091c301f98b90ac8e001b5c9f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9b39ef07757da2546307644d89bbbf944473e6d63e4855a63faeb48e16412626 }
   src/symbol.rs::SymbolKind: { source_hash: 705c2902ac4016a078c0207dc562b429c21c755363ceab9dfc3608825ebc7fab, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3aaa3a5c23a61c4d6c074cf71da5ce649410d1c66e26997bbfd1dc21f4248cdb }

@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/spec.rs]
-file: { source_hash: cf0cb0dc44d12fd95db48651ad6c9cab9db8a6f479ee276eb3ea70db3fa9fded, deps_hash: 25617e9f6ed8454142a297d6cdd6c13d7da42ba2914265ad28592e75bb0ce3ab, spec_hash: b5b7659a016f40fccca7f4eb202dc0f58c9f4628ff6aa7775628c3b9b2ca09a4 }
+file: { source_hash: 15760a8298827819f1047d3164892a52873fd980f3de134ef514106912226666, deps_hash: 25617e9f6ed8454142a297d6cdd6c13d7da42ba2914265ad28592e75bb0ce3ab, spec_hash: b5b7659a016f40fccca7f4eb202dc0f58c9f4628ff6aa7775628c3b9b2ca09a4 }
 symbols:
   src/spec.rs::classify_in: { source_hash: a4ebef1e5c2ff75b4e37f6c4408e5d2aa0f6b9b63634ff5e30e527e711f9028c, deps_hash: 9fb02c79a8164951423437955d4f2844446258dd7a532d2624d4b24258b27c06, spec_hash: 2f924389ee077fc9000eacaf15dd5ab05dbc900e30c6f190490a64b9e9027f94 }
   src/spec.rs::spec_path: { source_hash: 3dfc63d758381a3ffa2736a2ed112fafd6692d2f251ea2ad7ef43a945db2146e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 87e4518733cbfe51c0b0a0860d1e854e456d7011a801387cd945f03a5817e420 }
