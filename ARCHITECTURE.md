@@ -443,6 +443,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [17](DECISIONS.md#q17) | `get_spec_coverage` doesn't report files skipped as unreadable | Logged, not scheduled |
 | [18](DECISIONS.md#q18) | Whether to build a call graph (`Callable → Callable` edges) | Logged, not built; revisit on a measured multi-hop miss |
 | [21](DECISIONS.md#q21) | TypeScript extraction skips `interface`/`type`/`enum` and destructured exports, so imports of them create no edge (141 of 858 unresolved in `talentTrail`); Java picks one of several path matches unchecked | Mostly built for TypeScript: `type`/`interface`/`enum` and destructured-export symbols, then export clauses (141 to 0 unresolved; 131 to 0 coarse-hash targets). Open: `abstract class`/`declare`/`namespace`, renamed clause exports, and the Java pick check |
+| [22](DECISIONS.md#q22) | A file summary is written from the first 8,000 bytes of the file (23 of 35 `src` files are over), and the file fingerprint hashes bytes the summary never saw | Measured on Rust, not built: raw file if it fits, else module doc + signatures + symbol summaries (paged), and a prompt asking for coverage and specifics (recall 26 and 23 to 68 and 55). Waits on a TypeScript and a Java check and a paged-read check; evidence in `experiments/exp-05-file-summary-input.md` |
 
 **Resolved**
 

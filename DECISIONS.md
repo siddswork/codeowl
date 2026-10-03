@@ -79,6 +79,31 @@ Requirements-level open questions (whether something is in scope at all) live in
   - **Found in code review, measured, not built.** (a) `export default Name;` (a default export of a locally declared name) leaves `Name` non-exported: 1 case in `talentTrail` (`EvaluationForm`). Default imports resolve to the file only and give no symbol edge, so this cannot produce the coarse-hash over-staleness the clause fix removed, and the repo-wide count of resolved imports with no `interface_hash` is 0. (b) A *default or namespace* import re-exported by a clause (`import D from './y'; export { D }`) is not followed: 0 cases in `talentTrail`, pinned by a test, open if a barrel-heavy repo shows it.
   - **Still open:** `abstract class`/`declare`/`namespace` (above), the two review items just listed, a renamed clause export, and the Java ambiguous-pick check.
 
+<a id="q22"></a>
+**22.** **A file's summary is written from the first 8,000 bytes of the file, so most file summaries describe a fragment, and the file-level fingerprint hashes bytes the summary never saw.** Surfaced 2026-10-03, while planning a finer file fingerprint (so a comment-only edit stops staling hub file summaries). Evidence and method: `experiments/exp-05-file-summary-input.md`.
+- **The problem.** The file task hands the agent the file's raw text cut at `max_spec_task_bytes` (8,000). On CodeOwl's own `src`, 23 of 35 files are over it. The summary is then written from a prefix, and staleness is keyed on the *whole* raw file hash, so a comment-only edit anywhere stales the summary even though the writer never saw most of the file. Both halves of the problem share one cause: the input to the file summary is not what the fingerprint covers.
+- **What was measured** (Rust only; recall of frozen weighted key points, blind judges; full tables in the experiment):
+
+  | Approach | `spec.rs` (244 KB) | `mcp.rs` (174 KB) | `rust_crates.rs` (5.8 KB, fits) |
+  |---|---|---|---|
+  | Today: raw, cut at 8,000 bytes | 26 | 23 | **92** |
+  | Symbol summaries, old prompt | 52 | 35 | 54 |
+  | Symbol summaries, **new prompt** | **68** | **55** | not run |
+  | Summaries plus behaviour text, new prompt | 68 | 65 (runs 46 to 74) | not run |
+  | Whole file (cannot ship above the cap; about twice the tokens) | 61 | 49 | not run |
+
+- **Decided (on Rust evidence), not built:**
+  1. Raw file when it fits the task limit; otherwise module doc, signatures and each symbol's `### Summary`, paged with a cursor if still too large. Never summaries-only for a file that fits (92 against 54).
+  2. The cap stays at 8,000 bytes; the input shape changes, not the limit.
+  3. The file-summary instruction gains: cover every major part, give concrete specifics (named rules, limits, thresholds, ordering), mention surprising behaviours. This moved recall more than any input change (+16 and +20 points at no extra cost). `### Behavior` text was not worth its extra cost (+2 and +8 alone; no reliable gain over the prompt).
+  4. The fingerprint for a summary-based file task covers exactly its input: module doc, each symbol's signature and `spec_hash` (the containment rule rollups already use). Raw-file tasks keep the whole-file hash. This supersedes the parked `shape_hash` plan.
+- **Not established, so the build waits:**
+  - **Other stacks.** Both large files are Rust. The prompt wording is stack-neutral; the gain is not shown to carry over. TypeScript (routes, components; some symbol kinds still unextracted, question 21) and Java (many small methods) need their own check first.
+  - **Paging.** Every test read all of `spec.rs`'s 28 KB of summaries in one go; real paging means a writer carrying notes across pages and may lose information.
+  - **Noise.** Three runs per arm; differences under about 8 points are not reliable. The one wrong claim in the richer-input arm was a false "always".
+- **Next steps, in order:** a TypeScript and a Java check (controls and key points first), a paged-read check on `spec.rs`, then a plan for the file-task shape, the fingerprint, `FORMAT_VERSION` and the `setup/codeowl-generate.md` / `.prompt.md` prompt change, each needing its own branch and approval. The plan table is in the experiment.
+- **Also noticed.** The stored `src/spec.rs` summary says "five kinds of document" and lists four; the same slip appeared in every whole-file run and in no summaries-based run. To fix when the stored text is next touched.
+
 ## CodeOwl internals
 
 <a id="q13"></a>
