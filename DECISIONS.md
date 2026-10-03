@@ -82,27 +82,34 @@ Requirements-level open questions (whether something is in scope at all) live in
 <a id="q22"></a>
 **22.** **A file's summary is written from the first 8,000 bytes of the file, so most file summaries describe a fragment, and the file-level fingerprint hashes bytes the summary never saw.** Surfaced 2026-10-03, while planning a finer file fingerprint (so a comment-only edit stops staling hub file summaries). Evidence and method: `experiments/exp-05-file-summary-input.md`.
 - **The problem.** The file task hands the agent the file's raw text cut at `max_spec_task_bytes` (8,000). On CodeOwl's own `src`, 23 of 35 files are over it. The summary is then written from a prefix, and staleness is keyed on the *whole* raw file hash, so a comment-only edit anywhere stales the summary even though the writer never saw most of the file. Both halves of the problem share one cause: the input to the file summary is not what the fingerprint covers.
-- **What was measured** (Rust only; recall of frozen weighted key points, blind judges; full tables in the experiment):
+- **What was measured** (recall of frozen weighted key points, two blind judges, 3 runs per arm; one file per row; full tables, per-key-point results and method in the experiment):
 
-  | Approach | `spec.rs` (244 KB) | `mcp.rs` (174 KB) | `rust_crates.rs` (5.8 KB, fits) |
-  |---|---|---|---|
-  | Today: raw, cut at 8,000 bytes | 26 | 23 | **92** |
-  | Symbol summaries, old prompt | 52 | 35 | 54 |
-  | Symbol summaries, **new prompt** | **68** | **55** | not run |
-  | Summaries plus behaviour text, new prompt | 68 | 65 (runs 46 to 74) | not run |
-  | Whole file (cannot ship above the cap; about twice the tokens) | 61 | 49 | not run |
+  | File (stack, size) | Today: raw cut at 8,000 bytes | Best bounded input tested | Whole file (not shippable above the cap) | Control |
+  |---|---|---|---|---|
+  | `rust_crates.rs` (Rust, 5.8 KB, fits the cap) | **92** (raw, whole) | 54 (symbol summaries) | n/a | 92 |
+  | `analytics-dashboard.ts` (TypeScript, 18.5 KB, 2.3× the cap) | 48 | 53 (symbol summaries, new prompt) | **78** | 90 |
+  | `FightService.java` (Java, one class, 15.1 KB, 1.9× the cap) | 47 | **66** (deterministic member outline, new prompt) | 78 | 78 |
+  | `mcp.rs` (Rust, 174 KB, 22× the cap) | 23 | **55** (symbol summaries, new prompt) | 49 | 74 |
+  | `spec.rs` (Rust, 244 KB, 31× the cap) | 26 | **68** (symbol summaries, new prompt) | 61 | 92 |
 
-- **Decided (on Rust evidence), not built:**
-  1. Raw file when it fits the task limit; otherwise module doc, signatures and each symbol's `### Summary`, paged with a cursor if still too large. Never summaries-only for a file that fits (92 against 54).
-  2. The cap stays at 8,000 bytes; the input shape changes, not the limit.
-  3. The file-summary instruction gains: cover every major part, give concrete specifics (named rules, limits, thresholds, ordering), mention surprising behaviours. This moved recall more than any input change (+16 and +20 points at no extra cost). `### Behavior` text was not worth its extra cost (+2 and +8 alone; no reliable gain over the prompt).
-  4. The fingerprint for a summary-based file task covers exactly its input: module doc, each symbol's signature and `spec_hash` (the containment rule rollups already use). Raw-file tasks keep the whole-file hash. This supersedes the parked `shape_hash` plan.
+- **What it shows.**
+  1. **Today's capped input is blind to the second half of any big file** on every stack: exactly 1.00 on key points before the cut, 0.00 on every must-have point after it.
+  2. **No single replacement input fits every file shape.** Raw wins when it fits; the whole file wins when only modestly over the cap (TypeScript: 78 against 53 for summaries); symbol summaries win only when the file is far over the cap with many symbols (Rust: they beat even reading the whole file); a deterministic member outline wins for a single large class (Java: +19, no wrong claims).
+  3. **The coverage-and-specifics prompt helps only when the input spans the whole file** (+16 and +20 on Rust summaries input); it did nothing on capped raw text on either TypeScript or Java. It is not a universal fix.
+  4. **Symbol summaries keep topics and lose specifics**; detail lives in bodies and in comments attached to no symbol. Adding `### Behavior` text was not worth its cost on Rust (+2 and +8 alone), and was not tried on TypeScript.
+  5. **A Java class is one symbol**, so the symbol-spec rung degenerates to the class spec, which was no better than today (46) and carried false claims from the stored spec into every run.
+- **Decided, not built:**
+  1. Keep the 8,000-byte cap; change the input shape, not the limit.
+  2. Raw file when it fits. Never summaries-only for a file that fits (92 against 54).
+  3. Beyond the cap, choose the input by size and shape: the raw file in pages when modestly over (likely, untested); module doc, signatures and each symbol's `### Summary` when the file has many symbols and is far over; a deterministic member outline for a single large class.
+  4. The coverage-and-specifics instruction goes with the summaries and outline inputs only; the writer is also told not to describe its own input as cut off (all 6 capped TypeScript runs did).
+  5. The fingerprint hashes exactly what the writer saw for the rung used: whole-file hash for raw tasks; module doc + each symbol's signature + `spec_hash` for summary tasks (the containment rule rollups already use); the outline for outline tasks. This supersedes the parked `shape_hash` plan.
 - **Not established, so the build waits:**
-  - **Other stacks.** Both large files are Rust. The prompt wording is stack-neutral; the gain is not shown to carry over. TypeScript (routes, components; some symbol kinds still unextracted, question 21) and Java (many small methods) need their own check first.
-  - **Paging.** Every test read all of `spec.rs`'s 28 KB of summaries in one go; real paging means a writer carrying notes across pages and may lose information.
-  - **Noise.** Three runs per arm; differences under about 8 points are not reliable. The one wrong claim in the richer-input arm was a false "always".
-- **Next steps, in order:** a TypeScript and a Java check (controls and key points first), a paged-read check on `spec.rs`, then a plan for the file-task shape, the fingerprint, `FORMAT_VERSION` and the `setup/codeowl-generate.md` / `.prompt.md` prompt change, each needing its own branch and approval. The plan table is in the experiment.
-- **Also noticed.** The stored `src/spec.rs` summary says "five kinds of document" and lists four; the same slip appeared in every whole-file run and in no summaries-based run. To fix when the stored text is next touched.
+  - **Paging.** Every test read all of its input at once (28 KB of `spec.rs` summaries, the whole 18 KB TypeScript file). Real paging means a writer carrying notes across pages and may lose information; the 78 for the whole TypeScript file may not survive it. This also decides where the crossover between paged raw and summaries lies.
+  - **Breadth.** One file per non-Rust stack; nothing on Python, React components or Next.js routes, or Java files with several small classes. TypeScript summaries here were written by cold agents, not the real pipeline; 36 of 46 symbols were types and constants.
+  - **Noise.** Three runs per arm; differences under about 8 points are not reliable. The TypeScript lead of summaries over today (+5) is within it.
+- **Next steps, in order:** a paged-raw check on the TypeScript and Java files and a paged-summaries check on `spec.rs`; a rule for the crossover size; then a plan for the file-task shape, the Java outline, the fingerprint, `FORMAT_VERSION` and the `setup/codeowl-generate.md` / `.prompt.md` prompt change, each needing its own branch and approval. The plan table is in the experiment.
+- **Also noticed.** The stored `src/spec.rs` summary says "five kinds of document" and lists four; the same slip appeared in every whole-file run and in no summaries-based run. To fix when the stored text is next touched. The stored `FightService` spec in `quarkus-super-heroes` (local, not in this repo) also carries false claims (every public method has `@WithSpan`; two package-private helpers called private).
 
 ## CodeOwl internals
 

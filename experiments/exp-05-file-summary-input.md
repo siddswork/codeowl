@@ -1,6 +1,6 @@
 # exp-05 — What a file summary should be written from
 
-**Status:** measured on Rust only (2026-10-03). Nothing is built. The non-Rust check and the paged-read check below are still to run.
+**Status:** measured on Rust (rounds 1 and 2) and on one TypeScript and one Java file (round 3), 2026-10-03. Nothing is built. The paged-read check below is still to run, and it decides the last open piece of the design.
 **Feeds:** `DECISIONS.md#q22` (the decision this evidence supports), the file-task shape in `spec.rs` (`spec_task_to_response`, the `File` arm), the file-summary instructions in `setup/codeowl-generate.md` and its `.prompt.md` port, and the finer file-level fingerprint plan on branch `file-fingerprint`.
 **Not a decision doc:** conclusions fold into `DECISIONS.md#q22` and `ARCHITECTURE.md` when built. Where this file and those disagree, they win.
 
@@ -83,18 +83,80 @@ Findings:
 4. **BP beats whole-file D on both files** (+7, +6), at about half the cost.
 5. **The "five kinds" slip reappeared** in D and in the stored summary but not in any B/BP/X/XP run, so it comes from reading the whole file, not from the summaries.
 
+## Round 3 — does it carry over to TypeScript and Java (mean of 2 judges; range over 3 runs, 2 for DP)
+
+Same blind method. Controls and key points were written first and frozen (Appendix B). One file per stack, both over the cap and both logic-rich:
+
+| File | Size | Symbols | Where the 8,000-byte cap cuts |
+|---|---|---|---|
+| TypeScript: `talentTrail/lib/analytics-dashboard.ts` (private repo: judged locally, never published) | 18,574 bytes, 535 lines | 46 | line 261, inside `buildTrend` |
+| Java: `quarkus-super-heroes/rest-fights/.../FightService.java` | 15,126 bytes, 387 lines | 1 class, 36 members | line 198, inside a fallback method |
+
+Arms: A (today), AP (today's capped input with the new prompt), DP (whole file, new prompt), and a stack-specific bounded input, all with the new prompt:
+
+| Stack | Bounded input |
+|---|---|
+| TypeScript (BP) | signature and `### Summary` for each of the 46 symbols (6,251 bytes); summaries written by cold agents from each symbol's own source, because the MCP server is attached to this repo only |
+| Java (OP) | deterministic outline: class doc, annotations, and every member's annotations, signature and first comment sentence, no bodies (4,546 bytes; no LLM involved) |
+| Java (SP) | the stored class spec's Summary and Behavior (a Java class is one symbol, so this is what the symbol-summary rung would hand over) |
+
+| Arm | TypeScript | Java | Wrong claims per run (TypeScript, Java) |
+|---|---|---|---|
+| A: capped raw, original prompt (today) | 48 (48–50) | 47 (46–47) | 1, 0 |
+| AP: capped raw, new prompt | 48 (48–50) | 47 (46–47) | 1, 0 |
+| BP: symbol summaries (TypeScript) | **53** (53–54) | n/a | 0 |
+| OP: member outline (Java) | n/a | **66** (65–67) | 0 |
+| SP: stored class spec (Java) | n/a | 46 (45–46) | 2 |
+| DP: whole file | 78 (78–79) | 78 (72–83) | 0, 0 |
+| Stored spec | none | 34 | 1 |
+| Control / poor | 90 / 3 | 78 / 5 | 0 |
+
+Per key point, the shape of each arm:
+- **Capped raw (A, AP):** exactly 1.00 on points before the cut and exactly 0.00 on every must-have point after it. TypeScript: 0 on four of its eight must-have points, all in the second half of the file (the function that loads the data, and three of the transform functions). Java: 0 on the winner logic, saving a fight, narration with circuit breaker and retries.
+- **TypeScript summaries (BP):** no zeros on must-have points, but almost everything is 0.50: the topic without the specifics (numeric thresholds, lookup-table contents, the reason the data is fetched pre-aggregated). That last reason sits in a comment attached to no symbol, so no summary carries it.
+- **Java outline (OP):** no zeros on must-have points; weakest on the winner logic and saving a fight (0.50), because an outline shows names, not logic.
+- **Java stored class spec (SP):** misses the queries entirely, and inherits two false claims from the stored spec: every public method carries `@WithSpan` (`findRandomLocation` at line 132 does not), and `determineWinner` and `shouldHeroWin` are private (they are package-private, lines 309 and 333). The stored spec itself also had one wrong claim.
+
+Findings:
+1. **Today's capped input is blind to the second half of any big file**, on every stack: 23 to 48 % recall against 78 to 92 % for the control.
+2. **The new prompt does nothing on capped raw text** (AP equals A on both files). In Rust the prompt's +16 and +20 came with a summaries input; it helps when the input spans the whole file, not when the content is simply absent. The "stack-neutral prompt lifts recall" claim is not established.
+3. **TypeScript: symbol summaries beat today by about 5 points, within the noise; the whole file is 25 points higher.** This file is only 2.3 times the cap. The Rust result (summaries beat whole-file reading) held for files 20 to 30 times the cap, so the crossover between paging the raw file and summarising lies somewhere in between. Untested.
+4. **Java: the deterministic outline gains 19 points** with no wrong claims, from an input that costs no LLM tokens to build.
+5. **A Java class is one symbol, so the symbol-spec rung degenerates** into the class spec, which was no better than today and carried the stored spec's errors forward.
+6. **All 6 capped TypeScript runs said the file was cut off** ("cut off partway through `buildTrend`"), counted as a wrong claim because the file is complete. It is the writer reporting its input, but it ends up in the summary. The Java capped runs did not.
+7. **Existing prose is a risky input.** The stored `FightService` spec carries false claims that a summary built on it repeated in every run.
+
 ## Conclusions
 
-1. **Raw file when it fits the task limit; otherwise module doc, signatures and each symbol's `### Summary`.** No `### Behavior` text.
-2. **Change the file-summary instruction** to ask for coverage of every major part, concrete specifics, and surprising behaviours. That is worth more than any input change tested.
-3. **Never summaries-only for a file that fits.** (92 against 54.)
-4. **Keep the 8,000-byte cap.** The input shape moves instead.
-5. The "first sentence of each summary" rung and the "drop the tests" rung of the original ladder are dropped: measurement showed test-dropping rescues 1 of 23 over-cap files, and the summaries input already fits 19 of them.
+What the three rounds support:
+
+1. **The cap is the real problem.** A capped summary reads as complete and describes a prefix: perfect before the cut, zero after it, on Rust, TypeScript and Java.
+2. **No single replacement input fits every file.** What was measured, by file shape:
+
+   | File shape | Best input tested | Result against today |
+   |---|---|---|
+   | Fits the cap (Rust, 5.8 KB) | raw file | 92 against 54 for summaries |
+   | Slightly over (TypeScript, 2.3×) | whole file | 78 against 48; summaries only 53 |
+   | Many symbols, far over (Rust, 20 to 30×) | symbol summaries + coverage prompt | 68 and 55 against 26 and 23; beats the whole file read (61, 49) |
+   | One big class (Java) | deterministic member outline | 66 against 47 |
+
+3. **Never summaries-only for a file that fits** (92 against 54).
+4. **The coverage prompt helps only when the input spans the whole file.** Keep it for summaries and outline inputs; it does nothing for capped raw text.
+5. **Symbol summaries keep topics and lose specifics.** Detail lives in bodies and in comments attached to no symbol.
+6. **Do not feed earlier LLM prose back in as the only input** (the stored class spec carried false claims into every Java run); prefer deterministic inputs where they exist.
+7. **Keep the 8,000-byte cap.** The input shape moves instead.
+8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (likely, untested); symbol summaries when there are many symbols and the file is far over; the member outline for a single large class. The fingerprint hashes exactly what the writer saw for the rung used.
+9. The "first sentence of each summary" and "drop the tests" rungs of the original ladder are dropped: test-dropping rescues 1 of 23 over-cap files, and the summaries input already fits 19 of them.
+10. `### Behavior` text added to the summaries input was not worth its extra cost on Rust (+2 and +8 alone, no reliable gain over the prompt). It was not tried on TypeScript, where it may matter more.
 
 ## Limits of this evidence
 
-- **Rust only.** Both large files and the small one are CodeOwl's own Rust. The prompt wording is stack-neutral, but the gain is not shown to carry over (TypeScript routes and components, Java classes of many small methods, Python modules). The TypeScript pack also still lacks some symbol kinds (`DECISIONS.md#q21`), which would thin the summaries input there.
-- **Not paged.** In every test the writer read all 28 KB of `spec.rs` summaries at once. The real task limit means paging with a cursor, and a writer carrying notes across pages may lose information. Untested.
+- **One file per non-Rust stack, none for Python.** Rounds 1 and 2 are CodeOwl's own Rust; round 3 adds one TypeScript and one Java file. The prompt wording is stack-neutral, but its gain did not carry over to capped raw text, and nothing was measured on a Python module, a React component or Next.js route, or a Java file with several small classes. The TypeScript pack also still lacks some symbol kinds (`DECISIONS.md#q21`).
+- **The TypeScript symbol summaries were not from the real pipeline.** The MCP server is attached to this repo only, so each symbol's `### Summary` came from a cold agent given that symbol's source, 5 agents handling about 5 symbols each (some context shared within a group). 36 of the 46 symbols are types and constants.
+- **Round 3 had no TypeScript arm with behaviour text and no old-prompt summaries arm**, so the prompt's share of the TypeScript summaries score is not separable.
+- **The "cut off" statement counted as wrong** in all 6 capped TypeScript runs is a judging choice: it is the writer reporting its input, but it ends up in the summary text.
+- **The control note says the cap cuts TypeScript at line ~290;** it cuts at line 261. The frozen control file keeps the wrong figure; the key points are unaffected.
+- **Not paged.** In every test the writer read all of its input at once (all 28 KB of `spec.rs` summaries; the whole 18 KB TypeScript file). The real task limit means paging with a cursor, and a writer carrying notes across pages may lose information. Untested, and it decides whether the paged-raw rung is worth building.
 - **Small samples.** Three runs per arm; judge gaps of 5 to 10 points on large files. Treat differences under about 8 points as noise.
 - **Biased control.** The control and key points were written by the same author, so the control's score is biased upward; it is a ceiling check, not an absolute grade.
 - **One judge model family** scored everything.
@@ -109,7 +171,10 @@ Findings:
 | Round 1 judging | 9 | about 0.42M |
 | Round 2 generation | 18 | about 1.0M |
 | Round 2 judging | 6 | about 0.33M |
-| **Total** | **55** | **about 2.8M** |
+| Round 3 TypeScript symbol summaries | 5 | about 0.2M |
+| Round 3 generation | 25 | about 1.04M |
+| Round 3 judging | 6 | about 0.31M |
+| **Total** | **91** | **about 4.3M** |
 
 ## Plan
 
@@ -117,12 +182,13 @@ Nothing below is started. Each build step needs its own branch, plan and approva
 
 | # | Step | Gate |
 |---|---|---|
-| 1 | **Non-Rust check.** Repeat the BP-versus-A comparison (and D as the ceiling) on one TypeScript file (`talentTrail`, private: judged locally, never published) and one Java file (`commons-lang` or `quarkus-super-heroes`) that exceed the cap. Write controls and key points first and freeze them; same blind method. | If BP clearly beats A on both: ship the prompt as stack-neutral. If not: tune the wording per stack before shipping. |
-| 2 | **Paged-read check.** On `spec.rs`, compare the single-read BP (68) against a stateless paged read of 4 to 5 chunks with the writer carrying notes. | If paged is within noise of single-read: build paging as designed. If it loses clearly: look at the alternative (summarise chunks, then summarise the chunk summaries). |
-| 3 | **Design and tests.** File task shape: raw if the file fits, else module doc + signatures + `### Summary`, paged with a cursor (stateless, like `pending`). Failing tests first, including a rewrite of the `mcp.rs` lifecycle assertion `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`. | Approved plan. |
-| 4 | **Fingerprint.** For summary-based tasks, hash module doc + each symbol's signature + its `spec_hash` (the containment rule rollups already use); raw-file tasks keep the whole-file hash. This replaces the parked `shape_hash` plan. `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today). |
-| 5 | **Prompt.** Add the coverage instruction to `setup/codeowl-generate.md` and `setup/codeowl-generate.prompt.md` together, deferring to `STYLE.md`. | Both copies in step. |
-| 6 | **Housekeeping.** Fix the stored `src/spec.rs` summary ("five kinds" lists four). Decide whether a file-summary recall KPI belongs in `NORTHSTAR.md` (it would sit beside K1b; not added yet). | Owner decision. |
+| 1 | **Non-Rust check. Done (round 3).** One TypeScript and one Java file, controls and key points frozen first. | Result: the Rust finding does not generalise as one rule; see Conclusions. |
+| 2 | **Paged-read check (next).** Compare a stateless paged read, with the writer carrying notes, against the single-read results already measured: (a) the raw file in 3 pages for `analytics-dashboard.ts` (single-read whole file: 78) and in 2 pages for `FightService.java` (72 to 83); (b) the symbol summaries of `spec.rs` in 4 to 5 pages (single-read: 68). | If paged raw stays within noise of the single read, the modestly-over-cap rung is paged raw. If paged summaries lose clearly on `spec.rs`, try summarising chunks and then summarising the chunk summaries. |
+| 3 | **Find the crossover.** From (2), decide the file size, relative to the cap, at which paged raw stops beating summaries. One more file of intermediate size per stack if the two points are not enough. | A stated rule: raw up to N times the cap, summaries beyond. |
+| 4 | **Design and tests.** File task shape per the ladder in Conclusions, paged with a cursor (stateless, like `pending`); a Java member outline built deterministically from the extractor's own member data. Failing tests first, including a rewrite of the `mcp.rs` lifecycle assertion `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`. | Approved plan, own branch. |
+| 5 | **Fingerprint.** Hash exactly what the writer saw for the rung used: raw-file tasks keep the whole-file hash; summary tasks hash module doc + each symbol's signature + its `spec_hash` (the containment rule rollups already use); outline tasks hash the outline. This replaces the parked `shape_hash` plan. `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today). |
+| 6 | **Prompt.** Add the coverage and specifics instruction for the summaries and outline inputs only, to `setup/codeowl-generate.md` and `setup/codeowl-generate.prompt.md` together, deferring to `STYLE.md`. Tell the writer not to describe its own input as cut off. | Both copies in step. |
+| 7 | **Housekeeping.** Fix the stored `src/spec.rs` summary ("five kinds" lists four) and the false claims in the stored `FightService` spec (`quarkus-super-heroes`, local only). Decide whether a file-summary recall KPI belongs in `NORTHSTAR.md` (it would sit beside K1b; not added yet). | Owner decision. |
 
 ---
 
@@ -132,6 +198,9 @@ Nothing below is started. Each build step needs its own branch, plan and approva
 - **X input:** the same, with each symbol's `### Behavior` paragraph added.
 - **A input:** the raw file, cut by the same rule as `cap_generation_text` and ending with the marker `[... truncated: this content exceeded the generation-task size limit. Use get_symbol / search_code / get_callers for the parts not shown here.]`.
 - The stored top-level `## Summary` was always removed from B and X so the writer could not copy it.
+- **TypeScript BP input (round 3):** `FILE:`, `MODULE DOC: (none)`, then 46 symbols in file order, each as its declaration head (for example `export function buildTrend`) and a one-or-two-sentence summary. Each symbol's source began at its leading comment and ended at its closing brace; a section-divider comment that belongs to no symbol was dropped, as the real extractor would.
+- **Java OP input (round 3):** `FILE:`, class doc, `@ApplicationScoped public class FightService`, then every member in file order: its annotations, its signature, and the first sentence of its comment where one exists (only one member had a comment). No bodies.
+- **Java SP input (round 3):** the stored class spec's `### Summary` and `### Behavior`, with a one-line header saying the file holds a single class.
 
 ## Appendix B — frozen key points and "must NOT" lists
 
@@ -201,6 +270,33 @@ Control summary (hand-written):
 | 8 | N | The two small helpers (`parent_dir`, `join`) only do forward-slash path text operations. |
 
 Must NOT claim: that it reads `Cargo.lock`, downloads crates, or resolves external dependencies; that `crate::` means one root for the whole repo; that a binary-only package can be imported by name.
+
+### `lib/analytics-dashboard.ts` (TypeScript, `talentTrail`; round 3)
+
+Withheld: the source repo is private, and the control summary and 12 key points restate its business logic. The structure was the same as the others (8 must-have, 4 nice-to-have points, a hand-written control, a "must NOT claim" list of 4); the scores are in Round 3. To rerun on another TypeScript file, write the control and key points first and freeze them.
+
+### `FightService.java` (Java, `quarkus-super-heroes/rest-fights`; round 3)
+
+Control summary (hand-written):
+
+> This is the business logic of the Fight microservice in the Quarkus Super Heroes sample: one application-scoped class that lists fights, picks fighters, runs a fight, asks another service to narrate it, and saves it. Almost every call to another service (heroes, villains, locations, narration) is wrapped in a timeout, 2 seconds for a single lookup and 4 for the combined random-fighters call, 5 for the "hello" pings, with a fallback method that returns a stand-in built from configuration (a default hero, villain, location, narration or image, or a "Could not invoke the X microservice" message), so a fight can still go ahead when a dependency is down. Random fighters are fetched together, each falling back on its own if empty, with an optional configured delay added to show how delays behave. Running a fight works out the winner and then persists it: the hero wins if its level plus a random adjustment (bounded by configuration) beats the villain's; otherwise the villain wins if its level is strictly higher; otherwise a coin flip decides; the date is stamped, the fight is saved to the reactive MongoDB store and an event is emitted on the "fights" channel. The two calls to the narration service are heavier: a circuit breaker that opens after failures reach half of 8 requests, three retries 200 ms apart, a 30-second timeout for text and 2 minutes for image generation, and configured fallback text or image. Paged queries sort by fight date, newest first, and public operations are traced with OpenTelemetry spans.
+
+| # | W | Point |
+|---|---|---|
+| 1 | M | Purpose: the business logic of the Fight microservice, a single application-scoped Quarkus class that lists fights, picks random fighters and a location, runs a fight, has it narrated (text and image), saves it, and pings the other services. |
+| 2 | M | Resilience on calls to other services: each has a timeout (about 2 s for single lookups, 4 s for the combined random-fighters call, 5 s for the hello pings) and a fallback method returning a stand-in built from configuration (default hero, villain, location, narration, image, or a "Could not invoke the X microservice" message), so a fight can proceed when a dependency is down. |
+| 3 | M | Random fighters: a random hero and villain are fetched together, each falling back to the configured default when it comes back empty; an optional configured delay can be added to the response (a demo of delays and fault tolerance). |
+| 4 | M | Winner logic: the hero wins if its level plus a random adjustment (bounded by configuration) beats the villain's with its own adjustment; otherwise the villain wins if its level is strictly higher; otherwise a coin flip; the fight is stamped with the current date. |
+| 5 | M | Saving a fight: persisted to the reactive MongoDB store and a mapped event is emitted on the "fights" messaging channel (fire and forget) before the fight is returned. |
+| 6 | M | Narration and image generation are the heavy calls: circuit breaker (opens at a 50% failure ratio over 8 requests, 2 s delay), 3 retries 200 ms apart, long timeouts (30 s for narration text, 2 minutes for image), and configured fallback narration text or image. |
+| 7 | M | Queries: all fights, a page of fights sorted by fight date newest first, and one fight by its MongoDB id. |
+| 8 | N | Four hello methods ping the heroes, villains, locations and narration services, each with a 5 s timeout and a fallback message. |
+| 9 | N | Public operations are traced with OpenTelemetry spans, with arguments recorded as span attributes. |
+| 10 | N | Clients, the event emitter, configuration and mappers are injected through the constructor; fallbacks, delay, adjustment bounds and team names all come from the configuration object. |
+| 11 | N | A fight record is built from the winner and loser: name, picture, level, powers, each side's configured team name, and the location. |
+| 12 | N | Fallback heroes, villains and locations are created from configured name, level or description, picture and powers. |
+
+Must NOT claim: that the winner is decided only by comparing levels (there is a random adjustment and a coin flip); that it uses a relational/JDBC database or blocking calls; that the service itself generates the narration or image (it calls the narration service); that results are cached.
 
 ## Appendix C — how to rerun
 
