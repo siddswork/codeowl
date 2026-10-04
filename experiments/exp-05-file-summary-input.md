@@ -1,6 +1,6 @@
 # exp-05 — What a file summary should be written from
 
-**Status:** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), and on paged reading (round 4), 2026-10-03 and 2026-10-04. Nothing is built. The last open piece of the design is the crossover size between paged raw and summaries.
+**Status:** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), on paged reading (round 4), and on the crossover between paged raw and summaries (round 5), 2026-10-03 and 2026-10-04. Nothing is built. The ladder is specified except for two optional refinements (dropping test code before paging, and the exact cutoff between 12 and 22 pages); the next step is a build plan on its own branch.
 **Feeds:** `DECISIONS.md#q22` (the decision this evidence supports), the file-task shape in `spec.rs` (`spec_task_to_response`, the `File` arm), the file-summary instructions in `setup/codeowl-generate.md` and its `.prompt.md` port, and the finer file-level fingerprint plan on branch `file-fingerprint`.
 **Not a decision doc:** conclusions fold into `DECISIONS.md#q22` and `ARCHITECTURE.md` when built. Where this file and those disagree, they win.
 
@@ -156,9 +156,58 @@ Findings:
 2. **Paged raw reaches the whole-file score** (about 79 against 48 today), at the same cost per summary as a single read (about 47k tokens).
 3. **The crossover size is still open.** TypeScript at 2.3 times the cap favours paged raw (79 against 53 for summaries); `spec.rs` at 31 times favours summaries (68 and 70 against 61 for one read of the whole file). Somewhere between 2 and 31 times the cap, paged raw stops beating summaries. A starting rule of up to 5 to 8 pages of raw text, summaries beyond, is a guess to confirm on one mid-size file.
 
+## Round 5 — where raw gives way to summaries (`src/rust.rs`, 12.4× the cap; 2 recall judges, 1 precision judge)
+
+One Rust file in the unmeasured middle: 99,585 bytes (12.4 times the cap), 2,455 lines, 35 symbols, about 47 % of the bytes unit tests. Controls and key points were written first and frozen (Appendix B). Arms: raw text in 14 pages (about 8,000 bytes each, cut at blank lines, tests included as a real task would send them) against the module doc plus 35 symbol summaries in 2 pages, both with the new prompt, 2 runs each; one capped reference run with the original prompt; a hand-written control and a one-line poor candidate as anchors.
+
+| Arm | Run 1 | Run 2 | Mean | Tokens per run | Wrong claims |
+|---|---|---|---|---|---|
+| **Paged raw** (14 pages) | 73.8 | 71.4 | **72.6** | about 84k | 0 |
+| **Paged summaries** (2 pages) | 64.3 | 52.4 | **58.4** | about 43k | 0 |
+| Capped today (reference, 1 run) | 35.7 | n/a | 35.7 | about 41k | 0 |
+| Control / poor | 81.0 / 4.8 | n/a | n/a | n/a | n/a |
+
+The two judges agreed exactly on every candidate except the capped one (33.3 and 38.1).
+
+Per key point (mean over runs and judges):
+
+| # | W | Key point | Paged raw | Paged summaries | Capped | Control |
+|---|---|---|---|---|---|---|
+| 1 | M | Purpose: two jobs (items and imports) | 1.00 | 1.00 | 0.50 | 1.00 |
+| 2 | M | Kind mapping | 0.50 | 0.75 | 1.00 | 1.00 |
+| 3 | M | Shallow; what it skips | 1.00 | 0.75 | 0.75 | 1.00 |
+| 4 | M | Inherent impl folding | 0.50 | 0.50 | 0.50 | 1.00 |
+| 5 | M | Trait impl folds in one narrow case | 1.00 | 0.50 | 1.00 | 1.00 |
+| 6 | M | Public surface feeding the interface hash | 1.00 | 0.50 | 0.00 | 1.00 |
+| 7 | M | Doc, attribute and `pub` details | 0.00 | 0.50 | 0.00 | 0.00 |
+| 8 | M | Import extraction | 1.00 | 0.50 | 0.00 | 1.00 |
+| 9 | M | Import resolution | 1.00 | 0.50 | 0.00 | 1.00 |
+| 10 | N | Inline `crate::` edge rule | 0 | 0 | 0 | 0 |
+| 11 | N | Same-file trait edge | 1.00 | 1.00 | 0.00 | 1.00 |
+| 12 | N | Deterministic; externals unresolved | 0.25 | 0.25 | 0 | 0 |
+
+- Capped input loses the whole imports half of the file (points 8, 9 and 11 sit after the cut).
+- Paged summaries keep every topic but mostly at 0.50: right subject, missing specifics.
+- Points 7 and 10 were missed even by the control: the edge of what one 250-word paragraph holds.
+
+Putting the five points together (different files and judging sessions, so a rough picture only):
+
+| File | Size vs cap | Best raw | Summaries | Raw advantage |
+|---|---|---|---|---|
+| `analytics-dashboard.ts` | 2.3× | 79 (paged, 3 pages) | 53 | +26 |
+| `rust.rs` | 12.4× | 73 (paged, 14 pages) | 58 | +14 |
+| `mcp.rs` | 22× | 49 (one read of the whole file) | 55 | −6 |
+| `spec.rs` | 31× | 61 (one read of the whole file) | 68 | −7 |
+
+Findings:
+1. **At 12.4 times the cap, paged raw still beats summaries by 14 points**, with no wrong claims in either. Both far outscore today's capped input (36).
+2. **The raw advantage shrinks steadily and turns negative somewhere between about 12 and 22 times the cap**, roughly 15 to 20 pages. A safe starting rule is paged raw up to about 12 pages (the largest size actually verified), summaries beyond.
+3. **Paged raw costs about twice the tokens of paged summaries** (84k against 43k). Half of this file's pages were unit tests; dropping `#[cfg(test)]` blocks before paging would roughly halve that cost and push the raw range further out. Untested.
+4. **The 22× and 31× comparisons used one read of the whole file, not pages**, and were different files and judging sessions; the cutoff is an interpolation, not a measurement.
+
 ## Conclusions
 
-What the four rounds support:
+What the five rounds support:
 
 1. **The cap is the real problem.** A capped summary reads as complete and describes a prefix: perfect before the cut, zero after it, on Rust, TypeScript and Java.
 2. **No single replacement input fits every file.** What was measured, by file shape:
@@ -175,10 +224,11 @@ What the four rounds support:
 5. **Symbol summaries keep topics and lose specifics.** Detail lives in bodies and in comments attached to no symbol.
 6. **Do not feed earlier LLM prose back in as the only input** (the stored class spec carried false claims into every Java run); prefer deterministic inputs where they exist.
 7. **Keep the 8,000-byte cap.** The input shape moves instead.
-8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (paging measured to cost nothing in quality, round 4); symbol summaries, also in pages, when there are many symbols and the file is far over; the member outline for a single large class. Where paged raw gives way to summaries is not yet measured. The fingerprint hashes exactly what the writer saw for the rung used.
+8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (paging measured to cost nothing in quality, round 4); symbol summaries, also in pages, when there are many symbols and the file is far over; the member outline for a single large class. Paged raw beat summaries by 14 points at 12.4 times the cap and lost by about 6 to 7 at 22 and 31 times, so the cutoff lies between about 12 and 22 pages; start at 12. The fingerprint hashes exactly what the writer saw for the rung used.
 9. The "first sentence of each summary" and "drop the tests" rungs of the original ladder are dropped: test-dropping rescues 1 of 23 over-cap files, and the summaries input already fits 19 of them.
 10. `### Behavior` text added to the summaries input was not worth its extra cost on Rust (+2 and +8 alone, no reliable gain over the prompt). It was not tried on TypeScript, where it may matter more.
 11. **Paging does not hurt** (round 4): paged raw (TypeScript, 3 pages) and paged summaries (`spec.rs`, 4 pages) each scored within 2 points of their single-read counterparts, against a bar of 8, in the lenient case where one session sees every page.
+12. **The cutoff between paged raw and summaries lies between about 12 and 22 times the cap** (round 5): raw won by 14 at 12.4× (73 against 58), summaries won by 6 to 7 at 22× and 31×. Starting rule: paged raw up to about 12 pages, summaries beyond. Paged raw costs about twice the tokens; dropping test code before paging is the obvious saving (untested).
 
 ## Limits of this evidence
 
@@ -188,6 +238,7 @@ What the four rounds support:
 - **The "cut off" statement counted as wrong** in all 6 capped TypeScript runs is a judging choice: it is the writer reporting its input, but it ends up in the summary text.
 - **The control note says the cap cuts TypeScript at line ~290;** it cuts at line 261. The frozen control file keeps the wrong figure; the key points are unaffected.
 - **Paging was tested only in the lenient case.** In rounds 1 to 3 the writer read all of its input at once. Round 4 paged it, but one agent session saw every page, so every page stayed in its context. A writer that must forget earlier pages and carry notes was not tested (it would need one agent per page, roughly 2 to 3 times the cost); worth running only if the real loop is found to shed earlier pages.
+- **Round 5 is one Rust file with two runs per arm.** The 22× and 31× comparisons come from other files, other judging sessions and one read of the whole file rather than pages, so the cutoff between 12 and 22 pages is an interpolation. The paged-raw input included the file's unit tests (about half the bytes), as a real task would.
 - **Round 4 is small.** Two runs per arm, one judge (checked against six anchors: at most 4.7 points off, about 2 points stricter on average), no precision check on wrong claims, and one file per experiment.
 - **Small samples.** Three runs per arm; judge gaps of 5 to 10 points on large files. Treat differences under about 8 points as noise.
 - **Biased control.** The control and key points were written by the same author, so the control's score is biased upward; it is a ceiling check, not an absolute grade.
@@ -208,7 +259,9 @@ What the four rounds support:
 | Round 3 judging | 6 | about 0.31M |
 | Round 4 generation | 4 | about 0.19M |
 | Round 4 judging | 2 | about 0.09M |
-| **Total** | **97** | **about 4.6M** |
+| Round 5 generation | 5 | about 0.30M |
+| Round 5 judging | 3 | about 0.15M |
+| **Total** | **105** | **about 5.1M** |
 
 ## Plan
 
@@ -218,7 +271,8 @@ Nothing below is started. Each build step needs its own branch, plan and approva
 |---|---|---|
 | 1 | **Non-Rust check. Done (round 3).** One TypeScript and one Java file, controls and key points frozen first. | Result: the Rust finding does not generalise as one rule; see Conclusions. |
 | 2 | **Paged-read check. Done (round 4), lenient case.** Paged raw (TypeScript, 3 pages) 78.8 against 78 single-read; paged summaries (`spec.rs`, 4 pages) 70.2 against 68. | Passed the pre-set bar (within 8 points). Not tested: a writer that must forget earlier pages; run only if the real loop sheds them. |
-| 3 | **Find the crossover (next).** Decide the file size, relative to the cap, at which paged raw stops beating summaries. One mid-size file (about 8 to 15 times the cap) per stack, raw paged against summaries paged, same blind method with a precision pass. | A stated rule: raw up to N times the cap, summaries beyond. The starting guess is 5 to 8 pages. |
+| 3 | **Find the crossover. Done for Rust (round 5).** `rust.rs` at 12.4 times the cap: paged raw 72.6 against paged summaries 58.4. | Starting rule: paged raw up to about 12 pages, summaries beyond; the true cutoff lies between about 12 and 22. A mid-size file (about 16 to 20 times the cap) in another stack would tighten it; optional. |
+| 3b | **Optional refinement: drop test code before paging.** Compare paged raw with and without `#[cfg(test)]` blocks on a file like `rust.rs`. | Worth building only if quality holds and tokens roughly halve. |
 | 4 | **Design and tests.** File task shape per the ladder in Conclusions, paged with a cursor (stateless, like `pending`); a Java member outline built deterministically from the extractor's own member data. Failing tests first, including a rewrite of the `mcp.rs` lifecycle assertion `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`. | Approved plan, own branch. |
 | 5 | **Fingerprint.** Hash exactly what the writer saw for the rung used: raw-file tasks keep the whole-file hash; summary tasks hash module doc + each symbol's signature + its `spec_hash` (the containment rule rollups already use); outline tasks hash the outline. This replaces the parked `shape_hash` plan. `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today). |
 | 6 | **Prompt.** Add the coverage and specifics instruction for the summaries and outline inputs only, to `setup/codeowl-generate.md` and `setup/codeowl-generate.prompt.md` together, deferring to `STYLE.md`. Tell the writer not to describe its own input as cut off. | Both copies in step. |
@@ -331,6 +385,29 @@ Control summary (hand-written):
 | 12 | N | Fallback heroes, villains and locations are created from configured name, level or description, picture and powers. |
 
 Must NOT claim: that the winner is decided only by comparing levels (there is a random adjustment and a coin flip); that it uses a relational/JDBC database or blocking calls; that the service itself generates the narration or image (it calls the narration service); that results are cached.
+
+### `src/rust.rs` (Rust, this repo; round 5)
+
+Control summary (hand-written):
+
+> This file is the Rust pack's reader for one Rust source file, doing two jobs. First it uses a parser (tree-sitter) to list the file's top-level items, plus one level into impl, trait, inline module and struct bodies: functions and macros become callables, structs, enums, unions, traits, impls and modules become containers, consts, statics, type aliases and named struct fields become values, with the real keyword kept. It is deliberately shallow: function bodies, enum variants and nested functions are not declarations, a tuple struct's positional fields are not extracted, and a `#[cfg(test)]` module is skipped whole. Each `impl Foo` block is folded into the `Foo` it belongs to, so a type reads as one unit: methods move under the type, hashes are chained so an edit to a method counts as an edit to the type, and several impl blocks collapse in order. A trait impl folds in only one narrow case: a type with no fields, no inherent methods and exactly one trait impl in the file; otherwise it stays separate. For exported types the public shape, meaning public fields, trait method signatures and public methods, feeds the interface hash that decides when dependants go stale. Second, it reads `use` statements (a `pub use` is a re-export, an alias keeps the source name, braced lists are flattened one level, globs and nested lists are skipped), also finds `crate::` paths written inline without a `use`, and resolves each module path to a file by filesystem convention (`a::b` is `a/b.rs` or `a/b/mod.rs`), handling `crate`, `self`, `super` and library names in the repo, then follows one `pub use` hop. It adds an edge from a trait impl to a type defined in the same file, since no `use` would.
+
+| # | W | Point |
+|---|---|---|
+| 1 | M | Purpose: the Rust language pack's reader for one source file, doing two jobs: extracting the file's items (symbols) with a tree-sitter parse, and extracting and resolving its `use` imports. |
+| 2 | M | Kind mapping: fn and macro_rules become callables; struct, enum, union, trait, impl and mod become containers; const, static, type alias and named struct fields become values; the concrete keyword is kept alongside the kind. |
+| 3 | M | Deliberately shallow: top-level items plus one level into impl, trait, inline mod and struct bodies; function bodies, enum variants and nested fns are not declarations; a tuple struct's positional fields are not extracted; a `#[cfg(test)]` module is skipped entirely. |
+| 4 | M | Inherent impl folding: each `impl Foo` block is folded into the `Foo` this file defines (methods reparented onto it with rewritten ids, source hashes chained so any member edit changes the type's hash, attribute markers merged, the block dropped); several impls collapse in source order; impls on a type the file does not define are left alone; a method colliding with a field name gets a disambiguated id. |
+| 5 | M | A trait impl folds only in one narrow shape: the type has no fields, no inherent-impl methods, and exactly one trait impl in the file; any other shape leaves trait impls as their own symbols; the check is per file only (a known, logged limitation). |
+| 6 | M | Public surface feeding `interface_hash`: for an exported container, public fields (value stripped for const/static, kept for a type alias), a trait's method signatures, and the public methods of folded inherent impls (every method of a folded trait impl); an unexported type has no interface hash. |
+| 7 | M | Per-symbol details: the signature is the text before the body; leading doc comments (`///`, `//!`, `/** */`) are collected only if adjacent, with plain comments and attributes stepped over; attributes are kept verbatim; `pub`, `pub(crate)` and `pub(super)` count as exported, and a member inside an impl or trait never does. |
+| 8 | M | Import extraction: a `use` is an import, a `pub use` a re-export, an alias tracks the source name, braced lists flatten one level, globs, `self` and nested lists are skipped; `crate::`-rooted paths written inline with no `use` are also found by walking the whole tree. |
+| 9 | M | Import resolution: a module path becomes a file by filesystem convention (`crate::a::b` is `a/b.rs`, `a/b/mod.rs`, then `lib.rs`/`main.rs` in it), not by reading `mod` declarations; handles `crate` (the file's own crate root), `self`, `super` and names of library crates in the repo; the item is then looked up as a top-level symbol, following one hop through a `pub use`. |
+| 10 | N | Inline `crate::` references only add an edge when they resolve to a real, new target: not a same-file target, and not one an explicit `use` already covers. |
+| 11 | N | A same-file trait impl gets a synthesized impl-to-type edge (labelled "same file"), because no `use` statement would create one. |
+| 12 | N | Deterministic and bounded: files are processed in sorted order; external crates (`std`, `anyhow`) stay unresolved; an unresolvable module path gives no edge. |
+
+Must NOT claim: that it calls a language model or writes prose; that it parses function bodies, or extracts enum variants or nested functions as symbols; that it reads `mod` declarations to find module files; that it resolves external crates (`std`, `serde`) to files; that every trait impl is folded into its type.
 
 ## Appendix C — how to rerun
 
