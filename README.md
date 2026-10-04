@@ -78,9 +78,9 @@ cargo build --release          # -> ./target/release/codeowl
 /codeowl-generate --all                      # from your agent, once, to write the corpus
 ```
 
-Your agent gets nine tools: `get_symbol`, `get_source`, `get_callers`,
-`get_callees`, `search_code`, `get_spec`, `get_spec_coverage`, plus
-`get_next_spec_task` / `submit_spec` for generation. Full wiring:
+Your agent gets ten tools: `get_symbol`, `get_source`, `get_callers`,
+`get_callees`, `search_code`, `get_spec`, `get_spec_coverage`,
+`explain_stale`, plus `get_next_spec_task` / `submit_spec` for generation. Full wiring:
 [`setup/README.md`](setup/README.md).
 
 ## How it stays honest

@@ -153,7 +153,7 @@ of specs that already exist. They are not how you generate — see below.
 
 ### How the tools actually behave
 
-CodeOwl's 9 MCP tools are a thin layer over the resolved graph and the
+CodeOwl's 10 MCP tools are a thin layer over the resolved graph and the
 persisted spec store — precise, but Phase-1 literal. Worth knowing before
 you rely on an answer:
 
@@ -190,6 +190,15 @@ you rely on an answer:
   (nothing generated yet), `current`, or `stale` (last-known-good content
   returned, plus `changed` naming what moved). `smells` flags weak prose
   independent of `status`.
+- **`explain_stale(id?)`** — why a spec is stale. Give it an id (a symbol,
+  a file, `feature:<slug>`, `rollup:<dir>` or `system`) and it names the
+  causes: the file's own text changed, or a named dependency changed
+  (and whether its interface moved or only its source text), or a child
+  spec was rewritten. Leave the id out and it counts causes across the
+  whole repo and lists the dependencies that stale the most specs. It only
+  reads; it never writes a spec. A spec written before CodeOwl recorded
+  its dependencies says `unknown` for the dependency cause until it is
+  next regenerated. Ask your agent: *"why is `src/spec.rs` stale?"*
 - **`get_spec_coverage(scope?, cursor?)`** — the repo's spec inventory,
   current/stale/missing/smelly, plus `coverage` (what fraction has *any*
   spec) and `freshness` (of what exists, what fraction still matches the
