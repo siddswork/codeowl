@@ -9,6 +9,12 @@ symbols:
   tests/schema.rs::a_from_call_resolves_to_its_table_node: { source_hash: f6684d75017fcefb70df3ab1da17f1c92555da8f29a3b2a8fba5230a9f0a695d, deps_hash: f36b3c08581642a4028cf368f11a0643244626ccd02b3eb0c9cfbe5b6b2067b8, spec_hash: d840f0fca322764c0f660247e9e87151ebc936b10b18957fbdaf6be6b47654ca }
   tests/schema.rs::get_callers_on_a_table_lists_the_app_code_that_touches_it: { source_hash: e33bc7d86fff8c64f5e467e8f8807850aea2d4794d01852fc24633fd7e7ca07a, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c0975b12e59fbc338066a0d5897a725de3dc7b5a741a3c4cdbc17fdfc0077617 }
   tests/schema.rs::a_features_data_participants_are_the_tables_its_core_code_queries: { source_hash: 907fdb14054ce6de0cc22a64bf4577ab43d053bc94b1a39916dff98d7783296e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 91089de16d8f0352e406c9cf8b6f7fde21db08eabe0fb53f19016a2a3b74f3b8 }
+dep_targets:
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  tests/schema.rs::build -> src/index.rs::RepoIndex: 481419547059
+  tests/schema.rs::schema_nodes_are_created_for_every_create_table -> src/symbol.rs::SymbolKind: 264efecb34de
+  tests/schema.rs::a_from_call_resolves_to_its_table_node -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # tests/schema.rs
 ## Summary

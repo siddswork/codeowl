@@ -37,6 +37,39 @@ symbols:
   src/mcp.rs::SubmitSpecResponse: { source_hash: 584a6af40bf1b9c0a263a3e47981f044c365e16027b30261f75938270501f6dd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 00d14c160aed17d6690549c1aafc995e82ecccf705508426112b4d3a611b661e }
   src/mcp.rs::CodeOwlServer: { source_hash: 6dc80bd04673a0a2369b3de94f7669ca697441eabf386a541be54fc7ec2920d0, deps_hash: ae4b23e58f6d7d6d97e474c46a1a53c91cb44c5af3c385df81b9b29c2ba9c4ba, spec_hash: 5542479f2ec1e3b0be52461127e8fc7bcb38afd5aef57c5cc39a7de56d8bb14f }
   src/mcp.rs::impl ServerHandler for CodeOwlServer: { source_hash: 41fe3a9bccacd44456e09064f9da6f0f2741bc8512e5d1ac28689f69619eb63e, deps_hash: f2a74fbfb4a010ecb6919af784ed653c44ffec4954808e198d753becbf1ee6a1, spec_hash: 85d169ebefa47f36acfa77c5fb2820164a6ebd14b777d930b7652205a8b86519 }
+dep_targets:
+  src/mcp.rs::CoverageRequest -> src/spec.rs::by_kind: f15f994623d1
+  src/mcp.rs::CoverageRequest -> src/spec.rs::by_module: e2580ff19a35
+  src/mcp.rs::CoverageRequest -> src/spec.rs::top_stale_by_impact: 49530d50fe0b
+  src/mcp.rs::impl From<crate::spec::OrphanedSpec> for OrphanedSpecResponse -> src/mcp.rs::OrphanedSpecResponse: 7393c54e8cd2
+  src/mcp.rs::impl From<crate::spec::OrphanedSpec> for OrphanedSpecResponse -> src/spec.rs::OrphanedSpec: 4a51e3d7116a
+  src/mcp.rs::impl From<crate::spec::CoverageItem> for CoverageItemResponse -> src/mcp.rs::CoverageItemResponse: 58aec12c92a3
+  src/mcp.rs::impl From<crate::spec::CoverageItem> for CoverageItemResponse -> src/spec.rs::CoverageItem: 490a22c5cc59
+  src/mcp.rs::KindBreakdown -> src/spec.rs::by_kind: f15f994623d1
+  src/mcp.rs::KindBreakdown -> src/spec.rs::coverage: 85a1c5b13e7f
+  src/mcp.rs::ModuleBreakdown -> src/spec.rs::coverage: 85a1c5b13e7f
+  src/mcp.rs::impl From<(String, crate::spec::CoverageSummary)> for KindBreakdown -> src/mcp.rs::KindBreakdown: ef5f2a46109c
+  src/mcp.rs::impl From<(String, crate::spec::CoverageSummary)> for KindBreakdown -> src/spec.rs::CoverageSummary: 0ec461c51ede
+  src/mcp.rs::impl From<(String, crate::spec::CoverageSummary)> for KindBreakdown -> src/spec.rs::coverage: 85a1c5b13e7f
+  src/mcp.rs::impl From<(String, crate::spec::CoverageSummary)> for ModuleBreakdown -> src/mcp.rs::ModuleBreakdown: 2a55f3a3603c
+  src/mcp.rs::impl From<(String, crate::spec::CoverageSummary)> for ModuleBreakdown -> src/spec.rs::CoverageSummary: 0ec461c51ede
+  src/mcp.rs::impl From<(String, crate::spec::CoverageSummary)> for ModuleBreakdown -> src/spec.rs::coverage: 85a1c5b13e7f
+  src/mcp.rs::CoverageResponse -> src/mcp.rs::CoverageItemResponse: 58aec12c92a3
+  src/mcp.rs::CoverageResponse -> src/mcp.rs::GeneratedSourcesResponse: 9e6b69a5d516
+  src/mcp.rs::CoverageResponse -> src/mcp.rs::KindBreakdown: ef5f2a46109c
+  src/mcp.rs::CoverageResponse -> src/mcp.rs::ModuleBreakdown: 2a55f3a3603c
+  src/mcp.rs::CoverageResponse -> src/mcp.rs::OrphanedSpecResponse: 7393c54e8cd2
+  src/mcp.rs::CoverageResponse -> src/spec.rs::by_kind: f15f994623d1
+  src/mcp.rs::CoverageResponse -> src/spec.rs::by_module: e2580ff19a35
+  src/mcp.rs::CoverageResponse -> src/spec.rs::coverage: 85a1c5b13e7f
+  src/mcp.rs::CoverageResponse -> src/spec.rs::top_stale_by_impact: 49530d50fe0b
+  src/mcp.rs::CoverageResponse -> src/spec.rs::weighted_freshness: c6fe89f2fbf4
+  src/mcp.rs::impl From<crate::spec::GeneratedSourcesSummary> for GeneratedSourcesResponse -> src/mcp.rs::GeneratedSourcesResponse: 9e6b69a5d516
+  src/mcp.rs::impl From<crate::spec::GeneratedSourcesSummary> for GeneratedSourcesResponse -> src/spec.rs::GeneratedSourcesSummary: c23408e0e200
+  src/mcp.rs::SearchResponse -> src/search.rs::SearchMatch: 7f4d0f836354
+  src/mcp.rs::RollupFile -> src/spec.rs::next_task_for_directory: b0d0e3d6904b
+  src/mcp.rs::impl ServerHandler for CodeOwlServer -> src/mcp.rs::CodeOwlServer: 874e569c4376
+  src/mcp.rs::impl ServerHandler for CodeOwlServer -> src/search.rs::search_code: 23aae2394733
 ---
 # src/mcp.rs
 ## Summary

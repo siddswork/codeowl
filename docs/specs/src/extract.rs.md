@@ -25,6 +25,33 @@ symbols:
   src/extract.rs::field_text: { source_hash: 2a5140d871a8f94a462c9ede1e35d0cc3fc4e40157ee85e7866651beb6747233, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a88de7ed3d89b62b60a1a1e7c0db24ba134aae3752fa1bff14472ef6924b4f0f }
   src/extract.rs::text: { source_hash: f2f836c691a8002927cc493e38650603f8fc64232d33afeb1b8f41f9279d1f2f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 824d5565c791d27394ca7293daf4cb7fc831cda79c77534aa5ddb36294da989d }
   src/extract.rs::node_lines: { source_hash: 30cdd2645c25a8d4ce9ab107ed17c80f226a84814ba9d5294ac6d3666e6cd0f9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e6e0a0ed01636bab112b2154dad013d2c1ae8a09337dcbcf5725d1d31573af1a }
+dep_targets:
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/imports.rs::bare_export_clause: d533f1838605
+  file -> src/imports.rs::export_specs: aaf5c0b65b23
+  file -> src/lang.rs::ts_parser: ca09f16dafc1
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/extract.rs::extract_file -> src/lang.rs::ts_parser: ca09f16dafc1
+  src/extract.rs::extract_file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::clause_exported_names -> src/imports.rs::bare_export_clause: d533f1838605
+  src/extract.rs::clause_exported_names -> src/imports.rs::export_specs: aaf5c0b65b23
+  src/extract.rs::visit_top_level -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::visit_type_decl -> src/hash.rs::hash_text: 70c099c1622c
+  src/extract.rs::visit_type_decl -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::visit_type_decl -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/extract.rs::fold_same_id -> src/hash.rs::hash_text: 70c099c1622c
+  src/extract.rs::fold_same_id -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::fold_same_id -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/extract.rs::visit_function -> src/hash.rs::hash_text: 70c099c1622c
+  src/extract.rs::visit_function -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::visit_function -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/extract.rs::visit_class -> src/hash.rs::hash_text: 70c099c1622c
+  src/extract.rs::visit_class -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::visit_class -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/extract.rs::visit_lexical -> src/hash.rs::hash_text: 70c099c1622c
+  src/extract.rs::visit_lexical -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/extract.rs::visit_lexical -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # src/extract.rs
 ## Summary

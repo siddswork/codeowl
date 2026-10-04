@@ -5,6 +5,12 @@ file: { source_hash: f1bc37633ed94502e1e481bd61ba807b3a1f1514a8284247ce777199052
 symbols:
   tests/extraction.rs::react_component_with_hooks_and_generics: { source_hash: 83a97a6c030790e83d21d2ab34c38a45e6d425a058ae351e2a5e4ec49583ab5f, deps_hash: 4c0a824e87206f229e91a85487956d98ae6c40d484fe2d4cecfef6a84733b7ad, spec_hash: c56037b9e805ef39245dccb0455e42b42bb4d0c897123b432b0d9d1a4a83a20c }
   tests/extraction.rs::barrel_file_has_no_declarations: { source_hash: a6cb147b50fb900a835e84be70c7ebf045a9558c9a2bc9a8e89fe6f5124a927d, deps_hash: a65fd4a58cea4f4c11f1e2fd8d648b47cb091b15cf89775a510aac9dea4c2ba5, spec_hash: 380acc544f60ee2273e0a15e93742d5e86268ee4e2e4bf4cad4bfcde279ba0de }
+dep_targets:
+  file -> src/extract.rs::extract_file: fcab56f46e52
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  tests/extraction.rs::react_component_with_hooks_and_generics -> src/extract.rs::extract_file: fcab56f46e52
+  tests/extraction.rs::react_component_with_hooks_and_generics -> src/symbol.rs::SymbolKind: 264efecb34de
+  tests/extraction.rs::barrel_file_has_no_declarations -> src/extract.rs::extract_file: fcab56f46e52
 ---
 # tests/extraction.rs
 ## Summary

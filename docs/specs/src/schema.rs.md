@@ -12,6 +12,13 @@ symbols:
   src/schema.rs::backstop_from_headers: { source_hash: 604c500af53d19d98cae1ad6e6e739db8b7e03cab66c7e606cc8fd5d85230dff, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: dd96cbe339a8385d8c0e3bd76e0b8d0d00d9d8f687f1a7f214082fba30373a00 }
   src/schema.rs::table_name_from_header: { source_hash: 9056e8383aaacef28d6c072b4025f4d87e16cc5023ba7de27d9f78139b3045f9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6945f9e66224f6e5ca68a2b0b6cbc0af8d7ae6952391a6a3a9cab615dad65e03 }
   src/schema.rs::text: { source_hash: f2f836c691a8002927cc493e38650603f8fc64232d33afeb1b8f41f9279d1f2f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: bd6a8d27f1d98b59abfe41397c3b67e213c0cd4fa813b50e1ced00660535a75f }
+dep_targets:
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/schema.rs::extract_tables -> src/hash.rs::hash_text: 70c099c1622c
+  src/schema.rs::extract_tables -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/schema.rs::extract_tables -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # src/schema.rs
 ## Summary

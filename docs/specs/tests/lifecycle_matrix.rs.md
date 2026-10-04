@@ -20,6 +20,29 @@ symbols:
   tests/lifecycle_matrix.rs::typescript_lifecycle: { source_hash: b01543b546d6415b2f9331b38501c8ce64dd981a35aa08178e7756f89bb25cc8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 022dc2531058e5d6dea2617b87127382aa1ca67c62004d1a6efb1ec81885fa41 }
   tests/lifecycle_matrix.rs::python_lifecycle: { source_hash: 86ed22eb54783a01b6b08e021deffe4e7c379f9985e7678c639bb2f3c94e334f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1bdd95a0e07b85f13bcddec8487e2ea71b0b20dbe5517be6119bd9bbed2d1e44 }
   tests/lifecycle_matrix.rs::java_lifecycle: { source_hash: ec07a353c59e8a12eed74eefa637f5b91912347d479af510c980315de85637d5, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1de7f083114a4b0c3e9c6e56456bf2dbc838cd5a45c6e75ecf9f6d21bdd58235 }
+dep_targets:
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/spec.rs::SpecTask: 1f6b409c41df
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::reindex -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::reindex -> src/index.rs::RepoIndex: 481419547059
+  tests/lifecycle_matrix.rs::drain -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::drain -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/lifecycle_matrix.rs::drain -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::is_fully_current -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::is_fully_current -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::next_symbol_task_id -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::next_symbol_task_id -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/lifecycle_matrix.rs::next_symbol_task_id -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::drain_symbol_task_ids -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::drain_symbol_task_ids -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::owner_file_id -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::owner_file_id -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::consumer_file_id -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::consumer_file_id -> src/symbol.rs::SymbolId: 6733b5c62e75
+  tests/lifecycle_matrix.rs::unrelated_file_id -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/lifecycle_matrix.rs::unrelated_file_id -> src/symbol.rs::SymbolId: 6733b5c62e75
 ---
 # tests/lifecycle_matrix.rs
 ## Summary

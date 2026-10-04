@@ -7,6 +7,11 @@ symbols:
   src/main.rs::Command: { source_hash: 20f721df0a580d5fda2813ab531db5d29ca8e832e4d51b75acbc819f4e536a73, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c295340364202d1a8162d7b5baf67cb9bae8c48fb802be9a886d8623ee4b24dd }
   src/main.rs::main: { source_hash: 16d64b45ae1f53123c35f08f96dc2f68c0bdfa4535af9bb223f5582e2907369e, deps_hash: ad8f991c443fc9d8b732781de3051224e6b4521e821e5f8b04fb5480ecd1267b, spec_hash: 6b92f7caca05d7bad13d490fe29891e5aa925652d2d4958286a7e3b5fd960fba }
   src/main.rs::canonical_root: { source_hash: 118b754d0b23da9200b1c11dbf9ad945af8276777f91c432fb9bbb96a15cc7f3, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 43ac277e71253b08025075455066b22405845df75285e35540ba43e195721321 }
+dep_targets:
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/mcp.rs::CodeOwlServer: 874e569c4376
+  src/main.rs::main -> src/index.rs::RepoIndex: 481419547059
+  src/main.rs::main -> src/mcp.rs::CodeOwlServer: 874e569c4376
 ---
 # src/main.rs
 ## Summary

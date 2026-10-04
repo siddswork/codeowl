@@ -6,6 +6,9 @@ symbols:
   src/rust_crates.rs::CrateMap: { source_hash: f6e77727f3b6b0983dbe8bcde4dbff3680ab3911335a751ed719268f8bd2b672, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: d34659ec7926decddac26e2e0cc669a3fef37eeef34abd91fda8dab318248df5 }
   src/rust_crates.rs::parent_dir: { source_hash: 49a05a4c58fc3ce114cce587fc428abf0ffcfd6f5ee6dd23a2f5855edbe7b2bf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c74a2c391544e98bf03f5eab36d3760543cf4f83e53c3260b1843fd2f8e75320 }
   src/rust_crates.rs::join: { source_hash: 4206c372ea95a10c667ed752248cf276c12d4bca01dab72d96cc6dad0460f7b9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3fd583fd0b82a57b3288cb2881ac4564c4cbdff8ba1361514dbb2cccbe838c9a }
+dep_targets:
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  src/rust_crates.rs::CrateMap -> src/imports.rs::FileImports: 7a834189d6b3
 ---
 # src/rust_crates.rs
 ## Summary

@@ -8,6 +8,14 @@ symbols:
   tests/incremental.rs::watcher_reindexes_an_edited_file_without_restart: { source_hash: ad9e66f72d19a8c05e0956dccbd14181779178b6b7246bd9ce7e1604925aa0d8, deps_hash: ad8f991c443fc9d8b732781de3051224e6b4521e821e5f8b04fb5480ecd1267b, spec_hash: 53edb5e5c44dfb3a42ae95268c30a5448acc6f117f4da336fde1c8ac1b0134d9 }
   tests/incremental.rs::watcher_picks_up_a_newly_created_file: { source_hash: 827b31b45f251ac8520d0ce47f20fb306fa0b2231c8b9ce5a1509bef559462e4, deps_hash: ad8f991c443fc9d8b732781de3051224e6b4521e821e5f8b04fb5480ecd1267b, spec_hash: d0e6ad151e132fc8a3f96f0620b5ed2a4cac7f9a46c93f123c4c5db3c12d89f0 }
   tests/incremental.rs::a_fresh_spawn_reuses_the_persisted_index: { source_hash: 3156f31cb90f4d1cf899104e4136257be61e4dc1a269e3fb8c550770e417b916, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: aa540e829223a7b975f17155df8b3be7e7ef1eddf45b218314ed0bb7dbe9b9a2 }
+dep_targets:
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/mcp.rs::CodeOwlServer: 874e569c4376
+  tests/incremental.rs::watcher_reindexes_an_edited_file_without_restart -> src/index.rs::RepoIndex: 481419547059
+  tests/incremental.rs::watcher_reindexes_an_edited_file_without_restart -> src/mcp.rs::CodeOwlServer: 874e569c4376
+  tests/incremental.rs::watcher_picks_up_a_newly_created_file -> src/index.rs::RepoIndex: 481419547059
+  tests/incremental.rs::watcher_picks_up_a_newly_created_file -> src/mcp.rs::CodeOwlServer: 874e569c4376
+  tests/incremental.rs::a_fresh_spawn_reuses_the_persisted_index -> src/index.rs::RepoIndex: 481419547059
 ---
 # tests/incremental.rs
 ## Summary

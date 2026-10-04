@@ -14,6 +14,20 @@ symbols:
   src/fastapi.rs::disambiguate_colliding_slugs: { source_hash: 6ca57c0e07fc6cb6f77d6250d901b84c7234d0a98293a540cf13bb5e95c15ab8, deps_hash: dd79b8c0fa0f64d9f5c2fd7ffee003186005ce19f3443d1b51fb6d0fd60f5c6d, spec_hash: 8a00f3fa6065b197f7d72117889b931f28ff9cd7268073cb7fb2214b61b2ca9a }
   src/fastapi.rs::is_crud_module: { source_hash: cf448b80ac00375ba3d4c48a78dd429800ebe0fed130bce4e4866474d5bc8c10, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b3b3ffc166b257f6093d4d27e565d596c56e9bd583cd080509b90a5e55dcffd8 }
   src/fastapi.rs::file_touches_schema: { source_hash: 73390117722264f5f7194345c4c2ada05444ad7d7f3541e11eed5e9da9d10f11, deps_hash: c26f9d6a3e6974e2d667c28f724f82f43d77dfdb43054409f1e8e28bc6038944, spec_hash: c572422da4435eabbee4300f215778ba3ed0b3962b08a8613cf4e11e8a0515d8 }
+dep_targets:
+  file -> src/features.rs::EntryPoint: 60acb942d332
+  file -> src/features.rs::FeatureModel: d0f879980b40
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/fastapi.rs::FastApiFeatureModel -> src/features.rs::EntryPoint: 60acb942d332
+  src/fastapi.rs::FastApiFeatureModel -> src/features.rs::FeatureModel: d0f879980b40
+  src/fastapi.rs::FastApiFeatureModel -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/fastapi.rs::FastApiFeatureModel -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/fastapi.rs::router_prefix -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/fastapi.rs::router_prefix -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/fastapi.rs::disambiguate_colliding_slugs -> src/features.rs::EntryPoint: 60acb942d332
+  src/fastapi.rs::file_touches_schema -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/fastapi.rs::file_touches_schema -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # src/fastapi.rs
 ## Summary

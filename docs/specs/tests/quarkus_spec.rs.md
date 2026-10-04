@@ -27,6 +27,32 @@ symbols:
   tests/quarkus_spec.rs::a_grpc_services_public_method_is_a_grpc_entry_point: { source_hash: 63e7169fa42d3a9e11bd3b75846ec0832b4d5f4e988d65e85e22d0a8911ef057, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: 13f46e9eb4918c6ab65d011e96fa0a69f0b2032a1deed99bc2cedd85b882e0c1 }
   tests/quarkus_spec.rs::a_grpc_services_private_helper_method_is_not_an_entry_point: { source_hash: 6f2a359e53c0612ee2a2a470c202a9413d9a32e15b824d27aabcfe3591ae9257, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: cfd92ad72bdfeb5ad5218a400d60ba01b5516c38ab150065e5f07866803986e3 }
   tests/quarkus_spec.rs::a_non_grpc_classs_public_methods_are_not_grpc_entry_points: { source_hash: 46eab9a42fc085b3bc3f3f3162a10d9d2aa7173e507943a00bed3f059b2397e8, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: 553ed5e52b9332e58cd541454145e510ff48a2ae9b307b7993d62b5d3af6fafb }
+dep_targets:
+  file -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_class_path_plus_method_path_join_into_one_http_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::fully_qualified_annotations_with_no_imports_are_still_recognized -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_generated_interfaces_own_annotations_never_produce_an_entry_point_directly -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_hand_written_class_inherits_its_generated_interfaces_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::implements_clause_names_the_interface_fully_qualified_inline_with_no_import -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_generated_interface_is_found_even_when_not_the_first_implements_name -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::method_path_is_inherited_independently_of_an_own_verb_marker -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_nested_provider_class_with_an_override_is_not_an_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::an_injected_application_scoped_panache_repository_joins_core -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_cross_package_fully_qualified_call_with_no_import_still_joins_dependencies -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_plain_unannotated_helper_class_stays_a_one_hop_dependency -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_panache_entity_is_schema_and_a_repository_using_it_stays_core -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_register_rest_client_interface_is_not_an_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::an_incoming_only_consumer_method_is_a_kafka_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::an_outgoing_only_producer_method_is_a_kafka_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_combined_incoming_and_outgoing_method_resolves_same_class_constants_into_one_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_channel_annotated_constructor_param_is_not_its_own_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::http_and_kafka_slugs_never_collide_on_the_same_bare_word -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::scheduled_jobs_are_entry_points_keyed_on_method_name_with_distinct_details -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_scheduled_fixed_rate_bare_numeric_attribute_parses_without_quotes -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_grpc_services_public_method_is_a_grpc_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_grpc_services_private_helper_method_is_not_an_entry_point -> src/index.rs::RepoIndex: 481419547059
+  tests/quarkus_spec.rs::a_non_grpc_classs_public_methods_are_not_grpc_entry_points -> src/index.rs::RepoIndex: 481419547059
 ---
 # tests/quarkus_spec.rs
 ## Summary

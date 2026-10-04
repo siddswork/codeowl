@@ -13,6 +13,32 @@ symbols:
   tests/python_spec.rs::a_named_import_of_a_crud_function_promotes_its_file_to_core_like_a_module_import_does: { source_hash: ee83b5396f6c1d6aac758840c733954f6817314ca09569e4d9c4a469998619db, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: 8bcd9daa0973e16ca1fc2ef1a360baeba1b863e9b4ef628be05204560da3c423 }
   tests/python_spec.rs::a_named_import_of_a_table_symbol_still_lands_in_data_not_core: { source_hash: baffff698dc7d30de33cbd7bcc0ddccfdfd2190402f9b1f1a9109cb28076e041, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: c99ce4919b08f93db29a0f6b10c060fe1ae63b348e4e76cb44fd029087f26ec7 }
   tests/python_spec.rs::a_module_import_of_a_schema_only_file_still_lands_in_data_not_core: { source_hash: cfaee6ebcd1a7098044508de1723dbc08c48a75cc05d6e5038b778654c3a0709, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: 45ee2e34cb540c6576448b0e289b100500f76380187162267004ddcae8812651 }
+dep_targets:
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/spec.rs::SpecTask: 1f6b409c41df
+  file -> src/spec.rs::next_task: 9d894695159c
+  file -> src/spec.rs::read_file_spec: 6682201bb38f
+  file -> src/spec.rs::render: bed79b32a9ec
+  file -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/python_spec.rs::py_graph -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  tests/python_spec.rs::py_graph -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/python_spec.rs::py_graph -> src/hash.rs::hash_text: 70c099c1622c
+  tests/python_spec.rs::a_class_renders_as_one_section_with_its_methods_folded_in -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/python_spec.rs::a_class_renders_as_one_section_with_its_methods_folded_in -> src/spec.rs::next_task: 9d894695159c
+  tests/python_spec.rs::a_class_renders_as_one_section_with_its_methods_folded_in -> src/spec.rs::read_file_spec: 6682201bb38f
+  tests/python_spec.rs::a_class_renders_as_one_section_with_its_methods_folded_in -> src/spec.rs::render: bed79b32a9ec
+  tests/python_spec.rs::a_class_renders_as_one_section_with_its_methods_folded_in -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/python_spec.rs::a_from_import_resolves_end_to_end_through_repo_index -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::a_sqlmodel_table_class_becomes_a_schema_node_with_its_queriers -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::a_fastapi_route_becomes_a_feature_with_its_table_in_data -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::a_route_that_imports_modules_assembles_without_crashing -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::colliding_route_slugs_are_disambiguated_not_dropped -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::a_named_import_of_a_crud_function_promotes_its_file_to_core_like_a_module_import_does -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::a_named_import_of_a_table_symbol_still_lands_in_data_not_core -> src/index.rs::RepoIndex: 481419547059
+  tests/python_spec.rs::a_module_import_of_a_schema_only_file_still_lands_in_data_not_core -> src/index.rs::RepoIndex: 481419547059
 ---
 # tests/python_spec.rs
 ## Summary

@@ -6,6 +6,25 @@ symbols:
   tests/java_spec.rs::java_graph: { source_hash: c94e97052cc99407bc92cf2f09838f6f10bc5d8a74fe56b960d1a7d655f2005d, deps_hash: 5586d60160ea05dea2f3ff8ad9971353ca672d465b93cc63fce7decdb63dffaf, spec_hash: a6f196e5e9ee4c78b69b1b65682f81f70d90536c0b207f81b712b4cad39310a9 }
   tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in: { source_hash: 175257dd58b496f06b5f897de529b9c06c0e887093f3136e210c31d1f66345fd, deps_hash: 479097bfebd5c3e7d47ff551cd258b8de6b674e73b8c589a4c15c5fb5036c394, spec_hash: a8e706d51515c65e3a726bb876cba78dd087a938e9fc1b2a7c9cf3efa7e68c6d }
   tests/java_spec.rs::a_same_package_reference_resolves_end_to_end_through_repo_index: { source_hash: 4914691296174975079cade93306046a6c24157babd9f9b1c3a04a7914160b90, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: a97b02a79f249aa0009b60d3bf09d8959fb4b915bd086f6c6302315493502bb7 }
+dep_targets:
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/spec.rs::SpecTask: 1f6b409c41df
+  file -> src/spec.rs::next_task: 9d894695159c
+  file -> src/spec.rs::read_file_spec: 6682201bb38f
+  file -> src/spec.rs::render: bed79b32a9ec
+  file -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/java_spec.rs::java_graph -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  tests/java_spec.rs::java_graph -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/java_spec.rs::java_graph -> src/hash.rs::hash_text: 70c099c1622c
+  tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in -> src/spec.rs::next_task: 9d894695159c
+  tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in -> src/spec.rs::read_file_spec: 6682201bb38f
+  tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in -> src/spec.rs::render: bed79b32a9ec
+  tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/java_spec.rs::a_same_package_reference_resolves_end_to_end_through_repo_index -> src/index.rs::RepoIndex: 481419547059
 ---
 # tests/java_spec.rs
 ## Summary

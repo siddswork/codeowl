@@ -12,6 +12,43 @@ symbols:
   tests/rust_spec.rs::a_types_own_field_change_invalidates_its_trait_impls_document_without_folding: { source_hash: d25e488d131b672a6b2c29447fb0c43d3cb4138f2a4aa1ad85ece0f6bfc5d558, deps_hash: 479097bfebd5c3e7d47ff551cd258b8de6b674e73b8c589a4c15c5fb5036c394, spec_hash: a9d5a73997ac9fc705d2262b7366733a3ae54c47049b3e78c31243750cbc97bb }
   tests/rust_spec.rs::target_src: { source_hash: ad3cfa6d4ae52fc778482d54c4ab7eaf57525eecce78e99181f37fe986537846, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 267a41d0ea7ed43045c3e9d54ee3e1cd3a1c872694c3d8ebf2b82a21615cd4de }
   tests/rust_spec.rs::a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change: { source_hash: cb7f4a1b7665037628f84bd9c3da0295ea6192a2804b46d69d4ef755013e46f8, deps_hash: 479097bfebd5c3e7d47ff551cd258b8de6b674e73b8c589a4c15c5fb5036c394, spec_hash: 2a734fdbc33bc2f556d248058b7eda492966cd933239244945c438b616c4af39 }
+dep_targets:
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  file -> src/spec.rs::SpecTask: 1f6b409c41df
+  file -> src/spec.rs::next_task: 9d894695159c
+  file -> src/spec.rs::read_file_spec: 6682201bb38f
+  file -> src/spec.rs::render: bed79b32a9ec
+  file -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/rust_spec.rs::rust_graph_multi -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  tests/rust_spec.rs::rust_graph_multi -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/rust_spec.rs::rust_graph_multi -> src/hash.rs::hash_text: 70c099c1622c
+  tests/rust_spec.rs::rust_graph_multi -> src/imports.rs::FileImports: 7a834189d6b3
+  tests/rust_spec.rs::rust_graph -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  tests/rust_spec.rs::rust_graph -> src/graph.rs::Graph: 13dbdfa88b0e
+  tests/rust_spec.rs::rust_graph -> src/hash.rs::hash_text: 70c099c1622c
+  tests/rust_spec.rs::inherent_impl_is_folded_but_trait_impl_stays_its_own_section -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/rust_spec.rs::inherent_impl_is_folded_but_trait_impl_stays_its_own_section -> src/spec.rs::next_task: 9d894695159c
+  tests/rust_spec.rs::inherent_impl_is_folded_but_trait_impl_stays_its_own_section -> src/spec.rs::read_file_spec: 6682201bb38f
+  tests/rust_spec.rs::inherent_impl_is_folded_but_trait_impl_stays_its_own_section -> src/spec.rs::render: bed79b32a9ec
+  tests/rust_spec.rs::inherent_impl_is_folded_but_trait_impl_stays_its_own_section -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/rust_spec.rs::a_zero_field_single_trait_impl_marker_type_folds_into_one_document -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/rust_spec.rs::a_zero_field_single_trait_impl_marker_type_folds_into_one_document -> src/spec.rs::next_task: 9d894695159c
+  tests/rust_spec.rs::a_zero_field_single_trait_impl_marker_type_folds_into_one_document -> src/spec.rs::read_file_spec: 6682201bb38f
+  tests/rust_spec.rs::a_zero_field_single_trait_impl_marker_type_folds_into_one_document -> src/spec.rs::render: bed79b32a9ec
+  tests/rust_spec.rs::a_zero_field_single_trait_impl_marker_type_folds_into_one_document -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/rust_spec.rs::a_types_own_field_change_invalidates_its_trait_impls_document_without_folding -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/rust_spec.rs::a_types_own_field_change_invalidates_its_trait_impls_document_without_folding -> src/spec.rs::next_task: 9d894695159c
+  tests/rust_spec.rs::a_types_own_field_change_invalidates_its_trait_impls_document_without_folding -> src/spec.rs::read_file_spec: 6682201bb38f
+  tests/rust_spec.rs::a_types_own_field_change_invalidates_its_trait_impls_document_without_folding -> src/spec.rs::render: bed79b32a9ec
+  tests/rust_spec.rs::a_types_own_field_change_invalidates_its_trait_impls_document_without_folding -> src/spec.rs::submit: 6b3606c2f3b8
+  tests/rust_spec.rs::a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change -> src/spec.rs::SpecTask: 1f6b409c41df
+  tests/rust_spec.rs::a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change -> src/spec.rs::next_task: 9d894695159c
+  tests/rust_spec.rs::a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change -> src/spec.rs::read_file_spec: 6682201bb38f
+  tests/rust_spec.rs::a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change -> src/spec.rs::render: bed79b32a9ec
+  tests/rust_spec.rs::a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidates_on_change -> src/spec.rs::submit: 6b3606c2f3b8
 ---
 # tests/rust_spec.rs
 ## Summary

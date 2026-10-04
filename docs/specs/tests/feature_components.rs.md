@@ -6,6 +6,11 @@ symbols:
   tests/feature_components.rs::tempdir: { source_hash: dd13c893d5eb86f72b251b5fa2699b0a27027e81e47b10555044cf9c5d8b8ad1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 5b47a1addbc8100ac12254f2e526c2a369c7345b7cf1f16fd1c263f3bf6ce4ee }
   tests/feature_components.rs::build: { source_hash: 38ee617bdd3534412ebff811b80cbe5f8d21484787887e00438a4e3ff6a80d83, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: b8819df8c1dfb2c92101ea1bfc22ca522e33075ff1735dea9878814120d9a127 }
   tests/feature_components.rs::core_follows_the_rendered_component_subtree_into_its_fetches: { source_hash: ef835f61ddd4d14d45e22ade11fdc6693a3c717641f3e4060ce37cbcd8a8167d, deps_hash: dea08ec8ede72ecf86938bbf61525ab84aaacbc816c65bf4ef42916d467ba76d, spec_hash: 960d8177d2ef3172a3ffdb4fffca48a71ec89670ce89d82f77e9f42f43784154 }
+dep_targets:
+  file -> src/features.rs::assemble_participants: a6e5500838a2
+  file -> src/index.rs::RepoIndex: 481419547059
+  tests/feature_components.rs::build -> src/index.rs::RepoIndex: 481419547059
+  tests/feature_components.rs::core_follows_the_rendered_component_subtree_into_its_fetches -> src/features.rs::assemble_participants: a6e5500838a2
 ---
 # tests/feature_components.rs
 ## Summary

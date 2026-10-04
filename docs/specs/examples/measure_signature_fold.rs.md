@@ -10,6 +10,19 @@ symbols:
   examples/measure_signature_fold.rs::correctness_check: { source_hash: 8faed7869e85501ae0ac0c645948b1b26fb4e5c79b68f928dcb4650c6de63c2c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1a346d932a624df2ff3cf0eeef10c4e18ce455b6536ff9f10bc29eb25ed71e21 }
   examples/measure_signature_fold.rs::measure: { source_hash: ac9a81f020ef790a596f9fcff32f3768ab8eec985f372c9c50fbeb19894ca3d2, deps_hash: 1df444dd72a2653710a1e710b05bfc39ccb25af714e552f0cda93375b9bcc0ea, spec_hash: e932e793d0c131f55cf4c99192e3dfc5c130a366136c26ad7873431481f19e2e }
   examples/measure_signature_fold.rs::main: { source_hash: 3d9c57809712559eb08db7e84906679e9741d5c10fdc420d814a23ad2a30fa76, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: da7bc43933bcab6088de9d12eb9cb3cf358df8a7d792c13b201ba5f8028d6b29 }
+dep_targets:
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/symbol.rs::Symbol: 2bab71782e46
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  examples/measure_signature_fold.rs::is_qualifying_member -> src/symbol.rs::Symbol: 2bab71782e46
+  examples/measure_signature_fold.rs::qualifying_member_names -> src/graph.rs::Graph: 13dbdfa88b0e
+  examples/measure_signature_fold.rs::qualifying_member_names -> src/symbol.rs::SymbolId: 6733b5c62e75
+  examples/measure_signature_fold.rs::report_name_collisions -> src/graph.rs::Graph: 13dbdfa88b0e
+  examples/measure_signature_fold.rs::report_name_collisions -> src/symbol.rs::SymbolKind: 264efecb34de
+  examples/measure_signature_fold.rs::measure -> src/index.rs::RepoIndex: 481419547059
+  examples/measure_signature_fold.rs::measure -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # examples/measure_signature_fold.rs
 ## Summary
