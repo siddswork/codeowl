@@ -87,9 +87,16 @@ async fn main() -> Result<()> {
             );
             println!(
                 "skipped: {} whose dependencies moved since the spec was written, \
+                 {} that cannot be checked (symbol gone or source unreadable), \
                  {} already recorded, {} with no dependencies",
-                r.skipped_moved, r.already_recorded, r.without_dependencies
+                r.skipped_moved, r.unverifiable, r.already_recorded, r.without_dependencies
             );
+            if r.unreadable_files > 0 {
+                println!(
+                    "{} spec file(s) could not be read and were left alone",
+                    r.unreadable_files
+                );
+            }
             if !write && r.filled > 0 {
                 println!("dry run: nothing written; pass --write to apply");
             }
