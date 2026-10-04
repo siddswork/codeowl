@@ -11,6 +11,40 @@ symbols:
   src/index.rs::rel_path: { source_hash: 8fb5e79ec2f2f3bc5d8fed6fdbb54b303b47381e0bd2943f80b3745a47e1ee9c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b887526579e14f7161923631b7b35c6d45fe67e3905af60c966a59b04e051225 }
   src/index.rs::ingest_build_entry: { source_hash: 32b01140a21741c0250cf861084c81bb636721ea062d15a8642d39a3709270e4, deps_hash: 3cb515d9d23dd84457b02f8b3176d442ebe0ddad3d308cecd5753c3254b4da07, spec_hash: 027ecdb35ef41a3ddd233fd7f4531fe2ed2d7a23cfb2b306ec9a93215d12eea8 }
   src/index.rs::generated_source_entries: { source_hash: 13f83892670cc66f4eb2da9852c203b725178b2d9f14664a078a547198ded4e1, deps_hash: 3cb515d9d23dd84457b02f8b3176d442ebe0ddad3d308cecd5753c3254b4da07, spec_hash: 7bb78270cb332dc41d6562e817cc40de58cfa887bbde3174b3eba02428f10d15 }
+dep_targets:
+  file -> src/graph.rs::FORMAT_VERSION: d42a4415675a
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::FlowEdge: d62382a78a55
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/graph.rs::UnresolvedFlowEdge: 17c46f8128e8
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  file -> src/lang.rs::SourceKind: d4ad91928237
+  file -> src/lang.rs::detect: 32ef7186ff88
+  file -> src/resolve.rs::build_resolver: 640f64019c54
+  file -> src/resolve.rs::resolve_default_imports: 39471d06e1f6
+  file -> src/stack.rs::StackPack: 436012c73562
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/index.rs::FileInputs -> src/graph.rs::UnresolvedFlowEdge: 17c46f8128e8
+  src/index.rs::FileInputs -> src/hash.rs::hash_text: 70c099c1622c
+  src/index.rs::FileInputs -> src/imports.rs::FileImports: 7a834189d6b3
+  src/index.rs::FileInputs -> src/lang.rs::SourceKind: d4ad91928237
+  src/index.rs::FileInputs -> src/stack.rs::StackPack: 436012c73562
+  src/index.rs::FileInputs -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/index.rs::FileInputs -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/index.rs::RepoIndex -> src/graph.rs::FORMAT_VERSION: d42a4415675a
+  src/index.rs::RepoIndex -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  src/index.rs::RepoIndex -> src/graph.rs::FlowEdge: d62382a78a55
+  src/index.rs::RepoIndex -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/index.rs::RepoIndex -> src/hash.rs::hash_text: 70c099c1622c
+  src/index.rs::RepoIndex -> src/imports.rs::FileImports: 7a834189d6b3
+  src/index.rs::RepoIndex -> src/lang.rs::detect: 32ef7186ff88
+  src/index.rs::RepoIndex -> src/resolve.rs::build_resolver: 640f64019c54
+  src/index.rs::RepoIndex -> src/resolve.rs::resolve_default_imports: 39471d06e1f6
+  src/index.rs::RepoIndex -> src/stack.rs::StackPack: 436012c73562
+  src/index.rs::ingest_build_entry -> src/stack.rs::StackPack: 436012c73562
+  src/index.rs::generated_source_entries -> src/stack.rs::StackPack: 436012c73562
 ---
 # src/index.rs
 ## Summary

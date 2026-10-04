@@ -35,6 +35,52 @@ symbols:
   src/quarkus.rs::outgoing_channel: { source_hash: 6400f5033caa959a0e6276ea735b1501c8e3e47b732ecd57f59c997ba27c23b7, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: a68d068eabe0ab100069cba15fe34701c331cd0080015041f186203ffbc75c19 }
   src/quarkus.rs::resolve_channel_name: { source_hash: 049c2e73dd43431332ffbb831dcff62bb4e86c6db32282e5af762f5d99fa86e1, deps_hash: 1026699fa1108e005260d77a5f9109b5f21748ce8056f4b7ccf581455d7f79c7, spec_hash: 61e550cfc502ff2de48fdbfc2a7bbaaf5f6699db1ac7127a3d6c389b7e0005db }
   src/quarkus.rs::disambiguate_colliding_slugs: { source_hash: 6ca57c0e07fc6cb6f77d6250d901b84c7234d0a98293a540cf13bb5e95c15ab8, deps_hash: dd79b8c0fa0f64d9f5c2fd7ffee003186005ce19f3443d1b51fb6d0fd60f5c6d, spec_hash: b03d34d2aee1283cde79ee02f4671f362fa1c52e594c7638d7e1dec4af330991 }
+dep_targets:
+  file -> src/features.rs::EntryPoint: 60acb942d332
+  file -> src/features.rs::FeatureModel: d0f879980b40
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  file -> src/lang.rs::FileRole: 2e8bc021ccde
+  file -> src/stack.rs::strip_angle_bracket_groups: 9b459b0db653
+  file -> src/symbol.rs::Symbol: 2bab71782e46
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/quarkus.rs::QuarkusFeatureModel -> src/features.rs::EntryPoint: 60acb942d332
+  src/quarkus.rs::QuarkusFeatureModel -> src/features.rs::FeatureModel: d0f879980b40
+  src/quarkus.rs::QuarkusFeatureModel -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::QuarkusFeatureModel -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::QuarkusFeatureModel -> src/lang.rs::FileRole: 2e8bc021ccde
+  src/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::Symbol: 2bab71782e46
+  src/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/quarkus.rs::is_cdi_managed -> src/symbol.rs::Symbol: 2bab71782e46
+  src/quarkus.rs::is_admitting_annotation -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::parse_verb -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::parse_path_annotation -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::class_path_for -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::class_path_for -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::generated_interface_for -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::generated_interface_for -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::resolve_interface_name -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::resolve_interface_name -> src/lang.rs::FileRole: 2e8bc021ccde
+  src/quarkus.rs::resolve_interface_name -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::implemented_interface_names -> src/stack.rs::strip_angle_bracket_groups: 9b459b0db653
+  src/quarkus.rs::interface_method_by_name -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::interface_method_by_name -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::is_register_rest_client -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::is_register_rest_client -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::is_register_rest_client -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::is_scheduled_annotation -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::is_grpc_service_class -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::is_grpc_service_class -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::is_grpc_service_class -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::incoming_channel -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::outgoing_channel -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/quarkus.rs::resolve_channel_name -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/quarkus.rs::resolve_channel_name -> src/symbol.rs::Symbol: 2bab71782e46
+  src/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/quarkus.rs::disambiguate_colliding_slugs -> src/features.rs::EntryPoint: 60acb942d332
 ---
 # src/quarkus.rs
 ## Summary

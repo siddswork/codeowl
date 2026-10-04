@@ -38,6 +38,50 @@ symbols:
   src/rust.rs::resolve_one: { source_hash: c6afcef56a4d39e3ea01912a53d42d7e1e33d0db7eb392fbd5a5f451a4e848e8, deps_hash: 5d16e4df71519f0da07a181f71423605562a18ea529d86d45b0c34326f3e9b98, spec_hash: f70eb712304703de794e6c784c99567279ea61b7484a84f814b71104e8c877de }
   src/rust.rs::module_dir_of: { source_hash: 71f2e60391f0d84ce3ca34d37cc110e0876d1761ae0444d252721f7282532a38, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9444957a2778f4d46e11c12b8bc23d5c9c168fc77b7495f85e78493726f3ec99 }
   src/rust.rs::module_path_to_file: { source_hash: 62a8d77050abfe40362fba07bfe0d84b80ca1e71a94a1bfde535994568804afa, deps_hash: 18595553f8048f625e40de77eca251fa568767045127c8c9cd588eefdcc214a0, spec_hash: 7f6d924a28c52cd050a31f6a11e57eb057e5c41c57bc47f617af114cd1c35ef5 }
+dep_targets:
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  file -> src/imports.rs::ImportRef: 7a1b2c18f479
+  file -> src/imports.rs::ReExport: 31d004b78268
+  file -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  file -> src/rust_crates.rs::CrateMap: b5af7fdfbb64
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  file -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/rust.rs::extract_file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/rust.rs::merge_inherent_impls -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/rust.rs::merge_inherent_impls -> src/hash.rs::hash_text: 70c099c1622c
+  src/rust.rs::merge_inherent_impls -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/rust.rs::merge_inherent_impls -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/rust.rs::visit_item -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/rust.rs::visit_item -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/rust.rs::visit_container -> src/hash.rs::hash_text: 70c099c1622c
+  src/rust.rs::visit_container -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/rust.rs::visit_container -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/rust.rs::visit_container -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/rust.rs::push_leaf -> src/hash.rs::hash_text: 70c099c1622c
+  src/rust.rs::push_leaf -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/rust.rs::push_leaf -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/rust.rs::extract_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/rust.rs::extract_imports -> src/imports.rs::ImportRef: 7a1b2c18f479
+  src/rust.rs::extract_imports -> src/imports.rs::ReExport: 31d004b78268
+  src/rust.rs::extract_qualified_refs -> src/imports.rs::ImportRef: 7a1b2c18f479
+  src/rust.rs::resolve_imports -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/rust.rs::resolve_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/rust.rs::resolve_imports -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/rust.rs::resolve_imports -> src/rust_crates.rs::CrateMap: b5af7fdfbb64
+  src/rust.rs::resolve_imports -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/rust.rs::same_file_trait_impl_edges -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/rust.rs::same_file_trait_impl_edges -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/rust.rs::resolve_one -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/rust.rs::resolve_one -> src/imports.rs::FileImports: 7a834189d6b3
+  src/rust.rs::resolve_one -> src/rust_crates.rs::CrateMap: b5af7fdfbb64
+  src/rust.rs::resolve_one -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/rust.rs::module_path_to_file -> src/imports.rs::FileImports: 7a834189d6b3
+  src/rust.rs::module_path_to_file -> src/rust_crates.rs::CrateMap: b5af7fdfbb64
 ---
 # src/rust.rs
 ## Summary

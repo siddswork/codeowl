@@ -37,6 +37,34 @@ symbols:
   src/features.rs::feature_slug: { source_hash: b7249fe722139aed12c34ceffdc0fccec63396317314e4adbe16baa0aeed894f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 68151d633e2ee8d0e4c95d1d39467905538a67b1862432ae1775082dba85db63 }
   src/features.rs::Participants: { source_hash: 30442c4153843c182830e7de2f8d7c02a252efccc3e88efb93c3526598556e68, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c3a921ea219f43a30a401f678af8384ff8a4d13e4e07567a1cae4a285b8c6fed }
   src/features.rs::assemble_participants: { source_hash: efbcf677d434fff3d43cb0d274663d6b989c4ba92836ff4d4ef46dc0e7cdb654, deps_hash: d70f280f434c14bac41db70de20ce8b98f8a1917db30aea31e387f696526317a, spec_hash: 140fb080645c9fe5ea83f8f746c75e1ddb6fe10d29399b96166eb0c62b34b752 }
+dep_targets:
+  file -> src/graph.rs::FlowEdge: d62382a78a55
+  file -> src/graph.rs::FlowTarget: fec70e24a6f3
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/lang.rs::ts_parser: ca09f16dafc1
+  file -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  file -> src/stack.rs::for_name: 45d7be46f14a
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/features.rs::extract_route_literals -> src/lang.rs::ts_parser: ca09f16dafc1
+  src/features.rs::resolve_route_literal -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::resolve_route_literal -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/features.rs::extract_table_refs -> src/lang.rs::ts_parser: ca09f16dafc1
+  src/features.rs::resolve_table_ref -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::resolve_table_ref -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/features.rs::extract_rendered_components -> src/lang.rs::ts_parser: ca09f16dafc1
+  src/features.rs::resolve_rendered_component -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::file_does_data_work -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::FeatureModel -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::TypeScriptNextFeatureModel -> src/graph.rs::FlowTarget: fec70e24a6f3
+  src/features.rs::TypeScriptNextFeatureModel -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::feature_model_for -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::feature_model_for -> src/stack.rs::for_name: 45d7be46f14a
+  src/features.rs::enumerate_entry_points -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::assemble_participants -> src/graph.rs::FlowEdge: d62382a78a55
+  src/features.rs::assemble_participants -> src/graph.rs::FlowTarget: fec70e24a6f3
+  src/features.rs::assemble_participants -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/features.rs::assemble_participants -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/features.rs::assemble_participants -> src/symbol.rs::SymbolId: 6733b5c62e75
 ---
 # src/features.rs
 ## Summary

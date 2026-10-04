@@ -19,6 +19,9 @@ symbols:
   src/imports.rs::text: { source_hash: f2f836c691a8002927cc493e38650603f8fc64232d33afeb1b8f41f9279d1f2f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9c9762e818e8d171ef84278958b8becf4196b7b183b3ad304cc3cbb01e83c148 }
   src/imports.rs::field_text: { source_hash: 49fcca597c11dccf7ad16445d0a55ff9466165dfa7161782ba4be1054a28e01f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2b3e3ccfe6d2cbacf1bfc1245bcf6ab8f9d7d0ddbc85cd95765c43120d6fc587 }
   src/imports.rs::string_field: { source_hash: 42467b736c4d816d098e75165a41a7b59f91dd2ed1ad24b9d9b55ba12a5166c6, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e4705e8daf7fe8f382d71cdd1b703f2937464a2d3f026e3ac54252a5fac8e437 }
+dep_targets:
+  file -> src/lang.rs::ts_parser: ca09f16dafc1
+  src/imports.rs::extract_imports -> src/lang.rs::ts_parser: ca09f16dafc1
 ---
 # src/imports.rs
 ## Summary

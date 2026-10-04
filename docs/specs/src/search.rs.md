@@ -10,6 +10,12 @@ symbols:
   src/search.rs::FileContext: { source_hash: 6116823c2997907ec9b31295008e421a9d19069223047bf513b8418f70fc0126, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e6a2295f09ecd475c187ee6964c47e12df8c4cb7b38c00eb9a15f5e0d556c78d }
   src/search.rs::context_for_line: { source_hash: be9bdc64dfc2aec29cde363f55411771a3a7ab7895a0f208db39ad59a5651b7d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 273f0301b9c6452892651421b18fe0829f773eb66d5f720e8361d6aa685d13c1 }
   src/search.rs::search_code: { source_hash: c98c30b346c30c439148f3afd45768b76b6b3ee37a8a2adec4411476d89ce860, deps_hash: 4e1b3a6a6404b8cfa7e53da01a87ebb3862b58da1244e90c42575a3275c7037a, spec_hash: a15ff8bf78065f9bc9abfa4a63df8a000b8b65145bcc0b95cfe166eb84a51b95 }
+dep_targets:
+  file -> src/spec.rs::cap_source_text: fb0d9470a29c
+  file -> src/spec.rs::within_scope: 4dcc40036692
+  src/search.rs::SearchOptions -> src/spec.rs::within_scope: 4dcc40036692
+  src/search.rs::truncate_match_text -> src/spec.rs::cap_source_text: fb0d9470a29c
+  src/search.rs::search_code -> src/spec.rs::within_scope: 4dcc40036692
 ---
 # src/search.rs
 ## Summary

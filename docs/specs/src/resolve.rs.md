@@ -11,6 +11,21 @@ symbols:
   src/resolve.rs::resolve_default_imports: { source_hash: f8dbeae49c58a45c30dfa1776f71e48ae74629d82ae8c563cc9d63a1dc7e442b, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: e6f3fb3df559ef479db11caac917cfdfbecf7ef7f26cfb4ce62dedf3a4c95bca }
   src/resolve.rs::specifier_to_rel_path: { source_hash: 3229e450f1ad78c4d8aa1a1fdfabeff484b3da0f90e81a3eebfee7e092aeec95, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e428f2b0de6536c5a640b85ed8e722dc77dae8f1f301e0f27687e854d6357087 }
   src/resolve.rs::ResolveCtx: { source_hash: 4ea7ffb0afff8c7971523cac1044fa0ec71f09f4889755a3c3ae5a2af38eb998, deps_hash: a8b48d5312ca2852930b8adc41613f549dfd65e8ffe189dd0c38fd0185fe2127, spec_hash: 9dc9a83199f115430485574b9311d6fad562f0cb85f760acb9a990bdfb8a9440 }
+dep_targets:
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/graph.rs::extract_and_hash: 52dcd9d57f12
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  file -> src/lang.rs::RESOLVER_EXTENSIONS: 1705cc23b763
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/resolve.rs::ResolvedImport -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/resolve.rs::build_resolver -> src/lang.rs::RESOLVER_EXTENSIONS: 1705cc23b763
+  src/resolve.rs::resolve_imports -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/resolve.rs::resolve_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/resolve.rs::sorted_by_key -> src/imports.rs::FileImports: 7a834189d6b3
+  src/resolve.rs::resolve_default_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/resolve.rs::ResolveCtx -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/resolve.rs::ResolveCtx -> src/imports.rs::FileImports: 7a834189d6b3
+  src/resolve.rs::ResolveCtx -> src/symbol.rs::SymbolId: 6733b5c62e75
 ---
 # src/resolve.rs
 ## Summary

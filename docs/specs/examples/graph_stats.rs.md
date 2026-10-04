@@ -10,6 +10,16 @@ symbols:
   examples/graph_stats.rs::nodes_and_containment: { source_hash: cfca28a8bb4846d924a7a14eb47c6c136f8eb93b271a7e51f5fe6dd99f0e2194, deps_hash: c26f9d6a3e6974e2d667c28f724f82f43d77dfdb43054409f1e8e28bc6038944, spec_hash: bb0a15e923c686309f3d186976b19bfe41fd623066e61fccb2ef60affdb4ce61 }
   examples/graph_stats.rs::file_graph: { source_hash: 651bdaf37e8d98a1622cf9a6f352eb028c78f34e3dbb1e69cddc696875edd081, deps_hash: 308f45a79583deb699bf85014e3802b6dfdd23e12396d5348fbbaa03681c31db, spec_hash: 11b38d041454a4035fda18808d44d77f697b594f9587572bf4a258f8f078e387 }
   examples/graph_stats.rs::main: { source_hash: ac916d1504e59bb80736f0589eb8d258a67f807004cffe60ab06112ad4729865, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0dea4e08bfbdf354b1eb35cb484282a625a758f8dbdbecdc253959e493c9eb33 }
+dep_targets:
+  file -> src/graph.rs::FlowTarget: fec70e24a6f3
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/index.rs::RepoIndex: 481419547059
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  examples/graph_stats.rs::report -> src/index.rs::RepoIndex: 481419547059
+  examples/graph_stats.rs::nodes_and_containment -> src/graph.rs::Graph: 13dbdfa88b0e
+  examples/graph_stats.rs::nodes_and_containment -> src/symbol.rs::SymbolKind: 264efecb34de
+  examples/graph_stats.rs::file_graph -> src/graph.rs::FlowTarget: fec70e24a6f3
+  examples/graph_stats.rs::file_graph -> src/graph.rs::Graph: 13dbdfa88b0e
 ---
 # examples/graph_stats.rs
 ## Summary

@@ -7,6 +7,13 @@ symbols:
   src/watch.rs::spawn: { source_hash: 53d8e42152c83bbfe3e230d000b76a3dce79065de996cb02eaf4701a8b0ef227, deps_hash: aec1102fdf89ae067eb2fba4cc0acad666f9a5a607fcab4c157bffe92cd5df8c, spec_hash: cc326badc569dd861fd22a2afe7b73eb1b461ae03d67d2eece89a725f2f1c63b }
   src/watch.rs::watch_loop: { source_hash: 4675d570d6ecc15f05360defd6042e9abd01623b76a48dd77d3d3203c8737d45, deps_hash: aec1102fdf89ae067eb2fba4cc0acad666f9a5a607fcab4c157bffe92cd5df8c, spec_hash: 6d60fa759bbffed5f9c610ccad0f739b0bd8d221898ffac59979d1a5cdabf73b }
   src/watch.rs::collect: { source_hash: 10e08326e50f6e590691b7444d3662ed876c843287a218626b1deccba260249a, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: be0985e33d578cb512fef6ac0f6cb693a3d0c8fa23eafef1e6f4f25ca12c98dc }
+dep_targets:
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/index.rs::RepoIndex: 481419547059
+  src/watch.rs::spawn -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/watch.rs::spawn -> src/index.rs::RepoIndex: 481419547059
+  src/watch.rs::watch_loop -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/watch.rs::watch_loop -> src/index.rs::RepoIndex: 481419547059
 ---
 # src/watch.rs
 ## Summary

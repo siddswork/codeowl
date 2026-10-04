@@ -11,6 +11,23 @@ symbols:
   src/lang.rs::is_test_path: { source_hash: 43bd27fc12cb63b5b6e60e8b23cc75ba2d0bc82465e1ffb6cf530d089aab30e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a511957bab4e03e1d307eb16d4d08b01087428c3d50e9d8673f9d4e459a0ea28 }
   src/lang.rs::is_ui_primitive: { source_hash: 209f4445fe0023de0546da9717f126bbf2a38ed1753a94a50ca314462c748675, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 367ced1d96d513b98d77c48ddb63572c0bcfb1d984742211d1bf495007b8c895 }
   src/lang.rs::detect: { source_hash: 69e19ba3d8190ad772b621f27191c45166aa38cf80846179f17b0835e58175f4, deps_hash: a543d37c43576bc616f39ff9a81d12bca4bcf58e78c1e31ef694af10cdd81fc7, spec_hash: aeefe26f0258d1ab7e0dc65e27ca36b769abaa6a0843ef0a65b51f5147f2501e }
+dep_targets:
+  file -> src/extract.rs::extract_file: fcab56f46e52
+  file -> src/stack.rs::JavaStack: 3b4c6ab553d6
+  file -> src/stack.rs::PythonStack: 398bcceb2112
+  file -> src/stack.rs::RustStack: b161f0004a63
+  file -> src/stack.rs::StackPack: 436012c73562
+  file -> src/stack.rs::TypeScriptNextStack: 64056e725621
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/lang.rs::SourceKind -> src/stack.rs::TypeScriptNextStack: 64056e725621
+  src/lang.rs::extract_symbols -> src/extract.rs::extract_file: fcab56f46e52
+  src/lang.rs::extract_symbols -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/lang.rs::FileRole -> src/stack.rs::StackPack: 436012c73562
+  src/lang.rs::detect -> src/stack.rs::JavaStack: 3b4c6ab553d6
+  src/lang.rs::detect -> src/stack.rs::PythonStack: 398bcceb2112
+  src/lang.rs::detect -> src/stack.rs::RustStack: b161f0004a63
+  src/lang.rs::detect -> src/stack.rs::StackPack: 436012c73562
+  src/lang.rs::detect -> src/stack.rs::TypeScriptNextStack: 64056e725621
 ---
 # src/lang.rs
 ## Summary

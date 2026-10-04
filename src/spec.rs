@@ -260,6 +260,27 @@ impl FileSpec {
     }
 }
 
+/// The per-target record behind each `deps_hash`, as the `dep_targets:`
+/// frontmatter block: one line per `<owner> -> <target>: <hash>`, owner `file`
+/// for the file itself, then each symbol in order. Empty when nothing is
+/// recorded, so a spec with no resolved dependencies (or one written before
+/// the record existed) renders as it always has.
+pub(crate) fn dep_target_block(spec: &FileSpec) -> String {
+    let owners = std::iter::once(("file", &spec.file))
+        .chain(spec.symbols.iter().map(|(id, h)| (id.as_str(), h)));
+    let lines: Vec<String> = owners
+        .flat_map(|(owner, h)| {
+            h.dep_targets
+                .iter()
+                .map(move |(target, hash)| format!("  {owner} -> {target}: {hash}\n"))
+        })
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("dep_targets:\n{}", lines.concat())
+}
+
 /// Render a `FileSpec` to the markdown+frontmatter document
 /// `ARCHITECTURE.md`'s "File spec shape" describes. `graph`/`file_id` are
 /// needed to pull each symbol's current signature and the file's
@@ -288,24 +309,7 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
             ));
         }
     }
-    // The per-target record behind each `deps_hash`: one line per
-    // `<owner> -> <target>: <hash>`, owner `file` for the file itself.
-    // Written only when something is recorded, so a spec with no resolved
-    // dependencies (or one written before the record existed) renders as
-    // it always has.
-    let owners = std::iter::once(("file", &spec.file))
-        .chain(spec.symbols.iter().map(|(id, h)| (id.as_str(), h)));
-    let dep_lines: Vec<String> = owners
-        .flat_map(|(owner, h)| {
-            h.dep_targets
-                .iter()
-                .map(move |(target, hash)| format!("  {owner} -> {target}: {hash}\n"))
-        })
-        .collect();
-    if !dep_lines.is_empty() {
-        out.push_str("dep_targets:\n");
-        dep_lines.iter().for_each(|l| out.push_str(l));
-    }
+    out.push_str(&dep_target_block(spec));
     out.push_str("---\n");
     out.push_str(&format!("# {}\n", spec.source_path));
     out.push_str("## Summary\n");
@@ -1435,6 +1439,155 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             Ok(hash)
         }
     }
+}
+
+/// What `backfill_dep_targets` found, counted per owner (a file's own record,
+/// or one symbol's) except `unreadable_files`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct BackfillReport {
+    /// Spec files whose `dep_targets:` block changed (or would, on a dry run).
+    pub files_changed: usize,
+    /// Owners that got their pairs written.
+    pub filled: usize,
+    /// Owners skipped because the pairs the graph gives now no longer hash to
+    /// the stored `deps_hash`, so they are not the pairs it was made from.
+    pub skipped_moved: usize,
+    /// Owners skipped because the graph cannot say what they depend on now:
+    /// the symbol no longer exists, or its source cannot be read.
+    pub unverifiable: usize,
+    /// Owners that already had a record.
+    pub already_recorded: usize,
+    /// Owners whose dependency list is empty, so there is nothing to record.
+    pub without_dependencies: usize,
+    /// Spec files that could not be read or parsed; left as they are.
+    pub unreadable_files: usize,
+}
+
+/// Write the per-target record into stored file specs that predate it. An
+/// owner is filled only when the pairs recomputed from the graph hash to its
+/// stored `deps_hash`: then they are, by construction, the pairs it was made
+/// from. The only change to a spec is lines added to the `dep_targets:` block
+/// of its frontmatter; every other byte, including record lines already there,
+/// stays as it was. A spec that cannot be read is counted and skipped. With
+/// `write` false nothing is written and the report says what would be.
+pub fn backfill_dep_targets(graph: &Graph, root: &Path, write: bool) -> Result<BackfillReport> {
+    let mut report = BackfillReport::default();
+    for file in graph.files() {
+        let Some(file_id) = graph.find(&file.id) else {
+            continue;
+        };
+        let path = spec_path(root, &file.id);
+        if !path.exists() {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            report.unreadable_files += 1;
+            continue;
+        };
+        let Ok(spec) = parse(&text) else {
+            report.unreadable_files += 1;
+            continue;
+        };
+        let owners = std::iter::once((None, &spec.file))
+            .chain(spec.symbols.iter().map(|(id, h)| (Some(id.as_str()), h)));
+        let mut lines = String::new();
+        let mut filled = 0;
+        for (symbol, stored) in owners {
+            if !stored.dep_targets.is_empty() {
+                report.already_recorded += 1;
+                continue;
+            }
+            let pairs = match symbol {
+                None => try_file_dependency_pairs(graph, file_id),
+                Some(id) => graph
+                    .find(id)
+                    .and_then(|sym_id| graph.get_symbol(sym_id))
+                    .and_then(|sym| try_dependency_pairs(graph, root, file_id, sym)),
+            };
+            let Some(pairs) = pairs else {
+                report.unverifiable += 1;
+                continue;
+            };
+            if hash_dependency_pairs(&pairs) != stored.deps_hash {
+                report.skipped_moved += 1;
+            } else if pairs.is_empty() {
+                report.without_dependencies += 1;
+            } else {
+                let owner = symbol.unwrap_or("file");
+                for (target, hash) in shorten_dep_targets(&pairs) {
+                    lines.push_str(&format!("  {owner} -> {target}: {hash}\n"));
+                }
+                filled += 1;
+            }
+        }
+        if filled == 0 {
+            continue;
+        }
+        report.filled += filled;
+        report.files_changed += 1;
+        if write {
+            let updated = add_dep_target_lines(&text, &lines)
+                .with_context(|| format!("updating {}", path.display()))?;
+            write_replacing(&path, &updated)?;
+        }
+    }
+    Ok(report)
+}
+
+/// `text` with `lines` (each ending in `\n`) added to the `dep_targets:` block
+/// of its frontmatter: at the end of the block if there is one, otherwise as a
+/// new block just before the closing `---`. Uses the file's own line ending.
+fn add_dep_target_lines(text: &str, lines: &str) -> Result<String> {
+    let crlf = text
+        .split_inclusive('\n')
+        .next()
+        .is_some_and(|l| l.ends_with("\r\n"));
+    let eol = |s: &str| {
+        if crlf {
+            s.replace('\n', "\r\n")
+        } else {
+            s.to_string()
+        }
+    };
+    let mut out = String::new();
+    let mut rest = text.split_inclusive('\n');
+    let first = rest.next().context("empty spec file")?;
+    if first.trim_end() != "---" {
+        bail!("spec file has no frontmatter");
+    }
+    out.push_str(first);
+    let mut block = None; // None: no block seen; Some(true): inside it
+    for line in rest.by_ref() {
+        let at_end = line.trim_end() == "---";
+        let in_block = block == Some(true) && line.starts_with("  ");
+        if (at_end || !in_block) && block == Some(true) {
+            out.push_str(&eol(lines));
+            block = Some(false);
+        }
+        if at_end {
+            if block.is_none() {
+                out.push_str(&eol(&format!("dep_targets:\n{lines}")));
+            }
+            out.push_str(line);
+            out.extend(rest);
+            return Ok(out);
+        }
+        if line.trim_end() == "dep_targets:" {
+            block = Some(true);
+        }
+        out.push_str(line);
+    }
+    bail!("spec file frontmatter is never closed")
+}
+
+/// Replace `path`'s contents without a window in which it is empty: write a
+/// temp file beside it, then rename over it.
+fn write_replacing(path: &Path, content: &str) -> Result<()> {
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, content).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
 }
 
 /// Test helper: put a hash-*current* symbol spec on disk whose prose would
@@ -3743,6 +3896,30 @@ symbols:\n  a.ts::one: { source_hash: sh, deps_hash: sd, spec_hash: ss }\n\
         assert!(
             !rendered.contains("dep_targets"),
             "invented a block:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn the_dependency_block_is_empty_without_records_and_lists_file_first() {
+        let hash = |targets: &[(&str, &str)]| HashPair {
+            dep_targets: targets
+                .iter()
+                .map(|(t, h)| (t.to_string(), h.to_string()))
+                .collect(),
+            ..HashPair::default()
+        };
+        let mut spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: hash(&[]),
+            symbols: vec![("a.ts::one".to_string(), hash(&[]))],
+            ..FileSpec::default()
+        };
+        assert_eq!(dep_target_block(&spec), "");
+        spec.file = hash(&[("b.ts", "aaaaaaaaaaaa")]);
+        spec.symbols[0].1 = hash(&[("b.ts::f", "bbbbbbbbbbbb")]);
+        assert_eq!(
+            dep_target_block(&spec),
+            "dep_targets:\n  file -> b.ts: aaaaaaaaaaaa\n  a.ts::one -> b.ts::f: bbbbbbbbbbbb\n"
         );
     }
 
@@ -6588,5 +6765,237 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         assert!(is_test_path(&g, "rollup:e2e/helpers"));
         assert!(!is_test_path(&g, "lib/utils.ts"));
         assert!(!is_test_path(&g, "app/api/attest/route.ts")); // "test" substring, not a test file
+    }
+
+    /// Write the `Polite` section and `people.rs` summary, so the spec holds
+    /// one dependency record for the file and one for the symbol.
+    fn generate_people(graph: &Graph, dir: &Path) -> String {
+        let content = "### Summary\nGreets people politely by name.\n### Behavior\nReturns a polite greeting string for the caller.\n";
+        submit(graph, dir, "src/people.rs::Polite", content).unwrap();
+        submit(
+            graph,
+            dir,
+            "src/people.rs",
+            "Small people module for tests.",
+        )
+        .unwrap();
+        std::fs::read_to_string(spec_path(dir, "src/people.rs")).unwrap()
+    }
+
+    /// The spec text as it was before the record existed: no `dep_targets:`
+    /// block at all.
+    fn without_dep_targets(text: &str) -> String {
+        let mut out = String::new();
+        let mut in_block = false;
+        for line in text.split_inclusive('\n') {
+            if line.trim_end() == "dep_targets:" {
+                in_block = true;
+                continue;
+            }
+            if in_block && line.starts_with("  ") {
+                continue;
+            }
+            in_block = false;
+            out.push_str(line);
+        }
+        out
+    }
+
+    #[test]
+    fn backfill_restores_a_stripped_record_byte_for_byte() {
+        let (graph, dir) = greeter_people_graph("backfill-exact");
+        let original = generate_people(&graph, &dir);
+        assert!(original.contains("dep_targets:"));
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, without_dep_targets(&original)).unwrap();
+
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        assert_eq!(report.files_changed, 1);
+        assert_eq!(report.filled, 2); // the file and `Polite`
+        assert_eq!(report.skipped_moved, 0);
+
+        // A second run finds everything recorded and changes nothing.
+        let again = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(again.files_changed, 0);
+        assert_eq!(again.filled, 0);
+        assert_eq!(again.already_recorded, 2);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_dry_run_reports_the_same_counts_and_writes_nothing() {
+        let (graph, dir) = greeter_people_graph("backfill-dry");
+        let original = generate_people(&graph, &dir);
+        let stripped = without_dep_targets(&original);
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &stripped).unwrap();
+
+        let report = backfill_dep_targets(&graph, &dir, false).unwrap();
+        assert_eq!((report.files_changed, report.filled), (1, 2));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), stripped);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_owner_whose_dependencies_moved_is_skipped_and_its_lines_left_alone() {
+        let (graph, dir) = greeter_people_graph("backfill-moved");
+        let original = generate_people(&graph, &dir);
+        let spec = parse(&original).unwrap();
+        let polite = spec.symbol_hash("src/people.rs::Polite").unwrap();
+        // The symbol's stored dependency hash no longer matches the graph.
+        // (The file shares that hash here, so change the symbol's line only.)
+        let moved: String = without_dep_targets(&original)
+            .split_inclusive('\n')
+            .map(|line| {
+                if line.starts_with("  src/people.rs::Polite: ") {
+                    line.replace(&polite.deps_hash, &"0".repeat(64))
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect();
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &moved).unwrap();
+
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(report.filled, 1);
+        assert_eq!(report.skipped_moved, 1);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("  file -> src/greeter.rs::Greeter: "));
+        assert!(!text.contains("  src/people.rs::Polite -> "));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_spec_stale_in_its_text_alone_still_gets_its_records() {
+        let (graph, dir) = greeter_people_graph("backfill-source");
+        let original = generate_people(&graph, &dir);
+        let spec = parse(&original).unwrap();
+        // Source hashes moved (the code was edited), dependencies did not.
+        let edited = without_dep_targets(&original)
+            .replace(&spec.file.source_hash, &"1".repeat(64))
+            .replace(
+                &spec
+                    .symbol_hash("src/people.rs::Polite")
+                    .unwrap()
+                    .source_hash,
+                &"2".repeat(64),
+            );
+        std::fs::write(spec_path(&dir, "src/people.rs"), &edited).unwrap();
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(report.filled, 2);
+        assert_eq!(report.skipped_moved, 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn owners_with_no_dependencies_write_nothing_and_are_counted() {
+        let (graph, dir) = greeter_people_graph("backfill-none");
+        let content = "### Summary\nA trait with one greeting method.\n### Behavior\nDeclares the single greet method implementors provide.\n";
+        submit(&graph, &dir, "src/greeter.rs::Greeter", content).unwrap();
+        submit(
+            &graph,
+            &dir,
+            "src/greeter.rs",
+            "The greeting trait that people modules implement.",
+        )
+        .unwrap();
+        let path = spec_path(&dir, "src/greeter.rs");
+        let before = std::fs::read_to_string(&path).unwrap();
+        assert!(!before.contains("dep_targets"));
+
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(report.files_changed, 0);
+        assert_eq!(report.without_dependencies, 2);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_malformed_spec_is_counted_and_skipped_not_fatal() {
+        let (graph, dir) = greeter_people_graph("backfill-bad");
+        let original = generate_people(&graph, &dir);
+        std::fs::write(
+            spec_path(&dir, "src/people.rs"),
+            without_dep_targets(&original),
+        )
+        .unwrap();
+        // A hand-damaged spec for the other file: frontmatter `parse` rejects.
+        let bad = spec_path(&dir, "src/greeter.rs");
+        std::fs::create_dir_all(bad.parent().unwrap()).unwrap();
+        std::fs::write(&bad, "---\nthis line has no colon\n---\n# x\n").unwrap();
+
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(report.unreadable_files, 1);
+        assert_eq!(report.files_changed, 1);
+        assert_eq!(
+            std::fs::read_to_string(spec_path(&dir, "src/people.rs")).unwrap(),
+            original
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_record_line_for_an_undeclared_owner_survives_a_backfill() {
+        let (graph, dir) = greeter_people_graph("backfill-orphan");
+        let original = generate_people(&graph, &dir);
+        let orphan = "  src/people.rs::Gone -> src/x.rs::X: aaaaaaaaaaaa\n";
+        let with_orphan = add_dep_target_lines(&without_dep_targets(&original), orphan).unwrap();
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &with_orphan).unwrap();
+
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(report.filled, 2);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(orphan), "orphan line lost:\n{text}");
+        assert!(text.contains("  file -> src/greeter.rs::Greeter: "));
+        assert!(text.contains("  src/people.rs::Polite -> src/greeter.rs::Greeter: "));
+        // One block only.
+        assert_eq!(text.matches("dep_targets:").count(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_spec_with_windows_line_endings_keeps_them() {
+        let (graph, dir) = greeter_people_graph("backfill-crlf");
+        let original = generate_people(&graph, &dir).replace('\n', "\r\n");
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, without_dep_targets(&original)).unwrap();
+
+        backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_symbol_gone_from_the_graph_is_unverifiable_not_moved() {
+        let (graph, dir) = greeter_people_graph("backfill-gone");
+        let original = generate_people(&graph, &dir);
+        let renamed: String = without_dep_targets(&original)
+            .split_inclusive('\n')
+            .map(|l| {
+                if l.starts_with("  src/people.rs::Polite: ") {
+                    l.replace("::Polite", "::Gone")
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        std::fs::write(spec_path(&dir, "src/people.rs"), renamed).unwrap();
+
+        let report = backfill_dep_targets(&graph, &dir, true).unwrap();
+        assert_eq!(report.unverifiable, 1);
+        assert_eq!(report.skipped_moved, 0);
+        assert_eq!(report.filled, 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_block_splice_refuses_text_without_closed_frontmatter() {
+        assert!(add_dep_target_lines("no frontmatter\n", "  a\n").is_err());
+        assert!(add_dep_target_lines("---\nkind: file\n", "  a\n").is_err());
+        assert!(add_dep_target_lines("", "  a\n").is_err());
     }
 }

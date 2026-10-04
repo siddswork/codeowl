@@ -30,6 +30,48 @@ symbols:
   src/java.rs::dir_of: { source_hash: 2efb6c456c12ddbe5e47b82a6124d2e3958e72513d321a10b163e2adee1aa8f2, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 89bc9ea26d9d42b179d37290e3ba2df851555d1c29fe016eea56902bdb3113c3 }
   src/java.rs::package_of: { source_hash: c2fb4a6eeb828533cab8b67db4a98e3ccc071b9b71c2a583be9aa41f30f8807e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0c8255163e17e241525fe10a0e17b19f7fad839415f0e9759720f9bb70e6d7c8 }
   src/java.rs::mentions_identifier: { source_hash: 88f6db1b1148d800a516da0f9206f65cbd3b7a7e7526d28147bd3f54bb9bb42b, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 46c516216eb3fafdc68fb36116682e6f469698fa1296f6052d452e4d6f2b4e14 }
+dep_targets:
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  file -> src/imports.rs::ImportRef: 7a1b2c18f479
+  file -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  file -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/java.rs::extract_file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/java.rs::visit_item -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/java.rs::visit_item -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/java.rs::visit_container -> src/hash.rs::hash_text: 70c099c1622c
+  src/java.rs::visit_container -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/java.rs::visit_container -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/java.rs::visit_container -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/java.rs::push_leaf -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/java.rs::push_leaf -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/java.rs::push_named_leaf -> src/hash.rs::hash_text: 70c099c1622c
+  src/java.rs::push_named_leaf -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/java.rs::push_named_leaf -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/java.rs::extract_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/java.rs::extract_imports -> src/imports.rs::ImportRef: 7a1b2c18f479
+  src/java.rs::extract_qualified_refs -> src/imports.rs::ImportRef: 7a1b2c18f479
+  src/java.rs::resolve_imports -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java.rs::resolve_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/java.rs::resolve_imports -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/java.rs::cross_package_qualified_edges -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java.rs::cross_package_qualified_edges -> src/imports.rs::FileImports: 7a834189d6b3
+  src/java.rs::cross_package_qualified_edges -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/java.rs::cross_package_qualified_edges -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java.rs::fqn_to_file -> src/imports.rs::FileImports: 7a834189d6b3
+  src/java.rs::resolve_explicit -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java.rs::resolve_explicit -> src/imports.rs::FileImports: 7a834189d6b3
+  src/java.rs::resolve_explicit -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java.rs::same_package_edges -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java.rs::same_package_edges -> src/imports.rs::FileImports: 7a834189d6b3
+  src/java.rs::same_package_edges -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/java.rs::same_package_edges -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java.rs::same_package_edges -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # src/java.rs
 ## Summary

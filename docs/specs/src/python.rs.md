@@ -26,6 +26,46 @@ symbols:
   src/python.rs::is_route_decorated: { source_hash: 38a7354a9f018ae74714cfac443f91ade00b2e7f9935b0f20e3343e412f2b615, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: df26c0360b9c21db3a18506009a81ddfabf9bd76455928c7af9fca9401f155dd }
   src/python.rs::collect_route_deps: { source_hash: f797e94d810536b1ba61bb1b92f263a563e6f1421e5aa5f9362143dba37356ff, deps_hash: db6901984ad273d947383eb404c69c006c63274caa3b433b981a5237a822060e, spec_hash: 19203b3d206c27e8ab72f824e805313306c681b5cde5e13233e798ab7c37122d }
   src/python.rs::resolve_flow_edge: { source_hash: e2771b453681c8e2ba217b223a766f56d3e3d32d8293d58dd963ade25ec14fd3, deps_hash: 016d12e8c8ef5e1ea653bb984a70a82daeb5d05649412b7c8db73ffee8a53e26, spec_hash: 0af0ec627f22ce5045ad2af28fe9eba85fef75c0309f44e44891f8f2193ae2be }
+dep_targets:
+  file -> src/graph.rs::FileExtraction: 0cb1c67d8a8b
+  file -> src/graph.rs::FlowTarget: fec70e24a6f3
+  file -> src/graph.rs::Graph: 13dbdfa88b0e
+  file -> src/graph.rs::UnresolvedFlowEdge: 17c46f8128e8
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/imports.rs::FileImports: 7a834189d6b3
+  file -> src/imports.rs::ImportRef: 7a1b2c18f479
+  file -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  file -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/python.rs::extract_file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/python.rs::visit_item -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/python.rs::visit_container -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/python.rs::visit_container -> src/hash.rs::hash_text: 70c099c1622c
+  src/python.rs::visit_container -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/python.rs::visit_container -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/python.rs::visit_container -> src/text.rs::strip_value_for_fold: 1db626ff35a3
+  src/python.rs::push_callable -> src/hash.rs::hash_text: 70c099c1622c
+  src/python.rs::push_callable -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/python.rs::push_callable -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/python.rs::visit_assignment -> src/hash.rs::hash_text: 70c099c1622c
+  src/python.rs::visit_assignment -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/python.rs::visit_assignment -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/python.rs::extract_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/python.rs::extract_imports -> src/imports.rs::ImportRef: 7a1b2c18f479
+  src/python.rs::resolve_imports -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/python.rs::resolve_imports -> src/imports.rs::FileImports: 7a834189d6b3
+  src/python.rs::resolve_imports -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/python.rs::resolve_one -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/python.rs::resolve_one -> src/imports.rs::FileImports: 7a834189d6b3
+  src/python.rs::resolve_one -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/python.rs::pick_file -> src/imports.rs::FileImports: 7a834189d6b3
+  src/python.rs::extract_flow_edges -> src/graph.rs::UnresolvedFlowEdge: 17c46f8128e8
+  src/python.rs::collect_route_deps -> src/graph.rs::UnresolvedFlowEdge: 17c46f8128e8
+  src/python.rs::resolve_flow_edge -> src/graph.rs::FlowTarget: fec70e24a6f3
+  src/python.rs::resolve_flow_edge -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/python.rs::resolve_flow_edge -> src/graph.rs::UnresolvedFlowEdge: 17c46f8128e8
 ---
 # src/python.rs
 ## Summary

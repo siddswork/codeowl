@@ -13,6 +13,35 @@ symbols:
   src/graph.rs::UnresolvedFlowEdge: { source_hash: 247d5a418c02e679b95f2a79f6b153fbe044257e740deca6380e82514abcb422, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 1b08108bf64809c00a1e59025885a05382ab85ded5b10172af966abafa84f9fe }
   src/graph.rs::Graph: { source_hash: 481901ceff94a9240895681ab2d2dbd6fb74548c595980d2f08a9140eb769a75, deps_hash: 1363fd8e5ec54006f0090e49de57e85db19100cd42d3aa0580838e4897b516ec, spec_hash: 3113e6ab5d0b24ba9721b273635f7b06cbf9d42dae06f8d514edf4423c7e27b6 }
   src/graph.rs::build_graph_from_sources: { source_hash: dd5e3e0c36327ad645a76af4a2c9fd5bb8cbe4f36f51ed9217dc8a15a1d80028, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 55df20b1897ceed56015a0ace1c249b8db22646e47caf5beeb18422d4b6caa47 }
+dep_targets:
+  file -> src/hash.rs::hash_text: 70c099c1622c
+  file -> src/lang.rs::FileRole: 2e8bc021ccde
+  file -> src/lang.rs::extract_symbols: 86f13d92fbdd
+  file -> src/resolve.rs::ResolvedDefaultImport: bebbd77bb6f0
+  file -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  file -> src/schema.rs::extract_tables: ac1e0de7c6f8
+  file -> src/stack.rs::for_name: 45d7be46f14a
+  file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  file -> src/symbol.rs::Symbol: 2bab71782e46
+  file -> src/symbol.rs::SymbolId: 6733b5c62e75
+  file -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/graph.rs::SymbolView -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/graph.rs::SymbolView -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/graph.rs::FileNode -> src/symbol.rs::Symbol: 2bab71782e46
+  src/graph.rs::FileNode -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/graph.rs::Node -> src/symbol.rs::Symbol: 2bab71782e46
+  src/graph.rs::FileExtraction -> src/symbol.rs::ExtractedSymbol: 314759561cf6
+  src/graph.rs::extract_and_hash -> src/hash.rs::hash_text: 70c099c1622c
+  src/graph.rs::extract_and_hash -> src/lang.rs::extract_symbols: 86f13d92fbdd
+  src/graph.rs::extract_and_hash -> src/schema.rs::extract_tables: ac1e0de7c6f8
+  src/graph.rs::FlowTarget -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/graph.rs::Graph -> src/lang.rs::FileRole: 2e8bc021ccde
+  src/graph.rs::Graph -> src/resolve.rs::ResolvedDefaultImport: bebbd77bb6f0
+  src/graph.rs::Graph -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/graph.rs::Graph -> src/stack.rs::for_name: 45d7be46f14a
+  src/graph.rs::Graph -> src/symbol.rs::Symbol: 2bab71782e46
+  src/graph.rs::Graph -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/graph.rs::Graph -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
 # src/graph.rs
 ## Summary
