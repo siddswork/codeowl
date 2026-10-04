@@ -1,6 +1,6 @@
 # exp-05 — What a file summary should be written from
 
-**Status:** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), on paged reading (round 4), and on the crossover between paged raw and summaries (round 5), 2026-10-03 and 2026-10-04. Nothing is built. The ladder is specified except for two optional refinements (dropping test code before paging, and the exact cutoff between 12 and 22 pages); the next step is a build plan on its own branch.
+**Status:** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), on paged reading (round 4), on the crossover between paged raw and summaries (round 5), and on dropping test code before paging (round 6), 2026-10-03 to 2026-10-04. Nothing is built. The ladder is specified except for the exact cutoff between 12 and 22 pages (interpolated) and a writer that must forget earlier pages (untested); the next step is a build plan on its own branch.
 **Feeds:** `DECISIONS.md#q22` (the decision this evidence supports), the file-task shape in `spec.rs` (`spec_task_to_response`, the `File` arm), the file-summary instructions in `setup/codeowl-generate.md` and its `.prompt.md` port, and the finer file-level fingerprint plan on branch `file-fingerprint`.
 **Not a decision doc:** conclusions fold into `DECISIONS.md#q22` and `ARCHITECTURE.md` when built. Where this file and those disagree, they win.
 
@@ -205,9 +205,28 @@ Findings:
 3. **Paged raw costs about twice the tokens of paged summaries** (84k against 43k). Half of this file's pages were unit tests; dropping `#[cfg(test)]` blocks before paging would roughly halve that cost and push the raw range further out. Untested.
 4. **The 22× and 31× comparisons used one read of the whole file, not pages**, and were different files and judging sessions; the cutoff is an interpolation, not a measurement.
 
+## Round 6 — does dropping test code before paging hurt (`src/rust.rs`; 2 recall judges, 1 precision judge)
+
+Same file and frozen key points as round 5. The test module (`#[cfg(test)] mod tests`, about 47 % of the bytes) was cut off before paging: 52,950 bytes of code in 8 pages (the last page small) against 14 pages with tests. Two runs, new prompt. The earlier paged-raw runs, the paged-summaries run and the control were re-judged in the same blind pool so every score is on one scale.
+
+| Arm | Run 1 | Run 2 | Mean | Pages | Tokens per run | Wrong claims |
+|---|---|---|---|---|---|---|
+| **Paged raw, tests dropped** | 71.4 | 81.0 | **76.2** | 8 | about 62k | 0 |
+| Paged raw, tests included | 76.2 | 73.8 | 75.0 | 14 | about 84k | 0 |
+| Paged summaries | 59.5 | n/a | 59.5 | 2 | about 43k | 0 |
+| Control | 81.0 | n/a | 81.0 | n/a | n/a | 0 |
+
+Per key point, dropping tests against keeping them: inherent impl folding 1.00 against 0.75, doc, attribute and `pub` details 0.75 against 0, public surface feeding the interface hash 0.50 against 1.00, import extraction 0.75 against 1.00; everything else equal. Both miss the inline `crate::` rule. The two re-judged anchors moved by about 2 and 5 points from round 5, so only same-session comparisons count.
+
+Findings:
+1. **Dropping test code costs no measurable quality** (76.2 against 75.0, noise). One stripped run reached the control's score.
+2. **It saves 43 % of the pages and 27 % of the tokens per summary.** Tokens fall less than pages because the prompt and the first reads cost the same either way.
+3. **For Rust the page-count cutoff applies after stripping**: paged raw up to about 12 pages of non-test code. `rust.rs` is 8 pages stripped. Other stacks keep their tests in separate files, so nothing changes for them.
+4. **The fingerprint can then exclude test code too**: hashing what the writer saw means a test-only edit no longer stales the file summary.
+
 ## Conclusions
 
-What the five rounds support:
+What the six rounds support:
 
 1. **The cap is the real problem.** A capped summary reads as complete and describes a prefix: perfect before the cut, zero after it, on Rust, TypeScript and Java.
 2. **No single replacement input fits every file.** What was measured, by file shape:
@@ -228,7 +247,8 @@ What the five rounds support:
 9. The "first sentence of each summary" and "drop the tests" rungs of the original ladder are dropped: test-dropping rescues 1 of 23 over-cap files, and the summaries input already fits 19 of them.
 10. `### Behavior` text added to the summaries input was not worth its extra cost on Rust (+2 and +8 alone, no reliable gain over the prompt). It was not tried on TypeScript, where it may matter more.
 11. **Paging does not hurt** (round 4): paged raw (TypeScript, 3 pages) and paged summaries (`spec.rs`, 4 pages) each scored within 2 points of their single-read counterparts, against a bar of 8, in the lenient case where one session sees every page.
-12. **The cutoff between paged raw and summaries lies between about 12 and 22 times the cap** (round 5): raw won by 14 at 12.4× (73 against 58), summaries won by 6 to 7 at 22× and 31×. Starting rule: paged raw up to about 12 pages, summaries beyond. Paged raw costs about twice the tokens; dropping test code before paging is the obvious saving (untested).
+12. **The cutoff between paged raw and summaries lies between about 12 and 22 times the cap** (round 5): raw won by 14 at 12.4× (73 against 58), summaries won by 6 to 7 at 22× and 31×. Starting rule: paged raw up to about 12 pages, summaries beyond. Paged raw costs about twice the tokens of summaries.
+13. **For Rust, drop test code before paging** (round 6): quality unchanged (76 against 75), 43 % fewer pages and 27 % fewer tokens. The 12-page cutoff applies to the pages sent after stripping, and the fingerprint hashes the stripped text, so a test-only edit no longer stales a file summary.
 
 ## Limits of this evidence
 
@@ -238,6 +258,7 @@ What the five rounds support:
 - **The "cut off" statement counted as wrong** in all 6 capped TypeScript runs is a judging choice: it is the writer reporting its input, but it ends up in the summary text.
 - **The control note says the cap cuts TypeScript at line ~290;** it cuts at line 261. The frozen control file keeps the wrong figure; the key points are unaffected.
 - **Paging was tested only in the lenient case.** In rounds 1 to 3 the writer read all of its input at once. Round 4 paged it, but one agent session saw every page, so every page stayed in its context. A writer that must forget earlier pages and carry notes was not tested (it would need one agent per page, roughly 2 to 3 times the cost); worth running only if the real loop is found to shed earlier pages.
+- **Round 6 is the same single file with two runs per arm.** Stripping was tested on Rust only, where the test module is part of the file; it does not apply to stacks whose tests live in other files. Run 1 and run 2 of the stripped arm differ by 10 points (71 and 81), so the 1-point gap to the unstripped arm is well inside the noise.
 - **Round 5 is one Rust file with two runs per arm.** The 22× and 31× comparisons come from other files, other judging sessions and one read of the whole file rather than pages, so the cutoff between 12 and 22 pages is an interpolation. The paged-raw input included the file's unit tests (about half the bytes), as a real task would.
 - **Round 4 is small.** Two runs per arm, one judge (checked against six anchors: at most 4.7 points off, about 2 points stricter on average), no precision check on wrong claims, and one file per experiment.
 - **Small samples.** Three runs per arm; judge gaps of 5 to 10 points on large files. Treat differences under about 8 points as noise.
@@ -261,7 +282,9 @@ What the five rounds support:
 | Round 4 judging | 2 | about 0.09M |
 | Round 5 generation | 5 | about 0.30M |
 | Round 5 judging | 3 | about 0.15M |
-| **Total** | **105** | **about 5.1M** |
+| Round 6 generation | 2 | about 0.12M |
+| Round 6 judging | 3 | about 0.16M |
+| **Total** | **110** | **about 5.4M** |
 
 ## Plan
 
@@ -272,7 +295,7 @@ Nothing below is started. Each build step needs its own branch, plan and approva
 | 1 | **Non-Rust check. Done (round 3).** One TypeScript and one Java file, controls and key points frozen first. | Result: the Rust finding does not generalise as one rule; see Conclusions. |
 | 2 | **Paged-read check. Done (round 4), lenient case.** Paged raw (TypeScript, 3 pages) 78.8 against 78 single-read; paged summaries (`spec.rs`, 4 pages) 70.2 against 68. | Passed the pre-set bar (within 8 points). Not tested: a writer that must forget earlier pages; run only if the real loop sheds them. |
 | 3 | **Find the crossover. Done for Rust (round 5).** `rust.rs` at 12.4 times the cap: paged raw 72.6 against paged summaries 58.4. | Starting rule: paged raw up to about 12 pages, summaries beyond; the true cutoff lies between about 12 and 22. A mid-size file (about 16 to 20 times the cap) in another stack would tighten it; optional. |
-| 3b | **Optional refinement: drop test code before paging.** Compare paged raw with and without `#[cfg(test)]` blocks on a file like `rust.rs`. | Worth building only if quality holds and tokens roughly halve. |
+| 3b | **Drop test code before paging (Rust). Done (round 6).** Paged raw without the `#[cfg(test)]` module: 76.2 against 75.0 with it; 8 pages against 14; about 62k tokens against about 84k. | Quality held, and pages fell 43 %: build it for Rust. The pack knows its own test-module convention. |
 | 4 | **Design and tests.** File task shape per the ladder in Conclusions, paged with a cursor (stateless, like `pending`); a Java member outline built deterministically from the extractor's own member data. Failing tests first, including a rewrite of the `mcp.rs` lifecycle assertion `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`. | Approved plan, own branch. |
 | 5 | **Fingerprint.** Hash exactly what the writer saw for the rung used: raw-file tasks keep the whole-file hash; summary tasks hash module doc + each symbol's signature + its `spec_hash` (the containment rule rollups already use); outline tasks hash the outline. This replaces the parked `shape_hash` plan. `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today). |
 | 6 | **Prompt.** Add the coverage and specifics instruction for the summaries and outline inputs only, to `setup/codeowl-generate.md` and `setup/codeowl-generate.prompt.md` together, deferring to `STYLE.md`. Tell the writer not to describe its own input as cut off. | Both copies in step. |
