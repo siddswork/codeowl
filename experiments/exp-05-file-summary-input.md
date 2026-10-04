@@ -1,6 +1,6 @@
 # exp-05 — What a file summary should be written from
 
-**Status:** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), on paged reading (round 4), on the crossover between paged raw and summaries (round 5), and on dropping test code before paging (round 6), 2026-10-03 to 2026-10-04. Nothing is built. The ladder is specified except for the exact cutoff between 12 and 22 pages (interpolated) and a writer that must forget earlier pages (untested); the next step is a build plan on its own branch.
+**Status (2026-10-04, seven rounds; Round 7 is a no-token replay of the Rust history):** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), on paged reading (round 4), on the crossover between paged raw and summaries (round 5), and on dropping test code before paging (round 6), 2026-10-03 to 2026-10-04. Nothing is built. The ladder is specified except for the exact cutoff between 12 and 22 pages (interpolated) and a writer that must forget earlier pages (untested); the next step is a build plan on its own branch.
 **Feeds:** `DECISIONS.md#q22` (the decision this evidence supports), the file-task shape in `spec.rs` (`spec_task_to_response`, the `File` arm), the file-summary instructions in `setup/codeowl-generate.md` and its `.prompt.md` port, and the finer file-level fingerprint plan on branch `file-fingerprint`.
 **Not a decision doc:** conclusions fold into `DECISIONS.md#q22` and `ARCHITECTURE.md` when built. Where this file and those disagree, they win.
 
@@ -224,9 +224,49 @@ Findings:
 3. **For Rust the page-count cutoff applies after stripping**: paged raw up to about 12 pages of non-test code. `rust.rs` is 8 pages stripped. Other stacks keep their tests in separate files, so nothing changes for them.
 4. **The fingerprint can then exclude test code too**: hashing what the writer saw means a test-only edit no longer stales the file summary.
 
+## Round 7 — what the fingerprint rule spares, replayed on CodeOwl's own history (Rust only, no tokens)
+
+Rounds 1 to 6 decided what the writer is shown. This round asks what should make a file summary stale. The probe replays the 148 commits that touched `src/*.rs`: 342 edits to existing files. For each edit it asks whether the file summary's fingerprint would have changed under a candidate rule, using the real extractor (symbols, signatures, export flags, imports, doc comments) and tree-sitter for literals. The probe was throwaway and is not in the repo.
+
+The history, by kind of edit: shape change (a signature, constant, import, or an added or removed item) 223 (65.2 %); function body only 67 (19.6 %); other comment or whitespace 20 (5.8 %); test-only 18 (5.3 %); doc-comment only 14 (4.1 %).
+
+**Part A — the rules**
+
+| Rule | Edits that would NOT stale the file summary | Excluding the 18 test-only edits |
+|---|---|---|
+| 0. Today: whole file text | 0 (0 %) | 0 |
+| 1. Shape, ignore doc comments | 116 (33.9 %) | 101 of 324 (31.2 %) |
+| 2. Shape, include doc comments | 91 (26.6 %) | 76 of 324 (23.5 %) |
+| 3. **The ladder rule as recorded in Round 5/6**: raw files (up to 12 pages) hash their text without tests; beyond that, shape + docs + symbol bodies | **18 (5.3 %)** | **0 of 324** |
+| 4. As 3, but the raw rung hashes shape + docs instead of text | 88 (25.7 %) | 73 of 324 (22.5 %) |
+
+"Shape" is symbol ids, kinds, signatures, export flags, top-level constant values and imports; "doc comments" is each symbol's doc comment plus the module doc. 312 of the 342 edits (91 %) are in files that fit the raw rung.
+
+**Part B — literals** (a number or string written inside a function body, which the shape does not read). Each rule below is shape + docs + the literal rule. Literals are compared per file, outside the test module.
+
+| Literal rule | Spared | Share | Body-only edits flagged (of 56) |
+|---|---|---|---|
+| none | 91 | 26.6 % | 0 |
+| L1: every literal | 67 | 19.6 % | 19 |
+| L2: numbers except 0, 1, 2, plus strings of 8+ characters | 73 | 21.3 % | 13 |
+| L3: numbers except 0, 1, 2, plus every string | 68 | 19.9 % | 18 |
+| L4: numbers except 0, 1, 2 only | 90 | 26.3 % | 1 |
+| L5: strings of 8+ characters only | 73 | 21.3 % | 13 |
+
+The body-only count is 56 here (the earlier 67 also counted edits that changed a doc comment, which every doc-including rule already flags).
+
+Hand-check of the 19 edits L1 flags (author's judgment, not a judge model): 3 clearly relevant to a summary (the `mcp.rs` server instructions rewritten twice, and the tool descriptions rewritten); about 6 plausibly relevant (a new error message, new symbol kind names, the text `"same file"` shown in dependency lines); about 10 noise (single characters like `'\n'`, the `2` in `[usize; 2]`, a reworded log message).
+
+Findings:
+1. **The ladder rule as recorded spares nothing outside test edits** (0 of 324): any non-test text change counts for a raw-rung file, and nearly every file is in the raw rung. "Hash exactly what the writer saw" therefore does not deliver the goal of this work for most files.
+2. **A shape + docs fingerprint on every file spares about a quarter of edits** (26.6 %), mostly the 67 body-only edits.
+3. **Numbers almost never change on their own in body-only edits** (1 of 56), so a numbers-only rule is nearly free (26.3 %) but catches few cases; **strings carry the flags**, and the clearly relevant ones are agent-facing text.
+4. **Adding the L2 literal rule costs about 5 points** (26.6 % to 21.3 %) and catches the number changes and long-string rewrites, the cases a false "current" would hurt most. The case it closes is the one where a body edit changes a limit or message the summary quotes, such as a word-count floor going from 4 to 6.
+5. **Including doc comments costs 7 to 8 points against ignoring them** (26.6 % against 33.9 %) and keeps a doc fix, which a summary paraphrases, from leaving wrong text marked current (the failure PR #87 exposed).
+
 ## Conclusions
 
-What the six rounds support:
+What the seven rounds support:
 
 1. **The cap is the real problem.** A capped summary reads as complete and describes a prefix: perfect before the cut, zero after it, on Rust, TypeScript and Java.
 2. **No single replacement input fits every file.** What was measured, by file shape:
@@ -243,12 +283,13 @@ What the six rounds support:
 5. **Symbol summaries keep topics and lose specifics.** Detail lives in bodies and in comments attached to no symbol.
 6. **Do not feed earlier LLM prose back in as the only input** (the stored class spec carried false claims into every Java run); prefer deterministic inputs where they exist.
 7. **Keep the 8,000-byte cap.** The input shape moves instead.
-8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (paging measured to cost nothing in quality, round 4); symbol summaries, also in pages, when there are many symbols and the file is far over; the member outline for a single large class. Paged raw beat summaries by 14 points at 12.4 times the cap and lost by about 6 to 7 at 22 and 31 times, so the cutoff lies between about 12 and 22 pages; start at 12. The fingerprint hashes exactly what the writer saw for the rung used.
+8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (paging measured to cost nothing in quality, round 4); symbol summaries, also in pages, when there are many symbols and the file is far over; the member outline for a single large class. Paged raw beat summaries by 14 points at 12.4 times the cap and lost by about 6 to 7 at 22 and 31 times, so the cutoff lies between about 12 and 22 pages; start at 12. What the fingerprint hashes is a separate question, answered in Conclusion 14 (round 7).
 9. The "first sentence of each summary" and "drop the tests" rungs of the original ladder are dropped: test-dropping rescues 1 of 23 over-cap files, and the summaries input already fits 19 of them.
 10. `### Behavior` text added to the summaries input was not worth its extra cost on Rust (+2 and +8 alone, no reliable gain over the prompt). It was not tried on TypeScript, where it may matter more.
 11. **Paging does not hurt** (round 4): paged raw (TypeScript, 3 pages) and paged summaries (`spec.rs`, 4 pages) each scored within 2 points of their single-read counterparts, against a bar of 8, in the lenient case where one session sees every page.
 12. **The cutoff between paged raw and summaries lies between about 12 and 22 times the cap** (round 5): raw won by 14 at 12.4× (73 against 58), summaries won by 6 to 7 at 22× and 31×. Starting rule: paged raw up to about 12 pages, summaries beyond. Paged raw costs about twice the tokens of summaries.
-13. **For Rust, drop test code before paging** (round 6): quality unchanged (76 against 75), 43 % fewer pages and 27 % fewer tokens. The 12-page cutoff applies to the pages sent after stripping, and the fingerprint hashes the stripped text, so a test-only edit no longer stales a file summary.
+13. **For Rust, drop test code before paging** (round 6): quality unchanged (76 against 75), 43 % fewer pages and 27 % fewer tokens. The 12-page cutoff applies to the pages sent after stripping.
+14. **The fingerprint should not be "the text the writer saw"** (round 7): that rule spares 0 of 324 non-test edits in CodeOwl's history. The proposed rule is a **shape + doc comments + literals fingerprint** on every file: symbol ids, kinds, signatures, export flags, top-level constant values, imports, each symbol's doc comment and the module doc, plus the numbers (other than 0, 1, 2) and strings of 8 or more characters in function bodies (rule L2). It spares about 21 % of edits (about 27 % without the literal part). Body edits still stale the symbol's own spec. This is a recommendation, pending the owner's choice between this, shape + docs without literals, and shape without docs.
 
 ## Limits of this evidence
 
@@ -284,6 +325,7 @@ What the six rounds support:
 | Round 5 judging | 3 | about 0.15M |
 | Round 6 generation | 2 | about 0.12M |
 | Round 6 judging | 3 | about 0.16M |
+| Round 7 history replay | 0 (scripts only) | 0 |
 | **Total** | **110** | **about 5.4M** |
 
 ## Plan
@@ -297,7 +339,7 @@ Nothing below is started. Each build step needs its own branch, plan and approva
 | 3 | **Find the crossover. Done for Rust (round 5).** `rust.rs` at 12.4 times the cap: paged raw 72.6 against paged summaries 58.4. | Starting rule: paged raw up to about 12 pages, summaries beyond; the true cutoff lies between about 12 and 22. A mid-size file (about 16 to 20 times the cap) in another stack would tighten it; optional. |
 | 3b | **Drop test code before paging (Rust). Done (round 6).** Paged raw without the `#[cfg(test)]` module: 76.2 against 75.0 with it; 8 pages against 14; about 62k tokens against about 84k. | Quality held, and pages fell 43 %: build it for Rust. The pack knows its own test-module convention. |
 | 4 | **Design and tests.** File task shape per the ladder in Conclusions, paged with a cursor (stateless, like `pending`); a Java member outline built deterministically from the extractor's own member data. Failing tests first, including a rewrite of the `mcp.rs` lifecycle assertion `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`. | Approved plan, own branch. |
-| 5 | **Fingerprint.** Hash exactly what the writer saw for the rung used: raw-file tasks keep the whole-file hash; summary tasks hash module doc + each symbol's signature + its `spec_hash` (the containment rule rollups already use); outline tasks hash the outline. This replaces the parked `shape_hash` plan. `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today). |
+| 5 | **Fingerprint (rule revised after round 7).** One shape + doc comments + literals fingerprint for every file, independent of which input rung the writer used (see Conclusion 14). New hash field, so `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration; a per-pack literal rule (Rust first, then the other packs' literal node kinds). Ordering against the import-hash fix (importers of a file hashing its whole text) was raised by the owner and is not yet decided; both change stored hashes, so one migration tool should serve both. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today) and on the history probe (about 21 % of edits spared). |
 | 6 | **Prompt.** Add the coverage and specifics instruction for the summaries and outline inputs only, to `setup/codeowl-generate.md` and `setup/codeowl-generate.prompt.md` together, deferring to `STYLE.md`. Tell the writer not to describe its own input as cut off. | Both copies in step. |
 | 7 | **Housekeeping.** Fix the stored `src/spec.rs` summary ("five kinds" lists four) and the false claims in the stored `FightService` spec (`quarkus-super-heroes`, local only). Decide whether a file-summary recall KPI belongs in `NORTHSTAR.md` (it would sit beside K1b; not added yet). | Owner decision. |
 
