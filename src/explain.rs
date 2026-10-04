@@ -106,12 +106,12 @@ fn split_change(entry: &str) -> Option<(&str, &str)> {
 fn explain_symbol(graph: &Graph, root: &Path, sym_id: SymbolId) -> Result<Explanation> {
     let sym = graph.get_symbol(sym_id).context("not a symbol")?;
     let id = sym.id.as_str();
-    let file_id = sym
-        .parent
-        .context("symbol has no containing file to attach a spec to")?;
-    let file = graph
-        .get_file(file_id)
-        .context("symbol's parent is not a file")?;
+    // A member of a class has the class as its parent; its spec lives in the
+    // file, so ask for the owning file, not the parent.
+    let file_id = graph
+        .find(graph.owning_file_id(sym_id))
+        .context("symbol's file is not in the graph")?;
+    let file = graph.get_file(file_id).context("not a file")?;
     let Some(spec) = spec::read_file_spec(root, &file.id)? else {
         return Ok(Explanation::missing(id, "symbol"));
     };
@@ -127,8 +127,10 @@ fn explain_symbol(graph: &Graph, root: &Path, sym_id: SymbolId) -> Result<Explan
         causes.push(StaleCause::new("source", None, "its own text changed"));
     }
     if changes.iter().any(|c| c == "changed:dependencies") {
-        let now = spec::try_dependency_pairs(graph, root, file_id, sym).unwrap_or_default();
-        causes.extend(dependency_causes(graph, &now, stored));
+        match spec::try_dependency_pairs(graph, root, file_id, sym) {
+            Some(now) => causes.extend(dependency_causes(graph, &now, stored)),
+            None => causes.push(unreadable_cause()),
+        }
     }
     Ok(Explanation::new(id, "symbol", "stale", causes))
 }
@@ -143,18 +145,62 @@ fn explain_file(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<Explana
         return Ok(Explanation::missing(id, "file"));
     };
     let changes = spec::file_changes(graph, file_id, &spec.file);
-    if changes.is_empty() {
-        return Ok(Explanation::current(id, "file"));
-    }
     let mut causes = Vec::new();
     if changes.iter().any(|c| c == "changed:source") {
         causes.push(StaleCause::new("source", None, "the file's text changed"));
     }
     if changes.iter().any(|c| c == "changed:dependencies") {
-        let now = spec::try_file_dependency_pairs(graph, file_id).unwrap_or_default();
-        causes.extend(dependency_causes(graph, &now, &spec.file));
+        match spec::try_file_dependency_pairs(graph, file_id) {
+            Some(now) => causes.extend(dependency_causes(graph, &now, &spec.file)),
+            None => causes.push(unreadable_cause()),
+        }
+    }
+    if changes.is_empty() {
+        // The file's own text and imports match its summary. It still counts
+        // as stale (as `get_spec_coverage` counts it) while a symbol section
+        // is missing or stale, so name those.
+        causes.extend(stale_symbol_causes(graph, root, file_id, &spec));
+    }
+    if causes.is_empty() {
+        return Ok(Explanation::current(id, "file"));
     }
     Ok(Explanation::new(id, "file", "stale", causes))
+}
+
+/// The dependency hash moved but the current targets cannot be worked out
+/// (the file or its text is unreadable), so no single one can be blamed.
+fn unreadable_cause() -> StaleCause {
+    StaleCause::new(
+        "unknown",
+        None,
+        "a dependency changed, but the source could not be read to say which",
+    )
+}
+
+/// One `child` cause for each symbol of the file whose section is missing
+/// from the spec or no longer matches the code.
+fn stale_symbol_causes(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    spec: &spec::FileSpec,
+) -> Vec<StaleCause> {
+    spec::spec_bearing_children(graph, file_id)
+        .into_iter()
+        .filter_map(|sym_id| {
+            let sym = graph.get_symbol(sym_id)?;
+            let detail = match spec.symbol_hash(&sym.id) {
+                None => "its section has not been written yet".to_string(),
+                Some(stored)
+                    if spec::symbol_changes(graph, root, file_id, sym, stored).is_empty() =>
+                {
+                    return None;
+                }
+                Some(_) => "its section is out of date".to_string(),
+            };
+            Some(StaleCause::new("child", Some(&sym.id), &detail))
+        })
+        .collect()
 }
 
 /// Which dependencies moved, from the targets recorded when the spec was
@@ -879,6 +925,59 @@ mod tests {
         assert_eq!(coarse_dependants(&graph), 1);
         let graph = build(&dir, GREETER_V1, PEOPLE_V1, true);
         assert_eq!(coarse_dependants(&graph), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_unreadable_source_is_unknown_not_a_pile_of_removed_dependencies() {
+        let dir = fixture_dir("unreadable");
+        generate_all(&build(&dir, GREETER_V1, PEOPLE_V1, true), &dir);
+        let graph = build(&dir, GREETER_V1, PEOPLE_V1, true);
+        std::fs::remove_file(dir.join("src/people.rs")).unwrap();
+        let e = explain(&graph, &dir, "src/people.rs::Polite").unwrap();
+        assert_eq!(e.status, "stale");
+        assert!(
+            e.causes.iter().all(|c| c.kind != "removed"),
+            "{:?}",
+            kinds(&e)
+        );
+        assert!(e.causes.iter().any(|c| c.kind == "unknown"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_with_a_symbol_section_still_to_write_is_stale_with_a_child_cause() {
+        let dir = fixture_dir("child-missing");
+        let graph = build(&dir, GREETER_V1, PEOPLE_V1, true);
+        spec::submit(&graph, &dir, "src/greeter.rs::Greeter", SYM).unwrap();
+        spec::submit(&graph, &dir, "src/greeter.rs", FILE).unwrap();
+        spec::submit(&graph, &dir, "src/people.rs", FILE).unwrap();
+        // The file summary matches the code, but `Polite` has no section.
+        let e = explain(&graph, &dir, "src/people.rs").unwrap();
+        assert_eq!(e.status, "stale");
+        assert_eq!(kinds(&e), ["child"]);
+        assert_eq!(e.causes[0].target.as_deref(), Some("src/people.rs::Polite"));
+        // A file whose own text moved is explained by that alone.
+        let after = build(&dir, GREETER_V1, PEOPLE_BODY, true);
+        let e = explain(&after, &dir, "src/people.rs").unwrap();
+        assert_eq!(kinds(&e), ["source"]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_member_of_a_container_is_missing_not_an_error() {
+        let dir = fixture_dir("member");
+        let graph = build(&dir, GREETER_V1, PEOPLE_V1, true);
+        generate_all(&graph, &dir);
+        let member = [
+            "src/greeter.rs::Greeter::greet",
+            "src/people.rs::Polite::greet",
+        ]
+        .into_iter()
+        .find(|id| graph.find(id).is_some())
+        .expect("the fixture has a member symbol");
+        let e = explain(&graph, &dir, member).unwrap();
+        assert_eq!(e.status, "missing");
         std::fs::remove_dir_all(&dir).ok();
     }
 

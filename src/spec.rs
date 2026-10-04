@@ -135,7 +135,7 @@ pub fn generated_sources_summary(graph: &Graph) -> Option<GeneratedSourcesSummar
 /// `Value`s (a `const`) get no subsection of their own; a container's
 /// members are covered inside the container's own section, not separately,
 /// matching how M2 already treats a class as one containment unit.
-fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
+pub(crate) fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId> {
     graph
         .children_ids(file_id)
         .iter()
@@ -245,7 +245,7 @@ impl FileSpec {
         }
     }
 
-    fn symbol_hash(&self, id: &str) -> Option<&HashPair> {
+    pub(crate) fn symbol_hash(&self, id: &str) -> Option<&HashPair> {
         self.symbols
             .iter()
             .find(|(sid, _)| sid == id)
@@ -779,7 +779,8 @@ pub(crate) fn hash_dependency_pairs(pairs: &[(String, String)]) -> String {
 /// `HashPair.deps_hash` at generation time, recomputed here again at
 /// every currency check to detect drift.
 fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> String {
-    dependency_record(graph, root, file_id, sym).0
+    try_dependency_pairs(graph, root, file_id, sym)
+        .map_or_else(String::new, |pairs| hash_dependency_pairs(&pairs))
 }
 
 /// `None` when the symbol's file node or source text can't be read -- the
@@ -846,7 +847,8 @@ pub(crate) fn shorten_dep_targets(pairs: &[(String, String)]) -> Vec<(String, St
 /// on` section does; `dependency_hash` above is the narrower, per-symbol
 /// version of this same idea).
 fn file_dependency_hash(graph: &Graph, file_id: SymbolId) -> String {
-    file_dependency_record(graph, file_id).0
+    try_file_dependency_pairs(graph, file_id)
+        .map_or_else(String::new, |pairs| hash_dependency_pairs(&pairs))
 }
 
 /// `None` when `file_id` is not a file node (answered with an empty string

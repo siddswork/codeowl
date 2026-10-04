@@ -506,8 +506,10 @@ pub struct CorpusResponse {
     pub by_cause: Vec<CauseCount>,
     /// The dependencies that stale the most symbol and file specs.
     pub top_targets: Vec<TargetCount>,
-    /// Importers resting on a target with no interface hash, so that any
-    /// edit to the target stales them, whether or not anything is stale now.
+    /// Pairs of an importing file and a target in another file, where the
+    /// target has no interface hash, so that any edit to the target stales
+    /// the importer. Counts every such import in the file, whether or not a
+    /// symbol uses it, and whether or not anything is stale now.
     pub coarse_dependants: usize,
 }
 
@@ -1572,7 +1574,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "Why a spec is stale. With an `id` (a symbol id, a file path, 'feature:<slug>', 'rollup:<dir>' or 'system'): the state of that one document (`missing`, `current` or `stale`) and, if it is stale, its causes. Each cause has a `kind`: `source` (its own text changed); `dependency` (a named dependency changed, with `target` and a `detail` saying how); `added` or `removed` (a dependency or child appeared or went away); `child` (a stale child, with the child's own causes nested in `because`, down to three levels); `rewritten` (a child was written again since); `participant` (a part of a feature changed); `unknown` (a dependency changed, but the spec has no record of which one). Without an `id`: counts across every spec in the repo -- how many are stale, how many stale specs there are for each set of causes, the dependencies that stale the most specs, and how many importers rest on a target with no interface hash (so any edit to that target stales them). Always a pure read: it never writes a spec and never asks for one."
+        description = "Why a spec is stale. With an `id` (a symbol id, a file path, 'feature:<slug>', 'rollup:<dir>' or 'system'): the state of that one document (`missing`, `current` or `stale`) and, if it is stale, its causes. Each cause has a `kind`: `source` (its own text changed); `dependency` (a named dependency changed, with `target` and a `detail` saying how); `added` or `removed` (a dependency or child appeared or went away); `child` (a stale child, with the child's own causes nested in `because`, down to three levels); `rewritten` (a child was written again since); `participant` (a part of a feature changed); `unknown` (a dependency changed, but the spec has no record of which one). Without an `id`: counts across every spec in the repo -- how many are stale, how many stale specs there are for each set of causes, the dependencies that stale the most specs, and how many (importing file, target) pairs rest on a target in another file that has no interface hash (so any edit to that target stales the importer; every import of the file is counted, used or not). Always a pure read: it never writes a spec and never asks for one."
     )]
     async fn explain_stale(
         &self,
