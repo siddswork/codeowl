@@ -206,6 +206,14 @@ pub struct HashPair {
     /// `ARCHITECTURE.md`'s "Caching and invalidation").
     pub deps_hash: String,
     pub spec_hash: String,
+    /// The per-target `(target id, hash)` pairs `deps_hash` was made from,
+    /// each hash shortened to `DEP_TARGET_HASH_LEN` hex characters --
+    /// recorded so a later check can say *which* dependency moved, not just
+    /// that one did. Empty for a spec written before this record existed
+    /// (its cause then reads "unknown"), and when there are no resolved
+    /// dependencies. Never compared against `deps_hash`: that stays the
+    /// single staleness key.
+    pub dep_targets: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -279,6 +287,24 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
                 h.source_hash, h.deps_hash, h.spec_hash
             ));
         }
+    }
+    // The per-target record behind each `deps_hash`: one line per
+    // `<owner> -> <target>: <hash>`, owner `file` for the file itself.
+    // Written only when something is recorded, so a spec with no resolved
+    // dependencies (or one written before the record existed) renders as
+    // it always has.
+    let owners = std::iter::once(("file", &spec.file))
+        .chain(spec.symbols.iter().map(|(id, h)| (id.as_str(), h)));
+    let dep_lines: Vec<String> = owners
+        .flat_map(|(owner, h)| {
+            h.dep_targets
+                .iter()
+                .map(move |(target, hash)| format!("  {owner} -> {target}: {hash}\n"))
+        })
+        .collect();
+    if !dep_lines.is_empty() {
+        out.push_str("dep_targets:\n");
+        dep_lines.iter().for_each(|l| out.push_str(l));
     }
     out.push_str("---\n");
     out.push_str(&format!("# {}\n", spec.source_path));
@@ -745,11 +771,6 @@ fn hash_dependency_pairs(pairs: &[(String, String)]) -> String {
     )
 }
 
-/// Hash a set of reference-edge targets into one deps-hash value.
-fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId>) -> String {
-    hash_dependency_pairs(&dependency_target_pairs(graph, targets))
-}
-
 /// `sym`'s reference-edge staleness contribution — the same per-symbol
 /// scoping `dependency_lines` uses for the human-readable "Depends on"
 /// list, but hashing only the *resolved* targets' current interface
@@ -758,11 +779,23 @@ fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId
 /// `HashPair.deps_hash` at generation time, recomputed here again at
 /// every currency check to detect drift.
 fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> String {
+    dependency_record(graph, root, file_id, sym).0
+}
+
+/// `None` when the symbol's file node or source text can't be read -- the
+/// case `dependency_hash` has always answered with an empty string rather
+/// than the hash of an empty list, which a stored `deps_hash` still reflects.
+fn try_dependency_pairs(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym: &Symbol,
+) -> Option<Vec<(String, String)>> {
     let Node::File(file) = graph.get(file_id) else {
-        return String::new();
+        return None;
     };
     let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
-        return String::new();
+        return None;
     };
     // Excludes a resolved import whose target is `sym` itself -- see the
     // identical exclusion in `scoped_symbol_deps`'s own doc comment for
@@ -777,7 +810,34 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
                 && imp.target != self_id
         })
         .filter_map(|imp| imp.target);
-    hash_dependency_targets(graph, targets)
+    Some(dependency_target_pairs(graph, targets))
+}
+
+/// What `submit` stores for a symbol: its combined `deps_hash` and the
+/// shortened per-target pairs it was made from, computed together so the
+/// two cannot disagree.
+fn dependency_record(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym: &Symbol,
+) -> (String, Vec<(String, String)>) {
+    match try_dependency_pairs(graph, root, file_id, sym) {
+        Some(pairs) => (hash_dependency_pairs(&pairs), shorten_dep_targets(&pairs)),
+        None => (String::new(), Vec::new()),
+    }
+}
+
+/// How many hex characters of each target's hash `dep_targets` keeps. Enough
+/// to tell two versions of one target apart; the full values are never
+/// needed once the combined `deps_hash` is stored beside them.
+const DEP_TARGET_HASH_LEN: usize = 12;
+
+fn shorten_dep_targets(pairs: &[(String, String)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(id, h)| (id.clone(), h.chars().take(DEP_TARGET_HASH_LEN).collect()))
+        .collect()
 }
 
 /// A file's own reference-edge staleness contribution — every one of its
@@ -786,15 +846,29 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
 /// on` section does; `dependency_hash` above is the narrower, per-symbol
 /// version of this same idea).
 fn file_dependency_hash(graph: &Graph, file_id: SymbolId) -> String {
+    file_dependency_record(graph, file_id).0
+}
+
+/// `None` when `file_id` is not a file node (answered with an empty string
+/// by `file_dependency_hash`, as it always has been).
+fn try_file_dependency_pairs(graph: &Graph, file_id: SymbolId) -> Option<Vec<(String, String)>> {
     let Node::File(file) = graph.get(file_id) else {
-        return String::new();
+        return None;
     };
     let targets = graph
         .imports()
         .iter()
         .filter(|imp| imp.from_file == file.id)
         .filter_map(|imp| imp.target);
-    hash_dependency_targets(graph, targets)
+    Some(dependency_target_pairs(graph, targets))
+}
+
+/// The file-level counterpart of `dependency_record`.
+fn file_dependency_record(graph: &Graph, file_id: SymbolId) -> (String, Vec<(String, String)>) {
+    match try_file_dependency_pairs(graph, file_id) {
+        Some(pairs) => (hash_dependency_pairs(&pairs), shorten_dep_targets(&pairs)),
+        None => (String::new(), Vec::new()),
+    }
 }
 
 /// Diff two `(id, hash)` lists — shared between a feature's `participants`
@@ -886,6 +960,7 @@ pub fn parse(content: &str) -> Result<FileSpec> {
     let mut file = HashPair::default();
     let mut symbols = Vec::new();
     let mut in_symbols_block = false;
+    let mut in_dep_block = false;
 
     let mut consumed = 1; // the opening "---"
     for line in lines.by_ref() {
@@ -906,8 +981,15 @@ pub fn parse(content: &str) -> Result<FileSpec> {
             symbols.push((id.to_string(), parse_hash_pair(&rest[brace..])));
             continue;
         }
+        if let Some(rest) = line.strip_prefix("  ")
+            && in_dep_block
+        {
+            record_dep_target(rest, &mut file, &mut symbols);
+            continue;
+        }
+        in_dep_block = line.trim() == "dep_targets:";
         in_symbols_block = line.trim() == "symbols:";
-        if in_symbols_block {
+        if in_symbols_block || in_dep_block {
             continue;
         }
         let (key, value) = line
@@ -962,6 +1044,37 @@ pub fn parse(content: &str) -> Result<FileSpec> {
         file_summary,
         sections,
     })
+}
+
+/// Read one `dep_targets:` line (`<owner> -> <target>: <hash>`, already
+/// stripped of its two-space indent) into the owner's `HashPair`. The owner
+/// is `file` or one of the symbol ids this frontmatter declared, matched by
+/// the longest `<id> -> ` prefix: a symbol id may itself contain ` -> `
+/// (an `impl Fn() -> u8` header), so splitting at the first arrow would
+/// cut the id in half. The hash is whatever follows the last `: `, because
+/// a target id can contain `: ` too (`impl<T: Clone> ...`). A line whose
+/// owner is not declared, or that has no hash, is skipped, not an error.
+fn record_dep_target(line: &str, file: &mut HashPair, symbols: &mut [(String, HashPair)]) {
+    let owner_and_rest = std::iter::once("file")
+        .chain(symbols.iter().map(|(id, _)| id.as_str()))
+        .filter_map(|owner| {
+            let rest = line.strip_prefix(owner)?.strip_prefix(" -> ")?;
+            Some((owner, rest))
+        })
+        .max_by_key(|(owner, _)| owner.len());
+    // Copy the owner out so the borrow of `symbols` ends before it is mutated.
+    let Some((owner, rest)) = owner_and_rest.map(|(o, r)| (o.to_string(), r)) else {
+        return;
+    };
+    let Some((target, hash)) = rest.rsplit_once(": ") else {
+        return;
+    };
+    let pair = (target.to_string(), hash.trim().to_string());
+    if owner == "file" {
+        file.dep_targets.push(pair);
+    } else if let Some((_, h)) = symbols.iter_mut().find(|(id, _)| *id == owner) {
+        h.dep_targets.push(pair);
+    }
 }
 
 fn parse_hash_pair(flow_map: &str) -> HashPair {
@@ -1258,10 +1371,12 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
                 &format!("submitted summary for {id:?}"),
                 prose_smells(&summary),
             )?;
+            let (deps_hash, dep_targets) = file_dependency_record(graph, file_id);
             let hash = HashPair {
                 source_hash: file.source_hash.clone(),
-                deps_hash: file_dependency_hash(graph, file_id),
+                deps_hash,
                 spec_hash: hash_text(&summary),
+                dep_targets,
             };
             spec.file_summary = summary;
             spec.file = hash.clone();
@@ -1297,10 +1412,12 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
 
             let mut spec =
                 read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
+            let (deps_hash, dep_targets) = dependency_record(graph, root, file_id, sym);
             let hash = HashPair {
                 source_hash: sym.source_hash.clone(),
-                deps_hash: dependency_hash(graph, root, file_id, sym),
+                deps_hash,
                 spec_hash: hash_text(&format!("{summary}\n{behavior}")),
+                dep_targets,
             };
             upsert(&mut spec.symbols, sym.id.clone(), hash.clone());
             upsert_section(
@@ -3476,6 +3593,7 @@ mod tests {
                 source_hash: "filehash".to_string(),
                 deps_hash: "filedepshash".to_string(),
                 spec_hash: "filespechash".to_string(),
+                dep_targets: vec![],
             },
             symbols: vec![(
                 "a.ts::double".to_string(),
@@ -3483,6 +3601,7 @@ mod tests {
                     source_hash: sym.source_hash.clone(),
                     deps_hash: "symdepshash".to_string(),
                     spec_hash: "symspechash".to_string(),
+                    dep_targets: vec![],
                 },
             )],
             file_summary: "Doubles numbers.".to_string(),
@@ -3499,6 +3618,234 @@ mod tests {
         assert!(rendered.contains("function double(x: number): number"));
         let parsed = parse(&rendered).expect("should parse what we just rendered");
         assert_eq!(parsed, spec);
+    }
+
+    /// A two-file Rust fixture: `people.rs` imports the trait `Greeter` from
+    /// `greeter.rs` and implements it on `Polite`, with the import resolved,
+    /// so both the file and the `Polite` symbol have one real dependency.
+    fn greeter_people_graph(suffix: &str) -> (Graph, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-{suffix}", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let greeter = "pub trait Greeter {\n    fn greet(&self) -> String;\n}\n";
+        let people = "\
+use crate::greeter::Greeter;\n\n\
+pub struct Polite;\n\n\
+impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new()\n    }\n}\n";
+        std::fs::write(dir.join("src/greeter.rs"), greeter).unwrap();
+        std::fs::write(dir.join("src/people.rs"), people).unwrap();
+        let mut graph = Graph::build(vec![
+            crate::graph::FileExtraction {
+                rel_path: "src/greeter.rs".to_string(),
+                source_hash: hash_text(greeter),
+                symbols: crate::rust::extract_file(greeter, "src/greeter.rs"),
+            },
+            crate::graph::FileExtraction {
+                rel_path: "src/people.rs".to_string(),
+                source_hash: hash_text(people),
+                symbols: crate::rust::extract_file(people, "src/people.rs"),
+            },
+        ]);
+        graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+            from_file: "src/people.rs".to_string(),
+            specifier: "crate::greeter".to_string(),
+            imported_name: "Greeter".to_string(),
+            target: graph.find("src/greeter.rs::Greeter"),
+        }]);
+        (graph, dir)
+    }
+
+    #[test]
+    fn dependency_targets_round_trip_through_the_frontmatter() {
+        // The per-target pairs behind a deps_hash are written as a
+        // `dep_targets:` block (`<owner> -> <target>: <hash>`, owner `file`
+        // for the file itself) and read back. The second symbol's id
+        // contains ` -> ` (a Rust `impl Fn() -> u8` header), which must not
+        // be mistaken for the separator.
+        let graph = build_graph_from_sources(&[("a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let arrow_id = "a.ts::impl Fn() -> u8 for Wrapper";
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair {
+                source_hash: "fh".to_string(),
+                deps_hash: "fd".to_string(),
+                spec_hash: "fs".to_string(),
+                dep_targets: vec![("src/b.rs::Beta".to_string(), "a1b2c3d4e5f6".to_string())],
+            },
+            symbols: vec![
+                (
+                    "a.ts::one".to_string(),
+                    HashPair {
+                        source_hash: "sh".to_string(),
+                        deps_hash: "sd".to_string(),
+                        spec_hash: "ss".to_string(),
+                        dep_targets: vec![
+                            ("src/b.rs::Beta".to_string(), "a1b2c3d4e5f6".to_string()),
+                            (
+                                "src/c.rs::Gamma: Sized".to_string(),
+                                "0123456789ab".to_string(),
+                            ),
+                        ],
+                    },
+                ),
+                (
+                    arrow_id.to_string(),
+                    HashPair {
+                        source_hash: "sh2".to_string(),
+                        deps_hash: "sd2".to_string(),
+                        spec_hash: "ss2".to_string(),
+                        dep_targets: vec![(
+                            "src/b.rs::Beta".to_string(),
+                            "ffffffffffff".to_string(),
+                        )],
+                    },
+                ),
+            ],
+            file_summary: "A file.".to_string(),
+            // `render` writes an (empty) section for every symbol and
+            // `parse` reads it back, so the round trip carries them too.
+            sections: vec![
+                ("a.ts::one".to_string(), SymbolProse::default()),
+                (arrow_id.to_string(), SymbolProse::default()),
+            ],
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        assert!(
+            rendered.contains("dep_targets:\n"),
+            "block missing:\n{rendered}"
+        );
+        assert!(rendered.contains("  file -> src/b.rs::Beta: a1b2c3d4e5f6\n"));
+        let parsed = parse(&rendered).expect("should parse what we just rendered");
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn a_spec_without_dependency_targets_parses_and_renders_unchanged() {
+        // Every spec written before the record existed. It must parse with
+        // empty pairs, and re-rendering it must not invent an empty block.
+        let graph = build_graph_from_sources(&[("a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let legacy = "\
+---\nkind: file\nsource_paths: [a.ts]\n\
+file: { source_hash: fh, deps_hash: fd, spec_hash: fs }\n\
+symbols:\n  a.ts::one: { source_hash: sh, deps_hash: sd, spec_hash: ss }\n\
+---\n# a.ts\n## Summary\nA file.\n";
+        let parsed = parse(legacy).expect("legacy frontmatter must parse");
+        assert!(parsed.file.dep_targets.is_empty());
+        assert!(parsed.symbols[0].1.dep_targets.is_empty());
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &parsed);
+        assert!(
+            !rendered.contains("dep_targets"),
+            "invented a block:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_frontmatter_block_is_ignored_not_an_error() {
+        // What lets a reader that predates `dep_targets:` still read a spec
+        // that has it: an unknown top-level key and its indented lines are
+        // skipped, and the known keys still parse.
+        let content = "\
+---\nkind: file\nsource_paths: [a.ts]\n\
+file: { source_hash: fh, deps_hash: fd, spec_hash: fs }\n\
+mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
+---\n# a.ts\n## Summary\nA file.\n";
+        let parsed = parse(content).expect("an unknown block must not break parsing");
+        assert_eq!(parsed.file.source_hash, "fh");
+        assert_eq!(parsed.file.deps_hash, "fd");
+    }
+
+    #[test]
+    fn submitting_a_symbol_records_its_dependency_targets() {
+        let (graph, dir) = greeter_people_graph("rec-sym");
+        let file_id = graph.find("src/people.rs").unwrap();
+        let polite = graph
+            .get_symbol(graph.find("src/people.rs::Polite").unwrap())
+            .unwrap();
+        let content = "### Summary\nGreets people politely by name.\n### Behavior\nReturns a polite greeting string for the caller.\n";
+        let returned = submit(&graph, &dir, "src/people.rs::Polite", content).unwrap();
+
+        // The pairs are the symbol's real dependency, hash shortened to 12 hex.
+        let full = try_dependency_pairs(&graph, &dir, file_id, polite).unwrap();
+        assert_eq!(full.len(), 1);
+        assert_eq!(full[0].0, "src/greeter.rs::Greeter");
+        let expected: Vec<(String, String)> = full
+            .iter()
+            .map(|(id, h)| (id.clone(), h[..12].to_string()))
+            .collect();
+        assert_eq!(returned.dep_targets, expected);
+
+        // And it was persisted, and still agrees with the combined hash.
+        let spec = read_existing(&dir, "src/people.rs").unwrap().unwrap();
+        let stored = spec.symbol_hash("src/people.rs::Polite").unwrap();
+        assert_eq!(stored.dep_targets, expected);
+        assert_eq!(hash_dependency_pairs(&full), stored.deps_hash);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn submitting_a_file_records_its_dependency_targets() {
+        let (graph, dir) = greeter_people_graph("rec-file");
+        let file_id = graph.find("src/people.rs").unwrap();
+        let returned = submit(
+            &graph,
+            &dir,
+            "src/people.rs",
+            "A small module defining a polite greeting person.",
+        )
+        .unwrap();
+
+        let full = try_file_dependency_pairs(&graph, file_id).unwrap();
+        assert_eq!(full.len(), 1);
+        let expected: Vec<(String, String)> = full
+            .iter()
+            .map(|(id, h)| (id.clone(), h[..12].to_string()))
+            .collect();
+        assert_eq!(returned.dep_targets, expected);
+        let spec = read_existing(&dir, "src/people.rs").unwrap().unwrap();
+        assert_eq!(spec.file.dep_targets, expected);
+        assert_eq!(hash_dependency_pairs(&full), spec.file.deps_hash);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn adopting_a_human_edit_keeps_the_dependency_targets() {
+        // Case 3 of "Human corrections" refreshes only `spec_hash`; the
+        // recorded targets are about what the spec was *written from*, and
+        // a hand-edit of its prose does not change that.
+        let (graph, dir) = greeter_people_graph("keep-deps");
+        let file_id = graph.find("src/people.rs").unwrap();
+        let hash = HashPair {
+            source_hash: "sh".to_string(),
+            deps_hash: "sd".to_string(),
+            spec_hash: "old".to_string(),
+            dep_targets: vec![(
+                "src/greeter.rs::Greeter".to_string(),
+                "a1b2c3d4e5f6".to_string(),
+            )],
+        };
+        let prose = SymbolProse {
+            summary: "Hand-edited summary text.".to_string(),
+            behavior: "Hand-edited behavior text here.".to_string(),
+        };
+        reconcile_symbol_hash(
+            &graph,
+            &dir,
+            file_id,
+            "src/people.rs::Polite",
+            &hash,
+            &prose,
+        )
+        .unwrap();
+        let spec = read_existing(&dir, "src/people.rs").unwrap().unwrap();
+        let stored = spec.symbol_hash("src/people.rs::Polite").unwrap();
+        assert_eq!(stored.dep_targets, hash.dep_targets);
+        assert_ne!(stored.spec_hash, "old");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -3790,8 +4137,8 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     fn deps_hash_is_a_hash_of_the_sorted_target_pairs_and_stays_byte_identical() {
         // The per-target `(id, hash)` pairs behind a `deps_hash` must be
         // available on their own, and hashing them must give exactly the
-        // value `hash_dependency_targets` has always produced -- stored
-        // `deps_hash` values in existing specs depend on that.
+        // value a `deps_hash` has always had -- stored `deps_hash` values in
+        // existing specs depend on that.
         let dir =
             std::env::temp_dir().join(format!("codeowl-spec-test-{}-deppairs", std::process::id()));
         std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -3818,11 +4165,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             pairs[0].0, pairs[0].1, pairs[1].0, pairs[1].1
         ));
         assert_eq!(hash_dependency_pairs(&pairs), original_formula);
-        // ...and `hash_dependency_targets` is that same value.
-        assert_eq!(
-            hash_dependency_targets(&graph, [name_id, greeter_id, name_id].into_iter()),
-            original_formula
-        );
         // Each pair's hash is the target's interface hash, or its own source
         // hash when it has none -- the existing fallback, unchanged.
         let greeter_sym = graph.get_symbol(greeter_id).unwrap();
