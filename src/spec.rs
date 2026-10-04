@@ -260,6 +260,27 @@ impl FileSpec {
     }
 }
 
+/// The per-target record behind each `deps_hash`, as the `dep_targets:`
+/// frontmatter block: one line per `<owner> -> <target>: <hash>`, owner `file`
+/// for the file itself, then each symbol in order. Empty when nothing is
+/// recorded, so a spec with no resolved dependencies (or one written before
+/// the record existed) renders as it always has.
+pub(crate) fn dep_target_block(spec: &FileSpec) -> String {
+    let owners = std::iter::once(("file", &spec.file))
+        .chain(spec.symbols.iter().map(|(id, h)| (id.as_str(), h)));
+    let lines: Vec<String> = owners
+        .flat_map(|(owner, h)| {
+            h.dep_targets
+                .iter()
+                .map(move |(target, hash)| format!("  {owner} -> {target}: {hash}\n"))
+        })
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("dep_targets:\n{}", lines.concat())
+}
+
 /// Render a `FileSpec` to the markdown+frontmatter document
 /// `ARCHITECTURE.md`'s "File spec shape" describes. `graph`/`file_id` are
 /// needed to pull each symbol's current signature and the file's
@@ -288,24 +309,7 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
             ));
         }
     }
-    // The per-target record behind each `deps_hash`: one line per
-    // `<owner> -> <target>: <hash>`, owner `file` for the file itself.
-    // Written only when something is recorded, so a spec with no resolved
-    // dependencies (or one written before the record existed) renders as
-    // it always has.
-    let owners = std::iter::once(("file", &spec.file))
-        .chain(spec.symbols.iter().map(|(id, h)| (id.as_str(), h)));
-    let dep_lines: Vec<String> = owners
-        .flat_map(|(owner, h)| {
-            h.dep_targets
-                .iter()
-                .map(move |(target, hash)| format!("  {owner} -> {target}: {hash}\n"))
-        })
-        .collect();
-    if !dep_lines.is_empty() {
-        out.push_str("dep_targets:\n");
-        dep_lines.iter().for_each(|l| out.push_str(l));
-    }
+    out.push_str(&dep_target_block(spec));
     out.push_str("---\n");
     out.push_str(&format!("# {}\n", spec.source_path));
     out.push_str("## Summary\n");
@@ -3743,6 +3747,30 @@ symbols:\n  a.ts::one: { source_hash: sh, deps_hash: sd, spec_hash: ss }\n\
         assert!(
             !rendered.contains("dep_targets"),
             "invented a block:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn the_dependency_block_is_empty_without_records_and_lists_file_first() {
+        let hash = |targets: &[(&str, &str)]| HashPair {
+            dep_targets: targets
+                .iter()
+                .map(|(t, h)| (t.to_string(), h.to_string()))
+                .collect(),
+            ..HashPair::default()
+        };
+        let mut spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: hash(&[]),
+            symbols: vec![("a.ts::one".to_string(), hash(&[]))],
+            ..FileSpec::default()
+        };
+        assert_eq!(dep_target_block(&spec), "");
+        spec.file = hash(&[("b.ts", "aaaaaaaaaaaa")]);
+        spec.symbols[0].1 = hash(&[("b.ts::f", "bbbbbbbbbbbb")]);
+        assert_eq!(
+            dep_target_block(&spec),
+            "dep_targets:\n  file -> b.ts: aaaaaaaaaaaa\n  a.ts::one -> b.ts::f: bbbbbbbbbbbb\n"
         );
     }
 
