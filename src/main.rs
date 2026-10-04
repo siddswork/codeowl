@@ -48,6 +48,17 @@ enum Command {
         #[arg(long, default_value_t = codeowl::spec::MAX_SOURCE_TEXT_BYTES_DEFAULT)]
         max_source_bytes: usize,
     },
+    /// Write the per-target dependency record into stored specs that predate
+    /// it, so `explain_stale` can name the dependency that moved. Changes
+    /// only the `dep_targets:` block of a spec's frontmatter, and only for
+    /// owners whose stored `deps_hash` it can reproduce. Prints what it
+    /// would do unless `--write` is given.
+    BackfillDepTargets {
+        path: PathBuf,
+        /// Apply the changes; without it nothing is written.
+        #[arg(long)]
+        write: bool,
+    },
 }
 
 #[tokio::main]
@@ -63,6 +74,25 @@ async fn main() -> Result<()> {
                 .filter_map(|id| codeowl::graph::SymbolView::from_graph(&graph, id))
                 .collect();
             println!("{}", serde_json::to_string_pretty(&views)?);
+            Ok(())
+        }
+        Command::BackfillDepTargets { path, write } => {
+            let root = canonical_root(&path)?;
+            let graph = RepoIndex::build(&root)?.rebuild()?;
+            let r = codeowl::spec::backfill_dep_targets(&graph, &root, write)?;
+            let verb = if write { "wrote" } else { "would write" };
+            println!(
+                "{verb} records for {} owners in {} spec files",
+                r.filled, r.files_changed
+            );
+            println!(
+                "skipped: {} whose dependencies moved since the spec was written, \
+                 {} already recorded, {} with no dependencies",
+                r.skipped_moved, r.already_recorded, r.without_dependencies
+            );
+            if !write && r.filled > 0 {
+                println!("dry run: nothing written; pass --write to apply");
+            }
             Ok(())
         }
         Command::Serve {

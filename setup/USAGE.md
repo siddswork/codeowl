@@ -198,7 +198,8 @@ you rely on an answer:
   whole repo and lists the dependencies that stale the most specs. It only
   reads; it never writes a spec. A spec written before CodeOwl recorded
   its dependencies says `unknown` for the dependency cause until it is
-  next regenerated. Ask your agent: *"why is `src/spec.rs` stale?"*
+  regenerated, or until you run `codeowl backfill-dep-targets <path>`
+  (add `--write` to apply it; without that it only reports). Ask your agent: *"why is `src/spec.rs` stale?"*
 - **`get_spec_coverage(scope?, cursor?)`** — the repo's spec inventory,
   current/stale/missing/smelly, plus `coverage` (what fraction has *any*
   spec) and `freshness` (of what exists, what fraction still matches the
