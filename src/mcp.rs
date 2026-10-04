@@ -420,6 +420,126 @@ pub struct SearchResponse {
     pub truncated: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ExplainStaleRequest {
+    /// The document to explain: a symbol id, a file path, "feature:<slug>",
+    /// "rollup:<dir>" or "system". Omit it to count the causes across every
+    /// spec in the repo instead.
+    pub id: Option<String>,
+}
+
+/// One reason a spec is stale.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CauseResponse {
+    /// `source` (its own text changed), `dependency` (a named dependency
+    /// changed), `added` or `removed` (a dependency, file, folder or part of
+    /// a feature appeared or went away), `child` (a stale child), `rewritten`
+    /// (a child was written again since), `participant` (a part of a feature
+    /// changed) or `unknown` (a dependency changed, but the spec has no
+    /// record of which one).
+    pub kind: String,
+    /// The dependency, child or part that moved, when there is one.
+    pub target: Option<String>,
+    /// One short sentence saying what happened to it.
+    pub detail: String,
+    /// The causes of a stale child, down to three levels. Empty otherwise.
+    pub because: Vec<CauseResponse>,
+}
+
+impl From<crate::explain::StaleCause> for CauseResponse {
+    fn from(c: crate::explain::StaleCause) -> Self {
+        Self {
+            kind: c.kind,
+            target: c.target,
+            detail: c.detail,
+            because: c.because.into_iter().map(Self::from).collect(),
+        }
+    }
+}
+
+/// One document and, if it is stale, why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ExplanationResponse {
+    pub id: String,
+    /// `symbol`, `file`, `rollup`, `feature` or `system`.
+    pub kind: String,
+    /// `missing`, `current` or `stale`.
+    pub status: String,
+    /// Empty unless `status` is `stale`.
+    pub causes: Vec<CauseResponse>,
+}
+
+impl From<crate::explain::Explanation> for ExplanationResponse {
+    fn from(e: crate::explain::Explanation) -> Self {
+        Self {
+            id: e.id,
+            kind: e.kind,
+            status: e.status,
+            causes: e.causes.into_iter().map(CauseResponse::from).collect(),
+        }
+    }
+}
+
+/// How many stale specs share one set of causes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CauseCount {
+    /// The set of causes, for example `source`, `dependency`,
+    /// `source + dependency` or `child`.
+    pub cause: String,
+    pub documents: usize,
+}
+
+/// How many symbol and file specs a dependency stales.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct TargetCount {
+    pub target: String,
+    pub documents: usize,
+}
+
+/// The causes behind every stale spec in the repo, counted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct CorpusResponse {
+    /// Specs that exist (symbols, files, folders, features, the system spec).
+    pub documents: usize,
+    pub stale: usize,
+    /// Stale specs grouped by their set of causes, largest first.
+    pub by_cause: Vec<CauseCount>,
+    /// The dependencies that stale the most symbol and file specs.
+    pub top_targets: Vec<TargetCount>,
+    /// Pairs of an importing file and a target in another file, where the
+    /// target has no interface hash, so that any edit to the target stales
+    /// the importer. Counts every such import in the file, whether or not a
+    /// symbol uses it, and whether or not anything is stale now.
+    pub coarse_dependants: usize,
+}
+
+impl From<crate::explain::CorpusSummary> for CorpusResponse {
+    fn from(s: crate::explain::CorpusSummary) -> Self {
+        Self {
+            documents: s.documents,
+            stale: s.stale,
+            by_cause: s
+                .by_cause
+                .into_iter()
+                .map(|(cause, documents)| CauseCount { cause, documents })
+                .collect(),
+            top_targets: s
+                .top_targets
+                .into_iter()
+                .map(|(target, documents)| TargetCount { target, documents })
+                .collect(),
+            coarse_dependants: s.coarse_dependants,
+        }
+    }
+}
+
+/// Exactly one of `document` (an id was given) or `corpus` (none was) is set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct ExplainStaleResponse {
+    pub document: Option<ExplanationResponse>,
+    pub corpus: Option<CorpusResponse>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct SpecResponse {
     pub id: String,
@@ -1454,6 +1574,35 @@ impl CodeOwlServer {
     }
 
     #[tool(
+        description = "Why a spec is stale. With an `id` (a symbol id, a file path, 'feature:<slug>', 'rollup:<dir>' or 'system'): the state of that one document (`missing`, `current` or `stale`) and, if it is stale, its causes. Each cause has a `kind`: `source` (its own text changed); `dependency` (a named dependency changed, with `target` and a `detail` saying how); `added` or `removed` (a dependency or child appeared or went away); `child` (a stale child, with the child's own causes nested in `because`, down to three levels); `rewritten` (a child was written again since); `participant` (a part of a feature changed); `unknown` (a dependency changed, but the spec has no record of which one). Without an `id`: counts across every spec in the repo -- how many are stale, how many stale specs there are for each set of causes, the dependencies that stale the most specs, and how many (importing file, target) pairs rest on a target in another file that has no interface hash (so any edit to that target stales the importer; every import of the file is counted, used or not). Always a pure read: it never writes a spec and never asks for one."
+    )]
+    async fn explain_stale(
+        &self,
+        Parameters(req): Parameters<ExplainStaleRequest>,
+    ) -> Result<Json<ExplainStaleResponse>, String> {
+        let graph = self.graph.load_full();
+        let response = match req.id {
+            Some(id) => ExplainStaleResponse {
+                document: Some(
+                    crate::explain::explain(&graph, &self.root, &id)
+                        .map_err(|e| e.to_string())?
+                        .into(),
+                ),
+                corpus: None,
+            },
+            None => ExplainStaleResponse {
+                document: None,
+                corpus: Some(
+                    crate::explain::explain_corpus(&graph, &self.root)
+                        .map_err(|e| e.to_string())?
+                        .into(),
+                ),
+            },
+        };
+        Ok(Json(response))
+    }
+
+    #[tool(
         description = "Coverage of the repo's spec inventory -- every file/rollup/feature/the system spec that the granularity rules say should exist -- broken down current/stale/missing/smelly, both overall and via `by_kind` (per document kind -- `by_kind`'s \"feature\" row's `total` is the full count of feature specs this repo will ever have) and `by_module` (per directory -- a directory's own rollup and the files inside it share one row). `coverage` and `freshness` are two DIFFERENT axes, not one score: `coverage` is what fraction of eligible nodes have any spec at all (current or stale); `freshness` is, of the specs that exist, what fraction still match the code (ignores `missing` entirely). A repo can be 100% covered and 60% fresh (needs regeneration) or 60% covered and 100% fresh (just isn't fully documented yet) -- read them separately. `weighted_freshness` is `freshness` weighted by import fan-in instead of item count, so a stale file forty others import counts far more than a stale leaf utility, and `top_stale_by_impact` is the 5 file documents that same weighting says matter most right now (ranked by fan-in, not generate order -- for \"what should I fix first\", not \"what would a budgeted run spend on first\"). `orphaned` lists spec documents (or, for `kind: \"symbol\"`, sections within an otherwise-fine file spec) whose target no longer exists in the graph at all (a deleted file, a directory that dropped below the rollup threshold, a removed feature entry point, a deleted function whose file is still current) -- these are NOT counted in coverage/freshness/total and never appear in `pending`, since there's nothing left for `/codeowl generate` to regenerate; they're dead weight to delete (a `\"symbol\"` entry prunes itself automatically next time that file is regenerated for any other reason). `generations_remaining` is the total get_next_spec_task/submit_spec cycles a full `/codeowl generate --all` run would spend (the real `--budget=N` for a complete pass -- it counts uncovered symbols, so a single missing file is often 20+); each `pending` entry, and each `by_kind`/`by_module` row, carries its own `generations_remaining` share (and its own `coverage`/`freshness`). `pending` lists every document still needing attention (non-current, OR current but flagged by a deterministic quality check -- see `smells`), its `id` ready to pass straight to get_next_spec_task/get_spec, in the exact order a budgeted `/codeowl generate --all --budget=N` run should spend on: high-fan-in files first, then feature specs, then the long tail of files, then rollups, then the system spec last. `pending` is paginated -- up to 50 entries per call; if `next_cursor` comes back non-null, pass it as this call's `cursor` to fetch the next page, repeating until `next_cursor` is null. Every OTHER field (the counts, `by_kind`, `by_module`, `top_stale_by_impact`, `orphaned`) always covers the whole scope regardless of pagination -- only `pending` itself is paged, since it's the one field that grows unboundedly with repo size (confirmed real: 626 files on a real Java library serialized `pending` alone to 95 KB, over the MCP result limit). Optionally narrow the report to a directory prefix via `scope` -- a scoped report covers files and rollups only and leaves features and the system spec out, since those are repo-wide. `generated_sources` reports how many files sit under a known build-generated-source directory (e.g. Maven's `target/generated-sources`) and which directories were checked -- `null` for a pack with no such convention (every pack but Java today), or `{checked_dirs, found}` for one that has it. `found: 0` is the actionable signal on a repo that could have build-generated entry points: has `mvn compile` (or equivalent) been run locally?"
     )]
     async fn get_spec_coverage(
@@ -1541,7 +1690,9 @@ impl ServerHandler for CodeOwlServer {
              text is still returned, with `changed` naming what moved), and a non-empty `smells` \
              list means a deterministic quality check distrusts the prose even though its hashes \
              still match. get_spec_coverage lists everything missing/stale/smelly in priority \
-             order. To write or refresh specs, use the /codeowl-generate slash command (target a \
+             order. explain_stale says why a spec is stale: given an id, which text or dependency \
+             changed (and the stale child behind a folder or system spec); given none, counts of \
+             causes across the repo. To write or refresh specs, use the /codeowl-generate slash command (target a \
              file, a directory, \"system\", or \"--all [--budget=N]\") -- it drives the \
              get_next_spec_task -> submit_spec loop, which a normal consuming session otherwise \
              never touches."
@@ -1589,6 +1740,166 @@ mod tests {
             .rebuild()
             .unwrap();
         CodeOwlServer::new(dir, graph)
+    }
+
+    const EXPLAIN_A: &str =
+        "import { helper } from './util';\nexport function useA() {\n  helper(1);\n}\n";
+    const EXPLAIN_UTIL_V1: &str = "export function helper(n: number): void {}\n";
+    const EXPLAIN_UTIL_V2: &str = "export function helper(n: number, m: number): void {}\n";
+
+    /// Submit a symbol and a file spec for both files of the explain fixture.
+    async fn generate_explain_fixture(server: &CodeOwlServer) {
+        for (id, content) in [
+            (
+                "util.ts::helper",
+                "### Summary\nDoes one specific thing well.\n### Behavior\nIt runs and returns a plain value.\n",
+            ),
+            (
+                "a.ts::useA",
+                "### Summary\nCalls the helper once only.\n### Behavior\nIt runs and returns a plain value.\n",
+            ),
+            ("util.ts", "A small module that does one clear job."),
+            ("a.ts", "A second small module with its own clear job."),
+        ] {
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: id.to_string(),
+                    content: content.to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn explain_stale_with_an_id_names_the_moved_dependency() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-explain-{}-1", std::process::id()));
+        let v1 = rebuild_server(
+            dir.clone(),
+            &[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V1)],
+        );
+        generate_explain_fixture(&v1).await;
+        let v2 = rebuild_server(
+            dir.clone(),
+            &[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V2)],
+        );
+
+        let response = v2
+            .explain_stale(Parameters(ExplainStaleRequest {
+                id: Some("a.ts::useA".to_string()),
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(response.corpus.is_none());
+        let doc = response.document.expect("an id asks for one document");
+        assert_eq!(doc.status, "stale");
+        assert_eq!(doc.causes.len(), 1);
+        assert_eq!(doc.causes[0].kind, "dependency");
+        assert_eq!(doc.causes[0].target.as_deref(), Some("util.ts::helper"));
+        assert!(doc.causes[0].detail.contains("interface"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn explain_stale_without_an_id_counts_causes_across_the_repo() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-explain-{}-2", std::process::id()));
+        let v1 = rebuild_server(
+            dir.clone(),
+            &[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V1)],
+        );
+        generate_explain_fixture(&v1).await;
+        let v2 = rebuild_server(
+            dir.clone(),
+            &[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V2)],
+        );
+
+        let response = v2
+            .explain_stale(Parameters(ExplainStaleRequest { id: None }))
+            .await
+            .unwrap()
+            .0;
+        assert!(response.document.is_none());
+        let corpus = response.corpus.expect("no id asks for the whole repo");
+        assert_eq!(corpus.stale, 4, "{corpus:?}");
+        let count = |label: &str| {
+            corpus
+                .by_cause
+                .iter()
+                .find(|c| c.cause == label)
+                .map_or(0, |c| c.documents)
+        };
+        assert_eq!(count("source"), 2);
+        assert_eq!(count("dependency"), 2);
+        assert_eq!(corpus.top_targets.len(), 1);
+        assert_eq!(corpus.top_targets[0].target, "util.ts::helper");
+        assert_eq!(corpus.top_targets[0].documents, 2);
+        assert_eq!(corpus.coarse_dependants, 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn explain_stale_never_writes_a_spec() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-explain-{}-3", std::process::id()));
+        let v1 = rebuild_server(
+            dir.clone(),
+            &[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V1)],
+        );
+        generate_explain_fixture(&v1).await;
+        let v2 = rebuild_server(
+            dir.clone(),
+            &[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V2)],
+        );
+
+        let snapshot = |dir: &std::path::Path| {
+            let mut files: Vec<(std::path::PathBuf, String)> = Vec::new();
+            let mut stack = vec![dir.join("docs")];
+            while let Some(d) = stack.pop() {
+                for entry in std::fs::read_dir(&d).unwrap() {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else {
+                        let text = std::fs::read_to_string(&path).unwrap();
+                        files.push((path, text));
+                    }
+                }
+            }
+            files.sort();
+            files
+        };
+        let before = snapshot(&dir);
+        assert!(!before.is_empty());
+        for id in [
+            None,
+            Some("a.ts::useA"),
+            Some("a.ts"),
+            Some("util.ts::helper"),
+        ] {
+            v2.explain_stale(Parameters(ExplainStaleRequest {
+                id: id.map(str::to_string),
+            }))
+            .await
+            .unwrap();
+        }
+        assert_eq!(snapshot(&dir), before);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn explain_stale_rejects_an_unknown_id() {
+        let server = test_server(&[("a.ts", EXPLAIN_A), ("util.ts", EXPLAIN_UTIL_V1)]);
+        let err = server
+            .explain_stale(Parameters(ExplainStaleRequest {
+                id: Some("nope.ts".to_string()),
+            }))
+            .await
+            .err()
+            .expect("an unknown id is an error");
+        assert!(err.contains("unknown id"), "{err}");
     }
 
     #[tokio::test]

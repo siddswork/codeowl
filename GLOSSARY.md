@@ -470,6 +470,15 @@ a change to its signature should.
   the same, but a type it imports gained a field — `deps_hash` catches
   that, so `submit()`'s spec gets flagged for a look. (M7)
 
+**`dep_targets` (the per-target record)**
+: The list of `(owner, dependency id, hash)` pairs that went into a spec's
+  `deps_hash`, written into the spec's frontmatter as lines like
+  `  <owner id> -> <target id>: <hash>` (owner `file` for the file itself;
+  hashes shortened to 12 hex characters). A hash can only say "something
+  moved"; this record lets `explain_stale` say which dependency moved. It
+  is read for explanation only, never for a staleness decision, and a spec
+  without it is still valid (its dependency cause reads `unknown`).
+
 **`spec_hash`**
 : Hash of the **LLM-written prose only** — deliberately *not* including the
   signature and dependency lines that CodeOwl writes into the spec itself.
