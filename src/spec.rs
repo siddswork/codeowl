@@ -761,7 +761,7 @@ fn dependency_target_pairs(
 /// One deps-hash value over already-sorted, de-duplicated target pairs. The
 /// formula (`"id:hash"` lines joined by `"\n"`, then `hash_text`) is what
 /// every stored `deps_hash` was made with, so it must not change.
-fn hash_dependency_pairs(pairs: &[(String, String)]) -> String {
+pub(crate) fn hash_dependency_pairs(pairs: &[(String, String)]) -> String {
     hash_text(
         &pairs
             .iter()
@@ -785,7 +785,7 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
 /// `None` when the symbol's file node or source text can't be read -- the
 /// case `dependency_hash` has always answered with an empty string rather
 /// than the hash of an empty list, which a stored `deps_hash` still reflects.
-fn try_dependency_pairs(
+pub(crate) fn try_dependency_pairs(
     graph: &Graph,
     root: &Path,
     file_id: SymbolId,
@@ -833,7 +833,7 @@ fn dependency_record(
 /// needed once the combined `deps_hash` is stored beside them.
 const DEP_TARGET_HASH_LEN: usize = 12;
 
-fn shorten_dep_targets(pairs: &[(String, String)]) -> Vec<(String, String)> {
+pub(crate) fn shorten_dep_targets(pairs: &[(String, String)]) -> Vec<(String, String)> {
     pairs
         .iter()
         .map(|(id, h)| (id.clone(), h.chars().take(DEP_TARGET_HASH_LEN).collect()))
@@ -851,7 +851,10 @@ fn file_dependency_hash(graph: &Graph, file_id: SymbolId) -> String {
 
 /// `None` when `file_id` is not a file node (answered with an empty string
 /// by `file_dependency_hash`, as it always has been).
-fn try_file_dependency_pairs(graph: &Graph, file_id: SymbolId) -> Option<Vec<(String, String)>> {
+pub(crate) fn try_file_dependency_pairs(
+    graph: &Graph,
+    file_id: SymbolId,
+) -> Option<Vec<(String, String)>> {
     let Node::File(file) = graph.get(file_id) else {
         return None;
     };
