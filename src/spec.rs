@@ -707,11 +707,18 @@ fn interface_or_source_hash(graph: &Graph, id: SymbolId) -> String {
         .unwrap_or_default()
 }
 
-/// Hash a set of reference-edge targets into one deps-hash value — order-
-/// independent (sorted first) since import declaration order isn't a real
-/// dependency, and deduplicated since two different local names can
-/// resolve to the same target.
-fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId>) -> String {
+/// The `(target id, hash)` pairs behind a deps-hash: each reference-edge
+/// target with the hash an importer depends on (its `interface_hash`, or its
+/// own source hash when it has none -- see `interface_or_source_hash`).
+/// Order-independent (sorted first) since import declaration order isn't a
+/// real dependency, and deduplicated since two different local names can
+/// resolve to the same target. Kept as its own step, rather than folded
+/// straight into the hash, so a caller can see *which* target a deps-hash
+/// is made of.
+fn dependency_target_pairs(
+    graph: &Graph,
+    targets: impl Iterator<Item = SymbolId>,
+) -> Vec<(String, String)> {
     let mut pairs: Vec<(String, String)> = targets
         .map(|id| {
             (
@@ -722,6 +729,13 @@ fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId
         .collect();
     pairs.sort();
     pairs.dedup();
+    pairs
+}
+
+/// One deps-hash value over already-sorted, de-duplicated target pairs. The
+/// formula (`"id:hash"` lines joined by `"\n"`, then `hash_text`) is what
+/// every stored `deps_hash` was made with, so it must not change.
+fn hash_dependency_pairs(pairs: &[(String, String)]) -> String {
     hash_text(
         &pairs
             .iter()
@@ -729,6 +743,11 @@ fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId
             .collect::<Vec<_>>()
             .join("\n"),
     )
+}
+
+/// Hash a set of reference-edge targets into one deps-hash value.
+fn hash_dependency_targets(graph: &Graph, targets: impl Iterator<Item = SymbolId>) -> String {
+    hash_dependency_pairs(&dependency_target_pairs(graph, targets))
 }
 
 /// `sym`'s reference-edge staleness contribution — the same per-symbol
@@ -3762,6 +3781,57 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         assert!(
             !dependency_hash(&graph, &dir, file_id, polite).is_empty(),
             "dependency_hash must fold in Greeter's interface"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn deps_hash_is_a_hash_of_the_sorted_target_pairs_and_stays_byte_identical() {
+        // The per-target `(id, hash)` pairs behind a `deps_hash` must be
+        // available on their own, and hashing them must give exactly the
+        // value `hash_dependency_targets` has always produced -- stored
+        // `deps_hash` values in existing specs depend on that.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-deppairs", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let greeter =
+            "pub trait Greeter {\n    fn greet(&self) -> String;\n}\n\npub struct Name;\n";
+        std::fs::write(dir.join("src/greeter.rs"), greeter).unwrap();
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/greeter.rs".to_string(),
+            source_hash: hash_text(greeter),
+            symbols: crate::rust::extract_file(greeter, "src/greeter.rs"),
+        }]);
+        let greeter_id = graph.find("src/greeter.rs::Greeter").unwrap();
+        let name_id = graph.find("src/greeter.rs::Name").unwrap();
+
+        // Reverse order and a duplicate: the pairs come back sorted by id and
+        // de-duplicated, because import order is not a real dependency.
+        let pairs = dependency_target_pairs(&graph, [name_id, greeter_id, name_id].into_iter());
+        let ids: Vec<&str> = pairs.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["src/greeter.rs::Greeter", "src/greeter.rs::Name"]);
+
+        // The combined hash is the original formula over those pairs...
+        let original_formula = hash_text(&format!(
+            "{}:{}\n{}:{}",
+            pairs[0].0, pairs[0].1, pairs[1].0, pairs[1].1
+        ));
+        assert_eq!(hash_dependency_pairs(&pairs), original_formula);
+        // ...and `hash_dependency_targets` is that same value.
+        assert_eq!(
+            hash_dependency_targets(&graph, [name_id, greeter_id, name_id].into_iter()),
+            original_formula
+        );
+        // Each pair's hash is the target's interface hash, or its own source
+        // hash when it has none -- the existing fallback, unchanged.
+        let greeter_sym = graph.get_symbol(greeter_id).unwrap();
+        assert_eq!(
+            pairs[0].1,
+            greeter_sym
+                .interface_hash
+                .clone()
+                .unwrap_or_else(|| greeter_sym.source_hash.clone())
         );
 
         std::fs::remove_dir_all(&dir).ok();
