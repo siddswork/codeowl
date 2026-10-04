@@ -1,6 +1,6 @@
 # exp-05 — What a file summary should be written from
 
-**Status:** measured on Rust (rounds 1 and 2) and on one TypeScript and one Java file (round 3), 2026-10-03. Nothing is built. The paged-read check below is still to run, and it decides the last open piece of the design.
+**Status:** measured on Rust (rounds 1 and 2), on one TypeScript and one Java file (round 3), and on paged reading (round 4), 2026-10-03 and 2026-10-04. Nothing is built. The last open piece of the design is the crossover size between paged raw and summaries.
 **Feeds:** `DECISIONS.md#q22` (the decision this evidence supports), the file-task shape in `spec.rs` (`spec_task_to_response`, the `File` arm), the file-summary instructions in `setup/codeowl-generate.md` and its `.prompt.md` port, and the finer file-level fingerprint plan on branch `file-fingerprint`.
 **Not a decision doc:** conclusions fold into `DECISIONS.md#q22` and `ARCHITECTURE.md` when built. Where this file and those disagree, they win.
 
@@ -126,9 +126,39 @@ Findings:
 6. **All 6 capped TypeScript runs said the file was cut off** ("cut off partway through `buildTrend`"), counted as a wrong claim because the file is complete. It is the writer reporting its input, but it ends up in the summary. The Java capped runs did not.
 7. **Existing prose is a risky input.** The stored `FightService` spec carries false claims that a summary built on it repeated in every run.
 
+## Round 4 — does paging hurt (one recall judge; 2 runs per arm)
+
+Minimal-cost design (about 0.28M tokens): reuse the frozen key points and the earlier single-read results, two runs per arm, one blind recall judge per file, and three already-scored anchors in each pool to check the judge against its earlier scores. The decision rule was set before running: paging is fine if the paged score is within 8 points of the single-read score.
+
+Pages were cut between whole blocks (functions and their comments, or symbol entries), at most about 8,000 bytes each, with a "continues on page N of M" marker. Each run was one agent reading the pages in order, as a real session calling the task tool repeatedly would, then writing the paragraph.
+
+| Experiment | Pages (bytes) | Paged score | Single-read score | Gap |
+|---|---|---|---|---|
+| TypeScript, raw file | 3 (7,466; 7,730; 3,553) | 77.5, 80.0 (mean 78.8) | whole file in one read: 78 | +1 |
+| `spec.rs`, symbol summaries | 4 (7,779; 7,923; 8,089; 4,699) | 71.4, 69.0 (mean 70.2) | summaries in one read: 68 | +2 |
+| TypeScript, today (capped), reference | n/a | n/a | 48 | paged raw is +31 over today |
+
+Judge check against the anchors (earlier scores were the mean of two judges; this was one judge):
+
+| Anchor | Earlier | This judge |
+|---|---|---|
+| TypeScript control | 90.0 | 87.5 |
+| TypeScript whole file | 77.5 | 75.0 |
+| TypeScript capped | 50.0 | 50.0 |
+| `spec.rs` control | 91.7 | 90.5 |
+| `spec.rs` summaries | 67.9 | 64.3 |
+| `spec.rs` capped | 28.6 | 33.3 |
+
+The judge scored on average about 2 points below the earlier means and moved at most 4.7 points on any anchor, so gaps of +1 and +2 are within its noise: the result is "no measurable difference", not "paging helps".
+
+Findings:
+1. **Paging did not hurt**, on raw text (TypeScript) or on symbol summaries (`spec.rs`), against the 8-point bar.
+2. **Paged raw reaches the whole-file score** (about 79 against 48 today), at the same cost per summary as a single read (about 47k tokens).
+3. **The crossover size is still open.** TypeScript at 2.3 times the cap favours paged raw (79 against 53 for summaries); `spec.rs` at 31 times favours summaries (68 and 70 against 61 for one read of the whole file). Somewhere between 2 and 31 times the cap, paged raw stops beating summaries. A starting rule of up to 5 to 8 pages of raw text, summaries beyond, is a guess to confirm on one mid-size file.
+
 ## Conclusions
 
-What the three rounds support:
+What the four rounds support:
 
 1. **The cap is the real problem.** A capped summary reads as complete and describes a prefix: perfect before the cut, zero after it, on Rust, TypeScript and Java.
 2. **No single replacement input fits every file.** What was measured, by file shape:
@@ -145,9 +175,10 @@ What the three rounds support:
 5. **Symbol summaries keep topics and lose specifics.** Detail lives in bodies and in comments attached to no symbol.
 6. **Do not feed earlier LLM prose back in as the only input** (the stored class spec carried false claims into every Java run); prefer deterministic inputs where they exist.
 7. **Keep the 8,000-byte cap.** The input shape moves instead.
-8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (likely, untested); symbol summaries when there are many symbols and the file is far over; the member outline for a single large class. The fingerprint hashes exactly what the writer saw for the rung used.
+8. **Design direction (not built):** an input ladder chosen by size and shape: raw when it fits; the raw file in pages when modestly over (paging measured to cost nothing in quality, round 4); symbol summaries, also in pages, when there are many symbols and the file is far over; the member outline for a single large class. Where paged raw gives way to summaries is not yet measured. The fingerprint hashes exactly what the writer saw for the rung used.
 9. The "first sentence of each summary" and "drop the tests" rungs of the original ladder are dropped: test-dropping rescues 1 of 23 over-cap files, and the summaries input already fits 19 of them.
 10. `### Behavior` text added to the summaries input was not worth its extra cost on Rust (+2 and +8 alone, no reliable gain over the prompt). It was not tried on TypeScript, where it may matter more.
+11. **Paging does not hurt** (round 4): paged raw (TypeScript, 3 pages) and paged summaries (`spec.rs`, 4 pages) each scored within 2 points of their single-read counterparts, against a bar of 8, in the lenient case where one session sees every page.
 
 ## Limits of this evidence
 
@@ -156,7 +187,8 @@ What the three rounds support:
 - **Round 3 had no TypeScript arm with behaviour text and no old-prompt summaries arm**, so the prompt's share of the TypeScript summaries score is not separable.
 - **The "cut off" statement counted as wrong** in all 6 capped TypeScript runs is a judging choice: it is the writer reporting its input, but it ends up in the summary text.
 - **The control note says the cap cuts TypeScript at line ~290;** it cuts at line 261. The frozen control file keeps the wrong figure; the key points are unaffected.
-- **Not paged.** In every test the writer read all of its input at once (all 28 KB of `spec.rs` summaries; the whole 18 KB TypeScript file). The real task limit means paging with a cursor, and a writer carrying notes across pages may lose information. Untested, and it decides whether the paged-raw rung is worth building.
+- **Paging was tested only in the lenient case.** In rounds 1 to 3 the writer read all of its input at once. Round 4 paged it, but one agent session saw every page, so every page stayed in its context. A writer that must forget earlier pages and carry notes was not tested (it would need one agent per page, roughly 2 to 3 times the cost); worth running only if the real loop is found to shed earlier pages.
+- **Round 4 is small.** Two runs per arm, one judge (checked against six anchors: at most 4.7 points off, about 2 points stricter on average), no precision check on wrong claims, and one file per experiment.
 - **Small samples.** Three runs per arm; judge gaps of 5 to 10 points on large files. Treat differences under about 8 points as noise.
 - **Biased control.** The control and key points were written by the same author, so the control's score is biased upward; it is a ceiling check, not an absolute grade.
 - **One judge model family** scored everything.
@@ -174,7 +206,9 @@ What the three rounds support:
 | Round 3 TypeScript symbol summaries | 5 | about 0.2M |
 | Round 3 generation | 25 | about 1.04M |
 | Round 3 judging | 6 | about 0.31M |
-| **Total** | **91** | **about 4.3M** |
+| Round 4 generation | 4 | about 0.19M |
+| Round 4 judging | 2 | about 0.09M |
+| **Total** | **97** | **about 4.6M** |
 
 ## Plan
 
@@ -183,8 +217,8 @@ Nothing below is started. Each build step needs its own branch, plan and approva
 | # | Step | Gate |
 |---|---|---|
 | 1 | **Non-Rust check. Done (round 3).** One TypeScript and one Java file, controls and key points frozen first. | Result: the Rust finding does not generalise as one rule; see Conclusions. |
-| 2 | **Paged-read check (next).** Compare a stateless paged read, with the writer carrying notes, against the single-read results already measured: (a) the raw file in 3 pages for `analytics-dashboard.ts` (single-read whole file: 78) and in 2 pages for `FightService.java` (72 to 83); (b) the symbol summaries of `spec.rs` in 4 to 5 pages (single-read: 68). | If paged raw stays within noise of the single read, the modestly-over-cap rung is paged raw. If paged summaries lose clearly on `spec.rs`, try summarising chunks and then summarising the chunk summaries. |
-| 3 | **Find the crossover.** From (2), decide the file size, relative to the cap, at which paged raw stops beating summaries. One more file of intermediate size per stack if the two points are not enough. | A stated rule: raw up to N times the cap, summaries beyond. |
+| 2 | **Paged-read check. Done (round 4), lenient case.** Paged raw (TypeScript, 3 pages) 78.8 against 78 single-read; paged summaries (`spec.rs`, 4 pages) 70.2 against 68. | Passed the pre-set bar (within 8 points). Not tested: a writer that must forget earlier pages; run only if the real loop sheds them. |
+| 3 | **Find the crossover (next).** Decide the file size, relative to the cap, at which paged raw stops beating summaries. One mid-size file (about 8 to 15 times the cap) per stack, raw paged against summaries paged, same blind method with a precision pass. | A stated rule: raw up to N times the cap, summaries beyond. The starting guess is 5 to 8 pages. |
 | 4 | **Design and tests.** File task shape per the ladder in Conclusions, paged with a cursor (stateless, like `pending`); a Java member outline built deterministically from the extractor's own member data. Failing tests first, including a rewrite of the `mcp.rs` lifecycle assertion `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`. | Approved plan, own branch. |
 | 5 | **Fingerprint.** Hash exactly what the writer saw for the rung used: raw-file tasks keep the whole-file hash; summary tasks hash module doc + each symbol's signature + its `spec_hash` (the containment rule rollups already use); outline tasks hash the outline. This replaces the parked `shape_hash` plan. `FORMAT_VERSION` bump with its doc-comment entry; guarded migration of stored file hashes or regeneration. | Measured on the comment-only commit scenario (corpus 100 % to 40.2 % current today). |
 | 6 | **Prompt.** Add the coverage and specifics instruction for the summaries and outline inputs only, to `setup/codeowl-generate.md` and `setup/codeowl-generate.prompt.md` together, deferring to `STYLE.md`. Tell the writer not to describe its own input as cut off. | Both copies in step. |
