@@ -356,6 +356,119 @@ fn explain_system(graph: &Graph, root: &Path, depth: usize) -> Result<Explanatio
     Ok(Explanation::new("system", "system", "stale", causes))
 }
 
+/// How many dependency targets `explain_corpus` lists as the busiest.
+const TOP_TARGETS: usize = 10;
+
+/// The causes behind every stale spec in the repo, counted.
+///
+/// `by_cause` counts stale documents by the set of causes they have, for
+/// example `source`, `dependency`, `source + dependency` or `child`.
+/// `top_targets` lists the dependencies that stale the most symbol and file
+/// specs. `coarse_dependants` counts importers resting on a target that has
+/// no interface hash, whether or not anything is stale now.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CorpusSummary {
+    pub documents: usize,
+    pub stale: usize,
+    pub by_cause: Vec<(String, usize)>,
+    pub top_targets: Vec<(String, usize)>,
+    pub coarse_dependants: usize,
+}
+
+/// Explain every spec that exists, and count the causes.
+pub fn explain_corpus(graph: &Graph, root: &Path) -> Result<CorpusSummary> {
+    let mut ids: Vec<String> = Vec::new();
+    for item in spec::coverage(graph, root, None)? {
+        if item.kind == "file"
+            && let Some(file_spec) = spec::read_file_spec(root, &item.id)?
+        {
+            ids.extend(file_spec.symbols.into_iter().map(|(id, _)| id));
+        }
+        ids.push(item.id);
+    }
+
+    let mut documents = 0;
+    let mut stale = 0;
+    let mut by_cause: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut targets: std::collections::BTreeMap<String, usize> = Default::default();
+    for id in ids {
+        // One document that cannot be explained should not hide the rest.
+        let Ok(e) = explain(graph, root, &id) else {
+            continue;
+        };
+        if e.status == "missing" {
+            continue;
+        }
+        documents += 1;
+        if e.status != "stale" {
+            continue;
+        }
+        stale += 1;
+        *by_cause.entry(cause_label(&e)).or_default() += 1;
+        if e.kind == "symbol" || e.kind == "file" {
+            for cause in e.causes.iter().filter(|c| c.kind == "dependency") {
+                if let Some(target) = &cause.target {
+                    *targets.entry(target.clone()).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    let mut by_cause: Vec<(String, usize)> = by_cause.into_iter().collect();
+    by_cause.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut top_targets: Vec<(String, usize)> = targets.into_iter().collect();
+    top_targets.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    top_targets.truncate(TOP_TARGETS);
+    Ok(CorpusSummary {
+        documents,
+        stale,
+        by_cause,
+        top_targets,
+        coarse_dependants: coarse_dependants(graph),
+    })
+}
+
+/// A stale document's causes as one label: its distinct kinds, joined by
+/// ` + `. For a symbol or file, a new, removed or moved dependency all read
+/// as `dependency`.
+fn cause_label(e: &Explanation) -> String {
+    let leaf = e.kind == "symbol" || e.kind == "file";
+    let labels: std::collections::BTreeSet<&str> = e
+        .causes
+        .iter()
+        .map(|c| match c.kind.as_str() {
+            "dependency" | "added" | "removed" if leaf => "dependency",
+            "added" | "removed" => "added or removed",
+            "rewritten" => "rewritten child",
+            other => other,
+        })
+        .collect();
+    labels.into_iter().collect::<Vec<_>>().join(" + ")
+}
+
+/// Importers resting on a target with no interface hash: one per importing
+/// file and target, counting a target in another file only. Their
+/// dependency hash uses the target's whole text, so any edit to it stales
+/// them.
+pub fn coarse_dependants(graph: &Graph) -> usize {
+    let mut pairs: std::collections::BTreeSet<(&str, &str)> = Default::default();
+    for imp in graph.imports() {
+        let Some(target) = imp.target else {
+            continue;
+        };
+        let coarse = match graph.get_symbol(target) {
+            Some(sym) => {
+                sym.interface_hash.is_none() && graph.owning_file_id(target) != imp.from_file
+            }
+            None => true,
+        };
+        if coarse {
+            pairs.insert((imp.from_file.as_str(), graph.string_id(target)));
+        }
+    }
+    pairs.len()
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -720,6 +833,52 @@ mod tests {
         assert_eq!(e.status, "stale");
         assert_eq!(kinds(&e), ["participant"]);
         assert_eq!(e.causes[0].target.as_deref(), Some("app/submit/page.tsx"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_corpus_summary_counts_causes_and_names_the_busiest_target() {
+        let dir = fixture_dir("corpus");
+        generate_all(&build(&dir, GREETER_V1, PEOPLE_V1, true), &dir);
+
+        // Nothing moved: documents are counted, none is stale.
+        let quiet = explain_corpus(&build(&dir, GREETER_V1, PEOPLE_V1, true), &dir).unwrap();
+        assert_eq!(quiet.stale, 0);
+        assert!(quiet.documents >= 6, "{quiet:?}");
+        assert!(quiet.by_cause.is_empty());
+
+        // The trait's signature changes: the trait's own spec and file go
+        // stale on their text, the importer's symbol and file go stale on
+        // the trait, and the folder and system specs on their stale child.
+        let after = build(&dir, GREETER_SIG, PEOPLE_V1, true);
+        let s = explain_corpus(&after, &dir).unwrap();
+        let count = |label: &str| {
+            s.by_cause
+                .iter()
+                .find(|(l, _)| l == label)
+                .map_or(0, |(_, n)| *n)
+        };
+        assert_eq!(count("source"), 2, "{s:?}");
+        assert_eq!(count("dependency"), 2, "{s:?}");
+        assert_eq!(count("child"), 2, "{s:?}");
+        assert_eq!(s.stale, 6, "{s:?}");
+        // Two documents rest on the trait that moved.
+        assert_eq!(
+            s.top_targets,
+            vec![("src/greeter.rs::Greeter".to_string(), 2)]
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_corpus_summary_counts_dependants_resting_on_a_coarse_target() {
+        let dir = fixture_dir("coarse-count");
+        let graph = build(&dir, GREETER_PRIVATE_V1, PEOPLE_V1, true);
+        // `Greeter` is private here, so it has no interface hash and the
+        // importer's dependency hash uses its whole text.
+        assert_eq!(coarse_dependants(&graph), 1);
+        let graph = build(&dir, GREETER_V1, PEOPLE_V1, true);
+        assert_eq!(coarse_dependants(&graph), 0);
         std::fs::remove_dir_all(&dir).ok();
     }
 
