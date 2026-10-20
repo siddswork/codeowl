@@ -1086,7 +1086,11 @@ impl CodeOwlServer {
         prior: Option<String>,
         cursor: Option<&str>,
     ) -> Result<SpecTaskResponse, String> {
-        let text = std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
+        let raw = std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
+        // The writer reads the file without the test code its pack keeps
+        // inside source files; the cursor's hash covers this same text.
+        let graph = self.graph.load_full();
+        let text = crate::stack::for_name(graph.pack_name()).strip_test_code(&id, &raw);
         let pages = crate::spec::page_text(&text, self.max_spec_task_bytes);
         let total = pages.len();
         let page = match cursor {
@@ -4802,6 +4806,38 @@ mod tests {
         };
         let server = server.with_file_ladder(custom);
         assert_eq!(server.file_ladder(), custom);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_rust_file_task_leaves_out_the_cfg_test_module() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-rust-{}", std::process::id()));
+        // Small production code, then a test module far over the page size.
+        let padding = "y".repeat(600);
+        let src = format!(
+            "pub fn real() -> u32 {{ 1 }}\n\n#[cfg(test)]\nmod tests {{\n    // {padding}\n    #[test]\n    fn t() {{}}\n}}\n"
+        );
+        let server = rebuild_server(dir.clone(), &[("src/lib.rs", &src)])
+            .with_generation_limits(None, Some(200));
+
+        let SpecTaskResponse::File {
+            source,
+            pages,
+            next_cursor,
+            ..
+        } = first_file_page(&server, "src/lib.rs").await
+        else {
+            unreachable!()
+        };
+        assert_eq!(pages, 1, "without the test module the file fits one page");
+        assert_eq!(next_cursor, None);
+        assert!(source.contains("pub fn real"));
+        assert!(
+            !source.contains("mod tests"),
+            "test code must be left out: {source}"
+        );
 
         std::fs::remove_dir_all(&dir).ok();
     }

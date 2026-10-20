@@ -475,6 +475,86 @@ fn visit_item(
     }
 }
 
+/// `source` without its `#[cfg(test)]` modules (their attribute lines
+/// included), for the text a file summary is written from: unit tests
+/// colocated in a Rust file add pages without adding anything the summary
+/// is about. Finds exactly the modules [`extract_file`] skips -- an inline
+/// `mod` with a body whose attributes say `cfg(test)`, at the top level or
+/// inside a plain inline module -- so the stripped text yields the same
+/// symbols. Everything else, comments and blank lines included, is kept
+/// byte for byte; a removed module takes its trailing newline with it.
+pub fn strip_test_modules(source: &str) -> String {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .expect("bundled tree-sitter-rust grammar should always load");
+    let Some(tree) = parser.parse(source, None) else {
+        return source.to_string();
+    };
+    let mut ranges = Vec::new();
+    collect_cfg_test_ranges(tree.root_node(), source, &mut ranges);
+
+    let mut out = String::with_capacity(source.len());
+    let mut kept_from = 0;
+    for (start, end) in ranges {
+        out.push_str(&source[kept_from..start]);
+        kept_from = end;
+    }
+    out.push_str(&source[kept_from..]);
+    out
+}
+
+/// Byte ranges (attribute lines through the closing brace and its newline)
+/// of every `#[cfg(test)]` inline module under `node`, in source order. A
+/// removed module is not searched further; a plain inline module is.
+fn collect_cfg_test_ranges(node: Node, source: &str, out: &mut Vec<(usize, usize)>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "mod_item" {
+            continue;
+        }
+        let Some(body) = child.child_by_field_name("body") else {
+            continue; // `mod tests;` has no text in this file to remove
+        };
+        if is_cfg_test(child, source) {
+            let mut start = first_attribute_start(child);
+            // An indented (nested) module: take the indentation too, but
+            // only when nothing else shares the line before it.
+            let bytes = source.as_bytes();
+            let mut line_start = start;
+            while line_start > 0 && matches!(bytes[line_start - 1], b' ' | b'\t') {
+                line_start -= 1;
+            }
+            if line_start == 0 || bytes[line_start - 1] == b'\n' {
+                start = line_start;
+            }
+            let mut end = child.end_byte();
+            if source.as_bytes().get(end) == Some(&b'\n') {
+                end += 1;
+            }
+            out.push((start, end));
+        } else {
+            collect_cfg_test_ranges(body, source, out);
+        }
+    }
+}
+
+/// Where the run of attributes in front of `node` begins (the same
+/// siblings [`attributes`] reads), or the node's own start if it has none.
+fn first_attribute_start(node: Node) -> usize {
+    let mut start = node.start_byte();
+    let mut cursor = node.prev_sibling();
+    while let Some(n) = cursor {
+        match n.kind() {
+            "attribute_item" | "inner_attribute_item" => start = n.start_byte(),
+            "line_comment" | "block_comment" => {}
+            _ => break,
+        }
+        cursor = n.prev_sibling();
+    }
+    start
+}
+
 /// A `#[cfg(test)] mod tests { … }` block — unit tests colocated in a
 /// source file. Skipped entirely (the whole subtree), the same call
 /// `classify` makes for a `tests/` file: test code isn't spec-bearing and
@@ -2451,5 +2531,69 @@ pub use crate::stack::RustStack;\n";
             .find(|e| e.from_file == "src/add.rs" && e.imported_name == "Stats")
             .expect("expected the ordinary use-based edge from add.rs to Stats");
         assert!(e.target.is_some(), "Stats should resolve across files");
+    }
+
+    // ---- strip_test_modules: the writer's file text without unit tests ----
+
+    #[test]
+    fn strip_test_modules_removes_a_cfg_test_module_and_its_attribute() {
+        let src = "pub fn real() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn a_test() { real(); }\n}\n\npub fn after() {}\n";
+        // The module and its own newline go; the blank lines either side
+        // are the file's and stay.
+        assert_eq!(
+            strip_test_modules(src),
+            "pub fn real() {}\n\n\npub fn after() {}\n"
+        );
+    }
+
+    #[test]
+    fn strip_test_modules_keeps_a_module_that_is_not_cfg_test() {
+        let src = "\
+#[cfg(not(test))]\n\
+mod only_outside_tests { pub fn a() {} }\n\
+mod plain { pub fn b() {} }\n\
+#[cfg(test)]\n\
+mod tests;\n";
+        // `not(test)` is production code; a bodiless `mod tests;` has no
+        // text in this file to remove, so it stays too.
+        assert_eq!(strip_test_modules(src), src);
+    }
+
+    #[test]
+    fn strip_test_modules_finds_a_test_module_nested_in_a_plain_module() {
+        let src =
+            "mod outer {\n    pub fn keep() {}\n    #[cfg(test)]\n    mod tests { fn t() {} }\n}\n";
+        assert_eq!(
+            strip_test_modules(src),
+            "mod outer {\n    pub fn keep() {}\n}\n"
+        );
+    }
+
+    #[test]
+    fn strip_test_modules_leaves_text_with_no_test_module_byte_identical() {
+        let src = "pub fn a() {}\n// a comment with cfg(test) in it\nstruct S;\n";
+        assert_eq!(strip_test_modules(src), src);
+    }
+
+    #[test]
+    fn stripping_test_modules_never_changes_the_extracted_symbols() {
+        // The extractor already ignores a `#[cfg(test)]` module, so the
+        // stripped text must yield exactly the same symbols; checked on a
+        // real file with a large test module.
+        let src = std::fs::read_to_string("src/mcp.rs").unwrap();
+        let stripped = strip_test_modules(&src);
+        assert!(
+            stripped.len() < src.len() / 2,
+            "mcp.rs is mostly tests; stripped {} of {} bytes",
+            stripped.len(),
+            src.len()
+        );
+        let ids = |text: &str| {
+            extract_file(text, "src/mcp.rs")
+                .into_iter()
+                .map(|s| s.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&src), ids(&stripped));
     }
 }
