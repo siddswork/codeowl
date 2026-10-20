@@ -83,9 +83,9 @@ sentence. Three concrete failure modes to actively avoid:
   would tell the reader is exactly what belongs on the page instead. If
   you don't yet know what to say there, that's a signal to go read more,
   not to write that sentence.
-- A task's `source` (or a feature's `core_sources` entry) ending in a
-  `[... truncated: ...]` marker, written from as if it were the whole
-  thing. That marker means real content is missing, not merely that the
+- A symbol task's `source` (or a feature's `core_sources` entry) ending
+  in a `[... truncated: ...]` marker, written from as if it were the whole
+  thing. (A file task is never cut: it comes in pages.) That marker means real content is missing, not merely that the
   symbol or file is long. Call `get_source` on the same id first — its
   response sometimes fits more than the generation task's own bundled
   payload did. If `get_source` also reports `truncated: true`, don't guess
@@ -121,6 +121,31 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      headings needed) summarizing what the file as a whole is for, given
      everything you now know about its symbols from the tasks you already
      completed. This becomes the file's own `## Summary`.
+
+     **A file task comes in pages, and nothing is written until the last
+     one is read.** The response carries `page`, `pages`, `input_kind` and
+     `next_cursor`. While `next_cursor` is non-null, call
+     `get_next_spec_task` again with the same `target` and `cursor` set to
+     that value, exactly as given, and keep going until the last page
+     (`next_cursor` is null); only then write the summary and call
+     `submit_spec` once. If a call fails saying the file changed or the
+     cursor is for another file, restart from page 1 by calling again
+     without a cursor. `prior` (the reconciliation text) arrives on page 1
+     only; keep it in mind while you read the rest.
+
+     `input_kind` says what the pages hold. `raw` is the file's own text:
+     read it as you would any source. `summaries` and `outline` stand in
+     for a file too big to read raw. `summaries` is each top-level
+     function's and class's signature with its written summary; `outline`
+     is one dominant class's signature, doc comment and member signatures;
+     both end with the file's other declarations by signature only. For
+     these two, cover EVERY major part of the file, not only the first
+     ones; state concrete specifics (named rules, limits, thresholds,
+     flags, ordering) instead of general descriptions; and mention
+     behaviours that would surprise a reader. (`docs/specs/STYLE.md` still
+     governs wording and reading level.) Describe the file, not the
+     input: never describe the input as cut off, partial, or a list of
+     summaries.
    - **`kind: "feature"`** — write the whole feature document in one go,
      starting with a `# Title` line (a human-friendly title — CodeOwl
      never synthesizes one), then these four headings:
@@ -261,7 +286,9 @@ target loop above:
    count every `get_next_spec_task` call that returns a real task (`kind`
    is not `"done"`) toward that budget, not every item in `pending` (a
    single file with three uncovered symbols costs four generations: three
-   symbols plus the file itself). Without `--budget`, spend as many as it
+   symbols plus the file itself). A paged file task counts as one
+   generation, however many pages it has: the calls that fetch later pages
+   with a `cursor` are not counted. Without `--budget`, spend as many as it
    takes to exhaust `pending` entirely.
 3. Walk `pending` in order. For each item's `id`, run the single-target
    loop above (steps 1–5) against it — passing that `id` straight to
