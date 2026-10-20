@@ -59,6 +59,61 @@ fn both_copies_tell_the_agent_how_to_read_a_paged_file_task() {
     }
 }
 
+/// What every copy must tell the agent about a task that carries the last
+/// machine-written draft, and about the two habits that keep a regeneration
+/// from losing or inventing detail.
+const REVISION: [(&str, &str); 9] = [
+    (
+        "arrive on page 1 only",
+        "the old draft comes once, before the pages, so it must be noted then",
+    ),
+    (
+        "keep an old claim unless the stand-in contradicts it",
+        "on a summaries or outline file task the input cannot verify every claim",
+    ),
+    (
+        "not a sweep of every neighbour",
+        "the caller check is per claim stated, so a --budget run stays affordable",
+    ),
+    (
+        "`previous_summary`",
+        "the symbol field that carries the last draft",
+    ),
+    (
+        "`previous`",
+        "the file field that carries the last draft, on page 1",
+    ),
+    (
+        "Keep every claim that is still true",
+        "a revision starts from the old text, not from nothing",
+    ),
+    (
+        "re-check each claim against `source`",
+        "an old claim can be wrong, and copying it forward repeats the error",
+    ),
+    (
+        "what the code does not handle or only approximates",
+        "the limits a developer needs are the first thing a redraft drops",
+    ),
+    (
+        "confirm it with `get_callers`",
+        "a claim about who calls or serves what is checked, not assumed",
+    ),
+];
+
+#[test]
+fn both_copies_tell_the_writer_to_revise_the_previous_draft() {
+    for name in BOTH {
+        let text = flat(name);
+        for (phrase, why) in REVISION {
+            assert!(
+                text.contains(phrase),
+                "{name} must contain {phrase:?} ({why})"
+            );
+        }
+    }
+}
+
 #[test]
 fn both_copies_tell_the_writer_not_to_describe_its_input_as_cut_off() {
     for name in BOTH {

@@ -424,6 +424,16 @@ why CodeOwl cares.
   instructions: keep whatever the human wrote that's still accurate, and
   only change the parts the actual source diff forces you to change. (M8)
 
+**Previous draft** (`previous`)
+: The last **machine-written** text of a spec, handed to the writer when
+  the *source changed* but no human had edited the spec. Not a
+  reconciliation: there is no human correction to protect. The writer
+  revises the draft (keeps what is still true, re-checks each claim against
+  the source) instead of writing from the source alone, which is how a
+  regeneration used to lose caveats the old text had. Distinct from the
+  "prior" above, which is a *human's* version. Carried on symbol and file
+  tasks; empty for a first generation and whenever a "prior" is set.
+
 ---
 
 ## Hashes and status

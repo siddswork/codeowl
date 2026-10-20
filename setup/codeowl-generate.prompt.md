@@ -78,7 +78,7 @@ reading level, never structure: the headings below and "base it only on
 **Read before writing, every time — this is not a formality.** Every
 piece of `source`/`core_sources` a task hands you exists to be read in
 full before you write anything, not skimmed for a plausible-sounding
-sentence. Three concrete failure modes to actively avoid:
+sentence. Five concrete failure modes to actively avoid:
 - A feature task with several `core_sources` entries and the narrative
   only describing one of them, because the others were never actually
   read. If there are three core files, the document needs to account for
@@ -99,6 +99,19 @@ sentence. Three concrete failure modes to actively avoid:
   at what the missing portion says: note in your end-of-loop report that
   this one is too large to fully retrieve and move on, rather than
   submitting a spec written from a partial fragment.
+- A `### Behavior` that says what the code does but not where it stops.
+  When the source shows a limit, an approximation, a tie-break or a case
+  it skips (a text match that also hits comments, "the first match wins",
+  something it never reads), end `### Behavior` with a sentence or two
+  naming what the code does not handle or only approximates. That is the
+  part a developer opens the spec to find, and the part a rewrite loses
+  first.
+- A claim about another function that you did not check. Before you write
+  that X is called by, serves, overrides or is used from Y, confirm it
+  with `get_callers` or `get_callees` on the id. A comment, a docstring or
+  the old spec saying so is not proof; the code can have moved on. One
+  call per claim you actually state is enough; this is not a sweep of
+  every neighbour.
 
 ## Loop
 
@@ -137,8 +150,11 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      (`next_cursor` is null); only then write the summary and call
      `submit_spec` once. If a call fails saying the file changed or the
      cursor is for another file, restart from page 1 by calling again
-     without a cursor. `prior` (the reconciliation text) arrives on page 1
-     only; keep it in mind while you read the rest.
+     without a cursor. `prior` (the reconciliation text) and `previous`
+     (the last machine draft) arrive on page 1 only. Note what they say
+     before you read on: the later pages do not repeat them, and you write
+     only after the last page. After a restart they arrive again with
+     page 1.
 
      `input_kind` says what the pages hold. `raw` is the file's own text:
      read it as you would any source. `summaries` and `outline` stand in
@@ -152,7 +168,11 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      behaviours that would surprise a reader. (`docs/specs/STYLE.md` still
      governs wording and reading level.) Describe the file, not the
      input: never describe the input as cut off, partial, or a list of
-     summaries.
+     summaries. When `previous` comes with one of these two, the pages
+     are only a stand-in for the file, so you cannot re-check every old
+     claim against them: keep an old claim unless the stand-in
+     contradicts it, and add no new specific that the stand-in does not
+     show.
    - **`kind: "feature"`** — write the whole feature document in one go,
      starting with a `# Title` line (a human-friendly title — CodeOwl
      never synthesizes one), then these four headings:
@@ -221,6 +241,16 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
    what the actual source diff affects. Don't silently discard a human's
    correction just because you're rewriting the section — read it first,
    the same way you'd read `source`.
+
+   **Revising (`previous_summary`/`previous_behavior` on a symbol task,
+   `previous` on page 1 of a file task, when present and non-null):** the
+   source changed and nobody had edited this spec by hand, so the value is
+   the last machine-written text. Revise it; don't write from the source
+   alone. Keep every claim that is still true, change what the source
+   change affects, and drop nothing without a reason. It can be wrong too,
+   so re-check each claim against `source` before you keep it: an error
+   you copy forward stays. `previous` and `prior` never arrive together;
+   when `prior` is set, preserve the human's text as described above.
 
    **You may see the same target offered again even though nothing in
    `source`/`dependencies` looks different from last time, and `prior` is

@@ -649,6 +649,15 @@ pub enum SpecTaskResponse {
         /// correction is still accurate rather than silently overwrite it.
         prior_summary: Option<String>,
         prior_behavior: Option<String>,
+        /// `Some` when the source changed and no human had edited the
+        /// prose: the last machine-written `### Summary` / `### Behavior`.
+        /// Revise it rather than write from the source alone: keep every
+        /// claim that is still true, re-check each against `source`, and
+        /// drop nothing without a reason. Never present together with
+        /// `prior_summary`/`prior_behavior`, and absent on a first
+        /// generation.
+        previous_summary: Option<String>,
+        previous_behavior: Option<String>,
     },
     File {
         id: String,
@@ -658,6 +667,10 @@ pub enum SpecTaskResponse {
         /// Same case-4 meaning as `Symbol::prior_summary`, for the file's
         /// own `## Summary`. Present on page 1 only.
         prior: Option<String>,
+        /// Same meaning as `Symbol::previous_summary`, for the file's own
+        /// `## Summary`: the last machine-written text, to revise. Present
+        /// on page 1 only.
+        previous: Option<String>,
         /// What `source` is made of.
         input_kind: FileInputKind,
         /// This page's number, counting from 1.
@@ -1023,6 +1036,7 @@ impl CodeOwlServer {
                 signature,
                 docstring,
                 prior,
+                previous,
             } => {
                 let sym_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
                 let sym = graph
@@ -1075,19 +1089,27 @@ impl CodeOwlServer {
                     dependencies,
                     prior_summary: prior.as_ref().map(|p| p.summary.clone()),
                     prior_behavior: prior.map(|p| p.behavior),
+                    previous_summary: previous.as_ref().map(|p| p.summary.clone()),
+                    previous_behavior: previous.map(|p| p.behavior),
                 }
             }
-            crate::spec::SpecTask::File { id, prior } => self.file_task_page(id, prior, cursor)?,
+            crate::spec::SpecTask::File {
+                id,
+                prior,
+                previous,
+            } => self.file_task_page(id, prior, previous, cursor)?,
         })
     }
 
     /// One page of a file task. The file is read whole and cut into pages
     /// of `max_spec_task_bytes`; a cursor picks the page, and is refused if
-    /// the file changed since it was issued. `prior` rides on page 1 only.
+    /// the file changed since it was issued. `prior` and `previous` ride on
+    /// page 1 only.
     fn file_task_page(
         &self,
         id: String,
         prior: Option<String>,
+        previous: Option<String>,
         cursor: Option<&str>,
     ) -> Result<SpecTaskResponse, String> {
         let raw = std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
@@ -1124,6 +1146,7 @@ impl CodeOwlServer {
             id,
             source,
             prior: if page == 1 { prior } else { None },
+            previous: if page == 1 { previous } else { None },
             input_kind,
             page,
             pages: total,
@@ -1487,7 +1510,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). `input_kind` says what the pages hold: `raw` is the file's own text; for a file too big to read raw, `summaries` is each top-level function's and class's signature and written summary, and `outline` is one dominant class's signature, doc comment and member signatures; both then list every other top-level declaration by signature only. These stand in for the file, so describe the file as a whole, not just the part shown in detail. Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). `input_kind` says what the pages hold: `raw` is the file's own text; for a file too big to read raw, `summaries` is each top-level function's and class's signature and written summary, and `outline` is one dominant class's signature, doc comment and member signatures; both then list every other top-level declaration by signature only. These stand in for the file, so describe the file as a whole, not just the part shown in detail. Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. When the source changed and nobody edited the spec by hand, a symbol task also carries the last machine-written text as `previous_summary` and `previous_behavior`, and a file task carries it as `previous` on page 1: revise it (keep every claim that is still true, re-check each against the source, drop nothing without a reason) instead of writing from scratch. `prior_summary`/`prior_behavior`/`prior` are different: a human's edit, to preserve. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
@@ -2766,6 +2789,57 @@ mod tests {
             prior_behavior.as_deref(),
             Some("This is the original behavior.")
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_source_change_with_no_human_edit_serves_the_last_draft_as_previous() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-previous-{}-1", std::process::id()));
+        let source_v1 = "export function one(): void {}\n";
+        let server_v1 = rebuild_server(dir.clone(), &[("a.ts", source_v1)]);
+        server_v1
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "a.ts::one".to_string(),
+                content: "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n"
+                    .to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // Only the source changes; nobody edits the spec file.
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let server_v2 = rebuild_server(dir.clone(), &[("a.ts", source_v2)]);
+        let task = server_v2
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+                cursor: None,
+            }))
+            .await
+            .unwrap()
+            .0;
+        let SpecTaskResponse::Symbol {
+            prior_summary,
+            prior_behavior,
+            previous_summary,
+            previous_behavior,
+            ..
+        } = task
+        else {
+            panic!("expected a Symbol task");
+        };
+        assert_eq!(
+            previous_summary.as_deref(),
+            Some("This is the original summary.")
+        );
+        assert_eq!(
+            previous_behavior.as_deref(),
+            Some("This is the original behavior.")
+        );
+        // There is no human edit to preserve, so `prior` stays empty.
+        assert_eq!(prior_summary, None);
+        assert_eq!(prior_behavior, None);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -4806,6 +4880,57 @@ mod tests {
         };
         assert_eq!(page, 2);
         assert_eq!(prior, None, "prior is shown once, on page 1");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn previous_comes_back_on_page_one_only() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-mcp-ladder-previous-{}",
+            std::process::id()
+        ));
+        let v1 = padded_file(15);
+        let server = rebuild_server(dir.clone(), &[("paged.ts", &v1)])
+            .with_generation_limits(None, Some(100));
+        first_file_page(&server, "paged.ts").await;
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "paged.ts".to_string(),
+                content: "The original machine-written file summary.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // The source changes and nobody edits the summary: the file is
+        // stale, so the task carries the last draft as `previous`.
+        let v2 = v1.replace("padding 00000003", "padding 77777777");
+        let server2 = rebuild_server(dir.clone(), &[("paged.ts", &v2)])
+            .with_generation_limits(None, Some(100));
+
+        let SpecTaskResponse::File {
+            prior,
+            previous,
+            next_cursor,
+            ..
+        } = task_for(&server2, "paged.ts", None).await
+        else {
+            panic!("expected the file task");
+        };
+        assert_eq!(
+            previous.as_deref(),
+            Some("The original machine-written file summary.")
+        );
+        assert_eq!(prior, None, "no human edit, so nothing to preserve");
+        let cursor = next_cursor.expect("several pages");
+
+        let SpecTaskResponse::File { previous, page, .. } =
+            task_for(&server2, "paged.ts", Some(&cursor)).await
+        else {
+            panic!("expected page 2");
+        };
+        assert_eq!(page, 2);
+        assert_eq!(previous, None, "previous is shown once, on page 1");
 
         std::fs::remove_dir_all(&dir).ok();
     }
