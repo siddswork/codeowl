@@ -366,10 +366,36 @@ Claude Code, `.vscode/mcp.json` for VS Code), then reconnect the server:
 | `--summaries-min-symbols` | 8 | The fewest top-level functions and classes a too-big file needs before its summary is written from their summaries. Lower it to use summaries sooner. |
 | `--outline-container-percent` | 70 | The share of the file, in percent of its bytes, one class must cover to be written up from an outline. Raise it to use the outline less often. |
 
+You only add a flag if you want a value other than the default; a config
+with just `["serve", "."]` already runs with 12, 8 and 70. In Claude Code's
+`.mcp.json` the repo is the folder the session starts in, written `.`:
+
+```json
+{
+  "mcpServers": {
+    "codeowl": {
+      "command": "./target/release/codeowl",
+      "args": ["serve", ".", "--max-file-pages", "12",
+               "--summaries-min-symbols", "8",
+               "--outline-container-percent", "70"]
+    }
+  }
+}
+```
+
+In VS Code's `.vscode/mcp.json` the repo is `${workspaceFolder}` (that
+placeholder is VS Code's; Claude Code does not expand it):
+
 ```json
 "args": ["serve", "${workspaceFolder}", "--max-file-pages", "12",
          "--summaries-min-symbols", "8", "--outline-container-percent", "70"]
 ```
+
+Claude Code reads `.mcp.json` from the folder the session was started in, so
+start it inside the repo; from a parent folder `/mcp` will not list the
+server. `command` is the binary you built: `target/release/codeowl` after
+`utility/release.sh`, or `target/debug/codeowl` after a plain `cargo build`.
+After rebuilding, reconnect the server (`/mcp`, or start a new session).
 
 The defaults are starting values, not measured limits past 12 pages.
 
