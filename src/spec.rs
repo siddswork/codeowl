@@ -620,6 +620,116 @@ pub(crate) fn cap_generation_text(text: String, max_bytes: usize) -> String {
     out
 }
 
+/// How many pages of raw file text a writer reads before the file task
+/// switches to a stand-in for the file. Starting value, not measured past
+/// 12 pages (`experiments/exp-05-file-summary-input.md`); overridable per
+/// server (`codeowl serve --max-file-pages`), like the byte limits above,
+/// since the right cutoff depends on the MCP client and the model.
+pub const FILE_RAW_MAX_PAGES_DEFAULT: usize = 12;
+
+/// The fewest spec-bearing symbols a too-big file needs before its file
+/// task is built from the symbols' written summaries instead of raw text
+/// (`codeowl serve --summaries-min-symbols`). A guess, to be revisited
+/// after a first real run.
+pub const FILE_SUMMARIES_MIN_SYMBOLS_DEFAULT: usize = 8;
+
+/// The share of a too-big file, in percent of its bytes, that one
+/// container must cover for the file task to be a member outline of that
+/// container (`codeowl serve --outline-container-percent`). A guess, to be
+/// revisited after a first real run.
+pub const FILE_OUTLINE_CONTAINER_PERCENT_DEFAULT: usize = 70;
+
+/// The three numbers that decide what a file task hands the writer. One
+/// struct so the choice can be a pure function of its inputs and tests can
+/// pass any values; `mcp.rs::CodeOwlServer::with_file_ladder` sets it from
+/// `codeowl serve`'s flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileLadder {
+    pub max_raw_pages: usize,
+    pub summaries_min_symbols: usize,
+    pub outline_container_percent: usize,
+}
+
+impl Default for FileLadder {
+    fn default() -> Self {
+        Self {
+            max_raw_pages: FILE_RAW_MAX_PAGES_DEFAULT,
+            summaries_min_symbols: FILE_SUMMARIES_MIN_SYMBOLS_DEFAULT,
+            outline_container_percent: FILE_OUTLINE_CONTAINER_PERCENT_DEFAULT,
+        }
+    }
+}
+
+/// Split `text` into pages of at most `page_bytes` bytes that concatenate
+/// back to exactly `text`. A page ends after a newline when one fits in the
+/// budget; a single line longer than the budget is cut on a `char`
+/// boundary. Always makes progress: a budget smaller than one character
+/// still yields one character per page. Empty text is one empty page, so a
+/// caller can always say "page 1 of N".
+pub(crate) fn page_text(text: &str, page_bytes: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+    let mut pages = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if rest.len() <= page_bytes {
+            pages.push(rest.to_string());
+            break;
+        }
+        let mut cut = page_bytes;
+        while cut > 0 && !rest.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        if let Some(newline) = rest[..cut].rfind('\n') {
+            cut = newline + 1;
+        } else if cut == 0 {
+            // Budget smaller than the first character: take that one char.
+            cut = rest.chars().next().map_or(rest.len(), char::len_utf8);
+        }
+        pages.push(rest[..cut].to_string());
+        rest = &rest[cut..];
+    }
+    pages
+}
+
+/// First 12 hex characters of the blake3 hash of the full paged input; the
+/// same shortening `dep_targets` uses.
+fn input_fingerprint(input: &str) -> String {
+    hash_text(input)[..12].to_string()
+}
+
+/// The cursor for page `page` (1-based) of `input`: `"<page>:<hash12>"`.
+/// Stateless: the hash names the input the pages were cut from, so a cursor
+/// issued before the input changed is refused instead of stitching pages
+/// from two versions of a file.
+pub(crate) fn encode_page_cursor(page: usize, input: &str) -> String {
+    format!("{page}:{}", input_fingerprint(input))
+}
+
+/// The page number a cursor names, checked against the current `input` and
+/// its page count. Errors say what to do, since the reader is an agent.
+pub(crate) fn decode_page_cursor(cursor: &str, input: &str, pages: usize) -> Result<usize> {
+    let malformed =
+        || anyhow::anyhow!("malformed cursor {cursor:?}: pass back a next_cursor exactly as given");
+    let (page, hash) = cursor.split_once(':').ok_or_else(malformed)?;
+    let page: usize = page.parse().map_err(|_| malformed())?;
+    if page == 0 {
+        return Err(malformed());
+    }
+    if hash != input_fingerprint(input) {
+        bail!(
+            "the file changed since this cursor was issued: restart from page 1 by calling again without a cursor"
+        );
+    }
+    if page > pages {
+        bail!(
+            "cursor names page {page} but the file has {pages} page(s): restart from page 1 by calling again without a cursor"
+        );
+    }
+    Ok(page)
+}
+
 /// `get_source`'s cap — deliberately larger than
 /// [`MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT`], since the two serve
 /// different purposes. That cap exists to keep a *generation task* small
@@ -6997,5 +7107,113 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         assert!(add_dep_target_lines("no frontmatter\n", "  a\n").is_err());
         assert!(add_dep_target_lines("---\nkind: file\n", "  a\n").is_err());
         assert!(add_dep_target_lines("", "  a\n").is_err());
+    }
+
+    // ---- the file-task ladder: paging, cursor, configuration ----
+
+    #[test]
+    fn page_text_pages_concatenate_back_to_the_exact_text() {
+        let text = "line one\nline two\nline three\nline four\nline five\n";
+        let pages = page_text(text, 20);
+        assert!(pages.len() > 1, "fixture must need more than one page");
+        assert_eq!(pages.concat(), text);
+        for page in &pages {
+            assert!(page.len() <= 20, "page over the byte budget: {page:?}");
+        }
+    }
+
+    #[test]
+    fn page_text_cuts_on_a_line_boundary_when_one_exists() {
+        let text = "aaaa\nbbbb\ncccc\ndddd\n";
+        // 12 bytes fits two whole lines (10 bytes) but not a third.
+        let pages = page_text(text, 12);
+        assert_eq!(pages, vec!["aaaa\nbbbb\n", "cccc\ndddd\n"]);
+    }
+
+    #[test]
+    fn page_text_cuts_an_over_long_line_on_a_char_boundary() {
+        let text = "x".repeat(25);
+        let pages = page_text(&text, 10);
+        assert_eq!(
+            pages.iter().map(String::len).collect::<Vec<_>>(),
+            [10, 10, 5]
+        );
+        assert_eq!(pages.concat(), text);
+    }
+
+    #[test]
+    fn page_text_never_splits_a_multi_byte_char() {
+        // Each snowman is 3 bytes; a 10-byte page can hold 3 of them.
+        let text = "☃".repeat(10);
+        let pages = page_text(&text, 10);
+        assert_eq!(pages.concat(), text);
+        for page in &pages {
+            assert!(page.len() <= 10);
+            assert!(page.chars().all(|c| c == '☃'));
+        }
+    }
+
+    #[test]
+    fn page_text_always_makes_progress_on_a_tiny_budget() {
+        // A budget smaller than one char must still terminate, one char per page.
+        let pages = page_text("☃☃", 1);
+        assert_eq!(pages, vec!["☃", "☃"]);
+    }
+
+    #[test]
+    fn page_text_of_empty_text_is_one_empty_page() {
+        assert_eq!(page_text("", 100), vec![String::new()]);
+    }
+
+    #[test]
+    fn a_page_cursor_round_trips_and_names_the_input_it_belongs_to() {
+        let cursor = encode_page_cursor(3, "some full input text");
+        assert_eq!(
+            decode_page_cursor(&cursor, "some full input text", 5).unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn a_page_cursor_for_changed_input_asks_for_a_restart() {
+        let cursor = encode_page_cursor(2, "the text as first read");
+        let err = decode_page_cursor(&cursor, "the text after an edit", 5).unwrap_err();
+        assert!(
+            err.to_string().contains("page 1"),
+            "must tell the writer to restart from page 1: {err}"
+        );
+    }
+
+    #[test]
+    fn a_malformed_or_out_of_range_page_cursor_is_rejected() {
+        let good = encode_page_cursor(2, "text");
+        for bad in ["", "nonsense", "2", "x:abc", ":abc", "0:abc"] {
+            assert!(decode_page_cursor(bad, "text", 5).is_err(), "{bad:?}");
+        }
+        // Valid shape, but past the last page.
+        assert!(decode_page_cursor(&good, "text", 1).is_err());
+    }
+
+    #[test]
+    fn file_ladder_defaults_are_the_named_constants() {
+        let ladder = FileLadder::default();
+        assert_eq!(ladder.max_raw_pages, FILE_RAW_MAX_PAGES_DEFAULT);
+        assert_eq!(
+            ladder.summaries_min_symbols,
+            FILE_SUMMARIES_MIN_SYMBOLS_DEFAULT
+        );
+        assert_eq!(
+            ladder.outline_container_percent,
+            FILE_OUTLINE_CONTAINER_PERCENT_DEFAULT
+        );
+        // The owner-approved starting values.
+        assert_eq!(
+            (
+                FILE_RAW_MAX_PAGES_DEFAULT,
+                FILE_SUMMARIES_MIN_SYMBOLS_DEFAULT,
+                FILE_OUTLINE_CONTAINER_PERCENT_DEFAULT
+            ),
+            (12, 8, 70)
+        );
     }
 }

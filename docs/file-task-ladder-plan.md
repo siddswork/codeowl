@@ -73,16 +73,16 @@ Fingerprint, `FORMAT_VERSION`, migration (steps 5 and 0d), the `setup/codeowl-ge
 8. More than `P` pages with at least `S` spec-bearing symbols returns `summaries`: each symbol's signature and stored summary, no top-level file summary.
 9. More than `P` pages with one dominant container returns `outline` with every member's signature and docstring in file order (Java fixture).
 10. More than `P` pages with neither returns paged `raw` (complete).
-11. Configuration: a `FileLadder` with non-default values changes the chosen rung at each boundary (one page-count either side of `max_raw_pages`, one symbol either side of `summaries_min_symbols`, a share just under and just over `outline_container_percent`), and a server built with `with_file_ladder` honours it (the same style as the existing `max_spec_task_bytes` override test). The clap checks reject 0 pages, 0 symbols, and a percent of 0 or 101.
+11. Configuration. Commit 1: the `FileLadder` defaults are the named constants (12, 8, 70); a server built with `with_file_ladder` honours it (the same style as the existing `max_spec_task_bytes` override test); the clap checks reject 0 pages, 0 symbols, and a percent of 0 or 101. **Commit 3** (moved there on 2026-10-20, because with only the raw rung built the thresholds have no observable effect): a `FileLadder` with non-default values changes the chosen rung at each boundary (one page-count either side of `max_raw_pages`, one symbol either side of `summaries_min_symbols`, a share just under and just over `outline_container_percent`).
 12. The lifecycle test `leaf_body_edit_stales_exactly_its_file_and_containing_rollup` keeps passing unchanged (its rewrite moved to step 5).
 
 ## Lifecycle test (resolved 2026-10-05)
 The rewrite of `leaf_body_edit_stales_exactly_its_file_and_containing_rollup` moved to exp-05 step 5 (it depends on the file fingerprint). Here it must keep passing unchanged.
 
 ## Commit sequence (each compiles and passes `utility/check.sh`)
-1. Tests 1 to 6 and 11, the paging helper, the `FileLadder` struct and its three flags (`spec.rs`), `GenerateTaskRequest.cursor`, the new `File` response fields, `raw` kind. Replaces the cap for files only; symbol tasks keep `cap_generation_text`.
+1. Tests 1 to 6 and the first half of 11, the paging helper, the `FileLadder` struct and its three flags (`spec.rs`), `GenerateTaskRequest.cursor`, the new `File` response fields, `raw` kind. Replaces the cap for files only; symbol tasks keep `cap_generation_text`.
 2. `StackPack::strip_test_code` and the Rust implementation (test 7).
-3. `summaries` rung (test 8) and the `outline` rung (test 9), with the fallback (test 10).
+3. `summaries` rung (test 8) and the `outline` rung (test 9), with the fallback (test 10), and the boundary half of test 11.
 4. Docs: `ARCHITECTURE.md` (file task shape, tool description for `get_next_spec_task`, no milestone numbers in agent-facing strings), `GLOSSARY.md` (page, rung, outline), `DECISIONS.md` and exp-05 status lines.
 
 ## Risks

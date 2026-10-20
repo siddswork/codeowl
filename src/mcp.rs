@@ -580,6 +580,11 @@ pub struct GenerateTaskRequest {
     /// Stateless: safe to call repeatedly with the same target until it
     /// reports nothing left.
     pub target: String,
+    /// A file task is handed over in pages. Pass the previous response's
+    /// `next_cursor`, exactly as given, with the same `target`, to get the
+    /// next page. Omit it for the first page. Only a file task has pages.
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -614,6 +619,14 @@ pub struct RollupFile {
     pub summary: String,
 }
 
+/// What a file task's `source` is made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FileInputKind {
+    /// The file's own text.
+    Raw,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SpecTaskResponse {
@@ -633,10 +646,21 @@ pub enum SpecTaskResponse {
     },
     File {
         id: String,
+        /// This page of the file's text. A file larger than one page is
+        /// never cut: read every page, in order, before writing.
         source: String,
         /// Same case-4 meaning as `Symbol::prior_summary`, for the file's
-        /// own `## Summary`.
+        /// own `## Summary`. Present on page 1 only.
         prior: Option<String>,
+        /// What `source` is made of.
+        input_kind: FileInputKind,
+        /// This page's number, counting from 1.
+        page: usize,
+        /// How many pages the file task has in all.
+        pages: usize,
+        /// Pass this back as `cursor`, with the same `target`, to get the
+        /// next page. `null` on the last page: write the summary then.
+        next_cursor: Option<String>,
     },
     /// Generated in one shot, unlike the bottom-up symbol-then-file chase
     /// above: a feature spec is a single document with a single
@@ -756,6 +780,9 @@ pub struct CodeOwlServer {
     /// generation-task prompt) and defaults much larger — see
     /// `spec::MAX_SOURCE_TEXT_BYTES_DEFAULT`.
     max_source_bytes: usize,
+    /// What a file task hands the writer once a file is too big for raw
+    /// text — see `spec::FileLadder`. Set by `codeowl serve`'s flags.
+    file_ladder: crate::spec::FileLadder,
 }
 
 impl CodeOwlServer {
@@ -767,7 +794,22 @@ impl CodeOwlServer {
             large_class_bytes: crate::spec::LARGE_CONTAINER_BYTES_DEFAULT,
             max_spec_task_bytes: crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
             max_source_bytes: crate::spec::MAX_SOURCE_TEXT_BYTES_DEFAULT,
+            file_ladder: crate::spec::FileLadder::default(),
         }
+    }
+
+    /// Override the file-task ladder numbers from their compiled-in
+    /// defaults — `codeowl serve`'s `--max-file-pages`,
+    /// `--summaries-min-symbols` and `--outline-container-percent` flags
+    /// call this.
+    pub fn with_file_ladder(mut self, ladder: crate::spec::FileLadder) -> Self {
+        self.file_ladder = ladder;
+        self
+    }
+
+    /// The ladder numbers this server is running with.
+    pub fn file_ladder(&self) -> crate::spec::FileLadder {
+        self.file_ladder
     }
 
     /// Override the two `get_next_spec_task` size knobs from their
@@ -1031,15 +1073,38 @@ impl CodeOwlServer {
                     prior_behavior: prior.map(|p| p.behavior),
                 }
             }
-            crate::spec::SpecTask::File { id, prior } => {
-                let source =
-                    std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
-                // A `File` task had no size handling at all before this --
-                // a large flat file with no single big class was
-                // completely unprotected even after the Container fix.
-                let source = crate::spec::cap_generation_text(source, self.max_spec_task_bytes);
-                SpecTaskResponse::File { id, source, prior }
+            crate::spec::SpecTask::File { id, prior } => self.file_task_page(id, prior, None)?,
+        })
+    }
+
+    /// One page of a file task. The file is read whole and cut into pages
+    /// of `max_spec_task_bytes`; a cursor picks the page, and is refused if
+    /// the file changed since it was issued. `prior` rides on page 1 only.
+    fn file_task_page(
+        &self,
+        id: String,
+        prior: Option<String>,
+        cursor: Option<&str>,
+    ) -> Result<SpecTaskResponse, String> {
+        let text = std::fs::read_to_string(self.root.join(&id)).map_err(|e| e.to_string())?;
+        let pages = crate::spec::page_text(&text, self.max_spec_task_bytes);
+        let total = pages.len();
+        let page = match cursor {
+            None => 1,
+            Some(c) => {
+                crate::spec::decode_page_cursor(c, &text, total).map_err(|e| e.to_string())?
             }
+        };
+        let next_cursor = (page < total).then(|| crate::spec::encode_page_cursor(page + 1, &text));
+        let source = pages.into_iter().nth(page - 1).unwrap_or_default();
+        Ok(SpecTaskResponse::File {
+            id,
+            source,
+            prior: if page == 1 { prior } else { None },
+            input_kind: FileInputKind::Raw,
+            page,
+            pages: total,
+            next_cursor,
         })
     }
 }
@@ -1399,14 +1464,27 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
         Parameters(req): Parameters<GenerateTaskRequest>,
     ) -> Result<Json<SpecTaskResponse>, String> {
         let Json(task) = self.resolve_next_task(&req.target).await?;
-        Ok(Json(task.unwrap_or(SpecTaskResponse::Done {})))
+        let Some(cursor) = req.cursor else {
+            return Ok(Json(task.unwrap_or(SpecTaskResponse::Done {})));
+        };
+        // A cursor pages through one file task; the first page was already
+        // resolved above, so re-cut the same file at the cursor's page.
+        match task {
+            Some(SpecTaskResponse::File { id, .. }) => {
+                self.file_task_page(id, None, Some(&cursor)).map(Json)
+            }
+            _ => Err(format!(
+                "cursor given, but the next task for {:?} is not a file task: call again without a cursor",
+                req.target
+            )),
+        }
     }
 
     /// The dispatch behind `get_next_spec_task` — kept returning `Option`
@@ -2194,6 +2272,7 @@ mod tests {
                 let task = server
                     .get_next_spec_task(Parameters(GenerateTaskRequest {
                         target: item.id.clone(),
+                        cursor: None,
                     }))
                     .await
                     .unwrap()
@@ -2644,6 +2723,7 @@ mod tests {
         let task = server_v2
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "a.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -2725,6 +2805,7 @@ mod tests {
         let done = server_body_edit
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "user.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -2761,6 +2842,7 @@ mod tests {
         let task = server_sig_edit
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "user.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -2866,6 +2948,7 @@ mod tests {
         let task = server_edit
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "user.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -2932,6 +3015,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "src/main/java/org/acme/Big.java".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -2967,55 +3051,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_large_flat_file_task_gets_capped_even_with_no_big_container() {
-        // The real-world case that surfaced this: `File` tasks had zero
-        // size handling at all, even after the Container reduction fix --
-        // a large file with no single dominant class (a long flat script,
-        // or in this fixture a file padded outside any symbol's own span)
-        // was completely unprotected.
+    async fn a_large_flat_file_task_is_paged_not_cut_even_with_no_big_container() {
+        // The real-world case that surfaced the size handling: a large file
+        // with no single dominant class (a long flat script, or in this
+        // fixture a file padded outside any symbol's own span). It used to
+        // be cut at the cap; it is now handed over in full, one capped page
+        // at a time, so the writer is never blind past a cut.
         let dir = std::env::temp_dir().join(format!("codeowl-mcp-bigfile-{}", std::process::id()));
         let padding = "x".repeat(crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT + 2000);
         let src = format!("// {padding}\nexport function tiny(): number {{ return 1; }}\n");
         let server = rebuild_server(dir.clone(), &[("big.ts", &src)]);
 
-        // The lone symbol is offered first; submit it so the file task
-        // (which reads the whole raw file, comment padding included) is
-        // what comes back next.
-        let task = server
-            .get_next_spec_task(Parameters(GenerateTaskRequest {
-                target: "big.ts".to_string(),
-            }))
-            .await
-            .unwrap();
-        let SpecTaskResponse::Symbol { id, .. } = task.0 else {
-            panic!("expected the symbol task first");
-        };
-        server
-            .submit_spec(Parameters(SubmitSpecRequest {
-                id,
-                content: "### Summary\nReturns the constant value one to its caller.\n### Behavior\nAlways evaluates to the integer one, with no branching.\n".to_string(),
-            }))
-            .await
-            .unwrap();
-
-        let file_task = server
-            .get_next_spec_task(Parameters(GenerateTaskRequest {
-                target: "big.ts".to_string(),
-            }))
-            .await
-            .unwrap();
-        let SpecTaskResponse::File { source, .. } = file_task.0 else {
+        let SpecTaskResponse::File {
+            source,
+            page,
+            pages,
+            next_cursor,
+            ..
+        } = first_file_page(&server, "big.ts").await
+        else {
             panic!("expected the file task next");
         };
         assert!(
             source.len() <= crate::spec::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT,
-            "a large flat file's task source must be capped, marker included: {} bytes",
+            "each page must stay within the cap: {} bytes",
             source.len()
         );
-        assert!(
-            source.contains("truncated"),
-            "must visibly mark truncation, not silently drop content"
-        );
+        assert!(!source.contains("truncated"), "paged, not cut");
+        assert_eq!((page, pages), (1, 2));
+        assert!(next_cursor.is_some());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -3036,6 +3100,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "small.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -3096,6 +3161,7 @@ mod tests {
         let rollup_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "lib".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3177,6 +3243,7 @@ mod tests {
         let next = server2
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "lib".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3209,6 +3276,7 @@ mod tests {
         let symbol_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/widget/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3231,6 +3299,7 @@ mod tests {
         let feature_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/widget/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3326,6 +3395,7 @@ mod tests {
         let by_slug = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:submit".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3333,6 +3403,7 @@ mod tests {
         let by_path = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/submit/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3346,6 +3417,7 @@ mod tests {
         let rollup_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "rollup:lib".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3359,6 +3431,7 @@ mod tests {
         let missing = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:does-not-exist".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3376,6 +3449,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "a.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -3413,6 +3487,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "a.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -3432,6 +3507,7 @@ mod tests {
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "a.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -3444,6 +3520,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "a.ts".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -3485,6 +3562,7 @@ mod tests {
         let symbol_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/submit/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3500,6 +3578,7 @@ mod tests {
         let file_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/submit/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3518,6 +3597,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/submit/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3569,6 +3649,7 @@ mod tests {
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/submit/page.tsx".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -3597,6 +3678,7 @@ mod tests {
             let task = server
                 .get_next_spec_task(Parameters(GenerateTaskRequest {
                     target: "app/api/routes/items.py".to_string(),
+                    cursor: None,
                 }))
                 .await
                 .unwrap()
@@ -3614,6 +3696,7 @@ mod tests {
         let file_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/api/routes/items.py".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3632,6 +3715,7 @@ mod tests {
         let first = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:http-get-items".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3653,6 +3737,7 @@ mod tests {
         let second = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:http-get-items-id".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3690,6 +3775,7 @@ mod tests {
             let task = server
                 .get_next_spec_task(Parameters(GenerateTaskRequest {
                     target: "app/api/routes/items.py".to_string(),
+                    cursor: None,
                 }))
                 .await
                 .unwrap()
@@ -3708,6 +3794,7 @@ mod tests {
         let file_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "app/api/routes/items.py".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3729,6 +3816,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:http-get-items".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3762,6 +3850,7 @@ mod tests {
         let sibling_task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "feature:http-delete-items-id".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3798,6 +3887,7 @@ mod tests {
                 let task = server
                     .get_next_spec_task(Parameters(GenerateTaskRequest {
                         target: file.to_string(),
+                        cursor: None,
                     }))
                     .await
                     .unwrap()
@@ -3816,6 +3906,7 @@ mod tests {
             let file_task = server
                 .get_next_spec_task(Parameters(GenerateTaskRequest {
                     target: file.to_string(),
+                    cursor: None,
                 }))
                 .await
                 .unwrap()
@@ -3903,6 +3994,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "lib".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3942,6 +4034,7 @@ mod tests {
         let task = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "lib".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap()
@@ -3991,6 +4084,7 @@ mod tests {
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: "lib".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -4021,6 +4115,7 @@ mod tests {
             let task = server
                 .get_next_spec_task(Parameters(GenerateTaskRequest {
                     target: ".".to_string(),
+                    cursor: None,
                 }))
                 .await
                 .unwrap()
@@ -4130,6 +4225,7 @@ mod tests {
         let done = server
             .get_next_spec_task(Parameters(GenerateTaskRequest {
                 target: ".".to_string(),
+                cursor: None,
             }))
             .await
             .unwrap();
@@ -4428,5 +4524,285 @@ mod tests {
             result.0.lines[1] - result.0.lines[0] + 1,
             "source's real line count must match the span lines claims to cover"
         );
+    }
+
+    // ---- the file-task ladder: paged file tasks ----
+
+    const CANNED_SYMBOL_PROSE: &str = "### Summary\nReturns the constant value one to its caller.\n### Behavior\nAlways evaluates to the integer one, with no branching.\n";
+
+    /// A file with one tiny symbol and `comment_lines` padding comment
+    /// lines of exactly 20 bytes each, outside any symbol's span.
+    fn padded_file(comment_lines: usize) -> String {
+        let mut src = String::new();
+        for i in 0..comment_lines {
+            src.push_str(&format!("// padding {i:08}\n")); // "// " + "padding " + 8 digits + newline = 20 bytes
+        }
+        src.push_str("export function tiny(): number { return 1; }\n");
+        src
+    }
+
+    async fn task_for(
+        server: &CodeOwlServer,
+        target: &str,
+        cursor: Option<&str>,
+    ) -> SpecTaskResponse {
+        server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: target.to_string(),
+                cursor: cursor.map(str::to_string),
+            }))
+            .await
+            .unwrap()
+            .0
+    }
+
+    /// Submit every symbol task the bottom-up chase offers until the file
+    /// task itself comes up, and return that first page.
+    async fn first_file_page(server: &CodeOwlServer, target: &str) -> SpecTaskResponse {
+        loop {
+            match task_for(server, target, None).await {
+                SpecTaskResponse::Symbol { id, .. } => {
+                    server
+                        .submit_spec(Parameters(SubmitSpecRequest {
+                            id,
+                            content: CANNED_SYMBOL_PROSE.to_string(),
+                        }))
+                        .await
+                        .unwrap();
+                }
+                file @ SpecTaskResponse::File { .. } => return file,
+                other => panic!("expected a symbol or file task, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_file_task_waits_until_every_spec_bearing_symbol_is_current() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-wait-{}", std::process::id()));
+        let src = "export function one(): number { return 1; }\nexport function two(): number { return 2; }\n";
+        let server = rebuild_server(dir.clone(), &[("pair.ts", src)]);
+
+        let first = task_for(&server, "pair.ts", None).await;
+        let SpecTaskResponse::Symbol { id, .. } = first else {
+            panic!("a symbol task must come before the file task: {first:?}");
+        };
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id,
+                content: CANNED_SYMBOL_PROSE.to_string(),
+            }))
+            .await
+            .unwrap();
+        // One symbol is current, the other is not: still no file task.
+        let second = task_for(&server, "pair.ts", None).await;
+        assert!(
+            matches!(second, SpecTaskResponse::Symbol { .. }),
+            "the file task must not appear while a symbol spec is missing: {second:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_file_within_one_page_is_one_raw_page_with_no_truncation() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-one-{}", std::process::id()));
+        let src = "export function tiny(): number { return 1; }\n";
+        let server = rebuild_server(dir.clone(), &[("small.ts", src)]);
+
+        let SpecTaskResponse::File {
+            source,
+            input_kind,
+            page,
+            pages,
+            next_cursor,
+            ..
+        } = first_file_page(&server, "small.ts").await
+        else {
+            unreachable!()
+        };
+        assert_eq!(source, src);
+        assert_eq!(input_kind, FileInputKind::Raw);
+        assert_eq!((page, pages), (1, 1));
+        assert_eq!(next_cursor, None);
+        assert!(!source.contains("truncated"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_multi_page_file_is_read_page_by_page_through_the_cursor() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-pages-{}", std::process::id()));
+        let src = padded_file(15); // 300 bytes of comments + the symbol line
+        let server = rebuild_server(dir.clone(), &[("paged.ts", &src)])
+            .with_generation_limits(None, Some(100));
+
+        let mut collected = String::new();
+        let mut response = first_file_page(&server, "paged.ts").await;
+        let mut seen_pages = 0;
+        loop {
+            let SpecTaskResponse::File {
+                source,
+                input_kind,
+                page,
+                pages,
+                next_cursor,
+                ..
+            } = response
+            else {
+                panic!("expected a file page, got {response:?}");
+            };
+            seen_pages += 1;
+            assert_eq!(input_kind, FileInputKind::Raw);
+            assert_eq!(page, seen_pages, "pages arrive in order, 1-based");
+            assert!(pages > 1, "the fixture must need several pages");
+            assert!(
+                source.len() <= 100,
+                "page over the byte cap: {}",
+                source.len()
+            );
+            assert!(!source.contains("truncated"), "a paged file is never cut");
+            collected.push_str(&source);
+            match next_cursor {
+                Some(cursor) => response = task_for(&server, "paged.ts", Some(&cursor)).await,
+                None => {
+                    assert_eq!(page, pages, "only the last page has no next cursor");
+                    break;
+                }
+            }
+        }
+        assert_eq!(collected, src, "the pages must add up to the whole file");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_cursor_for_a_file_edited_since_page_one_asks_for_a_restart() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-stale-{}", std::process::id()));
+        let src = padded_file(15);
+        let server = rebuild_server(dir.clone(), &[("paged.ts", &src)])
+            .with_generation_limits(None, Some(100));
+        let SpecTaskResponse::File { next_cursor, .. } = first_file_page(&server, "paged.ts").await
+        else {
+            unreachable!()
+        };
+        let cursor = next_cursor.expect("several pages");
+
+        // The file changes on disk between page 1 and page 2.
+        let edited = src.replace("padding 00000003", "padding 99999999");
+        assert_ne!(edited, src);
+        std::fs::write(dir.join("paged.ts"), edited).unwrap();
+
+        let err = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "paged.ts".to_string(),
+                cursor: Some(cursor),
+            }))
+            .await
+            .err()
+            .expect("must be an error");
+        assert!(
+            err.contains("page 1"),
+            "must say to restart from page 1: {err}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_cursor_on_a_target_that_is_not_a_file_task_is_an_error() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-badcur-{}", std::process::id()));
+        let server = rebuild_server(
+            dir.clone(),
+            &[("a.ts", "export function a(): number { return 1; }\n")],
+        );
+        // The first task for this target is a symbol, not a file page.
+        let err = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.ts".to_string(),
+                cursor: Some("2:abcdef012345".to_string()),
+            }))
+            .await
+            .err()
+            .expect("must be an error");
+        assert!(err.contains("cursor"), "{err}");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn prior_comes_back_on_page_one_only() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-prior-{}", std::process::id()));
+        let v1 = padded_file(15);
+        let server = rebuild_server(dir.clone(), &[("paged.ts", &v1)])
+            .with_generation_limits(None, Some(100));
+        first_file_page(&server, "paged.ts").await;
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "paged.ts".to_string(),
+                content: "The original machine-written file summary.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        // A human edits the file summary by hand, then the source changes
+        // outside the symbol: the file is stale AND human-edited, so the
+        // task carries `prior`.
+        let md = crate::spec::spec_path(&dir, "paged.ts");
+        let text = std::fs::read_to_string(&md).unwrap();
+        let edited = text.replace(
+            "The original machine-written file summary.",
+            "A careful human correction of the summary.",
+        );
+        assert_ne!(edited, text);
+        std::fs::write(&md, edited).unwrap();
+        let v2 = v1.replace("padding 00000003", "padding 77777777");
+        let server2 = rebuild_server(dir.clone(), &[("paged.ts", &v2)])
+            .with_generation_limits(None, Some(100));
+
+        let SpecTaskResponse::File {
+            prior, next_cursor, ..
+        } = task_for(&server2, "paged.ts", None).await
+        else {
+            panic!("expected the file task");
+        };
+        assert_eq!(
+            prior.as_deref(),
+            Some("A careful human correction of the summary.")
+        );
+        let cursor = next_cursor.expect("several pages");
+
+        let SpecTaskResponse::File { prior, page, .. } =
+            task_for(&server2, "paged.ts", Some(&cursor)).await
+        else {
+            panic!("expected page 2");
+        };
+        assert_eq!(page, 2);
+        assert_eq!(prior, None, "prior is shown once, on page 1");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn with_file_ladder_overrides_the_compiled_in_defaults() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-cfg-{}", std::process::id()));
+        let server = rebuild_server(dir.clone(), &[("a.ts", "export const A = 1;\n")]);
+        assert_eq!(server.file_ladder(), crate::spec::FileLadder::default());
+
+        let custom = crate::spec::FileLadder {
+            max_raw_pages: 3,
+            summaries_min_symbols: 5,
+            outline_container_percent: 90,
+        };
+        let server = server.with_file_ladder(custom);
+        assert_eq!(server.file_ladder(), custom);
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
