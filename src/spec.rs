@@ -693,23 +693,29 @@ pub(crate) fn page_text(text: &str, page_bytes: usize) -> Vec<String> {
     pages
 }
 
-/// First 12 hex characters of the blake3 hash of the full paged input; the
-/// same shortening `dep_targets` uses.
-fn input_fingerprint(input: &str) -> String {
-    hash_text(input)[..12].to_string()
+/// First 12 hex characters of the blake3 hash of the file id and the full
+/// paged input; the same shortening `dep_targets` uses. The id is part of it
+/// so two files with identical text never honour each other's cursors.
+fn input_fingerprint(file_id: &str, input: &str) -> String {
+    hash_text(&format!("{file_id}\n{input}"))[..12].to_string()
 }
 
-/// The cursor for page `page` (1-based) of `input`: `"<page>:<hash12>"`.
-/// Stateless: the hash names the input the pages were cut from, so a cursor
-/// issued before the input changed is refused instead of stitching pages
-/// from two versions of a file.
-pub(crate) fn encode_page_cursor(page: usize, input: &str) -> String {
-    format!("{page}:{}", input_fingerprint(input))
+/// The cursor for page `page` (1-based) of `input`, the paged text of
+/// `file_id`: `"<page>:<hash12>"`. Stateless: the hash names the file and
+/// the input the pages were cut from, so a cursor issued before the input
+/// changed is refused instead of stitching pages from two versions of a file.
+pub(crate) fn encode_page_cursor(page: usize, file_id: &str, input: &str) -> String {
+    format!("{page}:{}", input_fingerprint(file_id, input))
 }
 
 /// The page number a cursor names, checked against the current `input` and
 /// its page count. Errors say what to do, since the reader is an agent.
-pub(crate) fn decode_page_cursor(cursor: &str, input: &str, pages: usize) -> Result<usize> {
+pub(crate) fn decode_page_cursor(
+    cursor: &str,
+    file_id: &str,
+    input: &str,
+    pages: usize,
+) -> Result<usize> {
     let malformed =
         || anyhow::anyhow!("malformed cursor {cursor:?}: pass back a next_cursor exactly as given");
     let (page, hash) = cursor.split_once(':').ok_or_else(malformed)?;
@@ -717,9 +723,9 @@ pub(crate) fn decode_page_cursor(cursor: &str, input: &str, pages: usize) -> Res
     if page == 0 {
         return Err(malformed());
     }
-    if hash != input_fingerprint(input) {
+    if hash != input_fingerprint(file_id, input) {
         bail!(
-            "the file changed since this cursor was issued: restart from page 1 by calling again without a cursor"
+            "this cursor does not match the file's current text (it changed, or the cursor is for another file): restart from page 1 by calling again without a cursor"
         );
     }
     if page > pages {
@@ -749,13 +755,20 @@ pub enum FileRung {
 /// gets the outline (checked first, since a class-sized file has one
 /// top-level symbol), then enough symbols get their summaries, and
 /// anything else stays raw, paged but complete.
+/// Whether a file of `pages` raw pages is read raw: the one place the page
+/// ceiling is compared, so `choose_file_rung` and the cheap early exit in
+/// `file_task_input` cannot drift apart.
+fn within_raw_ceiling(pages: usize, ladder: &FileLadder) -> bool {
+    pages <= ladder.max_raw_pages
+}
+
 pub fn choose_file_rung(
     pages: usize,
     spec_bearing_symbols: usize,
     container_percent: usize,
     ladder: &FileLadder,
 ) -> FileRung {
-    if pages <= ladder.max_raw_pages {
+    if within_raw_ceiling(pages, ladder) {
         FileRung::Raw
     } else if container_percent >= ladder.outline_container_percent {
         FileRung::Outline
@@ -767,7 +780,7 @@ pub fn choose_file_rung(
 }
 
 /// The comment block at the very top of `text`, as written: leading `//`,
-/// `/* … */`, `*` and `#` comment lines up to the first blank or code
+/// `/* … */` and `#` comment lines up to the first blank or code
 /// line. A Rust `#[…]` / `#![…]` attribute is not a comment. Empty when the
 /// file starts with code. A Python module docstring is not recognised.
 pub(crate) fn leading_comment_block(text: &str) -> String {
@@ -789,7 +802,7 @@ pub(crate) fn leading_comment_block(text: &str) -> String {
         if t.starts_with("/*") {
             lines.push(line);
             in_block = !t.contains("*/");
-        } else if t.starts_with("//") || t.starts_with('*') || is_hash_comment {
+        } else if t.starts_with("//") || is_hash_comment {
             lines.push(line);
         } else {
             break;
@@ -876,31 +889,68 @@ pub(crate) fn summaries_input(
         entries.push(format!("{}\n{summary}", sym.signature));
     }
     Ok(Some(format!(
-        "{}SYMBOLS ({}), in file order, each as: signature, then its written summary:\n{}\n",
+        "{}SYMBOLS ({}), in file order, each as: signature, then its written summary:\n{}\n{}",
         stand_in_header(&file.id, text),
         entries.len(),
-        entries.join("\n")
+        entries.join("\n"),
+        other_declarations(graph, file_id, &symbols)
     )))
 }
 
+/// The file's top-level declarations that a stand-in input does not already
+/// cover (types, enums, constants, or everything but the outlined class),
+/// as bare signatures, so the writer still sees the whole file's shape.
+/// Empty when there are none.
+fn other_declarations(graph: &Graph, file_id: SymbolId, covered: &[SymbolId]) -> String {
+    let signatures: Vec<&str> = graph
+        .children_ids(file_id)
+        .iter()
+        .filter(|id| !covered.contains(id))
+        .filter_map(|&id| graph.get_symbol(id))
+        .map(|sym| sym.signature.as_str())
+        .collect();
+    if signatures.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\nOTHER TOP-LEVEL DECLARATIONS (signatures only):\n{}\n",
+        signatures.join("\n")
+    )
+}
+
 /// The outline input: the file's top comment, then the dominant container's
-/// signature, docstring and member signatures and docstrings, no bodies.
+/// signature, docstring and member signatures and docstrings, no bodies,
+/// then every other top-level declaration by signature.
 pub(crate) fn outline_input(
     graph: &Graph,
-    file_id: &str,
-    container: &Symbol,
+    file_id: SymbolId,
+    container: SymbolId,
     text: &str,
 ) -> String {
+    let file = graph.get_file(file_id).expect("outline asked of a file id");
+    let sym = graph
+        .get_symbol(container)
+        .expect("outline asked of a container symbol");
     format!(
-        "{}CLASS OUTLINE, in file order, signatures and doc comments only:\n{}\n",
-        stand_in_header(file_id, text),
-        container_outline(container, graph)
+        "{}CLASS OUTLINE, in file order, signatures and doc comments only:\n{}\n{}",
+        stand_in_header(&file.id, text),
+        container_outline(sym, graph),
+        other_declarations(graph, file_id, &[container])
     )
+}
+
+/// What a file task hands the writer: the chosen rung, the input text, and
+/// that text already cut into pages.
+pub(crate) struct FileTaskInput {
+    pub rung: FileRung,
+    pub text: String,
+    pub pages: Vec<String>,
 }
 
 /// What a file task hands the writer for `text` (the file's text as the
 /// writer would read it, test code already left out): the chosen rung and
-/// its input. A summaries input that cannot be built falls back to raw.
+/// its input, paged. A summaries input that cannot be built falls back to
+/// raw. A file within the raw ceiling returns before any span is read.
 pub(crate) fn file_task_input(
     graph: &Graph,
     root: &Path,
@@ -908,31 +958,40 @@ pub(crate) fn file_task_input(
     text: &str,
     page_bytes: usize,
     ladder: &FileLadder,
-) -> Result<(FileRung, String)> {
-    let pages = page_text(text, page_bytes).len();
-    if pages <= ladder.max_raw_pages {
-        return Ok((FileRung::Raw, text.to_string()));
+) -> Result<FileTaskInput> {
+    let raw_pages = page_text(text, page_bytes);
+    let raw = |pages: Vec<String>| FileTaskInput {
+        rung: FileRung::Raw,
+        text: text.to_string(),
+        pages,
+    };
+    if within_raw_ceiling(raw_pages.len(), ladder) {
+        return Ok(raw(raw_pages));
     }
     let container = largest_container_percent(graph, root, file_id, text.len())?;
     let rung = choose_file_rung(
-        pages,
+        raw_pages.len(),
         spec_bearing_children(graph, file_id).len(),
         container.map_or(0, |(_, percent)| percent),
         ladder,
     );
-    let file = graph
-        .get_file(file_id)
-        .context("file task asked of a non-file id")?;
-    Ok(match (rung, container) {
-        (FileRung::Outline, Some((sym_id, _))) => {
-            let sym = graph.get_symbol(sym_id).expect("a container is a symbol");
-            (FileRung::Outline, outline_input(graph, &file.id, sym, text))
+    let stand_in = match (rung, container) {
+        (FileRung::Outline, Some((sym_id, _))) => Some((
+            FileRung::Outline,
+            outline_input(graph, file_id, sym_id, text),
+        )),
+        (FileRung::Summaries, _) => {
+            summaries_input(graph, root, file_id, text)?.map(|input| (FileRung::Summaries, input))
         }
-        (FileRung::Summaries, _) => match summaries_input(graph, root, file_id, text)? {
-            Some(input) => (FileRung::Summaries, input),
-            None => (FileRung::Raw, text.to_string()),
+        _ => None,
+    };
+    Ok(match stand_in {
+        Some((rung, input)) => FileTaskInput {
+            rung,
+            pages: page_text(&input, page_bytes),
+            text: input,
         },
-        _ => (FileRung::Raw, text.to_string()),
+        None => raw(raw_pages),
     })
 }
 
@@ -7380,17 +7439,17 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
 
     #[test]
     fn a_page_cursor_round_trips_and_names_the_input_it_belongs_to() {
-        let cursor = encode_page_cursor(3, "some full input text");
+        let cursor = encode_page_cursor(3, "a.ts", "some full input text");
         assert_eq!(
-            decode_page_cursor(&cursor, "some full input text", 5).unwrap(),
+            decode_page_cursor(&cursor, "a.ts", "some full input text", 5).unwrap(),
             3
         );
     }
 
     #[test]
     fn a_page_cursor_for_changed_input_asks_for_a_restart() {
-        let cursor = encode_page_cursor(2, "the text as first read");
-        let err = decode_page_cursor(&cursor, "the text after an edit", 5).unwrap_err();
+        let cursor = encode_page_cursor(2, "a.ts", "the text as first read");
+        let err = decode_page_cursor(&cursor, "a.ts", "the text after an edit", 5).unwrap_err();
         assert!(
             err.to_string().contains("page 1"),
             "must tell the writer to restart from page 1: {err}"
@@ -7398,13 +7457,24 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     }
 
     #[test]
+    fn a_page_cursor_is_bound_to_the_file_it_was_issued_for() {
+        // Two files with identical text must not honour each other's cursors.
+        let cursor = encode_page_cursor(2, "a.ts", "identical boilerplate");
+        let err = decode_page_cursor(&cursor, "b.ts", "identical boilerplate", 5).unwrap_err();
+        assert!(err.to_string().contains("page 1"), "{err}");
+    }
+
+    #[test]
     fn a_malformed_or_out_of_range_page_cursor_is_rejected() {
-        let good = encode_page_cursor(2, "text");
+        let good = encode_page_cursor(2, "a.ts", "text");
         for bad in ["", "nonsense", "2", "x:abc", ":abc", "0:abc"] {
-            assert!(decode_page_cursor(bad, "text", 5).is_err(), "{bad:?}");
+            assert!(
+                decode_page_cursor(bad, "a.ts", "text", 5).is_err(),
+                "{bad:?}"
+            );
         }
         // Valid shape, but past the last page.
-        assert!(decode_page_cursor(&good, "text", 1).is_err());
+        assert!(decode_page_cursor(&good, "a.ts", "text", 1).is_err());
     }
 
     #[test]
@@ -7487,6 +7557,8 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         let block = "/* header\n * more\n */\nexport const A = 1;\n";
         assert_eq!(leading_comment_block(block), "/* header\n * more\n */");
         assert_eq!(leading_comment_block("export const A = 1;\n"), "");
+        // A line starting with `*` is a comment only inside a block comment.
+        assert_eq!(leading_comment_block("*ptr = 1;\nfn a() {}\n"), "");
         // A Rust attribute is not a comment.
         assert_eq!(
             leading_comment_block("#![allow(dead_code)]\nfn a() {}\n"),
@@ -7615,5 +7687,75 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    const MIXED_TS: &str = "export interface Shape { sides: number }\nexport const LIMIT_VALUE = 5;\nexport function first(): void {}\nexport function second(): void {}\n";
+
+    #[test]
+    fn summaries_input_also_lists_the_declarations_that_have_no_summary() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-sumother", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", MIXED_TS)]);
+        let file_id = graph.find("a.ts").unwrap();
+        for id in ["a.ts::first", "a.ts::second"] {
+            submit(
+                &graph,
+                &dir,
+                id,
+                "### Summary\nDoes one specific thing.\n### Behavior\nIt runs and returns nothing at all.\n",
+            )
+            .unwrap();
+        }
+
+        let input = summaries_input(&graph, &dir, file_id, MIXED_TS)
+            .unwrap()
+            .expect("every spec-bearing symbol has a summary");
+        let (_, others) = input
+            .split_once("OTHER TOP-LEVEL DECLARATIONS")
+            .unwrap_or_else(|| panic!("missing the other-declarations section: {input}"));
+        assert!(others.contains("Shape"), "interface missing: {others}");
+        assert!(others.contains("LIMIT_VALUE"), "constant missing: {others}");
+        assert!(
+            !others.contains("function first"),
+            "summarised symbols are not repeated"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn outline_input_also_lists_every_other_top_level_declaration() {
+        let src = "export class Big {\n  a(): void {}\n}\nexport function helper(): void {}\nexport const LIMIT_VALUE = 5;\n";
+        let graph = build_graph_from_sources(&[("big.ts", src)]);
+        let file_id = graph.find("big.ts").unwrap();
+        let container = graph.find("big.ts::Big").unwrap();
+
+        let input = outline_input(&graph, file_id, container, src);
+        let (outline, others) = input
+            .split_once("OTHER TOP-LEVEL DECLARATIONS")
+            .unwrap_or_else(|| panic!("missing the other-declarations section: {input}"));
+        assert!(outline.contains("class Big"));
+        assert!(
+            others.contains("helper") && others.contains("LIMIT_VALUE"),
+            "{others}"
+        );
+        assert!(
+            !others.contains("class Big"),
+            "the outlined class is not repeated"
+        );
+    }
+
+    #[test]
+    fn a_file_with_nothing_else_has_no_other_declarations_section() {
+        let src = "export class Big {\n  a(): void {}\n}\n";
+        let graph = build_graph_from_sources(&[("big.ts", src)]);
+        let input = outline_input(
+            &graph,
+            graph.find("big.ts").unwrap(),
+            graph.find("big.ts::Big").unwrap(),
+            src,
+        );
+        assert!(!input.contains("OTHER TOP-LEVEL DECLARATIONS"), "{input}");
     }
 }
