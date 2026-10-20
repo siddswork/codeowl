@@ -539,14 +539,16 @@ fn collect_cfg_test_ranges(node: Node, source: &str, out: &mut Vec<(usize, usize
     }
 }
 
-/// Where the run of attributes in front of `node` begins (the same
-/// siblings [`attributes`] reads), or the node's own start if it has none.
+/// Where the run of outer attributes in front of `node` begins, or the
+/// node's own start if it has none.
 fn first_attribute_start(node: Node) -> usize {
     let mut start = node.start_byte();
     let mut cursor = node.prev_sibling();
     while let Some(n) = cursor {
         match n.kind() {
-            "attribute_item" | "inner_attribute_item" => start = n.start_byte(),
+            // Only outer attributes belong to the item; a file-level `#![…]`
+            // is the file's own and stays.
+            "attribute_item" => start = n.start_byte(),
             "line_comment" | "block_comment" => {}
             _ => break,
         }
@@ -2570,6 +2572,23 @@ mod tests;\n";
     }
 
     #[test]
+    fn strip_test_modules_keeps_file_level_inner_attributes() {
+        // `#![…]` belongs to the file, not to the module that follows it.
+        let src = "#![allow(dead_code)]\n#[cfg(test)]\nmod tests { fn t() {} }\npub fn a() {}\n";
+        assert_eq!(
+            strip_test_modules(src),
+            "#![allow(dead_code)]\npub fn a() {}\n"
+        );
+    }
+
+    #[test]
+    fn stripping_a_large_test_module_shrinks_the_text() {
+        let body = "    // padding\n".repeat(200);
+        let src = format!("pub fn a() {{}}\n#[cfg(test)]\nmod tests {{\n{body}}}\n");
+        assert!(strip_test_modules(&src).len() < src.len() / 4);
+    }
+
+    #[test]
     fn strip_test_modules_leaves_text_with_no_test_module_byte_identical() {
         let src = "pub fn a() {}\n// a comment with cfg(test) in it\nstruct S;\n";
         assert_eq!(strip_test_modules(src), src);
@@ -2582,12 +2601,6 @@ mod tests;\n";
         // real file with a large test module.
         let src = std::fs::read_to_string("src/mcp.rs").unwrap();
         let stripped = strip_test_modules(&src);
-        assert!(
-            stripped.len() < src.len() / 2,
-            "mcp.rs is mostly tests; stripped {} of {} bytes",
-            stripped.len(),
-            src.len()
-        );
         let ids = |text: &str| {
             extract_file(text, "src/mcp.rs")
                 .into_iter()

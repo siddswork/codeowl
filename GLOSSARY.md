@@ -295,9 +295,9 @@ why CodeOwl cares.
   never cut off. The response says `page` and `pages` and carries a
   **`next_cursor`**: pass it back, with the same target, to get the next
   page. A cursor is `<page>:<hash12>`, the page number plus a short hash of
-  the whole input the pages were cut from. If the file (or a symbol summary
-  the input is built from) changed since the cursor was issued, the hash no
-  longer matches and the call is refused with "restart from page 1". CodeOwl
+  the file id and the whole input the pages were cut from. If the file (or a
+  symbol summary the input is built from) changed since the cursor was
+  issued, or the cursor is for another file, the hash no longer matches and the call is refused with "restart from page 1". CodeOwl
   keeps no state between the calls.
 
 **Input rung** (`input_kind`)
@@ -305,7 +305,8 @@ why CodeOwl cares.
   For a file too big to read raw (over `--max-file-pages` pages),
   **`summaries`** is each top-level symbol's signature and written
   `### Summary`, and **`outline`** is one dominant class's signature, doc
-  comment and member signatures with no bodies. The three numbers that choose
+  comment and member signatures with no bodies. Both end with the file's
+  other top-level declarations as bare signatures. The three numbers that choose
   a rung (`--max-file-pages`, `--summaries-min-symbols`,
   `--outline-container-percent`) are `codeowl serve` flags. See
   `DECISIONS.md` open question 22.
