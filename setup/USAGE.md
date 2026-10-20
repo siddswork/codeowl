@@ -199,7 +199,10 @@ you rely on an answer:
   reads; it never writes a spec. A spec written before CodeOwl recorded
   its dependencies says `unknown` for the dependency cause until it is
   regenerated, or until you run `codeowl backfill-dep-targets <path>`
-  (add `--write` to apply it; without that it only reports).
+  (add `--write` to apply it; without that it only reports). A file spec
+  written before the file fingerprint existed also says `unknown`, with
+  the reason, until it is regenerated or migrated (see "After upgrading"
+  below).
   Ask your agent: *"why is `src/spec.rs` stale?"*
 - **`get_spec_coverage(scope?, cursor?)`** — the repo's spec inventory,
   current/stale/missing/smelly, plus `coverage` (what fraction has *any*
@@ -369,6 +372,30 @@ Claude Code, `.vscode/mcp.json` for VS Code), then reconnect the server:
 ```
 
 The defaults are starting values, not measured limits past 12 pages.
+
+### After upgrading: migrate old file specs
+
+A file summary used to go stale on any edit to the file, a comment included.
+It now goes stale only when something a summary could quote changed (for
+Rust: the file's shape, its doc comments, or a number or long string in a
+function body; other stacks still use the whole text until their rule
+lands). Specs written before that have no `fingerprint` key on the file line
+of their frontmatter, so they read as stale. To keep the ones that were
+current, run once:
+
+```
+codeowl migrate-file-fingerprint <path>            # dry run: reports only
+codeowl migrate-file-fingerprint <path> --write    # add the key
+```
+
+It adds the key only to a spec that was current before the change (its stored
+text hash and dependency hash still match), changes nothing else in the file,
+and leaves specs that were already stale stale. Running it twice changes
+nothing the second time. Run it before the next `/codeowl-generate`. It skips
+a spec that already has the key, so if a later release gives your stack a
+new fingerprint rule, specs migrated under the old one read stale and are
+regenerated; on a large corpus in a stack that has no rule yet (TypeScript,
+Java, Python), it is worth waiting for that rule before migrating.
 
 ---
 

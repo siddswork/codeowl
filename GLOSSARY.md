@@ -429,7 +429,8 @@ why CodeOwl cares.
 ## Hashes and status
 
 To decide when a spec has gone out of date, CodeOwl compares hashes. There
-are **four**, and all of them are computed the same boring way — `blake3`
+are **four** (plus the file-level **fingerprint** below, which stands in for
+`source_hash` on a file's own spec), and all of them are computed the same boring way — `blake3`
 of a canonical string — so they're fully deterministic and never involve
 an LLM.
 
@@ -509,6 +510,22 @@ a change to its signature should.
   won't match any more) apart from "CodeOwl refreshed the auto-generated
   signature line" (which shouldn't look like a human edit). The former
   triggers reconciliation; the latter is silent.
+
+**File fingerprint**
+: The hash that decides whether a **file's own** spec is still current,
+  stored as a `fingerprint` key on the file line of its frontmatter beside
+  `source_hash`. Where `source_hash` moves on any edit to the raw text, the
+  fingerprint moves only on what a file summary could quote. For Rust that
+  is the file's shape (symbols, signatures, export flags, attributes,
+  constants, imports), its doc comments, and the numbers (other than 0, 1,
+  2) and strings of 8 or more characters inside function bodies, all read
+  outside `#[cfg(test)]` modules. A comment-only edit, a reformat or a
+  renamed local variable leaves it alone; the symbol's own spec still goes
+  stale. A pack with no rule yet fingerprints the whole text. A spec written
+  before it existed has no `fingerprint` key and is called **legacy**: it
+  reads as stale until regenerated or migrated with
+  `codeowl migrate-file-fingerprint`. See "A file's spec is keyed on its
+  fingerprint" in `ARCHITECTURE.md`.
 
 **Spec status** — the word `get_spec` / `get_spec_coverage` attaches to
 each document:
