@@ -625,6 +625,12 @@ pub struct RollupFile {
 pub enum FileInputKind {
     /// The file's own text.
     Raw,
+    /// Each spec-bearing symbol's signature and written summary, for a
+    /// file too big to read raw.
+    Summaries,
+    /// One dominant class's signature, doc comment and member signatures,
+    /// for a file too big to read raw that is mostly that class.
+    Outline,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
@@ -1091,6 +1097,21 @@ impl CodeOwlServer {
         // inside source files; the cursor's hash covers this same text.
         let graph = self.graph.load_full();
         let text = crate::stack::for_name(graph.pack_name()).strip_test_code(&id, &raw);
+        let file_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
+        let (rung, text) = crate::spec::file_task_input(
+            &graph,
+            &self.root,
+            file_id,
+            &text,
+            self.max_spec_task_bytes,
+            &self.file_ladder,
+        )
+        .map_err(|e| e.to_string())?;
+        let input_kind = match rung {
+            crate::spec::FileRung::Raw => FileInputKind::Raw,
+            crate::spec::FileRung::Summaries => FileInputKind::Summaries,
+            crate::spec::FileRung::Outline => FileInputKind::Outline,
+        };
         let pages = crate::spec::page_text(&text, self.max_spec_task_bytes);
         let total = pages.len();
         let page = match cursor {
@@ -1105,7 +1126,7 @@ impl CodeOwlServer {
             id,
             source,
             prior: if page == 1 { prior } else { None },
-            input_kind: FileInputKind::Raw,
+            input_kind,
             page,
             pages: total,
             next_cursor,
@@ -1468,7 +1489,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). `input_kind` says what the pages hold: `raw` is the file's own text; for a file too big to read raw, `summaries` is each top-level symbol's signature and written summary, and `outline` is one dominant class's signature, doc comment and member signatures. Either way the pages cover the whole file, so describe the file as a whole. Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
@@ -4838,6 +4859,196 @@ mod tests {
             !source.contains("mod tests"),
             "test code must be left out: {source}"
         );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Read a file task to its last page: the input kind and the pages
+    /// joined, plus how many pages there were.
+    async fn read_all_pages(
+        server: &CodeOwlServer,
+        target: &str,
+    ) -> (FileInputKind, String, usize) {
+        let mut response = first_file_page(server, target).await;
+        let mut text = String::new();
+        let mut kind = None;
+        loop {
+            let SpecTaskResponse::File {
+                source,
+                input_kind,
+                pages,
+                next_cursor,
+                ..
+            } = response
+            else {
+                panic!("expected a file page, got {response:?}");
+            };
+            kind.get_or_insert(input_kind);
+            assert_eq!(kind, Some(input_kind), "the kind is fixed across pages");
+            text.push_str(&source);
+            match next_cursor {
+                Some(c) => response = task_for(server, target, Some(&c)).await,
+                None => return (input_kind, text, pages),
+            }
+        }
+    }
+
+    /// `functions` one-line functions, each followed by a `padding`-byte
+    /// trailing comment that lives inside its own span.
+    fn many_functions(functions: usize, padding: usize) -> String {
+        (0..functions)
+            .map(|i| {
+                format!(
+                    "export function f{i}(): number {{ return {i}; }} // {}\n",
+                    "Z".repeat(padding)
+                )
+            })
+            .collect()
+    }
+
+    fn tiny_pages(server: CodeOwlServer, ladder: crate::spec::FileLadder) -> CodeOwlServer {
+        server
+            .with_generation_limits(None, Some(100))
+            .with_file_ladder(ladder)
+    }
+
+    fn ladder_of(pages: usize, symbols: usize, percent: usize) -> crate::spec::FileLadder {
+        crate::spec::FileLadder {
+            max_raw_pages: pages,
+            summaries_min_symbols: symbols,
+            outline_container_percent: percent,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_too_big_file_with_many_symbols_is_read_through_their_summaries() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-sum-{}", std::process::id()));
+        let src = many_functions(4, 150);
+        let server = tiny_pages(
+            rebuild_server(dir.clone(), &[("many.ts", &src)]),
+            ladder_of(1, 3, 70),
+        );
+
+        let (kind, text, pages) = read_all_pages(&server, "many.ts").await;
+        assert_eq!(kind, FileInputKind::Summaries);
+        assert!(pages > 1, "the summaries input is paged too");
+        for i in 0..4 {
+            assert!(
+                text.contains(&format!("function f{i}(): number")),
+                "f{i} missing: {text}"
+            );
+        }
+        assert!(text.contains("Returns the constant value one to its caller."));
+        assert!(
+            !text.contains("ZZZZ"),
+            "no raw bodies in the summaries input"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_too_big_file_that_is_mostly_one_class_is_read_through_its_outline() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-out-{}", std::process::id()));
+        let pad = "Q".repeat(300);
+        let src = format!(
+            "/** The big class. */\nexport class Big {{\n  /** Adds one. */\n  bump(n: number): number {{\n    return n + 1; // BODY-ONE {pad}\n  }}\n  /** Doubles it. */\n  twice(n: number): number {{\n    return n * 2; // BODY-TWO {pad}\n  }}\n}}\n"
+        );
+        let server = tiny_pages(
+            rebuild_server(dir.clone(), &[("big.ts", &src)]),
+            ladder_of(1, 99, 70),
+        );
+
+        let (kind, text, _) = read_all_pages(&server, "big.ts").await;
+        assert_eq!(kind, FileInputKind::Outline);
+        assert!(
+            text.contains("bump(n: number)") && text.contains("twice(n: number)"),
+            "{text}"
+        );
+        assert!(text.contains("Adds one.") && text.contains("Doubles it."));
+        assert!(
+            !text.contains("BODY-ONE") && !text.contains("BODY-TWO"),
+            "no bodies"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_too_big_file_with_neither_shape_falls_back_to_complete_paged_raw() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-fb-{}", std::process::id()));
+        let src = many_functions(2, 400);
+        let server = tiny_pages(
+            rebuild_server(dir.clone(), &[("few.ts", &src)]),
+            ladder_of(1, 8, 70),
+        );
+
+        let (kind, text, pages) = read_all_pages(&server, "few.ts").await;
+        assert_eq!(kind, FileInputKind::Raw);
+        assert!(pages > 1);
+        assert_eq!(text, src, "the fallback is the whole file, never cut");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn changing_the_ladder_changes_the_rung_for_the_same_file() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-flip-{}", std::process::id()));
+        let src = many_functions(4, 150);
+        let base = rebuild_server(dir.clone(), &[("many.ts", &src)])
+            .with_generation_limits(None, Some(100));
+
+        let roomy = base.clone().with_file_ladder(ladder_of(100, 3, 70));
+        assert_eq!(
+            read_all_pages(&roomy, "many.ts").await.0,
+            FileInputKind::Raw
+        );
+
+        let tight = base.with_file_ladder(ladder_of(1, 3, 70));
+        assert_eq!(
+            read_all_pages(&tight, "many.ts").await.0,
+            FileInputKind::Summaries
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn a_summaries_cursor_is_refused_once_a_symbol_summary_is_rewritten() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-ladder-rewr-{}", std::process::id()));
+        let src = many_functions(4, 150);
+        let server = tiny_pages(
+            rebuild_server(dir.clone(), &[("many.ts", &src)]),
+            ladder_of(1, 3, 70),
+        );
+        let SpecTaskResponse::File { next_cursor, .. } = first_file_page(&server, "many.ts").await
+        else {
+            unreachable!()
+        };
+        let cursor = next_cursor.expect("several pages");
+
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: "many.ts::f0".to_string(),
+                content: "### Summary\nA freshly rewritten summary here.\n### Behavior\nIt now does something rather different.\n".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let err = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "many.ts".to_string(),
+                cursor: Some(cursor),
+            }))
+            .await
+            .err()
+            .expect("the input changed");
+        assert!(err.contains("page 1"), "{err}");
 
         std::fs::remove_dir_all(&dir).ok();
     }

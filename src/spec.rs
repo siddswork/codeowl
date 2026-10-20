@@ -730,6 +730,212 @@ pub(crate) fn decode_page_cursor(cursor: &str, input: &str, pages: usize) -> Res
     Ok(page)
 }
 
+/// What a file task's text is made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRung {
+    /// The file's own text.
+    Raw,
+    /// Each spec-bearing symbol's signature and written summary.
+    Summaries,
+    /// One dominant container's signature, docstring and member signatures.
+    Outline,
+}
+
+/// Which input a file task is built from. A pure function of the facts and
+/// the configured numbers, so the boundaries can be tested directly.
+/// `pages` is the raw text's page count; `container_percent` is the largest
+/// container's share of the file's bytes (0 when it has none). A file
+/// within the page ceiling is always raw; beyond it, a dominant container
+/// gets the outline (checked first, since a class-sized file has one
+/// top-level symbol), then enough symbols get their summaries, and
+/// anything else stays raw, paged but complete.
+pub fn choose_file_rung(
+    pages: usize,
+    spec_bearing_symbols: usize,
+    container_percent: usize,
+    ladder: &FileLadder,
+) -> FileRung {
+    if pages <= ladder.max_raw_pages {
+        FileRung::Raw
+    } else if container_percent >= ladder.outline_container_percent {
+        FileRung::Outline
+    } else if spec_bearing_symbols >= ladder.summaries_min_symbols {
+        FileRung::Summaries
+    } else {
+        FileRung::Raw
+    }
+}
+
+/// The comment block at the very top of `text`, as written: leading `//`,
+/// `/* … */`, `*` and `#` comment lines up to the first blank or code
+/// line. A Rust `#[…]` / `#![…]` attribute is not a comment. Empty when the
+/// file starts with code. A Python module docstring is not recognised.
+pub(crate) fn leading_comment_block(text: &str) -> String {
+    let mut lines: Vec<&str> = Vec::new();
+    let mut in_block = false;
+    for line in text.lines() {
+        let t = line.trim_start();
+        if in_block {
+            lines.push(line);
+            if t.contains("*/") {
+                in_block = false;
+            }
+            continue;
+        }
+        if t.is_empty() && lines.is_empty() {
+            continue;
+        }
+        let is_hash_comment = t.starts_with('#') && !t.starts_with("#[") && !t.starts_with("#!");
+        if t.starts_with("/*") {
+            lines.push(line);
+            in_block = !t.contains("*/");
+        } else if t.starts_with("//") || t.starts_with('*') || is_hash_comment {
+            lines.push(line);
+        } else {
+            break;
+        }
+    }
+    lines.join("\n")
+}
+
+/// The file's largest container (class, struct, …) and its share of
+/// `file_bytes`, in percent. `None` when the file has no container. The
+/// span includes folded-in `impl` blocks, the same text a symbol task shows.
+pub(crate) fn largest_container_percent(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    file_bytes: usize,
+) -> Result<Option<(SymbolId, usize)>> {
+    let file = graph
+        .get_file(file_id)
+        .context("container share asked of a non-file id")?;
+    let mut best: Option<(SymbolId, usize)> = None;
+    for sym_id in spec_bearing_children(graph, file_id) {
+        let sym = graph.get_symbol(sym_id).expect("filtered to symbol ids");
+        if sym.kind != SymbolKind::Container {
+            continue;
+        }
+        let bytes = symbol_span_text(root, graph, &file.id, sym)?.len();
+        if best.is_none_or(|(_, b)| bytes > b) {
+            best = Some((sym_id, bytes));
+        }
+    }
+    Ok(best.map(|(id, bytes)| {
+        // An empty file has no share (checked_div is None on a zero divisor).
+        let percent = (bytes * 100).checked_div(file_bytes).unwrap_or(0).min(100);
+        (id, percent)
+    }))
+}
+
+/// `FILE:` and `MODULE DOC:` lines that open both stand-in inputs.
+fn stand_in_header(file_id: &str, text: &str) -> String {
+    let doc = leading_comment_block(text);
+    let doc = if doc.is_empty() {
+        "(none)"
+    } else {
+        doc.as_str()
+    };
+    format!("FILE: {file_id}\nMODULE DOC:\n{doc}\n")
+}
+
+/// The summaries input: the file's top comment, then each spec-bearing
+/// symbol in file order as its signature followed by its written
+/// `### Summary`. Never the file's own summary (the writer would copy it)
+/// and never the `### Behavior` text. `None` when any symbol has no written
+/// summary, so a partial input is never presented as the whole file.
+pub(crate) fn summaries_input(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    text: &str,
+) -> Result<Option<String>> {
+    let file = graph
+        .get_file(file_id)
+        .context("summaries input asked of a non-file id")?;
+    let Some(existing) = read_existing(root, &file.id)? else {
+        return Ok(None);
+    };
+    let symbols = spec_bearing_children(graph, file_id);
+    let mut entries = Vec::with_capacity(symbols.len());
+    for sym_id in &symbols {
+        let sym = graph.get_symbol(*sym_id).expect("filtered to symbol ids");
+        let Some(prose) = existing
+            .section(&sym.id)
+            .filter(|p| !p.summary.trim().is_empty())
+        else {
+            return Ok(None);
+        };
+        let summary = prose
+            .summary
+            .trim()
+            .lines()
+            .map(|l| format!("  {l}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        entries.push(format!("{}\n{summary}", sym.signature));
+    }
+    Ok(Some(format!(
+        "{}SYMBOLS ({}), in file order, each as: signature, then its written summary:\n{}\n",
+        stand_in_header(&file.id, text),
+        entries.len(),
+        entries.join("\n")
+    )))
+}
+
+/// The outline input: the file's top comment, then the dominant container's
+/// signature, docstring and member signatures and docstrings, no bodies.
+pub(crate) fn outline_input(
+    graph: &Graph,
+    file_id: &str,
+    container: &Symbol,
+    text: &str,
+) -> String {
+    format!(
+        "{}CLASS OUTLINE, in file order, signatures and doc comments only:\n{}\n",
+        stand_in_header(file_id, text),
+        container_outline(container, graph)
+    )
+}
+
+/// What a file task hands the writer for `text` (the file's text as the
+/// writer would read it, test code already left out): the chosen rung and
+/// its input. A summaries input that cannot be built falls back to raw.
+pub(crate) fn file_task_input(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    text: &str,
+    page_bytes: usize,
+    ladder: &FileLadder,
+) -> Result<(FileRung, String)> {
+    let pages = page_text(text, page_bytes).len();
+    if pages <= ladder.max_raw_pages {
+        return Ok((FileRung::Raw, text.to_string()));
+    }
+    let container = largest_container_percent(graph, root, file_id, text.len())?;
+    let rung = choose_file_rung(
+        pages,
+        spec_bearing_children(graph, file_id).len(),
+        container.map_or(0, |(_, percent)| percent),
+        ladder,
+    );
+    let file = graph
+        .get_file(file_id)
+        .context("file task asked of a non-file id")?;
+    Ok(match (rung, container) {
+        (FileRung::Outline, Some((sym_id, _))) => {
+            let sym = graph.get_symbol(sym_id).expect("a container is a symbol");
+            (FileRung::Outline, outline_input(graph, &file.id, sym, text))
+        }
+        (FileRung::Summaries, _) => match summaries_input(graph, root, file_id, text)? {
+            Some(input) => (FileRung::Summaries, input),
+            None => (FileRung::Raw, text.to_string()),
+        },
+        _ => (FileRung::Raw, text.to_string()),
+    })
+}
+
 /// `get_source`'s cap — deliberately larger than
 /// [`MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT`], since the two serve
 /// different purposes. That cap exists to keep a *generation task* small
@@ -788,6 +994,13 @@ pub(crate) fn maybe_reduce_container_source(
     {
         return full_source;
     }
+    container_outline(sym, graph)
+}
+
+/// A container's signature and docstring, then each member's signature and
+/// docstring in declaration order, with no bodies: the reduced display of a
+/// god-class task, and the stand-in for a file that is mostly one class.
+pub(crate) fn container_outline(sym: &Symbol, graph: &Graph) -> String {
     let mut out = sym.signature.clone();
     if let Some(doc) = &sym.docstring {
         out.push('\n');
@@ -7215,5 +7428,192 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             ),
             (12, 8, 70)
         );
+    }
+
+    // ---- the file-task ladder: which input, and how each is built ----
+
+    fn ladder(pages: usize, symbols: usize, percent: usize) -> FileLadder {
+        FileLadder {
+            max_raw_pages: pages,
+            summaries_min_symbols: symbols,
+            outline_container_percent: percent,
+        }
+    }
+
+    #[test]
+    fn a_file_within_the_page_ceiling_is_always_raw() {
+        let l = ladder(12, 8, 70);
+        // Even with plenty of symbols and a dominant container.
+        assert_eq!(choose_file_rung(12, 50, 100, &l), FileRung::Raw);
+        assert_eq!(choose_file_rung(1, 50, 100, &l), FileRung::Raw);
+    }
+
+    #[test]
+    fn the_summaries_threshold_is_exactly_the_configured_symbol_count() {
+        let l = ladder(12, 8, 70);
+        assert_eq!(choose_file_rung(13, 7, 10, &l), FileRung::Raw);
+        assert_eq!(choose_file_rung(13, 8, 10, &l), FileRung::Summaries);
+    }
+
+    #[test]
+    fn the_outline_threshold_is_exactly_the_configured_container_share() {
+        let l = ladder(12, 8, 70);
+        assert_eq!(choose_file_rung(13, 1, 69, &l), FileRung::Raw);
+        assert_eq!(choose_file_rung(13, 1, 70, &l), FileRung::Outline);
+    }
+
+    #[test]
+    fn the_outline_wins_when_both_summaries_and_outline_qualify() {
+        let l = ladder(12, 8, 70);
+        assert_eq!(choose_file_rung(13, 20, 90, &l), FileRung::Outline);
+    }
+
+    #[test]
+    fn a_non_default_ladder_moves_every_boundary() {
+        let l = ladder(3, 2, 50);
+        assert_eq!(choose_file_rung(3, 5, 80, &l), FileRung::Raw);
+        assert_eq!(choose_file_rung(4, 1, 49, &l), FileRung::Raw);
+        assert_eq!(choose_file_rung(4, 2, 49, &l), FileRung::Summaries);
+        assert_eq!(choose_file_rung(4, 1, 50, &l), FileRung::Outline);
+    }
+
+    #[test]
+    fn leading_comment_block_takes_the_top_comment_and_stops_at_code() {
+        let text = "//! Module doc line one.\n//! Line two.\n\nuse std::io;\n// later\n";
+        assert_eq!(
+            leading_comment_block(text),
+            "//! Module doc line one.\n//! Line two."
+        );
+        let block = "/* header\n * more\n */\nexport const A = 1;\n";
+        assert_eq!(leading_comment_block(block), "/* header\n * more\n */");
+        assert_eq!(leading_comment_block("export const A = 1;\n"), "");
+        // A Rust attribute is not a comment.
+        assert_eq!(
+            leading_comment_block("#![allow(dead_code)]\nfn a() {}\n"),
+            ""
+        );
+    }
+
+    #[test]
+    fn summaries_input_lists_each_symbol_signature_with_its_written_summary_in_order() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-sumin", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = "// Top comment of the file.\nexport function first(): void {}\nexport function second(): void {}\n";
+        let graph = build_graph_from_sources(&[("a.ts", src)]);
+        let file_id = graph.find("a.ts").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts::first",
+            "### Summary\nDoes the first thing.\n### Behavior\nBEHAVIOR-ONE runs quietly and returns nothing.\n",
+        )
+        .unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts::second",
+            "### Summary\nDoes the second thing.\n### Behavior\nBEHAVIOR-TWO runs quietly and returns nothing.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "a.ts", "FILE-LEVEL-SUMMARY must not leak in.").unwrap();
+
+        let input = summaries_input(&graph, &dir, file_id, src)
+            .unwrap()
+            .expect("every symbol has a summary");
+        let first = input.find("function first(").expect("first signature");
+        let second = input.find("function second(").expect("second signature");
+        assert!(first < second, "file order: {input}");
+        assert!(input.contains("Does the first thing."));
+        assert!(input.contains("Does the second thing."));
+        assert!(
+            input.contains("// Top comment of the file."),
+            "module doc: {input}"
+        );
+        assert!(
+            !input.contains("BEHAVIOR-ONE"),
+            "summary only, not behavior"
+        );
+        assert!(
+            !input.contains("FILE-LEVEL-SUMMARY"),
+            "never the file's own summary"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn summaries_input_is_none_when_a_symbol_has_no_written_summary() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-sumnone", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = "export function first(): void {}\nexport function second(): void {}\n";
+        let graph = build_graph_from_sources(&[("a.ts", src)]);
+        let file_id = graph.find("a.ts").unwrap();
+        submit(
+            &graph,
+            &dir,
+            "a.ts::first",
+            "### Summary\nDoes the first thing.\n### Behavior\nIt runs and returns nothing.\n",
+        )
+        .unwrap();
+        // `second` was never generated: never present a partial input as whole.
+        assert_eq!(summaries_input(&graph, &dir, file_id, src).unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    const BIG_JAVA: &str = "package a;\n\n/** The big class. */\npublic class Big {\n    /** Adds one. */\n    public int bump(int n) {\n        return n + 1; // BODY-ONE\n    }\n\n    /** Doubles it. */\n    public int twice(int n) {\n        return n * 2; // BODY-TWO\n    }\n}\n";
+
+    fn java_graph(src: &str) -> Graph {
+        Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "a/Big.java".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::java::extract_file(src, "a/Big.java"),
+        }])
+    }
+
+    #[test]
+    fn container_outline_is_signature_docstring_then_each_member_without_bodies() {
+        let graph = java_graph(BIG_JAVA);
+        let big = graph
+            .get_symbol(graph.find("a/Big.java::Big").unwrap())
+            .unwrap();
+        let outline = container_outline(big, &graph);
+        assert!(outline.starts_with("public class Big"), "{outline}");
+        assert!(outline.contains("The big class."));
+        let bump = outline.find("int bump").expect("bump member");
+        let twice = outline.find("int twice").expect("twice member");
+        assert!(bump < twice, "member order: {outline}");
+        assert!(outline.contains("Adds one.") && outline.contains("Doubles it."));
+        assert!(!outline.contains("BODY-ONE") && !outline.contains("BODY-TWO"));
+    }
+
+    #[test]
+    fn largest_container_percent_is_the_class_share_of_the_file() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-pct", std::process::id()));
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::write(dir.join("a/Big.java"), BIG_JAVA).unwrap();
+        let graph = java_graph(BIG_JAVA);
+        let file_id = graph.find("a/Big.java").unwrap();
+
+        let (container, percent) = largest_container_percent(&graph, &dir, file_id, BIG_JAVA.len())
+            .unwrap()
+            .expect("the file has a container");
+        assert_eq!(graph.get_symbol(container).unwrap().id, "a/Big.java::Big");
+        assert!(
+            (70..=100).contains(&percent),
+            "the class is nearly the whole file, got {percent}"
+        );
+        // A file with no container has no share at all.
+        let ts = build_graph_from_sources(&[("f.ts", "export function f(): void {}\n")]);
+        let ts_id = ts.find("f.ts").unwrap();
+        assert_eq!(
+            largest_container_percent(&ts, &dir, ts_id, 30).unwrap(),
+            None
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
