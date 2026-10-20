@@ -75,6 +75,17 @@ enum Command {
         #[arg(long)]
         write: bool,
     },
+    /// Give file specs written before the file fingerprint their
+    /// `fingerprint` key. Only specs that were current are changed, and the
+    /// only change is that key on the file line; a stale spec stays stale.
+    /// Run it once after upgrading, before the next generation. Prints what
+    /// it would do unless `--write` is given.
+    MigrateFileFingerprint {
+        path: PathBuf,
+        /// Apply the changes; without it nothing is written.
+        #[arg(long)]
+        write: bool,
+    },
 }
 
 #[tokio::main]
@@ -90,6 +101,28 @@ async fn main() -> Result<()> {
                 .filter_map(|id| codeowl::graph::SymbolView::from_graph(&graph, id))
                 .collect();
             println!("{}", serde_json::to_string_pretty(&views)?);
+            Ok(())
+        }
+        Command::MigrateFileFingerprint { path, write } => {
+            let root = canonical_root(&path)?;
+            let graph = RepoIndex::build(&root)?.rebuild()?;
+            let r = codeowl::spec::migrate_file_fingerprints(&graph, &root, write)?;
+            let verb = if write { "migrated" } else { "would migrate" };
+            println!("{verb} {} file spec(s)", r.migrated);
+            println!(
+                "skipped: {} already migrated, {} already stale (left stale), \
+                 {} with no file summary yet",
+                r.already_migrated, r.left_stale, r.no_file_entry
+            );
+            if r.unreadable_files > 0 {
+                println!(
+                    "{} spec file(s) could not be read and were left alone",
+                    r.unreadable_files
+                );
+            }
+            if !write && r.migrated > 0 {
+                println!("dry run: nothing written; pass --write to apply");
+            }
             Ok(())
         }
         Command::BackfillDepTargets { path, write } => {
@@ -266,5 +299,19 @@ mod tests {
         ] {
             assert!(parse_serve(&bad).is_err(), "{bad:?} must be rejected");
         }
+    }
+
+    #[test]
+    fn migrate_file_fingerprint_takes_a_path_and_an_optional_write_flag() {
+        let dry = Cli::try_parse_from(["codeowl", "migrate-file-fingerprint", "/repo"]);
+        assert!(matches!(
+            dry.map(|c| c.command),
+            Ok(Command::MigrateFileFingerprint { write: false, .. })
+        ));
+        let live = Cli::try_parse_from(["codeowl", "migrate-file-fingerprint", "/repo", "--write"]);
+        assert!(matches!(
+            live.map(|c| c.command),
+            Ok(Command::MigrateFileFingerprint { write: true, .. })
+        ));
     }
 }
