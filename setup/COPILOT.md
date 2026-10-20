@@ -165,7 +165,8 @@ CodeOwl was built and tuned against Claude Code. The read tools
    - **`--max-spec-task-bytes`** (default **8,000**) — a hard ceiling
      applied *after* that reduction, to *any* generation-task response
      (a class, or a plain large file with no single big class — the
-     latter had no protection at all before this). This is the actual
+     latter had no protection at all before this; a big file is now
+     handed over in pages of this size rather than cut). This is the actual
      guarantee: nothing CodeOwl returns from `get_next_spec_task` can
      exceed this many bytes, full stop.
 

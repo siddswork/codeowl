@@ -1,6 +1,6 @@
 # Plan: the file-task ladder (exp-05 step 4)
 
-Status: **approved by the owner 2026-10-05 (numbers as proposed; lifecycle-test rewrite moved to step 5). Nothing is built.** Branch `file-task-ladder`. Tests first.
+Status: **approved by the owner 2026-10-05 (numbers as proposed; lifecycle-test rewrite moved to step 5). Built in four commits on this branch (2026-10-20); see the commit log.** Branch `file-task-ladder`. Tests first.
 Decided already (owner): see `DECISIONS.md` q22 and `experiments/exp-05-file-summary-input.md`. Items marked **PROPOSED** are mine and need approval.
 
 ## Goal
