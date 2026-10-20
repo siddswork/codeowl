@@ -228,10 +228,13 @@ you rely on an answer:
   `by_module`, `top_stale_by_impact`, `orphaned`, `generated_sources`) is
   already whole-repo regardless of pagination — only `pending` itself is
   paged.
-- **`get_next_spec_task(target)`** / **`submit_spec(id, content)`** — the
-  generation loop's two halves: the first hands back the next uncovered
-  unit with its source and dependency specs pre-assembled, the second
-  persists what your agent wrote. `/codeowl-generate` drives both — see
+- **`get_next_spec_task(target, cursor?)`** / **`submit_spec(id, content)`** —
+  the generation loop's two halves: the first hands back the next
+  uncovered unit with its source and dependency specs pre-assembled, the
+  second persists what your agent wrote. A file too big for one response
+  comes in pages (`cursor` fetches the next one; see "Big files" below),
+  and a unit that already has a spec comes with the old text, so the agent
+  revises it instead of starting over. `/codeowl-generate` drives both — see
   "How generation works" below; call them yourself only if you're
   building your own generation client.
 - **`search_code(query, path?, ignore_case?, context_lines?,
@@ -348,6 +351,20 @@ you can see which files are the expensive ones before you start.
 Start with `--all --budget=N` (N≈15 on a fresh repo), read what the agent
 wrote, commit, then run it again for the next batch — a small budget is
 what keeps each pass reviewable.
+
+**Regenerating starts from the old text.** When a spec is stale because the
+code changed and nobody edited it by hand, the task carries the last
+version the agent wrote (`previous_summary` and `previous_behavior` for a
+function or class, `previous` for a file's summary). The agent revises it:
+it keeps every claim that is still true, re-checks each against the current
+source, and drops nothing without a reason. A draft written from the
+source alone can lose a caveat the old text had, such as "this matches by
+text, so a name in a comment also counts", unless the agent finds it
+again; starting from the old text keeps it. The old text is left out when
+it fails the quality check (a "see the source" stub), and a hand-edited
+spec is handled separately (see the FAQ on hand edits).
+Review the diff of a regenerated spec the way you would a code change: a
+caveat that disappeared is worth a second look.
 
 ### Big files: pages, and the three numbers you can change
 
@@ -607,7 +624,8 @@ Two places, with opposite lifecycles:
   means a human touched the text and the code didn't move, so the edit
   simply becomes the current spec. If the code changed too, your edit is
   fed back to the agent as the prior version to preserve and adjust, not
-  silently discarded.
+  silently discarded. If you did not edit it and only the code changed,
+  the agent gets the last version it wrote instead, to revise.
 
 - **Does this hold up on a large monorepo?**
 
