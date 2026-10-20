@@ -813,11 +813,6 @@ impl CodeOwlServer {
         self
     }
 
-    /// The ladder numbers this server is running with.
-    pub fn file_ladder(&self) -> crate::spec::FileLadder {
-        self.file_ladder
-    }
-
     /// Override the two `get_next_spec_task` size knobs from their
     /// compiled-in defaults — `codeowl serve`'s `--large-class-bytes`
     /// / `--max-spec-task-bytes` flags call this. `None` leaves the
@@ -914,13 +909,14 @@ impl CodeOwlServer {
         &self,
         graph: &Graph,
         entry: &crate::features::EntryPoint,
+        cursor: Option<&str>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         let Some(file_id) = graph.find(&entry.file) else {
             return Ok(Json(None));
         };
         let task = crate::spec::next_task(graph, &self.root, file_id).map_err(|e| e.to_string())?;
         if let Some(task) = task {
-            return Ok(Json(Some(self.spec_task_to_response(graph, task)?)));
+            return Ok(Json(Some(self.spec_task_to_response(graph, task, cursor)?)));
         }
         self.first_pending_feature_task(graph, std::iter::once(entry))
     }
@@ -982,6 +978,7 @@ impl CodeOwlServer {
         &self,
         graph: &Graph,
         target: &str,
+        cursor: Option<&str>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         if !crate::spec::directory_is_spec_bearing(graph, target) {
             return Ok(Json(None));
@@ -990,7 +987,7 @@ impl CodeOwlServer {
         if let Some(task) = crate::spec::next_task_for_directory(graph, &self.root, target)
             .map_err(|e| e.to_string())?
         {
-            return Ok(Json(Some(self.spec_task_to_response(graph, task)?)));
+            return Ok(Json(Some(self.spec_task_to_response(graph, task, cursor)?)));
         }
 
         let Some(task) =
@@ -1018,6 +1015,7 @@ impl CodeOwlServer {
         &self,
         graph: &Graph,
         task: crate::spec::SpecTask,
+        cursor: Option<&str>,
     ) -> Result<SpecTaskResponse, String> {
         Ok(match task {
             crate::spec::SpecTask::Symbol {
@@ -1079,7 +1077,7 @@ impl CodeOwlServer {
                     prior_behavior: prior.map(|p| p.behavior),
                 }
             }
-            crate::spec::SpecTask::File { id, prior } => self.file_task_page(id, prior, None)?,
+            crate::spec::SpecTask::File { id, prior } => self.file_task_page(id, prior, cursor)?,
         })
     }
 
@@ -1098,7 +1096,7 @@ impl CodeOwlServer {
         let graph = self.graph.load_full();
         let text = crate::stack::for_name(graph.pack_name()).strip_test_code(&id, &raw);
         let file_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
-        let (rung, text) = crate::spec::file_task_input(
+        let crate::spec::FileTaskInput { rung, text, pages } = crate::spec::file_task_input(
             &graph,
             &self.root,
             file_id,
@@ -1112,15 +1110,15 @@ impl CodeOwlServer {
             crate::spec::FileRung::Summaries => FileInputKind::Summaries,
             crate::spec::FileRung::Outline => FileInputKind::Outline,
         };
-        let pages = crate::spec::page_text(&text, self.max_spec_task_bytes);
         let total = pages.len();
         let page = match cursor {
             None => 1,
             Some(c) => {
-                crate::spec::decode_page_cursor(c, &text, total).map_err(|e| e.to_string())?
+                crate::spec::decode_page_cursor(c, &id, &text, total).map_err(|e| e.to_string())?
             }
         };
-        let next_cursor = (page < total).then(|| crate::spec::encode_page_cursor(page + 1, &text));
+        let next_cursor =
+            (page < total).then(|| crate::spec::encode_page_cursor(page + 1, &id, &text));
         let source = pages.into_iter().nth(page - 1).unwrap_or_default();
         Ok(SpecTaskResponse::File {
             id,
@@ -1489,27 +1487,23 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). `input_kind` says what the pages hold: `raw` is the file's own text; for a file too big to read raw, `summaries` is each top-level symbol's signature and written summary, and `outline` is one dominant class's signature, doc comment and member signatures. Either way the pages cover the whole file, so describe the file as a whole. Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. Stateless: safe to call repeatedly with the same target."
+        description = "The next unit /codeowl generate <target> still needs a spec for, bottom-up: a file's uncovered top-level symbols, then the file itself, then (if the target is also a feature entry point -- a page or an orphan API route) the feature spec. target may also be a `feature:<slug>` or `rollup:<dir>` id (as get_spec_coverage reports them), a directory path (e.g. \"lib\") with >=2 spec-bearing files -- walks each of its files' own symbol-then-file ladder first, then the directory's rollup spec once every file is current -- or \"system\"/\".\" to walk EVERY module and EVERY feature in the whole repo, then the one system spec once all of them are current. Returns `{\"kind\":\"done\"}` when the target isn't spec-bearing at all (e.g. a barrel file with no feature or rollup either) or everything on it is already current -- that's the generate loop's termination signal. A `file` task is handed over in pages, never cut: it carries `page`, `pages` and `next_cursor`; while `next_cursor` is non-null, call again with the same `target` and that value as `cursor`, in order, and write the file's summary only after the last page (`next_cursor` null). `input_kind` says what the pages hold: `raw` is the file's own text; for a file too big to read raw, `summaries` is each top-level function's and class's signature and written summary, and `outline` is one dominant class's signature, doc comment and member signatures; both then list every other top-level declaration by signature only. These stand in for the file, so describe the file as a whole, not just the part shown in detail. Pass a cursor exactly as given; if the file changed in between you get an error telling you to restart from page 1. Stateless: safe to call repeatedly with the same target."
     )]
     async fn get_next_spec_task(
         &self,
         Parameters(req): Parameters<GenerateTaskRequest>,
     ) -> Result<Json<SpecTaskResponse>, String> {
-        let Json(task) = self.resolve_next_task(&req.target).await?;
-        let Some(cursor) = req.cursor else {
-            return Ok(Json(task.unwrap_or(SpecTaskResponse::Done {})));
-        };
-        // A cursor pages through one file task; the first page was already
-        // resolved above, so re-cut the same file at the cursor's page.
-        match task {
-            Some(SpecTaskResponse::File { id, .. }) => {
-                self.file_task_page(id, None, Some(&cursor)).map(Json)
-            }
-            _ => Err(format!(
+        let cursor = req.cursor.as_deref();
+        let Json(task) = self.resolve_next_task(&req.target, cursor).await?;
+        // The cursor was consumed while the file task was built; if what came
+        // back is not a file task, there was nothing for it to page through.
+        if cursor.is_some() && !matches!(task, Some(SpecTaskResponse::File { .. })) {
+            return Err(format!(
                 "cursor given, but the next task for {:?} is not a file task: call again without a cursor",
                 req.target
-            )),
+            ));
         }
+        Ok(Json(task.unwrap_or(SpecTaskResponse::Done {})))
     }
 
     /// The dispatch behind `get_next_spec_task` — kept returning `Option`
@@ -1518,10 +1512,11 @@ impl CodeOwlServer {
     async fn resolve_next_task(
         &self,
         target: &str,
+        cursor: Option<&str>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         let graph = self.graph.load_full();
         if target == "system" || target == "." {
-            return self.next_system_task_response(&graph);
+            return self.next_system_task_response(&graph, cursor);
         }
         // Accept the same id vocabulary get_spec_coverage emits and
         // get_spec/submit_spec take -- a budgeted --all walk hands these
@@ -1533,12 +1528,12 @@ impl CodeOwlServer {
             else {
                 return Ok(Json(None));
             };
-            return self.next_task_for_feature(&graph, &entry);
+            return self.next_task_for_feature(&graph, &entry, cursor);
         }
         if let Some(dir) = target.strip_prefix("rollup:") {
-            return self.next_directory_task_response(&graph, dir);
+            return self.next_directory_task_response(&graph, dir, cursor);
         }
-        self.next_task_for_target(&graph, target)
+        self.next_task_for_target(&graph, target, cursor)
     }
 
     /// The bottom-up chase for a single file/symbol/directory target --
@@ -1548,9 +1543,10 @@ impl CodeOwlServer {
         &self,
         graph: &Graph,
         target: &str,
+        cursor: Option<&str>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         let Some(target_id) = graph.find(target) else {
-            return self.next_directory_task_response(graph, target);
+            return self.next_directory_task_response(graph, target, cursor);
         };
         let task =
             crate::spec::next_task(graph, &self.root, target_id).map_err(|e| e.to_string())?;
@@ -1558,7 +1554,7 @@ impl CodeOwlServer {
         let Some(task) = task else {
             return self.next_feature_task_response(graph, target);
         };
-        Ok(Json(Some(self.spec_task_to_response(graph, task)?)))
+        Ok(Json(Some(self.spec_task_to_response(graph, task, cursor)?)))
     }
 
     /// `get_next_spec_task`'s path for the whole-repo target (`"system"` or
@@ -1570,14 +1566,15 @@ impl CodeOwlServer {
     fn next_system_task_response(
         &self,
         graph: &Graph,
+        cursor: Option<&str>,
     ) -> Result<Json<Option<SpecTaskResponse>>, String> {
         for dir in crate::spec::enumerate_modules(graph) {
-            if let Json(Some(response)) = self.next_directory_task_response(graph, &dir)? {
+            if let Json(Some(response)) = self.next_directory_task_response(graph, &dir, cursor)? {
                 return Ok(Json(Some(response)));
             }
         }
         for entry in crate::features::enumerate_entry_points(graph) {
-            if let Json(Some(response)) = self.next_task_for_target(graph, &entry.file)? {
+            if let Json(Some(response)) = self.next_task_for_target(graph, &entry.file, cursor)? {
                 return Ok(Json(Some(response)));
             }
         }
@@ -4818,7 +4815,7 @@ mod tests {
         let dir =
             std::env::temp_dir().join(format!("codeowl-mcp-ladder-cfg-{}", std::process::id()));
         let server = rebuild_server(dir.clone(), &[("a.ts", "export const A = 1;\n")]);
-        assert_eq!(server.file_ladder(), crate::spec::FileLadder::default());
+        assert_eq!(server.file_ladder, crate::spec::FileLadder::default());
 
         let custom = crate::spec::FileLadder {
             max_raw_pages: 3,
@@ -4826,7 +4823,7 @@ mod tests {
             outline_container_percent: 90,
         };
         let server = server.with_file_ladder(custom);
-        assert_eq!(server.file_ladder(), custom);
+        assert_eq!(server.file_ladder, custom);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -4924,7 +4921,7 @@ mod tests {
     async fn a_too_big_file_with_many_symbols_is_read_through_their_summaries() {
         let dir =
             std::env::temp_dir().join(format!("codeowl-mcp-ladder-sum-{}", std::process::id()));
-        let src = many_functions(4, 150);
+        let src = format!("{}export const LIMIT_VALUE = 5;\n", many_functions(4, 150));
         let server = tiny_pages(
             rebuild_server(dir.clone(), &[("many.ts", &src)]),
             ladder_of(1, 3, 70),
@@ -4932,6 +4929,10 @@ mod tests {
 
         let (kind, text, pages) = read_all_pages(&server, "many.ts").await;
         assert_eq!(kind, FileInputKind::Summaries);
+        assert!(
+            text.contains("LIMIT_VALUE"),
+            "a declaration with no summary still appears: {text}"
+        );
         assert!(pages > 1, "the summaries input is paged too");
         for i in 0..4 {
             assert!(
@@ -4954,7 +4955,7 @@ mod tests {
             std::env::temp_dir().join(format!("codeowl-mcp-ladder-out-{}", std::process::id()));
         let pad = "Q".repeat(300);
         let src = format!(
-            "/** The big class. */\nexport class Big {{\n  /** Adds one. */\n  bump(n: number): number {{\n    return n + 1; // BODY-ONE {pad}\n  }}\n  /** Doubles it. */\n  twice(n: number): number {{\n    return n * 2; // BODY-TWO {pad}\n  }}\n}}\n"
+            "/** The big class. */\nexport class Big {{\n  /** Adds one. */\n  bump(n: number): number {{\n    return n + 1; // BODY-ONE {pad}\n  }}\n  /** Doubles it. */\n  twice(n: number): number {{\n    return n * 2; // BODY-TWO {pad}\n  }}\n}}\nexport function helperOutsideTheClass(): void {{}}\n"
         );
         let server = tiny_pages(
             rebuild_server(dir.clone(), &[("big.ts", &src)]),
@@ -4963,6 +4964,10 @@ mod tests {
 
         let (kind, text, _) = read_all_pages(&server, "big.ts").await;
         assert_eq!(kind, FileInputKind::Outline);
+        assert!(
+            text.contains("helperOutsideTheClass"),
+            "other top-level declarations are listed: {text}"
+        );
         assert!(
             text.contains("bump(n: number)") && text.contains("twice(n: number)"),
             "{text}"
