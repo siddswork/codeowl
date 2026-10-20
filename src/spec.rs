@@ -1684,14 +1684,18 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 // case 2: regeneration with no human edit to preserve. The
                 // last machine draft still goes along, so the writer
                 // revises it instead of redrafting from the source alone
-                // (and quietly dropping a caveat the old text had).
-                let has_text = !prose.summary.is_empty() || !prose.behavior.is_empty();
+                // (and quietly dropping a caveat the old text had). Not
+                // when the old text is itself flagged (a cop-out stub, or
+                // an empty half, which counts as too short): that is the
+                // thing being replaced, not something to keep.
+                let clean = prose_smells(&prose.summary).is_empty()
+                    && prose_smells(&prose.behavior).is_empty();
                 return Ok(Some(SpecTask::Symbol {
                     id: sym.id.clone(),
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
                     prior: None,
-                    previous: has_text.then_some(prose),
+                    previous: clean.then_some(prose),
                 }));
             }
             (false, true) => {
@@ -1738,7 +1742,11 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 return Ok(Some(SpecTask::File {
                     id: file.id.clone(),
                     prior: None,
-                    previous: Some(spec.file_summary.clone()).filter(|s| !s.is_empty()),
+                    // Same rule as for a symbol: a flagged summary is not
+                    // handed over as text to keep.
+                    previous: prose_smells(&spec.file_summary)
+                        .is_empty()
+                        .then(|| spec.file_summary.clone()),
                 }));
             }
             (false, true) => {
@@ -5545,6 +5553,96 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 id: "a.ts".to_string(),
                 prior: None,
                 previous: Some("A file with one small helper function.".to_string()),
+            })
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_source_change_does_not_carry_a_flagged_symbol_draft_as_previous() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-previous-smelly-symbol",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph_v1 = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        // The stored draft is a cop-out stub: it is the thing being
+        // replaced, so handing it to the writer as text to keep would ask
+        // it to preserve a defect.
+        plant_smelly_symbol_spec(
+            &graph_v1,
+            &dir,
+            "a.ts::one",
+            "One does its one small job.",
+            "See the source for details.",
+        );
+
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let graph_v2 = build_graph_from_sources(&[("a.ts", source_v2)]);
+        let file_id_v2 = graph_v2.find("a.ts").unwrap();
+
+        let task = next_task(&graph_v2, &dir, file_id_v2).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::Symbol {
+                id: "a.ts::one".to_string(),
+                signature: "function one(): void".to_string(),
+                docstring: None,
+                prior: None,
+                previous: None,
+            })
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_source_change_does_not_carry_a_flagged_file_summary_as_previous() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-previous-smelly-file",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph_v1 = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        submit(
+            &graph_v1,
+            &dir,
+            "a.ts::one",
+            "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n",
+        )
+        .unwrap();
+        let clean = "A file with one small helper function.";
+        let stub = "See the source for details.";
+        submit(&graph_v1, &dir, "a.ts", clean).unwrap();
+        // Turn the stored file summary into a hash-current cop-out stub.
+        let path = spec_path(&dir, "a.ts");
+        let patched = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace(clean, stub)
+            .replace(&hash_text(clean), &hash_text(stub));
+        std::fs::write(&path, patched).unwrap();
+
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let graph_v2 = build_graph_from_sources(&[("a.ts", source_v2)]);
+        let file_id_v2 = graph_v2.find("a.ts").unwrap();
+        submit(
+            &graph_v2,
+            &dir,
+            "a.ts::one",
+            "### Summary\nThis is the revised summary.\n### Behavior\nThis is the revised behavior.\n",
+        )
+        .unwrap();
+
+        let task = next_task(&graph_v2, &dir, file_id_v2).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::File {
+                id: "a.ts".to_string(),
+                prior: None,
+                previous: None,
             })
         );
 

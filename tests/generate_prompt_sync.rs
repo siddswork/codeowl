@@ -62,7 +62,19 @@ fn both_copies_tell_the_agent_how_to_read_a_paged_file_task() {
 /// What every copy must tell the agent about a task that carries the last
 /// machine-written draft, and about the two habits that keep a regeneration
 /// from losing or inventing detail.
-const REVISION: [(&str, &str); 6] = [
+const REVISION: [(&str, &str); 9] = [
+    (
+        "arrive on page 1 only",
+        "the old draft comes once, before the pages, so it must be noted then",
+    ),
+    (
+        "keep an old claim unless the stand-in contradicts it",
+        "on a summaries or outline file task the input cannot verify every claim",
+    ),
+    (
+        "not a sweep of every neighbour",
+        "the caller check is per claim stated, so a --budget run stays affordable",
+    ),
     (
         "`previous_summary`",
         "the symbol field that carries the last draft",

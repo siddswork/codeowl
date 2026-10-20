@@ -102,7 +102,9 @@ sentence. Five concrete failure modes to actively avoid:
 - A claim about another function that you did not check. Before you write
   that X is called by, serves, overrides or is used from Y, confirm it
   with `get_callers` or `get_callees` on the id. A comment, a docstring or
-  the old spec saying so is not proof; the code can have moved on.
+  the old spec saying so is not proof; the code can have moved on. One
+  call per claim you actually state is enough; this is not a sweep of
+  every neighbour.
 
 ## Loop
 
@@ -141,8 +143,11 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      (`next_cursor` is null); only then write the summary and call
      `submit_spec` once. If a call fails saying the file changed or the
      cursor is for another file, restart from page 1 by calling again
-     without a cursor. `prior` (the reconciliation text) arrives on page 1
-     only; keep it in mind while you read the rest.
+     without a cursor. `prior` (the reconciliation text) and `previous`
+     (the last machine draft) arrive on page 1 only. Note what they say
+     before you read on: the later pages do not repeat them, and you write
+     only after the last page. After a restart they arrive again with
+     page 1.
 
      `input_kind` says what the pages hold. `raw` is the file's own text:
      read it as you would any source. `summaries` and `outline` stand in
@@ -156,7 +161,11 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      behaviours that would surprise a reader. (`docs/specs/STYLE.md` still
      governs wording and reading level.) Describe the file, not the
      input: never describe the input as cut off, partial, or a list of
-     summaries.
+     summaries. When `previous` comes with one of these two, the pages
+     are only a stand-in for the file, so you cannot re-check every old
+     claim against them: keep an old claim unless the stand-in
+     contradicts it, and add no new specific that the stand-in does not
+     show.
    - **`kind: "feature"`** — write the whole feature document in one go,
      starting with a `# Title` line (a human-friendly title — CodeOwl
      never synthesizes one), then these four headings:
