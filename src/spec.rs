@@ -1555,12 +1555,22 @@ pub enum SpecTask {
         /// `None` for a first-ever generation or a plain case-2
         /// regeneration (no human edit on record).
         prior: Option<SymbolProse>,
+        /// `Some` when the source moved and no human had edited the prose:
+        /// the last machine-written text, for the writer to revise rather
+        /// than redraft from nothing. Never set together with `prior` (a
+        /// human's text is the one to preserve), never set for a
+        /// first-ever generation, and never set for prose the quality
+        /// check flagged (that text is the thing being replaced).
+        previous: Option<SymbolProse>,
     },
     File {
         id: String,
         /// Same case-4 meaning as `Symbol::prior`, for the file's own
         /// `## Summary`.
         prior: Option<String>,
+        /// Same meaning as `Symbol::previous`, for the file's own
+        /// `## Summary`.
+        previous: Option<String>,
     },
 }
 
@@ -1640,6 +1650,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 signature: sym.signature.clone(),
                 docstring: sym.docstring.clone(),
                 prior: None,
+                previous: None,
             }));
         };
         let source_changed = !symbol_changes(graph, root, target_file_id, sym, hash).is_empty();
@@ -1664,17 +1675,23 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                         signature: sym.signature.clone(),
                         docstring: sym.docstring.clone(),
                         prior: None,
+                        previous: None,
                     }));
                 }
                 continue;
             }
             (true, false) => {
-                // case 2: plain regeneration, nothing to preserve
+                // case 2: regeneration with no human edit to preserve. The
+                // last machine draft still goes along, so the writer
+                // revises it instead of redrafting from the source alone
+                // (and quietly dropping a caveat the old text had).
+                let has_text = !prose.summary.is_empty() || !prose.behavior.is_empty();
                 return Ok(Some(SpecTask::Symbol {
                     id: sym.id.clone(),
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
                     prior: None,
+                    previous: has_text.then_some(prose),
                 }));
             }
             (false, true) => {
@@ -1688,6 +1705,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                     signature: sym.signature.clone(),
                     docstring: sym.docstring.clone(),
                     prior: Some(prose),
+                    previous: None,
                 }));
             }
         }
@@ -1711,6 +1729,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                     return Ok(Some(SpecTask::File {
                         id: file.id.clone(),
                         prior: None,
+                        previous: None,
                     }));
                 }
                 return Ok(None);
@@ -1719,6 +1738,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 return Ok(Some(SpecTask::File {
                     id: file.id.clone(),
                     prior: None,
+                    previous: Some(spec.file_summary.clone()).filter(|s| !s.is_empty()),
                 }));
             }
             (false, true) => {
@@ -1729,6 +1749,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
                 return Ok(Some(SpecTask::File {
                     id: file.id.clone(),
                     prior: Some(spec.file_summary.clone()),
+                    previous: None,
                 }));
             }
         }
@@ -1737,6 +1758,7 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
     Ok(Some(SpecTask::File {
         id: file.id.clone(),
         prior: None,
+        previous: None,
     }))
 }
 
@@ -5125,6 +5147,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 signature: "function one(): void".to_string(),
                 docstring: None,
                 prior: None,
+                previous: None,
             }
         );
 
@@ -5143,6 +5166,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 signature: "function two(): void".to_string(),
                 docstring: None,
                 prior: None,
+                previous: None,
             }
         );
 
@@ -5159,6 +5183,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             SpecTask::File {
                 id: "a.ts".to_string(),
                 prior: None,
+                previous: None,
             }
         );
 
@@ -5326,6 +5351,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             SpecTask::File {
                 id: "a.ts".to_string(),
                 prior: None,
+                previous: None,
             }
         );
 
@@ -5369,6 +5395,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             Some(SpecTask::File {
                 id: "a.ts".to_string(),
                 prior: None,
+                previous: None,
             })
         );
 
@@ -5426,6 +5453,98 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                     summary: "A careful human-corrected summary here.".to_string(),
                     behavior: "This is the original behavior.".to_string(),
                 }),
+                previous: None,
+            })
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_source_change_with_no_human_edit_carries_the_last_machine_draft_as_previous() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-previous-symbol",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph_v1 = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        submit(
+            &graph_v1,
+            &dir,
+            "a.ts::one",
+            "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n",
+        )
+        .unwrap();
+
+        // The source moves and nobody touched the prose: the writer is
+        // handed the last machine draft to revise, in `previous`, and
+        // `prior` stays empty because there is no human edit to preserve.
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let graph_v2 = build_graph_from_sources(&[("a.ts", source_v2)]);
+        let file_id_v2 = graph_v2.find("a.ts").unwrap();
+
+        let task = next_task(&graph_v2, &dir, file_id_v2).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::Symbol {
+                id: "a.ts::one".to_string(),
+                signature: "function one(): void".to_string(),
+                docstring: None,
+                prior: None,
+                previous: Some(SymbolProse {
+                    summary: "This is the original summary.".to_string(),
+                    behavior: "This is the original behavior.".to_string(),
+                }),
+            })
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_source_change_with_no_human_edit_carries_the_last_file_summary_as_previous() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-previous-file",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph_v1 = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        submit(
+            &graph_v1,
+            &dir,
+            "a.ts::one",
+            "### Summary\nThis is the original summary.\n### Behavior\nThis is the original behavior.\n",
+        )
+        .unwrap();
+        submit(
+            &graph_v1,
+            &dir,
+            "a.ts",
+            "A file with one small helper function.",
+        )
+        .unwrap();
+
+        let source_v2 = "export function one(): void {\n  console.log('changed');\n}\n";
+        let graph_v2 = build_graph_from_sources(&[("a.ts", source_v2)]);
+        let file_id_v2 = graph_v2.find("a.ts").unwrap();
+        // The changed symbol comes first; write it so the file is next.
+        submit(
+            &graph_v2,
+            &dir,
+            "a.ts::one",
+            "### Summary\nThis is the revised summary.\n### Behavior\nThis is the revised behavior.\n",
+        )
+        .unwrap();
+
+        let task = next_task(&graph_v2, &dir, file_id_v2).unwrap();
+        assert_eq!(
+            task,
+            Some(SpecTask::File {
+                id: "a.ts".to_string(),
+                prior: None,
+                previous: Some("A file with one small helper function.".to_string()),
             })
         );
 
@@ -5465,6 +5584,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 signature: "function one(): void".to_string(),
                 docstring: None,
                 prior: None,
+                previous: None,
             })
         );
 
@@ -6025,6 +6145,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 signature: "function one(): void".to_string(),
                 docstring: None,
                 prior: None,
+                previous: None,
             }
         );
         assert_eq!(next_rollup_task(&graph, &dir, "lib").unwrap(), None);

@@ -1023,6 +1023,7 @@ impl CodeOwlServer {
                 signature,
                 docstring,
                 prior,
+                previous: _,
             } => {
                 let sym_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
                 let sym = graph
@@ -1077,7 +1078,11 @@ impl CodeOwlServer {
                     prior_behavior: prior.map(|p| p.behavior),
                 }
             }
-            crate::spec::SpecTask::File { id, prior } => self.file_task_page(id, prior, cursor)?,
+            crate::spec::SpecTask::File {
+                id,
+                prior,
+                previous: _,
+            } => self.file_task_page(id, prior, cursor)?,
         })
     }
 
