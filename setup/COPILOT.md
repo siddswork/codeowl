@@ -178,6 +178,13 @@ CodeOwl was built and tuned against Claude Code. The read tools
    "args": ["serve", "${workspaceFolder}", "--max-spec-task-bytes", "5000"]
    ```
 
+   Three more flags decide when a big file's summary is written from
+   symbol summaries or a class outline instead of raw text
+   (`--max-file-pages`, `--summaries-min-symbols`,
+   `--outline-container-percent`); the defaults are fine to start with, and
+   `USAGE.md` ("Big files: pages, and the three numbers you can change")
+   documents them with a `.vscode/mcp.json` example.
+
 2. **The prompt is Claude-tuned.** Copilot's agent may not follow the
    multi-step loop as faithfully — reading *every* `core_sources` file,
    the budget arithmetic, the reconciliation rules. Run
