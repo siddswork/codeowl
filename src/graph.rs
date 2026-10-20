@@ -260,8 +260,10 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// of the whole text). No shape change, but it moves every Rust file's
 /// cached `fingerprint`, and `rescan` would never recompute one for a file
 /// whose raw hash is unchanged, so a version-21 cache keeps serving the old
-/// whole-text values.
-pub const FORMAT_VERSION: u32 = 22;
+/// whole-text values. 23 = that rule no longer reads imports (or a
+/// fully-qualified `crate::…` reference) inside a `#[cfg(test)]` module, which
+/// moves the cached fingerprint of every Rust file whose tests do either.
+pub const FORMAT_VERSION: u32 = 23;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

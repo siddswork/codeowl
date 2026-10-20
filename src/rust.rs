@@ -485,7 +485,7 @@ const FINGERPRINT_RULE: &str = "rust-file-fingerprint-1";
 ///
 /// - **Shape:** each symbol's id, kind, signature, export flag and
 ///   attributes, in file order, with a constant's whole text (its value is
-///   its shape), plus the file's imports.
+///   its shape), plus the file's imports (read outside any test module).
 /// - **Docs:** each symbol's doc comment and the comment block at the top
 ///   of the file.
 /// - **Literals (rule L2):** the numbers other than 0, 1 and 2, and the
@@ -498,7 +498,7 @@ const FINGERPRINT_RULE: &str = "rust-file-fingerprint-1";
 pub fn file_fingerprint(
     source: &str,
     symbols: &[ExtractedSymbol],
-    imports: &crate::imports::FileImports,
+    _imports: &crate::imports::FileImports,
 ) -> String {
     let mut text = String::from(FINGERPRINT_RULE);
     for sym in symbols {
@@ -518,8 +518,13 @@ pub fn file_fingerprint(
             text.push_str(&format!("\nvalue {}", sym.source_hash));
         }
     }
+    // The caller's imports were read from the whole file, and the import pass
+    // also records a fully-qualified `crate::…` reference wherever it sits,
+    // test bodies included. Read them again from the text without its test
+    // modules, so an edit confined to a test module never moves the hash.
+    let imports = extract_imports(&strip_test_modules(source), "");
     text.push_str("\nimports ");
-    text.push_str(&serde_json::to_string(imports).unwrap_or_default());
+    text.push_str(&serde_json::to_string(&imports).unwrap_or_default());
     text.push_str("\nmodule-doc ");
     text.push_str(&crate::spec::leading_comment_block(source));
     text.push_str("\nliterals\n");
@@ -2815,6 +2820,28 @@ mod tests;\n";
         assert_eq!(fp(&with_tests), fp(&edited));
         // And adding the test module at all does not move it.
         assert_eq!(fp(BASE), fp(&with_tests));
+    }
+
+    #[test]
+    fn imports_inside_the_cfg_test_module_do_not_move_the_fingerprint() {
+        // Found by replaying CodeOwl's own history: three test-only edits
+        // staled the file because the import pass reads a fully-qualified
+        // `crate::…` reference (an edge) wherever it appears, test bodies
+        // included.
+        let with_tests = format!(
+            "{BASE}\n#[cfg(test)]\nmod tests {{\n    use super::*;\n    #[test]\n    fn t() {{ let _ = crate::spec::first(); }}\n}}\n"
+        );
+        let more_refs = with_tests.replace(
+            "crate::spec::first()",
+            "crate::spec::first(); let _ = crate::graph::other()",
+        );
+        assert_ne!(with_tests, more_refs);
+        assert_eq!(fp(&with_tests), fp(&more_refs));
+        // A real top-level import still counts.
+        assert_ne!(
+            fp(&with_tests),
+            fp(&with_tests.replace("use std::fmt;", "use std::io;"))
+        );
     }
 
     #[test]
