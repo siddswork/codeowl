@@ -81,9 +81,10 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// The stack's model of "what is a feature", or `None` if it has no
     /// runtime entry surface — a CLI or a utility library gets symbol /
     /// file / rollup / system specs and no feature layer (M13-pre;
-    /// `ROADMAP.md` M13 piece 3, design decision 3). M14 (`RustStack`) and
-    /// M16 (commons-lang) both return `None`; M17 (Quarkus) is where this
-    /// gets its second implementation.
+    /// `ROADMAP.md` M13 piece 3, design decision 3). Only `RustStack` takes
+    /// this default `None`. `JavaStack` returns its Quarkus model even for a
+    /// plain library like commons-lang, which then enumerates zero entry
+    /// points, so `Some` does not promise that a repo has any feature.
     ///
     /// `'static`: a feature model is a stateless ZST, so this can be
     /// recovered from just a pack name (via [`for_name`]) with no lifetime

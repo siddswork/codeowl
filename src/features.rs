@@ -462,7 +462,9 @@ pub fn default_feature_model() -> &'static dyn FeatureModel {
 }
 
 /// The feature model for the stack that built `graph`, or `None` if that
-/// stack has none (M14 `RustStack`, M16 commons-lang). Recovered from
+/// stack has none (`RustStack`; `TypeScriptNextStack`, `JavaStack` and
+/// `PythonStack` always return one, which for a plain Java library such as
+/// commons-lang simply enumerates zero entry points). Recovered from
 /// `graph.pack_name()` via [`crate::stack::for_name`] so a pure-read
 /// caller doesn't need the pack threaded down. This is the M14 completion
 /// of what M13 stubbed as `default_feature_model()`.
