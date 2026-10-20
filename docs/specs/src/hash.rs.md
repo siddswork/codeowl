@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/hash.rs]
-file: { source_hash: cc20920f6b3ad8a75b6f2a992f5def7182810a96edcd6818a7995014485694bd, fingerprint: 4c2f55225b9b3eebc43f62c6bd1fdea54d5ed971f3a307b92658b8914c44e8e4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 676a175ccd5d2ddca7ddb6bb5ba588f4f87f1131cbc9c806b0a0e659a4e4c56f }
+file: { source_hash: cc20920f6b3ad8a75b6f2a992f5def7182810a96edcd6818a7995014485694bd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 676a175ccd5d2ddca7ddb6bb5ba588f4f87f1131cbc9c806b0a0e659a4e4c56f }
 symbols:
   src/hash.rs::hash_text: { source_hash: b68417d95d8759027bd745de13209e192545b78e88b031c08f4d4533a4ed0d16, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 23e2bd7c5f69f0ce1dbc23f9bf846094141e2f5653bbe7acbb07c0f90ab04811 }
 ---

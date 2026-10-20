@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [tests/schema.rs]
-file: { source_hash: 0cf2625a31d748f035d7263d1f10052f267049ed3271ca5ba5a757396ab5c9b5, fingerprint: 9413bae4549b0b4d735be69ac3fe3a7244f4c310d5a98168f5d99f3dcba5fc12, deps_hash: 1df444dd72a2653710a1e710b05bfc39ccb25af714e552f0cda93375b9bcc0ea, spec_hash: 4eea2a084db22b4ed1aa6c2ceabd810e5d3c446f5aaf5b0a531d0b8fa3980d3b }
+file: { source_hash: 0cf2625a31d748f035d7263d1f10052f267049ed3271ca5ba5a757396ab5c9b5, deps_hash: 1df444dd72a2653710a1e710b05bfc39ccb25af714e552f0cda93375b9bcc0ea, spec_hash: 4eea2a084db22b4ed1aa6c2ceabd810e5d3c446f5aaf5b0a531d0b8fa3980d3b }
 symbols:
   tests/schema.rs::tempdir: { source_hash: 70c64ecd3572b78d6213eef75fdb27b2c9f0b3e0cdd3e93f81f071d561b784f2, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9bf9c3dbe23e638b6015029627be81bfbeb798aec8fc6b3110dbbdeb9824f867 }
   tests/schema.rs::build: { source_hash: 86ff9744510723f37521d8ef779fd2604f0a5bead18f9405a0d34124ae51f821, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: 4f14be46bf3ba310279863f38b63caacc93ae265fbcff4f3e17ccf157dba35a3 }

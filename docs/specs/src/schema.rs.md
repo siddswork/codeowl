@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/schema.rs]
-file: { source_hash: 0d9fb8dd4ba8bb517dc5766830b7ab3d9109addb64405150a32db02e400bdf90, fingerprint: 3f08020cffdbb765e8f7daff4159a8002c84d9af7ed594e208e948b0dff102e6, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: fe774de27dba288d8c428227aaa0d100bc46c034949797a70f936b9682710cb2 }
+file: { source_hash: 0d9fb8dd4ba8bb517dc5766830b7ab3d9109addb64405150a32db02e400bdf90, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: fe774de27dba288d8c428227aaa0d100bc46c034949797a70f936b9682710cb2 }
 symbols:
   src/schema.rs::Table: { source_hash: 99a6815c88acf037a161e04393937b9a1b4c1af1b2c958f4909de4ef75416a4e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3e1d055df01adea599ef6a08242efaf0464aaa0c90c4f767f53cc56587c6c558 }
   src/schema.rs::extract_tables: { source_hash: 0b826ecaef84c1a0014c55feb5933c776a199718a312c7ca9c0cb0b13fd782b0, deps_hash: 5d10d0e1282025a9b52b20ce70ba10ebd083b412cf48d4afd271d271f9b3a9ab, spec_hash: d19555c4cbff372b454ff7eb8c3e30086fbbc5ab7271fa150798998ea78a7ef2 }
