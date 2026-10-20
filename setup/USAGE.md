@@ -346,6 +346,30 @@ Start with `--all --budget=N` (N≈15 on a fresh repo), read what the agent
 wrote, commit, then run it again for the next batch — a small budget is
 what keeps each pass reviewable.
 
+### Big files: pages, and the three numbers you can change
+
+A file summary is written from the whole file, so a big file arrives in
+**pages** (each up to `--max-spec-task-bytes`, default 8,000 bytes). The
+agent reads every page in order, then writes one summary. Past a certain
+size CodeOwl stops handing over the raw text and hands over a stand-in: each
+symbol's written summary, or an outline of the one big class that makes up
+most of the file. These `codeowl serve` flags decide where those lines fall;
+set them in the `args` of the MCP client's server entry (`.mcp.json` for
+Claude Code, `.vscode/mcp.json` for VS Code), then reconnect the server:
+
+| Flag | Default | What moving it does |
+|---|---|---|
+| `--max-file-pages` | 12 | Raise it to read more raw text before switching to a stand-in; lower it to switch sooner. |
+| `--summaries-min-symbols` | 8 | The fewest top-level functions and classes a too-big file needs before its summary is written from their summaries. Lower it to use summaries sooner. |
+| `--outline-container-percent` | 70 | The share of the file, in percent of its bytes, one class must cover to be written up from an outline. Raise it to use the outline less often. |
+
+```json
+"args": ["serve", "${workspaceFolder}", "--max-file-pages", "12",
+         "--summaries-min-symbols", "8", "--outline-container-percent", "70"]
+```
+
+The defaults are starting values, not measured limits past 12 pages.
+
 ---
 
 ## When to (re)generate — you run `/codeowl-generate`

@@ -108,6 +108,16 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
         false
     }
 
+    /// `source` without the test code a pack keeps inside its source files,
+    /// for the text a file summary is written from. Default: unchanged --
+    /// most stacks keep tests in separate files. `RustStack` drops its
+    /// `#[cfg(test)]` modules (`experiments/exp-05-file-summary-input.md`,
+    /// round 6: quality held and pages fell 43 %). Only the writer's input
+    /// changes; the file's hashes still cover the whole file.
+    fn strip_test_code(&self, _rel_path: &str, source: &str) -> String {
+        source.to_string()
+    }
+
     /// Repo-relative, forward-slash build-output directories this pack
     /// knows can hold real source-language files generated from a
     /// declarative contract (an OpenAPI spec, a `.proto`, a GraphQL SDL) —
@@ -297,6 +307,10 @@ impl StackPack for RustStack {
 
     fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
         FlowTarget::Unresolved
+    }
+
+    fn strip_test_code(&self, _rel_path: &str, source: &str) -> String {
+        crate::rust::strip_test_modules(source)
     }
 }
 
@@ -825,5 +839,19 @@ mod tests {
             "public class FruitRepository implements PanacheRepository<Fruit>"
         ));
         assert!(!extends_panache_entity("public class SlugFormatter"));
+    }
+
+    #[test]
+    fn only_the_rust_pack_strips_test_code_from_a_file_task() {
+        let src = "pub fn a() {}\n#[cfg(test)]\nmod tests { fn t() {} }\n";
+        assert_eq!(
+            RustStack.strip_test_code("src/a.rs", src),
+            "pub fn a() {}\n"
+        );
+        // Every other pack keeps the text it was given: their tests live
+        // in separate files, so there is nothing to strip.
+        assert_eq!(TypeScriptNextStack.strip_test_code("a.ts", src), src);
+        assert_eq!(JavaStack.strip_test_code("A.java", src), src);
+        assert_eq!(PythonStack.strip_test_code("a.py", src), src);
     }
 }

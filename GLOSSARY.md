@@ -289,6 +289,27 @@ why CodeOwl cares.
   a unit of code + its context) → you write the prose → `submit_spec`
   (CodeOwl stores it).
 
+**Page** and **page cursor**
+: A file task is handed to the writer one **page** at a time, each at most
+  `max_spec_task_bytes` long and cut at a line boundary, so a large file is
+  never cut off. The response says `page` and `pages` and carries a
+  **`next_cursor`**: pass it back, with the same target, to get the next
+  page. A cursor is `<page>:<hash12>`, the page number plus a short hash of
+  the whole input the pages were cut from. If the file (or a symbol summary
+  the input is built from) changed since the cursor was issued, the hash no
+  longer matches and the call is refused with "restart from page 1". CodeOwl
+  keeps no state between the calls.
+
+**Input rung** (`input_kind`)
+: What a file task's pages are made of. **`raw`** is the file's own text.
+  For a file too big to read raw (over `--max-file-pages` pages),
+  **`summaries`** is each top-level symbol's signature and written
+  `### Summary`, and **`outline`** is one dominant class's signature, doc
+  comment and member signatures with no bodies. The three numbers that choose
+  a rung (`--max-file-pages`, `--summaries-min-symbols`,
+  `--outline-container-percent`) are `codeowl serve` flags. See
+  `DECISIONS.md` open question 22.
+
 **Spec-bearing**
 : A piece of code that gets **its own spec section or file**, rather than
   being folded into its parent's.
