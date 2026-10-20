@@ -147,7 +147,16 @@ fn explain_file(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<Explana
     let changes = spec::file_changes(graph, file_id, &spec.file);
     let mut causes = Vec::new();
     if changes.iter().any(|c| c == "changed:source") {
-        causes.push(StaleCause::new("source", None, "the file's text changed"));
+        causes.push(if spec.file.fingerprint.is_empty() {
+            // Not an edit: the spec was stored before files had a fingerprint.
+            StaleCause::new(
+                "unknown",
+                None,
+                "stored before the file fingerprint existed: run migrate-file-fingerprint, or regenerate it",
+            )
+        } else {
+            StaleCause::new("source", None, "the file changed in what its summary is based on")
+        });
     }
     if changes.iter().any(|c| c == "changed:dependencies") {
         match spec::try_file_dependency_pairs(graph, file_id) {
@@ -996,5 +1005,42 @@ mod tests {
             Some(("removed", "rollup:src"))
         );
         assert_eq!(split_change("nonsense"), None);
+    }
+
+    #[test]
+    fn a_file_spec_from_before_the_fingerprint_is_explained_as_such_not_as_an_edit() {
+        let dir = fixture_dir("legacy-fp");
+        let graph = build(&dir, GREETER_V1, PEOPLE_V1, true);
+        generate_all(&graph, &dir);
+
+        // Turn the stored greeter.rs spec back into a legacy one: drop the key.
+        let path = spec::spec_path(&dir, "src/greeter.rs");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let legacy: String = text
+            .lines()
+            .map(|l| {
+                if l.starts_with("file: {") {
+                    let start = l.find(" fingerprint:").expect("the file line records one");
+                    let end = l[start..].find(", deps_hash").unwrap() + start;
+                    format!("{}{}", &l[..start], &l[end + 1..])
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        assert!(!legacy.contains("fingerprint:"));
+        std::fs::write(&path, legacy).unwrap();
+
+        let e = explain(&graph, &dir, "src/greeter.rs").unwrap();
+        assert_eq!(e.status, "stale");
+        assert_eq!(kinds(&e), ["unknown"]);
+        assert!(
+            e.causes[0].detail.contains("fingerprint"),
+            "must say why: {}",
+            e.causes[0].detail
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

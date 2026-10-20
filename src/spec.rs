@@ -197,6 +197,13 @@ fn short_name(id: &str) -> &str {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct HashPair {
     pub source_hash: String,
+    /// A file's own entry only (empty for a symbol): the pack's fingerprint
+    /// of what a file summary could quote, as observed at generation time.
+    /// A file spec is current while this still equals the graph's
+    /// `FileNode.fingerprint`; `source_hash` stays the raw-text hash. Empty
+    /// on a spec written before the fingerprint existed (a *legacy* spec),
+    /// which therefore reads as changed until it is migrated or regenerated.
+    pub fingerprint: String,
     /// The reference-edge contribution to this entry's staleness key: a
     /// hash of every resolved dependency's current `interfaceHash` (see
     /// `dependency_hash`/`file_dependency_hash`) as observed *at generation
@@ -296,8 +303,13 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
     out.push_str("---\n");
     out.push_str("kind: file\n");
     out.push_str(&format!("source_paths: [{}]\n", spec.source_path));
+    let fingerprint = if spec.file.fingerprint.is_empty() {
+        String::new()
+    } else {
+        format!(" fingerprint: {},", spec.file.fingerprint)
+    };
     out.push_str(&format!(
-        "file: {{ source_hash: {}, deps_hash: {}, spec_hash: {} }}\n",
+        "file: {{ source_hash: {},{fingerprint} deps_hash: {}, spec_hash: {} }}\n",
         spec.file.source_hash, spec.file.deps_hash, spec.file.spec_hash
     ));
     if !spec.symbols.is_empty() {
@@ -1318,20 +1330,22 @@ pub fn symbol_changes(
 /// The file-level equivalent of `symbol_changes` — what's changed about
 /// `file_id`'s own spec since `stored` was recorded.
 pub fn file_changes(graph: &Graph, file_id: SymbolId, stored: &HashPair) -> Vec<String> {
-    let source_hash = graph
+    // The fingerprint, not the raw text: edits a file summary would not
+    // mention leave it unchanged. A legacy spec stored none, so it differs.
+    let fingerprint = graph
         .get_file(file_id)
-        .map(|f| f.source_hash.clone())
+        .map(|f| f.fingerprint.clone())
         .unwrap_or_default();
     diff_hash_lists(
         &[
-            ("source".to_string(), source_hash),
+            ("source".to_string(), fingerprint),
             (
                 "dependencies".to_string(),
                 file_dependency_hash(graph, file_id),
             ),
         ],
         &[
-            ("source".to_string(), stored.source_hash.clone()),
+            ("source".to_string(), stored.fingerprint.clone()),
             ("dependencies".to_string(), stored.deps_hash.clone()),
         ],
     )
@@ -1478,6 +1492,7 @@ fn parse_hash_pair(flow_map: &str) -> HashPair {
         if let Some((k, v)) = kv.split_once(':') {
             match k.trim() {
                 "source_hash" => pair.source_hash = v.trim().to_string(),
+                "fingerprint" => pair.fingerprint = v.trim().to_string(),
                 "deps_hash" => pair.deps_hash = v.trim().to_string(),
                 "spec_hash" => pair.spec_hash = v.trim().to_string(),
                 _ => {}
@@ -1765,6 +1780,7 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             let (deps_hash, dep_targets) = file_dependency_record(graph, file_id);
             let hash = HashPair {
                 source_hash: file.source_hash.clone(),
+                fingerprint: file.fingerprint.clone(),
                 deps_hash,
                 spec_hash: hash_text(&summary),
                 dep_targets,
@@ -1806,6 +1822,7 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             let (deps_hash, dep_targets) = dependency_record(graph, root, file_id, sym);
             let hash = HashPair {
                 source_hash: sym.source_hash.clone(),
+                fingerprint: String::new(),
                 deps_hash,
                 spec_hash: hash_text(&format!("{summary}\n{behavior}")),
                 dep_targets,
@@ -2612,7 +2629,7 @@ pub fn next_rollup_task(graph: &Graph, root: &Path, dir_path: &str) -> Result<Op
     for id in spec_bearing_files_in(graph, dir_path) {
         let file = graph.get_file(id).expect("filtered to file ids");
         let summary = read_file_spec(root, &file.id)?
-            .filter(|s| s.file.source_hash == file.source_hash)
+            .filter(|s| file_changes(graph, id, &s.file).is_empty())
             .map(|s| s.file_summary)
             .with_context(|| {
                 format!(
@@ -4131,6 +4148,7 @@ mod tests {
             source_path: "a.ts".to_string(),
             file: HashPair {
                 source_hash: "filehash".to_string(),
+                fingerprint: "filefp".to_string(),
                 deps_hash: "filedepshash".to_string(),
                 spec_hash: "filespechash".to_string(),
                 dep_targets: vec![],
@@ -4139,6 +4157,7 @@ mod tests {
                 "a.ts::double".to_string(),
                 HashPair {
                     source_hash: sym.source_hash.clone(),
+                    fingerprint: String::new(),
                     deps_hash: "symdepshash".to_string(),
                     spec_hash: "symspechash".to_string(),
                     dep_targets: vec![],
@@ -4209,6 +4228,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             source_path: "a.ts".to_string(),
             file: HashPair {
                 source_hash: "fh".to_string(),
+                fingerprint: String::new(),
                 deps_hash: "fd".to_string(),
                 spec_hash: "fs".to_string(),
                 dep_targets: vec![("src/b.rs::Beta".to_string(), "a1b2c3d4e5f6".to_string())],
@@ -4218,6 +4238,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                     "a.ts::one".to_string(),
                     HashPair {
                         source_hash: "sh".to_string(),
+                        fingerprint: String::new(),
                         deps_hash: "sd".to_string(),
                         spec_hash: "ss".to_string(),
                         dep_targets: vec![
@@ -4233,6 +4254,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                     arrow_id.to_string(),
                     HashPair {
                         source_hash: "sh2".to_string(),
+                        fingerprint: String::new(),
                         deps_hash: "sd2".to_string(),
                         spec_hash: "ss2".to_string(),
                         dep_targets: vec![(
@@ -4384,6 +4406,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
         let file_id = graph.find("src/people.rs").unwrap();
         let hash = HashPair {
             source_hash: "sh".to_string(),
+            fingerprint: String::new(),
             deps_hash: "sd".to_string(),
             spec_hash: "old".to_string(),
             dep_targets: vec![(
@@ -7757,5 +7780,183 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
             src,
         );
         assert!(!input.contains("OTHER TOP-LEVEL DECLARATIONS"), "{input}");
+    }
+
+    // ---- the file fingerprint in a file's own spec ----
+
+    fn temp_dir_for(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-{tag}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_file_line_with_a_fingerprint_parses_and_renders_back() {
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair {
+                source_hash: "rawhash".to_string(),
+                fingerprint: "fp123".to_string(),
+                deps_hash: "deps".to_string(),
+                spec_hash: "spec".to_string(),
+                dep_targets: vec![],
+            },
+            file_summary: "A file.".to_string(),
+            ..FileSpec::default()
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        assert!(
+            rendered.contains(
+                "file: { source_hash: rawhash, fingerprint: fp123, deps_hash: deps, spec_hash: spec }"
+            ),
+            "{rendered}"
+        );
+        assert_eq!(parse(&rendered).unwrap().file.fingerprint, "fp123");
+    }
+
+    #[test]
+    fn a_legacy_file_line_without_a_fingerprint_still_parses_and_renders_unchanged() {
+        let legacy = "---\nkind: file\nsource_paths: [a.ts]\nfile: { source_hash: rawhash, deps_hash: deps, spec_hash: spec }\n---\n# a.ts\n## Summary\nA file.\n";
+        let spec = parse(legacy).unwrap();
+        assert_eq!(
+            spec.file.fingerprint, "",
+            "no key means legacy, not an error"
+        );
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        let rendered = render(
+            &graph,
+            Path::new("/nonexistent"),
+            graph.find("a.ts").unwrap(),
+            &spec,
+        );
+        assert!(
+            !rendered.contains("fingerprint"),
+            "an empty fingerprint is not written: {rendered}"
+        );
+    }
+
+    fn stored_for(graph: &Graph, file: &str, fingerprint: &str, raw: &str) -> HashPair {
+        HashPair {
+            source_hash: raw.to_string(),
+            fingerprint: fingerprint.to_string(),
+            deps_hash: file_dependency_hash(graph, graph.find(file).unwrap()),
+            ..HashPair::default()
+        }
+    }
+
+    #[test]
+    fn file_changes_compares_the_fingerprint_not_the_raw_text() {
+        let mut graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        graph.set_file_fingerprint("a.ts", "fp-now");
+        let file_id = graph.find("a.ts").unwrap();
+
+        // Same fingerprint, a raw hash that no longer matches: not stale.
+        let stored = stored_for(&graph, "a.ts", "fp-now", "an-old-raw-hash");
+        assert!(file_changes(&graph, file_id, &stored).is_empty());
+
+        // A different fingerprint is a source change, even if the raw hash matches.
+        let raw_now = graph.get_file(file_id).unwrap().source_hash.clone();
+        let stored = stored_for(&graph, "a.ts", "fp-then", &raw_now);
+        assert_eq!(
+            file_changes(&graph, file_id, &stored),
+            vec!["changed:source"]
+        );
+    }
+
+    #[test]
+    fn a_legacy_file_spec_with_no_fingerprint_reads_as_changed() {
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let raw_now = graph.get_file(file_id).unwrap().source_hash.clone();
+        let legacy = stored_for(&graph, "a.ts", "", &raw_now);
+        assert_eq!(
+            file_changes(&graph, file_id, &legacy),
+            vec!["changed:source"]
+        );
+    }
+
+    #[test]
+    fn submitting_a_file_records_the_graphs_fingerprint_beside_the_raw_hash() {
+        let dir = temp_dir_for("fp-submit");
+        let mut graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        graph.set_file_fingerprint("a.ts", "fp-custom");
+        let hash = submit(&graph, &dir, "a.ts", "A file that does one clear job.").unwrap();
+        let raw = graph
+            .get_file(graph.find("a.ts").unwrap())
+            .unwrap()
+            .source_hash
+            .clone();
+        assert_eq!(hash.fingerprint, "fp-custom");
+        assert_eq!(hash.source_hash, raw, "the raw text hash is still recorded");
+
+        let stored = read_file_spec(&dir, "a.ts").unwrap().unwrap();
+        assert_eq!(stored.file.fingerprint, "fp-custom");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_symbol_submission_leaves_the_files_fingerprint_unset() {
+        // Symbol entries never carry a fingerprint; only a file's own entry does.
+        let dir = temp_dir_for("fp-symbol");
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        let hash = submit(
+            &graph,
+            &dir,
+            "a.ts::f",
+            "### Summary\nDoes one specific thing.\n### Behavior\nIt runs and returns nothing at all.\n",
+        )
+        .unwrap();
+        assert_eq!(hash.fingerprint, "");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_rollup_stays_buildable_when_a_files_text_changed_but_its_fingerprint_did_not() {
+        let dir = temp_dir_for("fp-rollup");
+        let v1 = "export function f(): number { return 1; }\n";
+        let v2 = "export function f(): number { return 1; }\n// a trailing comment\n";
+        let other = "export function g(): number { return 2; }\n";
+
+        let mut g1 = build_graph_from_sources(&[("lib/a.ts", v1), ("lib/b.ts", other)]);
+        g1.set_file_fingerprint("lib/a.ts", "fp-a");
+        g1.set_file_fingerprint("lib/b.ts", "fp-b");
+        for (id, prose) in [
+            (
+                "lib/a.ts::f",
+                "### Summary\nReturns the number one.\n### Behavior\nIt always evaluates to one.\n",
+            ),
+            (
+                "lib/b.ts::g",
+                "### Summary\nReturns the number two.\n### Behavior\nIt always evaluates to two.\n",
+            ),
+            ("lib/a.ts", "File a returns the number one."),
+            ("lib/b.ts", "File b returns the number two."),
+        ] {
+            submit(&g1, &dir, id, prose).unwrap();
+        }
+
+        // a.ts gains a comment (raw text moves) but keeps its fingerprint.
+        let mut g2 = build_graph_from_sources(&[("lib/a.ts", v2), ("lib/b.ts", other)]);
+        g2.set_file_fingerprint("lib/a.ts", "fp-a");
+        g2.set_file_fingerprint("lib/b.ts", "fp-b");
+        assert_ne!(
+            g1.get_file(g1.find("lib/a.ts").unwrap())
+                .unwrap()
+                .source_hash,
+            g2.get_file(g2.find("lib/a.ts").unwrap())
+                .unwrap()
+                .source_hash,
+            "the raw text really did change"
+        );
+
+        assert_eq!(next_task_for_directory(&g2, &dir, "lib").unwrap(), None);
+        let rollup = next_rollup_task(&g2, &dir, "lib")
+            .expect("both file specs are still current, so the rollup can be built")
+            .expect("the rollup was never written");
+        assert_eq!(rollup.files.len(), 2);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

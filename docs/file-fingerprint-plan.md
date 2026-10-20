@@ -51,7 +51,7 @@ The graph and index caches gain a field and a changed hash scheme. Bump to 21 wi
 4. `file_changes` reports `source` when the fingerprint differs, nothing when it matches, and reports `source` for a legacy spec.
 5. `submit` for a file stores the current fingerprint.
 6. A rollup stays current when a file's raw text changed but its fingerprint did not (the cascade benefit); `next_rollup_task` uses the same test.
-7. The lifecycle test `leaf_body_edit_stales_exactly_its_file_and_containing_rollup`, **rewritten** (moved here from step 4): a body edit that changes a number or a long string stales the file and the rollup (the existing assertions, on a changed literal); a body edit that changes neither stales only the symbol and leaves the file, rollup and sibling current.
+7. The lifecycle test `leaf_body_edit_stales_exactly_its_file_and_containing_rollup` is **TypeScript, and TypeScript keeps the whole-text fingerprint** (decision 1), so its assertions still hold and it is not rewritten in this commit. The sparing behaviour is covered instead by a Rust lifecycle test added with the Rust rule (commit 3, in `tests/lifecycle_matrix.rs`'s style): a body edit that changes a long string stales the file and its folder; one that changes no literal stales only the symbol and leaves the file, folder and a sibling current. The TypeScript test is rewritten in the commit that gives TypeScript its rule. (Corrected 2026-10-20.)
 
 **The Rust rule** (each a separate small test)
 8. Spared (fingerprint unchanged): a changed ordinary comment; whitespace and formatting; a renamed local variable; a body change that adds or removes calls but no literal; a literal 0, 1 or 2 changed to another of those; a short string (7 characters or fewer) changed; an edit inside the `#[cfg(test)]` module.
@@ -63,8 +63,8 @@ The graph and index caches gain a field and a changed hash scheme. Bump to 21 wi
 
 ## Commit sequence (each compiles and passes `utility/check.sh`)
 1. Plumbing: `StackPack::file_fingerprint` (default), `FileExtraction`/`FileNode`/`FileInputs` field, `FORMAT_VERSION` 21 and its entry (tests 1).
-2. Spec side: `HashPair.fingerprint`, parse and render, `file_changes`, `submit`, `next_rollup_task`, `explain.rs`, and the lifecycle-test rewrite (tests 3 to 7). With the default fingerprint this is behaviour-neutral for fresh specs; legacy specs read stale until migrated.
-3. The Rust rule (tests 8 to 10).
+2. Spec side: `HashPair.fingerprint`, parse and render, `file_changes`, `submit`, `next_rollup_task`, `explain.rs` (a legacy spec is explained as such, not as an edit) (tests 3 to 6). With the default fingerprint this is behaviour-neutral for fresh specs; legacy specs read stale until migrated.
+3. The Rust rule (tests 8 to 10) and the Rust lifecycle test.
 4. The migration command and its tests (test 11).
 5. Run the migration on CodeOwl's own `docs/specs/`, as its own commit: only file-line `fingerprint` additions. I report the counts before committing.
 6. Docs: `ARCHITECTURE.md` ("Caching and invalidation"), `GLOSSARY.md` (the fingerprint), `setup/USAGE.md` (the new command), `DECISIONS.md` q22, exp-05 status.
