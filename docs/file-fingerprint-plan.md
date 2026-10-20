@@ -31,8 +31,8 @@ Everything else is ignored: ordinary comments, whitespace, local names, which ca
 - **On disk (decided, option B):** the file line gains a key: `file: { source_hash, fingerprint, deps_hash, spec_hash }`. `source_hash` stays (raw text at generation time, still useful: `explain_stale` can later say "the text changed but the fingerprint did not"). A spec with **no** `fingerprint` key is *legacy*: it reads as stale until it is migrated or regenerated. The alternative (reuse the `source_hash` key to hold the fingerprint) needs no parse change but makes the key a misnomer and makes "old or new?" undecidable; I recommend against it.
 - `file_changes` compares `fingerprint` (its cause label stays `source`). `submit` for a file records it. `next_rollup_task` uses `file_changes` instead of the raw comparison.
 
-### `FORMAT_VERSION` 21
-The graph and index caches gain a field and a changed hash scheme. Bump to 21 with its entry in the constant's doc comment (the project rule), in the commit that adds the field.
+### `FORMAT_VERSION` 21, then 22 (and one more bump per later pack rule)
+The graph and index caches gain a field and a changed hash scheme. Bump to 21 with its entry in the constant's doc comment (the project rule), in the commit that adds the field. The Rust rule is a pack-logic change that moves cached fingerprints, so it bumps again to 22 in its own commit (the project rule); each later pack's rule does the same.
 
 ### The migration tool (exp-05 step 0d)
 `codeowl migrate-file-fingerprint <path> [--write]`, a dry run unless `--write`, modelled on `backfill-dep-targets`:

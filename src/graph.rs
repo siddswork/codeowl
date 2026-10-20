@@ -255,8 +255,13 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// `FileInputs` gain `fingerprint`, the pack's hash of what a file summary
 /// could quote, and a file's own spec is now compared against it instead of
 /// the raw `source_hash`. A cache built before it has no fingerprints, so
-/// every file would read as changed or, read as empty, unchanged).
-pub const FORMAT_VERSION: u32 = 21;
+/// every file would read as changed or, read as empty, unchanged). 22 =
+/// the Rust fingerprint rule (shape, doc comments and body literals instead
+/// of the whole text). No shape change, but it moves every Rust file's
+/// cached `fingerprint`, and `rescan` would never recompute one for a file
+/// whose raw hash is unchanged, so a version-21 cache keeps serving the old
+/// whole-text values.
+pub const FORMAT_VERSION: u32 = 22;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

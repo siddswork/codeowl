@@ -5057,4 +5057,93 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).ok();
     }
+
+    #[tokio::test]
+    async fn a_rust_body_edit_without_a_new_literal_stales_only_its_symbol() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-mcp-fp-lifecycle-{}", std::process::id()));
+        let math_v1 = "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n";
+        let sibling = "pub fn noop() {}\n";
+        let server = rebuild_server(
+            dir.clone(),
+            &[("src/math.rs", math_v1), ("src/sibling.rs", sibling)],
+        );
+        for (id, content) in [
+            (
+                "src/math.rs::add",
+                "### Summary\nAdds together two given numbers.\n### Behavior\nReturns the sum of its two arguments.\n",
+            ),
+            (
+                "src/sibling.rs::noop",
+                "### Summary\nDoes nothing at all.\n### Behavior\nIntentionally performs no operation.\n",
+            ),
+            ("src/math.rs", "A small numeric addition helper module."),
+            (
+                "src/sibling.rs",
+                "An intentional, deliberate no-op function.",
+            ),
+        ] {
+            server
+                .submit_spec(Parameters(SubmitSpecRequest {
+                    id: id.to_string(),
+                    content: content.to_string(),
+                }))
+                .await
+                .unwrap();
+        }
+        let rollup_task = task_for(&server, "src", None).await;
+        let SpecTaskResponse::Rollup { id: rollup_id, .. } = rollup_task else {
+            panic!("expected a Rollup task, got {rollup_task:?}");
+        };
+        server
+            .submit_spec(Parameters(SubmitSpecRequest {
+                id: rollup_id.clone(),
+                content: "Small numeric and no-op helper functions.".to_string(),
+            }))
+            .await
+            .unwrap();
+
+        let status = |s: &CodeOwlServer, id: &str| {
+            let id = id.to_string();
+            let s = s.clone();
+            async move {
+                s.get_spec(Parameters(IdRequest { id }))
+                    .await
+                    .unwrap()
+                    .0
+                    .status
+            }
+        };
+
+        // 1. A body edit that adds a comment and a call, but no literal
+        //    that a summary could quote: the symbol is stale, the file and
+        //    folder are not.
+        let math_v2 = "pub fn add(a: i32, b: i32) -> i32 {\n    // swap for clarity\n    b.wrapping_add(a)\n}\n";
+        let server2 = rebuild_server(
+            dir.clone(),
+            &[("src/math.rs", math_v2), ("src/sibling.rs", sibling)],
+        );
+        assert_eq!(status(&server2, "src/math.rs::add").await, "stale");
+        assert_eq!(status(&server2, "src/math.rs").await, "current");
+        assert_eq!(status(&server2, rollup_id.as_str()).await, "current");
+        assert_eq!(status(&server2, "src/sibling.rs").await, "current");
+        let next = task_for(&server2, "src", None).await;
+        assert!(
+            matches!(next, SpecTaskResponse::Symbol { ref id, .. } if id == "src/math.rs::add"),
+            "only the symbol needs regenerating: {next:?}"
+        );
+
+        // 2. The same file with a long string literal added: now the file
+        //    and the folder go stale too.
+        let math_v3 = "pub fn add(a: i32, b: i32) -> i32 {\n    let _note = \"adds two numbers\";\n    a + b\n}\n";
+        let server3 = rebuild_server(
+            dir.clone(),
+            &[("src/math.rs", math_v3), ("src/sibling.rs", sibling)],
+        );
+        assert_eq!(status(&server3, "src/math.rs").await, "stale");
+        assert_eq!(status(&server3, rollup_id.as_str()).await, "stale");
+        assert_eq!(status(&server3, "src/sibling.rs").await, "current");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

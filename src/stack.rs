@@ -329,6 +329,16 @@ impl StackPack for RustStack {
     fn strip_test_code(&self, _rel_path: &str, source: &str) -> String {
         crate::rust::strip_test_modules(source)
     }
+
+    fn file_fingerprint(
+        &self,
+        _rel_path: &str,
+        source: &str,
+        symbols: &[ExtractedSymbol],
+        imports: &FileImports,
+    ) -> String {
+        crate::rust::file_fingerprint(source, symbols, imports)
+    }
 }
 
 /// The Java stack (M16 core + M18 feature layer): `tree-sitter-java` over
@@ -894,5 +904,22 @@ mod tests {
                 pack.file_fingerprint(path, src, &[], &imports)
             );
         }
+    }
+
+    #[test]
+    fn the_rust_pack_fingerprints_a_file_by_what_a_summary_could_quote() {
+        let src = "pub fn a() -> u32 {\n    // note\n    9\n}\n";
+        let fp = |source: &str| {
+            let symbols = RustStack.extract_symbols("a.rs", source);
+            let imports = RustStack.extract_imports("a.rs", source);
+            RustStack.file_fingerprint("a.rs", source, &symbols, &imports)
+        };
+        assert_eq!(fp(src), fp(&src.replace("// note", "// another note")));
+        assert_ne!(fp(src), fp(&src.replace("9", "10")));
+        assert_ne!(
+            fp(src),
+            crate::hash::hash_text(src),
+            "not the whole-text default"
+        );
     }
 }
