@@ -32,6 +32,10 @@ use crate::symbol::{ExtractedSymbol, SymbolKind};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInputs {
     pub source_hash: String,
+    /// The pack's `file_fingerprint` for this file, cached with the
+    /// extraction so a load never reparses to get it.
+    #[serde(default)]
+    pub fingerprint: String,
     pub symbols: Vec<ExtractedSymbol>,
     pub imports: FileImports,
     /// Unresolved flow edges from `pack.extract_flow_edges` — resolved
@@ -57,18 +61,26 @@ impl FileInputs {
             }
         }
         match pack.source_kind(Path::new(rel_path)) {
-            Some(SourceKind::Schema) => Self {
-                source_hash,
-                symbols,
-                imports: FileImports::default(),
-                flow_edges: Vec::new(),
-            },
-            Some(SourceKind::Code) | None => Self {
-                source_hash,
-                symbols,
-                imports: pack.extract_imports(rel_path, source),
-                flow_edges: pack.extract_flow_edges(rel_path, source),
-            },
+            Some(SourceKind::Schema) => {
+                let imports = FileImports::default();
+                Self {
+                    fingerprint: pack.file_fingerprint(rel_path, source, &symbols, &imports),
+                    source_hash,
+                    symbols,
+                    imports,
+                    flow_edges: Vec::new(),
+                }
+            }
+            Some(SourceKind::Code) | None => {
+                let imports = pack.extract_imports(rel_path, source);
+                Self {
+                    fingerprint: pack.file_fingerprint(rel_path, source, &symbols, &imports),
+                    source_hash,
+                    symbols,
+                    imports,
+                    flow_edges: pack.extract_flow_edges(rel_path, source),
+                }
+            }
         }
     }
 }
@@ -395,6 +407,11 @@ impl RepoIndex {
 
         let mut graph = Graph::build(extractions);
         graph.set_pack_name(self.pack.name());
+        for (rel, f) in &self.files {
+            if !f.fingerprint.is_empty() {
+                graph.set_file_fingerprint(rel, &f.fingerprint);
+            }
+        }
         let file_imports: HashMap<String, FileImports> = self
             .files
             .iter()
@@ -1004,5 +1021,106 @@ mod tests {
             graph.imports().iter().any(|i| i.target == Some(target)),
             "the new importer's edge resolves against the existing graph"
         );
+    }
+
+    /// A TypeScript pack that fingerprints a file as `probe:` plus the
+    /// whole-text hash, to prove the index asks the pack rather than
+    /// hashing the text itself.
+    #[derive(Debug)]
+    struct ProbePack(crate::stack::TypeScriptNextStack);
+
+    impl StackPack for ProbePack {
+        fn name(&self) -> &str {
+            self.0.name()
+        }
+        fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+            self.0.source_kind(path)
+        }
+        fn classify(&self, rel_path: &str) -> crate::lang::FileRole {
+            self.0.classify(rel_path)
+        }
+        fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+            self.0.extract_symbols(rel_path, source)
+        }
+        fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
+            self.0.extract_imports(rel_path, source)
+        }
+        fn resolve_imports(
+            &self,
+            root: &Path,
+            file_imports: &HashMap<String, FileImports>,
+            graph: &Graph,
+        ) -> Vec<crate::resolve::ResolvedImport> {
+            self.0.resolve_imports(root, file_imports, graph)
+        }
+        fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {
+            self.0.extract_flow_edges(rel_path, source)
+        }
+        fn resolve_flow_edge(
+            &self,
+            graph: &Graph,
+            edge: &UnresolvedFlowEdge,
+        ) -> crate::graph::FlowTarget {
+            self.0.resolve_flow_edge(graph, edge)
+        }
+        fn file_fingerprint(
+            &self,
+            _rel_path: &str,
+            source: &str,
+            _symbols: &[ExtractedSymbol],
+            _imports: &FileImports,
+        ) -> String {
+            format!("probe:{}", hash_text(source))
+        }
+    }
+
+    #[test]
+    fn extraction_asks_the_pack_for_the_files_fingerprint() {
+        let pack = ProbePack(crate::stack::TypeScriptNextStack);
+        let source = "export const a = 1;\n";
+        let inputs = FileInputs::extract(&pack, "a.ts", source);
+        assert_eq!(inputs.fingerprint, format!("probe:{}", hash_text(source)));
+        assert_eq!(inputs.source_hash, hash_text(source), "raw hash unchanged");
+    }
+
+    #[test]
+    fn the_rebuilt_graph_carries_each_files_cached_fingerprint() {
+        let dir = tempdir("fingerprint-rebuild");
+        write(&dir, "a.ts", "export const a = 1;\n");
+        let mut index = RepoIndex::build(&dir).unwrap();
+        // Default pack: the fingerprint is the whole-text hash.
+        let graph = index.rebuild().unwrap();
+        let file = graph.get_file(graph.find("a.ts").unwrap()).unwrap();
+        assert_eq!(file.fingerprint, hash_text("export const a = 1;\n"));
+
+        // The graph takes whatever the cached inputs say.
+        index.files.get_mut("a.ts").unwrap().fingerprint = "cached".to_string();
+        let graph = index.rebuild().unwrap();
+        let file = graph.get_file(graph.find("a.ts").unwrap()).unwrap();
+        assert_eq!(file.fingerprint, "cached");
+        assert_eq!(file.source_hash, hash_text("export const a = 1;\n"));
+    }
+
+    #[test]
+    fn an_edited_file_gets_a_new_fingerprint_after_catch_up() {
+        let dir = tempdir("fingerprint-edit");
+        write(&dir, "a.ts", "export const a = 1;\n");
+        let (index, graph, _) = RepoIndex::open(&dir).unwrap();
+        let before = graph
+            .get_file(graph.find("a.ts").unwrap())
+            .unwrap()
+            .fingerprint
+            .clone();
+        drop(index);
+
+        write(&dir, "a.ts", "export const a = 2;\n");
+        let (_index, graph, caught) = RepoIndex::open(&dir).unwrap();
+        assert_eq!(caught.modified, vec!["a.ts".to_string()]);
+        let after = graph
+            .get_file(graph.find("a.ts").unwrap())
+            .unwrap()
+            .fingerprint
+            .clone();
+        assert_ne!(before, after);
     }
 }

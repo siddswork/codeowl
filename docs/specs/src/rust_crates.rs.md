@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/rust_crates.rs]
-file: { source_hash: d8ef26c21d633a7516d5065397f681b5dc0a928ffb9462a928720e8a50a56fd0, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: 4d9c479b0ec2aa5d113cd6b39804533923218700c91512d92146907228338817 }
+file: { source_hash: d8ef26c21d633a7516d5065397f681b5dc0a928ffb9462a928720e8a50a56fd0, fingerprint: ba26a2b2ee50efcf475e98cfd7156dc5420fb1b044a74bc11e0cfb34f576b663, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: 4d9c479b0ec2aa5d113cd6b39804533923218700c91512d92146907228338817 }
 symbols:
   src/rust_crates.rs::CrateMap: { source_hash: f6e77727f3b6b0983dbe8bcde4dbff3680ab3911335a751ed719268f8bd2b672, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: d34659ec7926decddac26e2e0cc669a3fef37eeef34abd91fda8dab318248df5 }
   src/rust_crates.rs::parent_dir: { source_hash: 49a05a4c58fc3ce114cce587fc428abf0ffcfd6f5ee6dd23a2f5855edbe7b2bf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c74a2c391544e98bf03f5eab36d3760543cf4f83e53c3260b1843fd2f8e75320 }

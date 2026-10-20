@@ -475,6 +475,133 @@ fn visit_item(
     }
 }
 
+/// Names the rule below in the hash, so changing what it covers is a
+/// deliberate edit here, not an accident.
+const FINGERPRINT_RULE: &str = "rust-file-fingerprint-1";
+
+/// What decides whether a Rust file's own summary is still current: the
+/// file's shape, its doc comments, and the literals in its function bodies,
+/// and nothing else (`DECISIONS.md` open question 22).
+///
+/// - **Shape:** each symbol's id, kind, signature, export flag and
+///   attributes, in file order, with a constant's whole text (its value is
+///   its shape), plus the file's imports (read outside any test module).
+/// - **Docs:** each symbol's doc comment and the comment block at the top
+///   of the file.
+/// - **Literals (rule L2):** the numbers other than 0, 1 and 2, and the
+///   strings of 8 or more characters, written inside function bodies,
+///   outside any `#[cfg(test)]` module, compared as a sorted list so moving
+///   code between functions does not count by itself.
+///
+/// Ordinary comments, whitespace, local names and which calls a body makes
+/// are not read. A symbol's own spec still goes stale on any edit to it.
+pub fn file_fingerprint(
+    source: &str,
+    symbols: &[ExtractedSymbol],
+    _imports: &crate::imports::FileImports,
+) -> String {
+    let mut text = String::from(FINGERPRINT_RULE);
+    for sym in symbols {
+        text.push_str(&format!(
+            "\nsymbol {} {:?} {} {} {}\ndoc {}",
+            sym.id,
+            sym.kind,
+            sym.raw,
+            sym.is_exported,
+            sym.signature,
+            sym.docstring.as_deref().unwrap_or("")
+        ));
+        for marker in &sym.markers {
+            text.push_str(&format!("\nmarker {marker}"));
+        }
+        if sym.kind == SymbolKind::Value {
+            text.push_str(&format!("\nvalue {}", sym.source_hash));
+        }
+    }
+    // The caller's imports were read from the whole file, and the import pass
+    // also records a fully-qualified `crate::…` reference wherever it sits,
+    // test bodies included. Read them again from the text without its test
+    // modules, so an edit confined to a test module never moves the hash.
+    let imports = extract_imports(&strip_test_modules(source), "");
+    text.push_str("\nimports ");
+    text.push_str(&serde_json::to_string(&imports).unwrap_or_default());
+    text.push_str("\nmodule-doc ");
+    text.push_str(&crate::spec::leading_comment_block(source));
+    text.push_str("\nliterals\n");
+    text.push_str(&body_literals(source).join("\n"));
+    hash_text(&text)
+}
+
+/// The sorted body literals of rule L2 for `source`.
+fn body_literals(source: &str) -> Vec<String> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .expect("bundled tree-sitter-rust grammar should always load");
+    let Some(tree) = parser.parse(source, None) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    collect_body_literals(tree.root_node(), source, false, &mut out);
+    out.sort();
+    out
+}
+
+/// Walk `node`, collecting the literals that sit inside a function body.
+/// A `#[cfg(test)]` module is skipped whole; a function's parameters and
+/// return type are shape, so only its body is entered.
+fn collect_body_literals(node: Node, source: &str, in_body: bool, out: &mut Vec<String>) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "mod_item"
+                if child.child_by_field_name("body").is_some() && is_cfg_test(child, source) => {}
+            "function_item" => {
+                if let Some(body) = child.child_by_field_name("body") {
+                    collect_body_literals(body, source, true, out);
+                }
+            }
+            "integer_literal" | "float_literal" if in_body => {
+                if let Some(n) = number_literal(text(child, source)) {
+                    out.push(format!("n:{n}"));
+                }
+            }
+            "string_literal" | "raw_string_literal" if in_body => {
+                let inner = text(child, source)
+                    .trim_start_matches(['b', 'r'])
+                    .trim_matches('#')
+                    .trim_matches('"');
+                if inner.chars().count() >= 8 {
+                    out.push(format!("s:{inner}"));
+                }
+            }
+            _ => collect_body_literals(child, source, in_body, out),
+        }
+    }
+}
+
+/// A number literal's text without `_` separators and a type suffix, or
+/// `None` for 0, 1 and 2, which carry no fact a summary would quote.
+fn number_literal(raw: &str) -> Option<String> {
+    let mut t: String = raw.chars().filter(|c| *c != '_').collect();
+    if t.starts_with("0x") || t.starts_with("0b") || t.starts_with("0o") {
+        return Some(t);
+    }
+    for suffix in [
+        "usize", "isize", "u128", "i128", "u64", "i64", "u32", "i32", "u16", "i16", "u8", "i8",
+        "f64", "f32",
+    ] {
+        if let Some(stripped) = t.strip_suffix(suffix) {
+            t = stripped.to_string();
+            break;
+        }
+    }
+    match t.parse::<f64>() {
+        Ok(v) if v == 0.0 || v == 1.0 || v == 2.0 => None,
+        _ => Some(t),
+    }
+}
+
 /// `source` without its `#[cfg(test)]` modules (their attribute lines
 /// included), for the text a file summary is written from: unit tests
 /// colocated in a Rust file add pages without adding anything the summary
@@ -2608,5 +2735,221 @@ mod tests;\n";
                 .collect::<Vec<_>>()
         };
         assert_eq!(ids(&src), ids(&stripped));
+    }
+
+    // ---- file_fingerprint: what a file summary could quote ----
+
+    fn fp(source: &str) -> String {
+        let symbols = extract_file(source, "src/a.rs");
+        let imports = extract_imports(source, "src/a.rs");
+        file_fingerprint(source, &symbols, &imports)
+    }
+
+    const BASE: &str = concat!(
+        "//! Module doc.\n",
+        "use std::fmt;\n",
+        "\n",
+        "/// Adds numbers.\n",
+        "pub fn add(a: i32, b: i32) -> i32 {\n",
+        "    // plain comment\n",
+        "    let total = a + b;\n",
+        "    total + 1\n",
+        "}\n",
+        "\n",
+        "pub fn greet() -> String {\n",
+        "    String::from(\"hi\")\n",
+        "}\n",
+        "\n",
+        "pub const MAX: u32 = 5;\n",
+    );
+
+    fn assert_spared(edited: &str, why: &str) {
+        assert_eq!(fp(BASE), fp(edited), "should be spared: {why}\n{edited}");
+    }
+
+    fn assert_staled(edited: &str, why: &str) {
+        assert_ne!(
+            fp(BASE),
+            fp(edited),
+            "should stale the file: {why}\n{edited}"
+        );
+    }
+
+    #[test]
+    fn edits_a_file_summary_would_not_mention_leave_the_fingerprint_alone() {
+        assert_spared(
+            &BASE.replace("// plain comment", "// a very different plain comment"),
+            "an ordinary comment",
+        );
+        assert_spared(
+            &BASE.replace("    let total = a + b;", "    let   total  =  a+b ;"),
+            "whitespace",
+        );
+        assert_spared(&BASE.replace("total", "sum"), "a renamed local variable");
+        assert_spared(
+            &BASE.replace("total + 1", "total.wrapping_add(a)"),
+            "a changed call with no new literal",
+        );
+        assert_spared(
+            &BASE.replace("total + 1", "total + 2"),
+            "a literal 1 changed to 2",
+        );
+        assert_spared(
+            &BASE.replace("total + 1", "total + 0"),
+            "a literal 1 changed to 0",
+        );
+        assert_spared(&BASE.replace("\"hi\"", "\"yo\""), "a short string");
+        assert_spared(
+            &BASE
+                .replace("\"hi\"", "\"seven_c\"")
+                .replace("seven_c", "sevenc!"),
+            "a string under 8 characters",
+        );
+    }
+
+    #[test]
+    fn an_edit_inside_the_cfg_test_module_leaves_the_fingerprint_alone() {
+        let with_tests = format!(
+            "{BASE}\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn t() {{ assert_eq!(super::add(1, 2), 3); }}\n}}\n"
+        );
+        let edited = with_tests.replace(
+            "assert_eq!(super::add(1, 2), 3)",
+            "assert_eq!(super::add(40, 2), 42_000)",
+        );
+        assert_ne!(with_tests, edited);
+        assert_eq!(fp(&with_tests), fp(&edited));
+        // And adding the test module at all does not move it.
+        assert_eq!(fp(BASE), fp(&with_tests));
+    }
+
+    #[test]
+    fn imports_inside_the_cfg_test_module_do_not_move_the_fingerprint() {
+        // Found by replaying CodeOwl's own history: three test-only edits
+        // staled the file because the import pass reads a fully-qualified
+        // `crate::…` reference (an edge) wherever it appears, test bodies
+        // included.
+        let with_tests = format!(
+            "{BASE}\n#[cfg(test)]\nmod tests {{\n    use super::*;\n    #[test]\n    fn t() {{ let _ = crate::spec::first(); }}\n}}\n"
+        );
+        let more_refs = with_tests.replace(
+            "crate::spec::first()",
+            "crate::spec::first(); let _ = crate::graph::other()",
+        );
+        assert_ne!(with_tests, more_refs);
+        assert_eq!(fp(&with_tests), fp(&more_refs));
+        // A real top-level import still counts.
+        assert_ne!(
+            fp(&with_tests),
+            fp(&with_tests.replace("use std::fmt;", "use std::io;"))
+        );
+    }
+
+    #[test]
+    fn shape_changes_stale_the_fingerprint() {
+        assert_staled(
+            &BASE.replace("a: i32, b: i32", "a: i64, b: i32"),
+            "a parameter type",
+        );
+        assert_staled(&BASE.replacen("-> i32 {", "-> i64 {", 1), "a return type");
+        assert_staled(
+            &format!("{BASE}\npub fn extra() {{}}\n"),
+            "an added function",
+        );
+        assert_staled(
+            &BASE.replace(
+                "pub fn greet() -> String {\n    String::from(\"hi\")\n}\n\n",
+                "",
+            ),
+            "a removed function",
+        );
+        assert_staled(&BASE.replace("pub fn greet", "fn greet"), "an export flag");
+        assert_staled(&BASE.replace("= 5;", "= 6;"), "a constant's value");
+        assert_staled(
+            &BASE.replace("use std::fmt;", "use std::fmt;\nuse std::io;"),
+            "an import",
+        );
+        assert_staled(
+            &format!("{BASE}\n#[derive(Debug)]\npub struct S {{ pub a: u8 }}\n"),
+            "an added struct",
+        );
+        assert_staled(
+            &format!("{BASE}\npub struct S {{ pub a: u8 }}\n").replace("pub a: u8", "pub a: u16"),
+            "a struct field type (checked against the same struct with u8)",
+        );
+    }
+
+    #[test]
+    fn a_struct_field_type_and_a_derive_each_move_the_fingerprint() {
+        let one = "pub struct S { pub a: u8 }\n";
+        assert_ne!(fp(one), fp("pub struct S { pub a: u16 }\n"));
+        assert_ne!(
+            fp(one),
+            fp("#[derive(Debug)]\npub struct S { pub a: u8 }\n")
+        );
+    }
+
+    #[test]
+    fn doc_comments_stale_the_fingerprint() {
+        assert_staled(
+            &BASE.replace("/// Adds numbers.", "/// Sums two numbers."),
+            "a doc comment",
+        );
+        assert_staled(
+            &BASE.replace("//! Module doc.", "//! A changed module doc."),
+            "the module doc",
+        );
+    }
+
+    #[test]
+    fn body_literals_that_a_summary_could_quote_stale_the_fingerprint() {
+        assert_staled(
+            &BASE.replace("total + 1", "total + 6"),
+            "a number other than 0, 1, 2",
+        );
+        assert_staled(
+            &BASE.replace("\"hi\"", "\"hello there\""),
+            "a string of 8+ characters",
+        );
+        let long = BASE.replace("\"hi\"", "\"hello there\"");
+        assert_ne!(fp(&long), fp(&long.replace("hello there", "hello world")));
+        let hex = "pub fn f() -> u32 { 0x10 }\n";
+        assert_ne!(fp(hex), fp("pub fn f() -> u32 { 0x20 }\n"));
+        let float = "pub fn f() -> f64 { 1.5 }\n";
+        assert_ne!(fp(float), fp("pub fn f() -> f64 { 2.5 }\n"));
+        // A literal inside a macro call is a body literal too.
+        let mac = "pub fn f() { println!(\"a long message here\"); }\n";
+        assert_ne!(
+            fp(mac),
+            fp("pub fn f() { println!(\"another long message\"); }\n")
+        );
+    }
+
+    #[test]
+    fn reordering_functions_changes_the_fingerprint_but_moving_a_literal_does_not() {
+        let ab = "pub fn a() {}\npub fn b() {}\n";
+        let ba = "pub fn b() {}\npub fn a() {}\n";
+        assert_ne!(fp(ab), fp(ba), "the shape is in file order");
+
+        // The same literal in a different function, nothing else changed:
+        // literals are compared as a sorted list, not by position.
+        let in_a = "pub fn a() -> u32 { 4242 }\npub fn b() -> u32 { 7 }\n";
+        let in_b = "pub fn a() -> u32 { 7 }\npub fn b() -> u32 { 4242 }\n";
+        assert_eq!(fp(in_a), fp(in_b));
+    }
+
+    #[test]
+    fn a_literal_outside_a_function_body_is_covered_by_the_shape_not_double_counted() {
+        // A const's value is shape (top-level constant values); a changed
+        // const stales, and the same change is not needed twice.
+        assert_ne!(
+            fp("pub const N: u32 = 100;\n"),
+            fp("pub const N: u32 = 200;\n")
+        );
+        // A literal in an attribute argument is not a body literal, but the
+        // attribute is a marker on the item's shape.
+        assert_ne!(
+            fp("#[doc = \"first long text\"]\npub fn f() {}\n"),
+            fp("#[doc = \"second long text\"]\npub fn f() {}\n")
+        );
     }
 }
