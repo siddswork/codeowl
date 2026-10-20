@@ -62,7 +62,7 @@ fn both_copies_tell_the_agent_how_to_read_a_paged_file_task() {
 /// What every copy must tell the agent about a task that carries the last
 /// machine-written draft, and about the two habits that keep a regeneration
 /// from losing or inventing detail.
-const REVISION: [(&str, &str); 9] = [
+const REVISION: [(&str, &str); 10] = [
     (
         "arrive on page 1 only",
         "the old draft comes once, before the pages, so it must be noted then",
@@ -96,8 +96,12 @@ const REVISION: [(&str, &str); 9] = [
         "the limits a developer needs are the first thing a redraft drops",
     ),
     (
-        "confirm it with `get_callers`",
-        "a claim about who calls or serves what is checked, not assumed",
+        "run `search_code` for the name",
+        "a helper only called inside its own file has no caller edge, so a text search is the check",
+    ),
+    (
+        "An empty `get_callers` result proves nothing about same-file use",
+        "the graph records imports between files, not calls inside one file",
     ),
 ];
 

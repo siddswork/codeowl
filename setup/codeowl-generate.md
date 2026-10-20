@@ -100,10 +100,14 @@ sentence. Five concrete failure modes to actively avoid:
   part a developer opens the spec to find, and the part a rewrite loses
   first.
 - A claim about another function that you did not check. Before you write
-  that X is called by, serves, overrides or is used from Y, confirm it
-  with `get_callers` or `get_callees` on the id. A comment, a docstring or
+  that X is called by, serves, overrides or is used from Y, confirm it.
+  `get_callers` and `get_callees` follow imports between files, so they
+  answer the question for a symbol that another file imports. A helper
+  that is only called inside its own file has no such edge. An empty
+  `get_callers` result proves nothing about same-file use. For those, run
+  `search_code` for the name and read the hits. A comment, a docstring or
   the old spec saying so is not proof; the code can have moved on. One
-  call per claim you actually state is enough; this is not a sweep of
+  check per claim you actually state is enough; this is not a sweep of
   every neighbour.
 
 ## Loop
