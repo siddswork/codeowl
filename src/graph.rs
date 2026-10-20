@@ -90,6 +90,15 @@ pub struct FileNode {
     /// declared symbols alone, and a whole-file hash is simpler and
     /// strictly more sensitive.
     pub source_hash: String,
+    /// What decides whether the file's own spec is current: the pack's
+    /// `file_fingerprint` (shape + doc comments + body literals for a pack
+    /// with a rule, the whole-text hash otherwise). `source_hash` stays the
+    /// raw-text hash, which `get_source` and the incremental reindex need.
+    /// Starts equal to `source_hash`; `RepoIndex::rebuild` sets the real
+    /// value. `#[serde(default)]` only so the field can be added; a cache
+    /// without it is discarded by `FORMAT_VERSION`.
+    #[serde(default)]
+    pub fingerprint: String,
     /// Its top-level symbols, in declaration order.
     pub children: Vec<SymbolId>,
 }
@@ -242,7 +251,12 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
 /// hashing its whole source; and `import { X } …; export { X }` is a
 /// re-export that resolution follows. No shape change, but it moves
 /// `interface_hash` and which imports resolve, so an older cache is stale).
-pub const FORMAT_VERSION: u32 = 20;
+/// 21 = the file fingerprint (open question 22: `FileNode` and the index's
+/// `FileInputs` gain `fingerprint`, the pack's hash of what a file summary
+/// could quote, and a file's own spec is now compared against it instead of
+/// the raw `source_hash`. A cache built before it has no fingerprints, so
+/// every file would read as changed or, read as empty, unchanged).
+pub const FORMAT_VERSION: u32 = 21;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
@@ -390,6 +404,7 @@ impl Graph {
             }
             nodes.push(Node::File(FileNode {
                 id: file.rel_path,
+                fingerprint: file.source_hash.clone(),
                 source_hash: file.source_hash,
                 children,
             }));
@@ -411,6 +426,21 @@ impl Graph {
     /// until set — [`crate::stack::for_name`] treats empty as the TS pack.
     pub fn set_pack_name(&mut self, name: &str) {
         self.pack_name = name.to_string();
+    }
+
+    /// Set one file's spec fingerprint (see [`FileNode::fingerprint`]).
+    /// `false` if `rel_path` is not a file in this graph.
+    pub fn set_file_fingerprint(&mut self, rel_path: &str, fingerprint: &str) -> bool {
+        let Some(id) = self.find(rel_path) else {
+            return false;
+        };
+        match &mut self.nodes[id.index()] {
+            Node::File(file) => {
+                file.fingerprint = fingerprint.to_string();
+                true
+            }
+            Node::Symbol(_) => false,
+        }
     }
 
     pub fn pack_name(&self) -> &str {
@@ -742,5 +772,41 @@ mod tests {
         assert!(graph.find("b.ts::b").is_some());
         assert!(graph.find("a.ts").is_some());
         assert!(graph.find("b.ts").is_some());
+    }
+
+    #[test]
+    fn a_built_graph_starts_each_file_fingerprint_at_its_source_hash() {
+        // `Graph::build` knows no pack, so it assumes the safe default (the
+        // whole-text hash); `RepoIndex::rebuild` then sets the real value.
+        let graph = build_graph_from_sources(&[("a.ts", "export const A = 1;\n")]);
+        let file = graph.get_file(graph.find("a.ts").unwrap()).unwrap();
+        assert_eq!(file.fingerprint, file.source_hash);
+    }
+
+    #[test]
+    fn set_file_fingerprint_overrides_one_file_and_reports_an_unknown_id() {
+        let mut graph = build_graph_from_sources(&[
+            ("a.ts", "export const A = 1;\n"),
+            ("b.ts", "export const B = 2;\n"),
+        ]);
+        assert!(graph.set_file_fingerprint("a.ts", "custom"));
+        let fp = |g: &Graph, id: &str| g.get_file(g.find(id).unwrap()).unwrap().fingerprint.clone();
+        assert_eq!(fp(&graph, "a.ts"), "custom");
+        assert_ne!(fp(&graph, "b.ts"), "custom", "only the named file moves");
+        // Unknown ids and symbol ids are not files.
+        assert!(!graph.set_file_fingerprint("nope.ts", "x"));
+        assert!(!graph.set_file_fingerprint("a.ts::A", "x"));
+    }
+
+    #[test]
+    fn a_file_fingerprint_survives_a_save_and_load() {
+        let mut graph = build_graph_from_sources(&[("a.ts", "export const A = 1;\n")]);
+        graph.set_file_fingerprint("a.ts", "custom");
+        let path = std::env::temp_dir().join(format!("codeowl-fp-graph-{}", std::process::id()));
+        graph.save(&path).unwrap();
+        let loaded = Graph::load(&path).unwrap();
+        let file = loaded.get_file(loaded.find("a.ts").unwrap()).unwrap();
+        assert_eq!(file.fingerprint, "custom");
+        std::fs::remove_file(&path).ok();
     }
 }

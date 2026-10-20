@@ -118,6 +118,23 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
         source.to_string()
     }
 
+    /// The hash that decides whether a file's own spec is still current:
+    /// what the pack says a file summary could plausibly quote. Default: the
+    /// whole raw text, today's behaviour, which can only over-report
+    /// staleness and never hide a change. A pack overrides it with a rule
+    /// that ignores edits a summary would not mention (shape, doc comments
+    /// and body literals; `DECISIONS.md` open question 22). `symbols` and
+    /// `imports` are this file's own extraction output.
+    fn file_fingerprint(
+        &self,
+        _rel_path: &str,
+        source: &str,
+        _symbols: &[ExtractedSymbol],
+        _imports: &FileImports,
+    ) -> String {
+        crate::hash::hash_text(source)
+    }
+
     /// Repo-relative, forward-slash build-output directories this pack
     /// knows can hold real source-language files generated from a
     /// declarative contract (an OpenAPI spec, a `.proto`, a GraphQL SDL) —
@@ -853,5 +870,29 @@ mod tests {
         assert_eq!(TypeScriptNextStack.strip_test_code("a.ts", src), src);
         assert_eq!(JavaStack.strip_test_code("A.java", src), src);
         assert_eq!(PythonStack.strip_test_code("a.py", src), src);
+    }
+
+    #[test]
+    fn a_pack_with_no_fingerprint_rule_fingerprints_the_whole_text() {
+        // The safe default: over-reports staleness, never hides a change.
+        let src = "export const A = 1; // comment\n";
+        let imports = FileImports::default();
+        for (pack, path) in [
+            (&TypeScriptNextStack as &dyn StackPack, "a.ts"),
+            (&JavaStack as &dyn StackPack, "A.java"),
+            (&PythonStack as &dyn StackPack, "a.py"),
+        ] {
+            assert_eq!(
+                pack.file_fingerprint(path, src, &[], &imports),
+                crate::hash::hash_text(src),
+                "{}",
+                pack.name()
+            );
+            // A comment-only edit moves it: there is no sparing yet.
+            assert_ne!(
+                pack.file_fingerprint(path, &src.replace("comment", "other"), &[], &imports),
+                pack.file_fingerprint(path, src, &[], &imports)
+            );
+        }
     }
 }
