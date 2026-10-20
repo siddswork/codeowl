@@ -1,7 +1,7 @@
 ---
 kind: file
 source_paths: [src/extract.rs]
-file: { source_hash: 5a092b27253793bd1f357b81de71d601df24b6d758ef1461457d3913e795f97a, deps_hash: a469f3de54636f1fa8782176580650d4a3355b3ae9a24c031a5b28b7243baf17, spec_hash: 6e48d00a5e29e00d9b69de93d01f5afbe57e0ad8a58d9a9f3f1a4a20e7de3499 }
+file: { source_hash: 5a092b27253793bd1f357b81de71d601df24b6d758ef1461457d3913e795f97a, fingerprint: 666fea3fde69a1a4d7a632cb846d62af17ee27ffc75c8b529d564ed52b3adb74, deps_hash: a469f3de54636f1fa8782176580650d4a3355b3ae9a24c031a5b28b7243baf17, spec_hash: 6e48d00a5e29e00d9b69de93d01f5afbe57e0ad8a58d9a9f3f1a4a20e7de3499 }
 symbols:
   src/extract.rs::extract_file: { source_hash: 7efdd390846a2ea39f69360dd415b183bdcbed6111ad9392f8d418a5dee89834, deps_hash: 77295d7d860d5edbd3856fe14543fec6cde0a8c182294d14f65c1da6345256ed, spec_hash: 145afeb2888aecb46115bcc866cff76bc2220b905f88f50cfc7e932bfcde1fad }
   src/extract.rs::clause_exported_names: { source_hash: 6e8803c0b7912cd3d0b7f373d5fa3030d2b4e4655300c0624159c6ed444b9aa9, deps_hash: bd2d238e8bdadefcbda29c5a455a659e20696152b094e543f74a86f23397dc0d, spec_hash: 3942497753fe0e6e7fbf16dd5f81b12840755e885345c9a7cef52a346e20d542 }
