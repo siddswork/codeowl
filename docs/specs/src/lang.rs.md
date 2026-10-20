@@ -1,37 +1,37 @@
 ---
 kind: file
 source_paths: [src/lang.rs]
-file: { source_hash: 265ae6a607d0aeb3634623f5573365d76832769b01ae177ad47707feaafda5e6, deps_hash: b776fb3cc6c002ace828693051e3b97eaf436e4d510c078f8de4abe18e7eee17, spec_hash: 56ca05f178c3e034a75ea3087eadc1826c5df4c91258655624b70cd2a653b493 }
+file: { source_hash: 265ae6a607d0aeb3634623f5573365d76832769b01ae177ad47707feaafda5e6, fingerprint: a2bb150eb112ce790fb6083c73df811365b95f63f3e9d109e77f6b5a304b45f1, deps_hash: 67a48b24191b515fc09307d7ac000c448b56f790acab54e1bc729df0768a141a, spec_hash: 2dab468e0eef6bfebf0a19bb31c9f1e136ec25ceb288fd087e02e7ffe0cbf961 }
 symbols:
   src/lang.rs::SourceKind: { source_hash: 030d6675bccb66a7f8439dc3f04f8c310d7bd2c00ab00dac67bec882b8ca1a15, deps_hash: 2a9d2ea9db4f081ce47fc07c50dfff9c0fc7567dd30571980f7e3cddf762311f, spec_hash: 08edb275f1878607938f083cc6cbb91ede4bcd674b9302beb14a5f2bb80c54b6 }
   src/lang.rs::ts_parser: { source_hash: a4658a5c6fc19c35d73f060642c96c4e029a9fb4ac78f7d14c6f8a2ab39892cf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3ca8125f4a6f16954cd35389b931e4f5254eed0644541aa93296a4246335abee }
   src/lang.rs::extract_symbols: { source_hash: 9884210b833cf488592ee7a0904ea061eae1990853e1d2d70a2a41e5ae137746, deps_hash: 7cb07719fc60cc0fb67d5ed31b14f24f3af3ddd28259bcce38cd092cb25b0b39, spec_hash: 7ee021e582a78ee15fba7d51d4857d2b120f1c07a0cc9e544cc759d9f8a9a8c5 }
-  src/lang.rs::FileRole: { source_hash: 5b2895883885ea62dd71226ca330aa642b970ff9dcf29ca9eae78a6e9bc45051, deps_hash: 3cb515d9d23dd84457b02f8b3176d442ebe0ddad3d308cecd5753c3254b4da07, spec_hash: 825fc19b00c94748ba427c5119dd1ea3f0310cc5ef61a0fa155c69f8acbad50b }
+  src/lang.rs::FileRole: { source_hash: 5b2895883885ea62dd71226ca330aa642b970ff9dcf29ca9eae78a6e9bc45051, deps_hash: 47273209ec5140c5f8d7af7935e26ab691768b33840826bbf90a615c5a4d23f0, spec_hash: 9903e681e9dbf53390d3bfc4c201dcef9af76399532e66ff169c2947b72764a0 }
   src/lang.rs::classify: { source_hash: 908bf0c8a6f2bb97bc5feed5c0cd0e4df84717e8c481b29b9f1ac2eed35b626f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: cb5f679c4c0e908c4665e90988e4a80a1825f3fdab8173f868ad5a56ba9148c5 }
   src/lang.rs::is_test_path: { source_hash: 43bd27fc12cb63b5b6e60e8b23cc75ba2d0bc82465e1ffb6cf530d089aab30e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a511957bab4e03e1d307eb16d4d08b01087428c3d50e9d8673f9d4e459a0ea28 }
   src/lang.rs::is_ui_primitive: { source_hash: 209f4445fe0023de0546da9717f126bbf2a38ed1753a94a50ca314462c748675, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 367ced1d96d513b98d77c48ddb63572c0bcfb1d984742211d1bf495007b8c895 }
-  src/lang.rs::detect: { source_hash: 69e19ba3d8190ad772b621f27191c45166aa38cf80846179f17b0835e58175f4, deps_hash: a543d37c43576bc616f39ff9a81d12bca4bcf58e78c1e31ef694af10cdd81fc7, spec_hash: aeefe26f0258d1ab7e0dc65e27ca36b769abaa6a0843ef0a65b51f5147f2501e }
+  src/lang.rs::detect: { source_hash: 69e19ba3d8190ad772b621f27191c45166aa38cf80846179f17b0835e58175f4, deps_hash: ebdc16994acb1b22c69614c3a266f099d0d0e3151f76ce3861277c2dc314ad1f, spec_hash: 655a85bf5f82e87168e9750702435378699e49da0d762c0a4d0f78fe08b834e5 }
 dep_targets:
   file -> src/extract.rs::extract_file: fcab56f46e52
   file -> src/stack.rs::JavaStack: 3b4c6ab553d6
   file -> src/stack.rs::PythonStack: 398bcceb2112
-  file -> src/stack.rs::RustStack: b161f0004a63
-  file -> src/stack.rs::StackPack: 436012c73562
+  file -> src/stack.rs::RustStack: b893cf055d16
+  file -> src/stack.rs::StackPack: 9350ff43aeca
   file -> src/stack.rs::TypeScriptNextStack: 64056e725621
   file -> src/symbol.rs::ExtractedSymbol: 314759561cf6
   src/lang.rs::SourceKind -> src/stack.rs::TypeScriptNextStack: 64056e725621
   src/lang.rs::extract_symbols -> src/extract.rs::extract_file: fcab56f46e52
   src/lang.rs::extract_symbols -> src/symbol.rs::ExtractedSymbol: 314759561cf6
-  src/lang.rs::FileRole -> src/stack.rs::StackPack: 436012c73562
+  src/lang.rs::FileRole -> src/stack.rs::StackPack: 9350ff43aeca
   src/lang.rs::detect -> src/stack.rs::JavaStack: 3b4c6ab553d6
   src/lang.rs::detect -> src/stack.rs::PythonStack: 398bcceb2112
-  src/lang.rs::detect -> src/stack.rs::RustStack: b161f0004a63
-  src/lang.rs::detect -> src/stack.rs::StackPack: 436012c73562
+  src/lang.rs::detect -> src/stack.rs::RustStack: b893cf055d16
+  src/lang.rs::detect -> src/stack.rs::StackPack: 9350ff43aeca
   src/lang.rs::detect -> src/stack.rs::TypeScriptNextStack: 64056e725621
 ---
 # src/lang.rs
 ## Summary
-This file does two jobs. First, `detect` picks which language pack a repo uses, by counting each candidate's ordinary source files (skipping test and tooling folders so a stray fixture cannot mislead it) and requiring exactly one winner, with a clear error naming all four supported stacks if there are none, or listing the stacks found if there are several. Second, it holds the TypeScript pack's own basics: which extensions the import resolver tries, how a path maps to a source kind, which tree-sitter grammar (the parser CodeOwl uses to turn source text into a syntax tree) to load, which function extracts declarations, and the rules that recognise test code and shared UI building blocks. Two small vocabularies defined here are shared by every language: `SourceKind` (ordinary code versus a dedicated schema file) and `FileRole` (product code, UI primitive, test code, or machine-generated code assigned by the Java and Python packs), which decide how a file's spec is ordered and whether it counts as shared infrastructure. Everything else in the file is specific to TypeScript, and the TypeScript pack calls into it.
+This file does two jobs. First, `detect` picks which language pack a repo uses, by counting each candidate's ordinary source files (skipping top-level `tests`, `test`, `benches`, any `src/test/` path, and the tooling folders `utility`, `scripts`, `tools`, `hack`, so a stray fixture or build script cannot mislead it) and requiring exactly one winner. It fails with an error naming all four supported stacks if there are none, or listing the stacks found with their file counts if there are several. Second, it holds the TypeScript pack's own basics. `RESOLVER_EXTENSIONS` is the Node-style order the import resolver tries (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.json`). `SourceKind::of` maps a path to ordinary code only for `.ts` and `.tsx`, and deliberately not `.d.ts`. `ts_parser` loads the tree-sitter grammar (the parser CodeOwl uses to turn source text into a syntax tree): the TSX grammar for `.tsx`, plain TypeScript for everything else, and it panics if the bundled grammar fails to load. `extract_symbols` hands a file to the TypeScript extractor. `classify` turns a path into a `FileRole`, after stripping a `rollup:` or `feature:` prefix so a coverage id classifies by its path. Test paths are `e2e`, `cypress` or `playwright` folders at the root or nested, any `__tests__/`, and any `.test.` or `.spec.` name; a UI primitive is anything under `components/ui/`, at the root or nested; test is checked first, and everything else is domain code. Two small vocabularies defined here are shared by every language: `SourceKind` (ordinary code versus a dedicated schema file, which the TypeScript pack uses for `.sql`) and `FileRole` (product code, UI primitive, test code, or machine-generated code assigned by the Java and Python packs), which decide how a file's spec is ordered and whether it counts as shared infrastructure. Everything else in the file is specific to TypeScript, and the TypeScript pack calls into it. The path rules are plain substring checks, so an unusual name like `my.test.helper.ts` counts as a test.
 
 ## `SourceKind`
 `pub enum SourceKind`
@@ -66,7 +66,7 @@ It forwards to `extract::extract_file(source, rel_path)` and returns whatever li
 ### Summary
 Says what kind of code a file holds, which decides how its spec is ordered in a generation run and whether it counts as shared infrastructure. Each language pack decides which paths get which role.
 ### Behavior
-Four variants. `Domain` is ordinary product code, the default: it can be in the top tier of widely used shared code, it counts in import fan-in, and it is documented in normal priority order. `Primitive` is a low-level UI building block (`components/ui/*`), which is imported almost everywhere and so would dominate a fan-in ranking, but whose summary tells a dependent nothing it could not guess; it is kept out of the shared-code tier and still gets its own file spec in the long tail. `Test` is test code (an `e2e`, `cypress` or `playwright` tree, a `__tests__` folder, or a `.test.` or `.spec.` file): it stays in the graph so callers can see which tests use something, but its specs come last and it is never a product module. `Generated` is machine-written code, assigned by the pack: the Java pack uses it for `target/generated-sources` and `build/generated`, and the Python pack for Alembic migration versions. It is never spec-bearing, since specs describe hand-written code. Plain data, no logic.
+Four variants. `Domain` is ordinary product code, the default: it can be in the top tier of widely used shared code, it counts in import fan-in, and it is documented in normal priority order. `Primitive` is a low-level UI building block (`components/ui/*`), which is imported almost everywhere and so would dominate a fan-in ranking, but whose summary tells a dependent feature spec nothing it could not guess; it is kept out of the shared-code tier and still gets its own file spec in the long tail. `Test` is test code (an `e2e`, `cypress` or `playwright` tree, a `__tests__` folder, or a `.test.` or `.spec.` file): it stays in the graph so callers can still see which tests use something, but its specs sort last and it is never treated as a product module. `Generated` is machine-written code, assigned by the pack: the Java pack uses it under `target/generated-sources` and `build/generated`, and the Python pack for Alembic migration versions. It is never spec-bearing, since specs describe hand-written code. Plain data, no logic; the classification itself lives in the packs.
 ### Depends on
 - `src/stack.rs::StackPack` — crate::stack
 
@@ -102,9 +102,9 @@ Detects a shadcn/ui-style presentational primitive by path — a file in a `comp
 ### Summary
 Works out which language the repo is written in and returns the matching language pack, or fails with a clear message instead of quietly serving an empty index. It runs once at startup.
 ### Behavior
-For each of the four candidates (TypeScript/TSX, Rust, Java, Python) it counts the files the pack would parse as ordinary code, skipping folders that do not define a repo's identity. Test folders (`tests`, `test`, `benches`, or any path containing `src/test/`) are skipped so a TypeScript fixture read by a Rust test cannot make a Rust repo look like TypeScript. Tooling folders (`utility`, `scripts`, `tools`, `hack`) are skipped so build scripts cannot make a repo look like it has a second language. The walk respects ignore files. A `.sql` schema file is not counted, since it is not ordinary code, so a Rust repo with migrations stays a Rust repo.
+For each of the four candidates (TypeScript/TSX, Rust, Java, Python) it walks the repo and counts the files the pack classifies as ordinary code, skipping folders that do not define a repo's identity. Test folders (`tests`, `test`, `benches` at the top level, or any path containing `src/test/`) are skipped so a TypeScript fixture read by a Rust test cannot make a Rust repo look like TypeScript. Tooling folders (`utility`, `scripts`, `tools`, `hack`) are skipped so build scripts cannot make a repo look like it has a second language. The walk respects ignore files. A `.sql` schema file is not counted, since it is not ordinary code, so a Rust repo with migrations stays a Rust repo.
 
-Packs with a count above zero are the hits. With exactly one hit, a fresh instance of that pack is returned. With none, it fails, saying no extractable source files were found and naming all four supported stacks. With more than one, it fails listing each stack and its file count and suggests pointing CodeOwl at a subdirectory, since one stack per repo is a deliberate limit. Because tests are skipped only for the count, they are still parsed once the pack is chosen.
+Packs with a count above zero are the hits. With exactly one hit, a fresh instance of that pack is returned. With none, it fails, saying no extractable source files were found and naming all four supported stacks. With more than one, it fails listing each stack and its file count and suggests pointing CodeOwl at a subdirectory, since one stack per repo is a deliberate limit. A repo that genuinely mixes two stacks therefore cannot be indexed as a whole. Because tests and tooling are skipped only for the count, they are still parsed once the pack is chosen. The directory-name match is by exact top-level segment, so a nested `scripts` folder deeper in the tree is still counted, and any single code file in a second language outside those folders is enough to make the repo ambiguous.
 ### Depends on
 - `src/stack.rs::StackPack` — crate::stack
 - `src/stack.rs::TypeScriptNextStack` — crate::stack
