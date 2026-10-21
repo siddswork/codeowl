@@ -1,0 +1,201 @@
+---
+kind: file
+source_paths: [src/spec/file_task.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/spec/file_task.rs::SpecTask: { source_hash: 7f6fd0eca873de2d83c3f95096dbdd5779fbdfe9e3decb1584362aa3ae970fa1, deps_hash: 34a95995527dc5f673d09639b70c27217984732249263b23f878b003a1bf1598, spec_hash: 21d5fbd291ac9236de17eed69fda3a4fb794cb2a4fe5a6149c302a648507219b }
+  src/spec/file_task.rs::symbol_prose_is_human_edited: { source_hash: 26c0c6ccc478bb181296d643d0d6d28a910a409429d243c25812ca7ca040c9c5, deps_hash: d7da40bd5b91baea3db803ad745a18c4adf9c2308a97b126dd894920bb84e365, spec_hash: c43c7cd5cfecebd60a068861a003505fb9c9a918682bc1d0dc3af2eb4640d737 }
+  src/spec/file_task.rs::file_prose_is_human_edited: { source_hash: 38f116549b9d551424c1da497702b23178b605408fa9922f8560b85ffa27b7cf, deps_hash: d7da40bd5b91baea3db803ad745a18c4adf9c2308a97b126dd894920bb84e365, spec_hash: 56f02b9c153ed1449ae3bba52816a5e847bd497d909370126249d00a076e4b01 }
+  src/spec/file_task.rs::reconcile_symbol_hash: { source_hash: 9fae3249c62503c98829615195c90675610cf3c05435a6e639d322c271587dfa, deps_hash: 6747083ef57c71aba2e8745dd85eb8ddc85b74668ec962158466f694a756ffc1, spec_hash: e3c6c948ddf9d42cbfa3bfd84bbfc6f510d8a00a76e9cfa1630bc0ecabf4b955 }
+  src/spec/file_task.rs::reconcile_file_hash: { source_hash: 87bc25797532bbe03d220a0ba3615ae253f7475bf4bfab7030dd0112a61d1175, deps_hash: ece3fa0a8631b5e65b18ceb394a24d1d24020215fcd36d08215772605acf90c5, spec_hash: 00936fc51f42da617c2653a84d9b026cd0e459b1f540599d1d3c5bda33ab1585 }
+  src/spec/file_task.rs::next_task: { source_hash: 57f663ac44e18b629bfe7675ed2838b80e7a6170ccd0b5d8452ed33a9da8f7dc, deps_hash: 7139611c2449214bfc7bb552592931223583fc488491fce545e8c11a9b6ec247, spec_hash: 30346d67595ec85f876559bed61efc22d1c94f84f8113de8ae9103980c600187 }
+  src/spec/file_task.rs::submit: { source_hash: bc7656dfe87d574edd530b72369bcb29d155c032fa977d43dca31dde77df8b9d, deps_hash: 3238f514f946f3717289b602efa1c9d5b7b95b1cbb37b1e579563cc2bd1ab340, spec_hash: 2e1d196a23167bd0ca04503e48e0fc08962ff49e91340b3f903390b7d0f68344 }
+  src/spec/file_task.rs::upsert: { source_hash: da7b1e09074bff7970134d0ad82d476e8ce32147d25423ab7b6c7b617a3b9f2a, deps_hash: 4b98af40d3152d5a23834b56f1784d2535ac6e51b87a4bcb6800fe364b465b76, spec_hash: 031bdc54c14ec5fc867bb5d69f3d933f7ccbd10e1e55231b4918806c14da278f }
+  src/spec/file_task.rs::upsert_section: { source_hash: 5d27a98e730753b68d162688133e3e0b5e3032c49898ea0f56a17ca35359d084, deps_hash: 7b0a0ea2eb694d7ebcbabd9fed562b4326765392c65b95ffc7789fb7e221f4f5, spec_hash: 3cac64d90e30d90e580129991eafab8baec0c3007373d2c583f06256758e450f }
+  src/spec/file_task.rs::reorder_symbols: { source_hash: ca5c9aab82c7ae5951c0cb4f1c81ef0d90f594cf75a1b624c5fccd3e459611da, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: aaa6e849445bf97dc5940f5617571af340b18c78e42f9a8cec9bc787543eed7f }
+dep_targets:
+  src/spec/file_task.rs::SpecTask -> src/symbol.rs::Symbol: 2bab71782e46
+  src/spec/file_task.rs::symbol_prose_is_human_edited -> src/hash.rs::hash_text: 70c099c1622c
+  src/spec/file_task.rs::file_prose_is_human_edited -> src/hash.rs::hash_text: 70c099c1622c
+  src/spec/file_task.rs::reconcile_symbol_hash -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/file_task.rs::reconcile_symbol_hash -> src/graph.rs::Node: 1e1e50b8ba0e
+  src/spec/file_task.rs::reconcile_symbol_hash -> src/hash.rs::hash_text: 70c099c1622c
+  src/spec/file_task.rs::reconcile_symbol_hash -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/spec/file_task.rs::reconcile_file_hash -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/file_task.rs::reconcile_file_hash -> src/hash.rs::hash_text: 70c099c1622c
+  src/spec/file_task.rs::reconcile_file_hash -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/spec/file_task.rs::next_task -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/file_task.rs::next_task -> src/symbol.rs::Symbol: 2bab71782e46
+  src/spec/file_task.rs::next_task -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/spec/file_task.rs::submit -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/file_task.rs::submit -> src/graph.rs::Node: 1e1e50b8ba0e
+  src/spec/file_task.rs::submit -> src/hash.rs::hash_text: 70c099c1622c
+  src/spec/file_task.rs::submit -> src/symbol.rs::Symbol: 2bab71782e46
+  src/spec/file_task.rs::upsert -> src/spec/format.rs::HashPair: 46895bbf1c04
+  src/spec/file_task.rs::upsert_section -> src/spec/format.rs::SymbolProse: a318b4029959
+  src/spec/file_task.rs::reorder_symbols -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/file_task.rs::reorder_symbols -> src/symbol.rs::SymbolId: 6733b5c62e75
+---
+# src/spec/file_task.rs
+## Summary
+
+
+## `SpecTask`
+`pub enum SpecTask`
+### Summary
+Describes the next piece of writing work for a single file: either one function or type that needs a spec, or the file's own summary. Symbols come before the file, so the file summary can build on them.
+### Behavior
+Two variants. `Symbol` carries the symbol's `id`, its `signature`, its `docstring` if any, and `prior`. `File` carries the file's `id` and a `prior`. In both, `prior` is `Some` only when the code moved and a human had also edited that prose since it was last machine-written, so the agent can keep what is still accurate. It is `None` for a first generation or a plain regeneration with no human edit on record. Generation walks containment (a file's own symbols) and never follows reference edges, which is why only these two shapes exist at file level. The enum is plain data produced by the task-selection code.
+### Depends on
+- `src/spec/format.rs::SymbolProse` — super::format
+- `src/symbol.rs::Symbol` — crate::symbol
+
+## `symbol_prose_is_human_edited`
+`pub(super) fn symbol_prose_is_human_edited(hash: &HashPair, prose: &SymbolProse) -> bool`
+### Summary
+Detects whether a symbol's spec prose was hand-edited directly in the `.md` file since it was last written through the normal `submit_spec` path — the signal that triggers CodeOwl's "human corrections" reconciliation behavior (see `ARCHITECTURE.md`).
+### Behavior
+Recomputes a hash of the currently-parsed summary and behavior text and compares it against the `spec_hash` recorded in the stored `HashPair`. Since `spec_hash` is always set to exactly `hash_text` of the prose at the moment it was written via `submit`, the only way the two can disagree is if someone edited the markdown file's prose directly without going through that path — a normal machine round-trip (write via `submit`, later read back and re-parsed) always keeps them in sync, so a mismatch reliably signals a manual edit rather than any other kind of drift.
+### Depends on
+- `src/spec/format.rs::HashPair` — super::format
+- `src/spec/format.rs::SymbolProse` — super::format
+
+## `file_prose_is_human_edited`
+`pub(super) fn file_prose_is_human_edited(hash: &HashPair, file_summary: &str) -> bool`
+### Summary
+The file-level equivalent of `symbol_prose_is_human_edited` — detects whether a file's own `## Summary` prose was hand-edited since it was last machine-written.
+### Behavior
+Recomputes the hash of the currently-parsed file summary and compares it against the stored `spec_hash`; a mismatch signals a direct manual edit to the markdown, the same reasoning `symbol_prose_is_human_edited` uses.
+### Depends on
+- `src/spec/format.rs::HashPair` — super::format
+- `src/hash.rs::hash_text` — crate::hash
+
+## `reconcile_symbol_hash`
+`fn reconcile_symbol_hash(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym_id: &str,
+    hash: &HashPair,
+    prose: &SymbolProse,
+) -> Result<()>`
+### Summary
+Handles the case where a person edited a symbol's spec text by hand but the code did not change. It records the edit as the new baseline, so the spec is treated as current and the human's wording is kept exactly as written, with no agent call needed.
+### Behavior
+Clones the stored `HashPair` and replaces its `spec_hash` with a hash of the current prose (summary and behavior joined by a newline). The code and dependency hashes are left alone. It then loads the file's existing spec from disk (or a blank one if none), inserts or updates this symbol's entry with `upsert`, puts the symbols back in declaration order with `reorder_symbols`, and writes the file with `write`. Returns `Ok(())` without doing anything if the id is not a file node. Errors from reading or writing the spec file are returned. The prose itself is never rewritten here.
+### Depends on
+- `src/spec/format.rs::FileSpec` — super::format
+- `src/spec/format.rs::HashPair` — super::format
+- `src/spec/format.rs::SymbolProse` — super::format
+- `src/spec/format.rs::read_existing` — super::format
+- `src/spec/format.rs::write` — super::format
+- `src/graph.rs::Graph` — crate::graph
+- `src/graph.rs::Node` — crate::graph
+- `src/symbol.rs::SymbolId` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- externals: anyhow, std
+
+## `reconcile_file_hash`
+`fn reconcile_file_hash(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    spec: &FileSpec,
+) -> Result<()>`
+### Summary
+The file-level version of accepting a hand edit: when a person rewrote a file's summary and the code did not change, it records their wording as the new baseline.
+### Behavior
+Copies the given `FileSpec`, sets the file's `spec_hash` to a hash of its current `file_summary` text, and writes the document back with `write`. Only that one hash changes, and the prose and the other hashes are saved as they are. Unlike the symbol version it does not reload the spec from disk, because the caller already holds the full parsed spec. Errors from writing the file are returned.
+### Depends on
+- `src/spec/format.rs::FileSpec` — super::format
+- `src/spec/format.rs::write` — super::format
+- `src/graph.rs::Graph` — crate::graph
+- `src/symbol.rs::SymbolId` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- externals: anyhow, std
+
+## `next_task`
+`pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result<Option<SpecTask>>`
+### Summary
+Decides what spec writing a file still needs next: a particular function or type, the file's own summary, or nothing. It is the core of the generate loop, which keeps asking until the answer is "nothing left".
+### Behavior
+Returns `Ok(None)` at once if the file is not spec-bearing. Otherwise it loads the existing spec document (if any) and goes through the file's spec-bearing symbols in declaration order, deciding for each by whether the code or dependencies changed (`symbol_changes`) and whether a human edited the prose (`symbol_prose_is_human_edited`):
+- Never written: return a `Symbol` task with no `prior`.
+- Unchanged and not edited: skip, unless the prose fails the quality check (`prose_smells`), in which case it is offered again for a rewrite.
+- Changed, not edited: return a task with no `prior`.
+- Unchanged but hand-edited: quietly record the edit with `reconcile_symbol_hash`, with no task, and move on.
+- Changed and hand-edited: return a task whose `prior` is the human's text, so it can be kept where still accurate.
+
+Once all symbols are done, the file's own summary is judged the same way. An empty file `spec_hash` means the file entry was never written, which can happen even when symbols were stored first, so it gets a `File` task. Otherwise the same four cases apply, with smelly prose also triggering a rewrite and the unchanged-but-edited case reconciled with `reconcile_file_hash`. Despite being safe to call repeatedly, it may write a small fix to disk in those reconcile cases. It errors if the id is not a file or if disk reads and writes fail.
+### Depends on
+- `src/spec/format.rs::FileSpec` — super::format
+- `src/spec/format.rs::HashPair` — super::format
+- `src/spec/format.rs::read_existing` — super::format
+- `src/spec/layout.rs::file_is_spec_bearing` — super::layout
+- `src/spec/layout.rs::spec_bearing_children` — super::layout
+- `src/spec/smells.rs::prose_smells` — super::smells
+- `src/spec/staleness.rs::file_changes` — super::staleness
+- `src/spec/staleness.rs::symbol_changes` — super::staleness
+- `src/graph.rs::Graph` — crate::graph
+- `src/symbol.rs::SymbolId` — crate::graph
+- `src/symbol.rs::Symbol` — crate::symbol
+- externals: anyhow, std
+
+## `submit`
+`pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<HashPair>`
+### Summary
+Saves prose an agent wrote for a file or for one function or type into that file's spec document, and returns the fingerprints recorded alongside it. It is the write half of the generate loop, and it rejects text that is too thin to be useful.
+### Behavior
+Looks the id up in the graph, and fails with "unknown id" if it is absent. Then there are two cases.
+
+File id: the content is trimmed and checked with `prose_smells`; a failure is returned as an error naming what tripped. A new `HashPair` is built from the file's current `source_hash`, `file_dependency_hash` and a hash of the summary. The existing spec is loaded from disk (or a blank one created), the summary and hashes replaced, symbols reordered to declaration order, and the document written.
+
+Symbol id: the symbol must have a parent file. The content must contain non-empty `### Summary` and `### Behavior` sections (each ends at the next `### ` heading); otherwise it errors saying which one is missing. Both are checked for smells, with failures labelled "Summary:" or "Behavior:". Hashes come from the symbol's `source_hash`, its `dependency_hash`, and a hash of summary and behavior joined by a newline. The symbol's entry and prose are inserted or replaced (`upsert`, `upsert_section`), symbols reordered, and the file written.
+
+Nothing is written when validation fails, so a rejected submission leaves the existing spec intact. The returned `HashPair` is what staleness checks later compare against.
+### Depends on
+- `src/spec/format.rs::FileSpec` — super::format
+- `src/spec/format.rs::HashPair` — super::format
+- `src/spec/format.rs::SymbolProse` — super::format
+- `src/spec/format.rs::extract_section` — super::format
+- `src/spec/format.rs::read_existing` — super::format
+- `src/spec/format.rs::write` — super::format
+- `src/spec/smells.rs::prose_smells` — super::smells
+- `src/spec/smells.rs::reject_if_smelly` — super::smells
+- `src/spec/staleness.rs::dependency_record` — super::staleness
+- `src/spec/staleness.rs::file_dependency_record` — super::staleness
+- `src/graph.rs::Graph` — crate::graph
+- `src/graph.rs::Node` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- `src/symbol.rs::Symbol` — crate::symbol
+- externals: anyhow, std
+
+## `upsert`
+`fn upsert(entries: &mut Vec<(String, HashPair)>, id: String, value: HashPair)`
+### Summary
+Updates an existing entry by id in a list of `(id, HashPair)` pairs, or appends a new one if it isn't present yet — the generic "insert or update" operation used when persisting a symbol's hash into a file's spec.
+### Behavior
+Searches the list for an entry whose id matches; if found, replaces its value in place, preserving its position in the list. If not found, appends a new `(id, value)` entry to the end — its final position gets corrected afterward by `reorder_symbols`, which every caller of `upsert` runs immediately after.
+### Depends on
+- `src/spec/format.rs::HashPair` — super::format
+
+## `upsert_section`
+`fn upsert_section(entries: &mut Vec<(String, SymbolProse)>, id: String, value: SymbolProse)`
+### Summary
+The same insert-or-update operation as `upsert`, but for a list of `(id, SymbolProse)` pairs instead of `(id, HashPair)` — used to persist a symbol's actual summary/behavior prose text alongside its hash.
+### Behavior
+Identical logic to `upsert`: replaces an existing entry's value in place if the id is found, otherwise appends a new entry at the end.
+### Depends on
+- `src/spec/format.rs::SymbolProse` — super::format
+
+## `reorder_symbols`
+`fn reorder_symbols(graph: &Graph, file_id: SymbolId, spec: &mut FileSpec)`
+### Summary
+Keeps a file's spec in the same order as the code and removes entries for items that no longer exist. It runs on every save so moving or deleting a function in the source never leaves an orphan section behind.
+### Behavior
+Takes the file's current spec-bearing top-level symbols in declaration order. For each one it copies the stored hash pair and the stored prose into fresh lists, if they exist. The spec's `symbols` and `sections` are then replaced by these lists, which drops anything whose symbol is gone and orders the rest to match the source. Symbols that have no stored entry yet are simply not added; they appear when first submitted. It does not touch the file-level summary or hashes. It uses `expect` on ids it just filtered to symbols, so it cannot fail unless the graph is inconsistent.
+### Depends on
+- `src/spec/format.rs::FileSpec` — super::format
+- `src/spec/layout.rs::spec_bearing_children` — super::layout
+- `src/graph.rs::Graph` — crate::graph
+- `src/symbol.rs::SymbolId` — crate::graph

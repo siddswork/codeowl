@@ -1,0 +1,92 @@
+---
+kind: file
+source_paths: [src/spec/orphans.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/spec/orphans.rs::OrphanedSpec: { source_hash: ca0be9f40895b960a43bc88e5c5788be8efe3f4d2c99cf0a177fd9c225937fae, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: cb51f4332ca1395a56faa9e4253bc15755352aea93d4066b36456986cdc150db }
+  src/spec/orphans.rs::find_orphaned_specs: { source_hash: eb88af4b054889c1f34b173f293af323bb3f3552520f5cd232c188bd4e4e0ef0, deps_hash: 75a03749417daf590088bc2f9507b9399ae4b6c557b2ea837038a5a7731427de, spec_hash: 25613fb8deb10bc69603e541f74e94381565bc6cfd4b1f4121a16a3db4464918 }
+  src/spec/orphans.rs::find_orphaned_symbol_sections: { source_hash: 0ddab28fef3e7d2b2f742ccd2e5fffb4fa4349abccdacc469d9eddac68564201, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 9439103089a107dd170ff2db620241ddfbb9565b4e3b8ba75c3bd4cf539a08c9 }
+  src/spec/orphans.rs::find_orphaned_files_and_rollups: { source_hash: 6e6339855a6ef68a6b2f34ec329f1159c225f352c153d9a63711cafffd8deda6, deps_hash: 47c8690c85777507f529176e26a8b0372e4ba4715a4969dd11ca572578508126, spec_hash: f3cbc9d1ef506663501342fba3a58db7aa88220c3e3051107184b3831ca1b984 }
+dep_targets:
+  src/spec/orphans.rs::find_orphaned_specs -> src/features.rs::enumerate_entry_points: 6fc94a001d4c
+  src/spec/orphans.rs::find_orphaned_specs -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/orphans.rs::find_orphaned_symbol_sections -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/orphans.rs::find_orphaned_symbol_sections -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/spec/orphans.rs::find_orphaned_files_and_rollups -> src/spec/format.rs::parse: 5f76030ba2a5
+  src/spec/orphans.rs::find_orphaned_files_and_rollups -> src/text.rs::within_scope: 4dcc40036692
+---
+# src/spec/orphans.rs
+## Summary
+
+
+## `OrphanedSpec`
+`pub struct OrphanedSpec`
+### Summary
+Describes one spec on disk whose subject no longer exists, such as a deleted file or a removed feature. It is leftover clutter to delete, not something to regenerate.
+### Behavior
+Fields: `id` uses the same names as the coverage report (a feature has the `feature:` prefix, a folder summary the `rollup:` prefix) and names what is gone, so it should not be passed to the generate tools. `kind` is one of `file`, `rollup`, `feature` or `symbol`; the system spec is never orphaned because it always has a repo to summarise. `path` is relative to the repo root: for a file, rollup or feature it is the orphaned document itself, which a caller can delete. For a `symbol` it is the containing file's spec, because only a section inside a still-valid document is dead, and that section is dropped automatically the next time the file is written (`reorder_symbols`). Different from stale, where the target still exists. Plain data, no logic.
+### Depends on
+- (none)
+
+## `find_orphaned_specs`
+`pub fn find_orphaned_specs(
+    graph: &Graph,
+    root: &Path,
+    scope: Option<&str>,
+) -> Result<Vec<OrphanedSpec>>`
+### Summary
+Finds spec documents whose subject has been deleted, so they can be removed. The coverage report only looks outward from the code, so a spec for a file that no longer exists would never show up there. This walks the spec folder inward to catch those.
+### Behavior
+Returns an empty list at once if `docs/specs/` does not exist. Otherwise it collects orphans from three places:
+- Features: only when no `scope` is given, it lists the `.md` files in `docs/specs/_features/`, treats each filename (without the extension) as a slug, and reports any slug that no current feature entry point has. A failure listing that folder is an error.
+- Files and folder summaries: it delegates to `find_orphaned_files_and_rollups`, passing the sets of live file paths and live module folders, so a spec counts as an orphan when its implied target is not in those sets.
+- Symbol sections: `find_orphaned_symbol_sections` reports sections inside still-valid file specs whose function no longer exists.
+
+Targets are worked out from the mirrored folder layout and filenames alone (a file spec is its source path plus `.md`, a rollup is an `_index.md`, a feature is `_features/<slug>.md`), so no document is parsed. `scope` narrows files and folders by directory, and removes feature orphans entirely because a feature has no directory of its own. It only reports and never deletes.
+### Depends on
+- `src/spec/rollup.rs::enumerate_modules` — super::rollup
+- `src/features.rs::enumerate_entry_points` — crate::features
+- `src/graph.rs::Graph` — crate::graph
+- externals: anyhow, std
+
+## `find_orphaned_symbol_sections`
+`fn find_orphaned_symbol_sections(
+    graph: &Graph,
+    root: &Path,
+    scope: Option<&str>,
+    orphans: &mut Vec<OrphanedSpec>,
+) -> Result<()>`
+### Summary
+Finds sections inside a still-existing file's spec that describe a function or type since deleted from the file. Without this, the file could look fully up to date while still carrying a description of code that is gone.
+### Behavior
+Goes through every file in the graph in path order, skipping those outside `scope`, and skipping files with no stored spec. For each remaining file it collects the ids of its current spec-bearing symbols and compares them to the symbol ids stored in the spec. Each stored id missing from the current set is added to `orphans` as an `OrphanedSpec` of kind `symbol`, with the path of the containing file's spec (`docs/specs/<path>.md`). It only covers files still in the graph, because a deleted file's whole spec is already reported as a file orphan, and double-reporting would be noise. The status check cannot see these, since it only walks current symbols. The dead section is dropped automatically the next time the file's spec is written. Errors if a spec file cannot be read.
+### Depends on
+- `src/spec/format.rs::read_file_spec` — super::format
+- `src/spec/layout.rs::spec_bearing_children` — super::layout
+- `src/graph.rs::Graph` — crate::graph
+- `src/symbol.rs::SymbolId` — crate::graph
+- `src/text.rs::within_scope` — crate::text
+- externals: anyhow, std
+
+## `find_orphaned_files_and_rollups`
+`fn find_orphaned_files_and_rollups(
+    dir: &Path,
+    specs_root: &Path,
+    features_dir: &Path,
+    live_files: &std::collections::HashSet<String>,
+    live_modules: &std::collections::HashSet<String>,
+    scope: Option<&str>,
+    orphans: &mut Vec<OrphanedSpec>,
+) -> Result<()>`
+### Summary
+Searches the spec folder tree for file specs and folder summaries whose subject no longer exists. It is the file-and-folder half of orphan detection and adds what it finds to a shared list.
+### Behavior
+Reads the directory entry by entry. It skips the `_features/` folder (features are matched by name elsewhere) and recurses into every other subfolder. For a file it works out the path relative to `docs/specs/` with backslashes turned into `/`, then decides:
+- `_index.md` files: one directly at the top is the system spec and is skipped, since it can never be orphaned. Otherwise the folder path is the part before `/_index.md`; unless it is outside `scope`, it is reported as a `rollup:<dir>` orphan when it is not in `live_modules`.
+- Other `.md` files: the source path is the filename minus `.md`. Anything outside `scope` is skipped. The file must be readable and must actually parse as a CodeOwl-written spec (`parse` succeeds), so a hand-written guide such as `STYLE.md` is never flagged, as telling a human to delete their own document would be a false positive. A parsed spec whose source path is not in `live_files` is reported as a `file` orphan.
+
+Files with other extensions are ignored. Errors reading a directory (with a "reading <path>" message) are returned, but an unreadable individual file is silently skipped.
+### Depends on
+- `src/spec/format.rs::parse` — super::format
+- `src/text.rs::within_scope` — crate::text
+- externals: anyhow, std

@@ -1,0 +1,32 @@
+---
+kind: file
+source_paths: [src/spec/test_support.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/spec/test_support.rs::plant_smelly_symbol_spec: { source_hash: ecbd80f01a41e43d26fe13e671517830daa669871214cbedeff65f76a2c4e5e0, deps_hash: 95d771bb7e074397c1b0b4d8f3414dce03c969efe263c5362cbbf4ce49cf30c2, spec_hash: 07e034b70ac4aa9134a7857fe6ec6e379d4c5a0e6779dfd35808e2acd785ce00 }
+dep_targets:
+  src/spec/test_support.rs::plant_smelly_symbol_spec -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/test_support.rs::plant_smelly_symbol_spec -> src/hash.rs::hash_text: 70c099c1622c
+---
+# src/spec/test_support.rs
+## Summary
+
+
+## `plant_smelly_symbol_spec`
+`pub(crate) fn plant_smelly_symbol_spec(
+    graph: &Graph,
+    root: &Path,
+    sym_id: &str,
+    summary: &str,
+    behavior: &str,
+)`
+### Summary
+A test helper that puts a spec on disk whose hashes are up to date but whose prose is too poor to pass the quality check. Tests use it to confirm that such a spec is offered for rewriting, since `submit` now refuses to write prose like that.
+### Behavior
+First it submits clean placeholder text for the symbol through `submit`, which creates a valid spec file with correct hashes. It then finds the symbol's parent file, locates the spec path, reads the written document, and replaces three things: the placeholder summary with the given `summary`, the placeholder behavior with the given `behavior`, and the placeholder's `spec_hash` with a hash of the new text. The document is written back, so the hashes match the weak prose and nothing looks stale by hash alone. Every step uses `expect`, so a missing symbol, parent or file panics, which is acceptable in a test helper. It returns nothing.
+### Depends on
+- `src/spec/file_task.rs::submit` — super::file_task
+- `src/spec/layout.rs::spec_path` — super::layout
+- `src/graph.rs::Graph` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- externals: std

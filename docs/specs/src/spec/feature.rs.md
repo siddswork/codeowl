@@ -1,0 +1,178 @@
+---
+kind: file
+source_paths: [src/spec/feature.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/spec/feature.rs::FeatureSpec: { source_hash: 9b3d4a959f6125406cbb8e02f1f6b82acc349bb6f94183332af12c442fec8b63, deps_hash: 4dc105aada736e003cfc081b66c1cd5b42e9796e1410412dd6a22398f946acb5, spec_hash: 10c37c5dfd36e41123e53bd648cf5d9a0756e7790a27d0562f68b523db2fce53 }
+  src/spec/feature.rs::feature_spec_path: { source_hash: 1e846e23efe6f5e7b2a8bfdc2fee24b128f7a6068add6008f8c77c5c81f1b9b8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 633a733ac700f866ccb5c90b5ac0488a6d828e2936e8146e59e37c0c983a2e42 }
+  src/spec/feature.rs::render_feature: { source_hash: 1c105d9712139bc92e3a6eac3d6975bdfcfed6a2b5bebd7a4296c349a473522e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b0694114c64be2a5b489d349674ee60a942bae1b2402096b49f9281affeb54b0 }
+  src/spec/feature.rs::parse_feature: { source_hash: d619fd92085f762de6a9721f278785baf84e6defeaba9f8599fe25f26410a55e, deps_hash: 81ad5918c292ce3fb92542b408ea48b4ae55f09449731102a82f17a5484ccbb5, spec_hash: e5e37af16028807749aaa36f792afc464c4457a245d6f84f8ba035661b5ec50a }
+  src/spec/feature.rs::read_feature_spec: { source_hash: ae46831ce819ce2b4ddd0618c420cb9ce412fd6c7ffa3d0b039c5e1eaa756983, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: f8a610bc38be74a2dc2329ecf5b5259638f916024ecb350e129ba08798da8eee }
+  src/spec/feature.rs::current_participant_hashes: { source_hash: 22047dbfe835caa3690e45ffcc81fc44d0be145e118313d19cb7f1df04e01488, deps_hash: e4fb706a34fcc436e84a6b5a44fa84e0e4fcab06dd07ba4575a446ac915134ff, spec_hash: 29a73a35f458c4a4d229aed20971506efaca3138ee3d91ee7246f004092985d3 }
+  src/spec/feature.rs::dependency_context: { source_hash: c5fbbdde82170da0b402c4129fc93ea44faa2e6c47626ca3f3f383a70f3f92cf, deps_hash: 5610b760aca04f5943603f23ca475d4bee7861294c7d4e2a6d1d0246f5ebd555, spec_hash: e6533d4157c1e7b4fa06dfbf3fbd548023ed58feaa09bf4b7430c9dd10a340ef }
+  src/spec/feature.rs::FeatureTask: { source_hash: d3d6ba44da5a83e7833d0bb5f7359d2fab8713f823ec0f1ea5c92b409bf87c67, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 762d9f63dfd8f91f3183e3d180ccf59f613ad7c0160179994086384413ff3166 }
+  src/spec/feature.rs::next_feature_task: { source_hash: 2f09544abcff587df70a52691f1f1729351ec254343eacc079216346bf0770b2, deps_hash: fb3eb7fc35add1ca1136f0aff42f9f801c6859ca5e1c7bbf5627f63a04371b19, spec_hash: c72f307dd5aabc6405f54f08b599d2dbde74fe4027ae42e463ea46f5420891d0 }
+  src/spec/feature.rs::submit_feature: { source_hash: d9e36fc8a82cbc1a609000f9dd5d28463b0d3f0251be1c23ae3661fcd41a12ad, deps_hash: 243d98507d17a27870ebeaa984b88f91e23a2aae56adc586c8f12b79f40a2dc1, spec_hash: 63869805683632f30aab4aa16a2f0f262c8c0f4ec2b8e56f5b5f0e5406b944a4 }
+  src/spec/feature.rs::current_feature_hashes: { source_hash: 1e64a1f8e7cbcf0703f0095af90c5da33f6a150e19deab935abd4c93ebac9459, deps_hash: 6c563063746691df6b9d4f8403d020facb5960009cb6baf6c077878fda364c30, spec_hash: b4c982170679e28d951386ddb4c8524a8a0f324cc365e37a135dc77aa65135df }
+dep_targets:
+  src/spec/feature.rs::FeatureSpec -> src/features.rs::Participants: d881f770516b
+  src/spec/feature.rs::parse_feature -> src/features.rs::feature_slug: 8ba2356031a4
+  src/spec/feature.rs::current_participant_hashes -> src/features.rs::Participants: d881f770516b
+  src/spec/feature.rs::current_participant_hashes -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/feature.rs::dependency_context -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/feature.rs::next_feature_task -> src/features.rs::EntryPoint: 60acb942d332
+  src/spec/feature.rs::next_feature_task -> src/features.rs::assemble_participants: a6e5500838a2
+  src/spec/feature.rs::next_feature_task -> src/features.rs::feature_model_for: 39b4b61777d5
+  src/spec/feature.rs::next_feature_task -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/feature.rs::submit_feature -> src/features.rs::assemble_participants: a6e5500838a2
+  src/spec/feature.rs::submit_feature -> src/features.rs::enumerate_entry_points: 6fc94a001d4c
+  src/spec/feature.rs::submit_feature -> src/features.rs::feature_model_for: 39b4b61777d5
+  src/spec/feature.rs::submit_feature -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/feature.rs::submit_feature -> src/hash.rs::hash_text: 70c099c1622c
+  src/spec/feature.rs::current_feature_hashes -> src/features.rs::assemble_participants: a6e5500838a2
+  src/spec/feature.rs::current_feature_hashes -> src/features.rs::enumerate_entry_points: 6fc94a001d4c
+  src/spec/feature.rs::current_feature_hashes -> src/features.rs::feature_model_for: 39b4b61777d5
+  src/spec/feature.rs::current_feature_hashes -> src/graph.rs::Graph: 13dbdfa88b0e
+---
+# src/spec/feature.rs
+## Summary
+
+
+## `FeatureSpec`
+`pub struct FeatureSpec`
+### Summary
+The stored form of a feature spec, a document describing one end-to-end capability such as a page and the API and database work behind it. It is deliberately simpler than a file spec, with one body and one fingerprint for the prose.
+### Behavior
+Fields: `slug` (the feature's short name, used in the filename), `entry_point` (the file where the feature starts), `participants` (a list of id plus hash pairs recorded at generation time: a core file's `source_hash`, or a dependency symbol's `interface_hash`), `spec_hash` (a fingerprint of the whole written body) and `body` (everything from the `# Title` line onward). The title is written by the agent and lives inside the body, not synthesized by CodeOwl as a file spec's heading is. There are no per-section hashes because nothing reads part of a feature spec by itself. Staleness is decided by comparing the stored participant hashes with current ones. It is plain data with no logic.
+### Depends on
+- `src/features.rs::Participants` — crate::features
+
+## `feature_spec_path`
+`pub fn feature_spec_path(root: &Path, slug: &str) -> PathBuf`
+### Summary
+Computes where a feature's spec document lives on disk.
+### Behavior
+Joins the repo root with `docs/specs/_features/<slug>.md` — the dedicated subdirectory feature specs live in, separate from the file-spec tree `spec_path` targets.
+### Depends on
+- externals: std
+
+## `render_feature`
+`pub fn render_feature(spec: &FeatureSpec) -> String`
+### Summary
+Renders a `FeatureSpec` into its markdown-plus-frontmatter document form — the feature-spec counterpart to `render`.
+### Behavior
+Writes a YAML frontmatter block: `kind: feature`, the entry point, a `participants:` list of each participant's id and hash (one indented line each), and the whole-document `spec_hash`. After the closing `---`, it writes the body text as-is (trimmed), since a feature spec's body is the entire LLM-written document — title, all four headings — with nothing further assembled deterministically the way a file spec's per-symbol sections are.
+### Depends on
+- (none)
+
+## `parse_feature`
+`pub fn parse_feature(content: &str) -> Result<FeatureSpec>`
+### Summary
+Parses a feature spec's rendered text back into a `FeatureSpec` — the inverse of `render_feature`.
+### Behavior
+Requires the document to open with `---`, erroring otherwise. Walks the frontmatter line by line: a `participants:` line switches into a nested mode where each subsequent two-space-indented line is one participant entry, split with `rsplit_once(':')` rather than the first colon — deliberately, since a symbol's own id contains `::`, while its hash value never contains a colon at all, so splitting from the right correctly separates the two. Every other frontmatter line is split on the first `:` into a key/value pair, capturing `entry_point` and `spec_hash`; any other key is ignored. Parsing stops at the closing `---`.
+
+The remaining text becomes the `body` (trimmed) — unlike a file spec, there's no further section-by-section extraction, since a feature spec's whole body is treated as one unit. The `slug` is derived from the parsed `entry_point` via `feature_slug`, computed rather than stored separately in the frontmatter, so it's always consistent with the entry point even if the file was manually renamed.
+### Depends on
+- `src/features.rs::feature_slug` — crate::features
+- externals: anyhow
+
+## `read_feature_spec`
+`pub fn read_feature_spec(root: &Path, slug: &str) -> Result<Option<FeatureSpec>>`
+### Summary
+Reads and parses a feature's spec document off disk, if it exists — the feature-spec counterpart to `read_existing`, and what `get_spec`'s MCP handler calls for a `"feature:<slug>"` id.
+### Behavior
+Computes the expected path via `feature_spec_path`; returns `Ok(None)` if nothing exists there yet, otherwise reads and parses the content via `parse_feature`.
+### Depends on
+- externals: anyhow, std
+
+## `current_participant_hashes`
+`pub fn current_participant_hashes(
+    graph: &Graph,
+    participants: &Participants,
+) -> Result<Vec<(String, String)>>`
+### Summary
+Looks up the current fingerprint of every file, dependency and database table a feature spec depends on. Comparing this with the fingerprints saved when the spec was written shows whether the feature spec is still current, and a fresh generation records the same list.
+### Behavior
+Returns a list of id plus hash pairs in three groups, in this order. Core participants are files, and each contributes its `source_hash`, so any edit to the file counts. Dependencies are symbols, and each contributes its `interface_hash`, falling back to its `source_hash` when it has none, so only a change in public shape matters. Data participants are SQL tables, each contributing its `source_hash` (the table definition), because a table has no separate public shape and adding, dropping or renaming a column the feature uses should make the spec stale. A participant missing from the graph, or of the wrong kind (a core entry that is not a file, a dependency or table that is not a symbol), returns an error naming it, and the whole call fails rather than returning a partial list.
+### Depends on
+- `src/features.rs::Participants` — crate::features
+- `src/graph.rs::Graph` — crate::graph
+- externals: anyhow
+
+## `dependency_context`
+`fn dependency_context(graph: &Graph, root: &Path, dep_id: &str) -> Result<String>`
+### Summary
+Gives the agent a short description of one dependency of a feature, so it can understand what that piece does without reading its code. It uses the dependency's own written summary when that is trustworthy, and otherwise a plain stub built from its signature.
+### Behavior
+If the id is not in the graph it returns "<id> (unresolved)", and if it is not a symbol "<id> (not a symbol)"; neither is an error. If the symbol's file has a stored spec containing this symbol, whose stored `source_hash` still equals the symbol's current one, and which has a prose section, it returns that section's summary. Otherwise it returns the signature, followed by " -- " and the docstring when there is one. Only the source hash is compared, so a summary written before a dependency's own imports changed is still used. It only reads existing specs and never triggers generation of the dependency. A failure reading the spec file is returned as an error.
+### Depends on
+- `src/spec/format.rs::read_file_spec` — super::format
+- `src/graph.rs::Graph` — crate::graph
+- externals: anyhow, std
+
+## `FeatureTask`
+`pub struct FeatureTask`
+### Summary
+Everything an agent is given to write the spec for one feature: where it starts, the code that makes it up, what that code depends on, and the database tables it touches. A feature is written in one go rather than piece by piece.
+### Behavior
+Fields: `slug` and `entry_point` identify the feature. `core_sources` is a list of (file id, raw source text) for the entry point and the files it reaches through route-literal edges (links such as an API path written as a string). `dependencies` is a list of (symbol id, summary or stub) for what that code uses, as produced by `dependency_context`. `data` is a list of (table id, `table(col, col, ...)`) for each SQL table the code queries, so the "Data touched" section can name real columns. The struct has no logic and is built by the feature task code.
+### Depends on
+- (none)
+
+## `next_feature_task`
+`pub fn next_feature_task(
+    graph: &Graph,
+    root: &Path,
+    entry: &EntryPoint,
+) -> Result<Option<FeatureTask>>`
+### Summary
+Decides whether a feature needs a new spec and, if so, gathers everything the agent needs to write it. It returns nothing when the existing spec is still current.
+### Behavior
+Returns `Ok(None)` if the repo's language pack has no feature model (a CLI or library has none). Otherwise it assembles the feature's participants with `assemble_participants` and computes their current hashes. The stored feature spec counts as current only when the current and stored participant lists match exactly, and its body passes `body_smells`. A new participant, such as a fresh `fetch()` literal reaching another file, therefore also makes it stale even though no existing participant changed. A weak body is re-offered even if every hash matches.
+
+When a task is needed, it reads each core file in full from disk (failing with a "reading <path>" error if one cannot be read), builds the dependency list with `dependency_context`, and for each data table takes the signature, which renders as `table(col, ...)`; a table missing from the graph gets an empty string. The returned `FeatureTask` uses the entry's id as the slug.
+### Depends on
+- `src/spec/smells.rs::body_smells` — super::smells
+- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
+- `src/features.rs::EntryPoint` — crate::features
+- `src/features.rs::assemble_participants` — crate::features
+- `src/features.rs::feature_model_for` — crate::features
+- `src/graph.rs::Graph` — crate::graph
+- externals: anyhow, std
+
+## `submit_feature`
+`pub fn submit_feature(
+    graph: &Graph,
+    root: &Path,
+    entry_id: &str,
+    content: &str,
+) -> Result<FeatureSpec>`
+### Summary
+Saves the agent's written description of a feature, recording the fingerprints of everything it covers so later changes can be detected. It rejects empty, untitled or weak text.
+### Behavior
+Validation comes first: the trimmed body must be non-empty, must begin with `# ` (a title line), and must pass `body_smells`; each failure is an error. It then requires the language pack to have a feature model, otherwise it errors that the stack has no feature layer. The feature entry is found by its `id` (the slug) among `enumerate_entry_points`, never by its file. Looking up by file used to be a bug: several entries can share one file, such as many routes in one FastAPI module, and a file-based lookup picked the wrong sibling and overwrote a different feature's spec. An unknown slug is an error.
+
+With the entry found, it assembles the participants, computes their current hashes, and builds a `FeatureSpec` with the body hashed with `hash_text`. It creates the target directory, writes the rendered document, and returns the `FeatureSpec`. Nothing is written if validation or lookup fails. File errors carry "creating ..." or "writing ..." context.
+### Depends on
+- `src/spec/format.rs::write_replacing` — super::format
+- `src/spec/smells.rs::body_smells` — super::smells
+- `src/spec/smells.rs::reject_if_smelly` — super::smells
+- `src/features.rs::assemble_participants` — crate::features
+- `src/features.rs::feature_model_for` — crate::features
+- `src/graph.rs::Graph` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- externals: anyhow, std
+
+## `current_feature_hashes`
+`pub fn current_feature_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, String)>>`
+### Summary
+Lists every feature in the repo with the fingerprint of its current feature spec, or an empty value if that spec is missing or out of date. It is the feature half of what decides whether the system summary needs rewriting.
+### Behavior
+Returns an empty list at once when the language pack has no feature model, such as a CLI or library. Otherwise, for each feature entry point it assembles the participants and computes their current hashes. It reads the stored feature spec and uses its `spec_hash` only if the recorded participants equal the current ones; if the spec is missing or its participants differ, the value is an empty string. Each entry is keyed by the feature's id (slug). An error reading a feature spec file is returned.
+### Depends on
+- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
+- `src/features.rs::assemble_participants` — crate::features
+- `src/features.rs::feature_model_for` — crate::features
+- `src/graph.rs::Graph` — crate::graph
+- externals: anyhow, std

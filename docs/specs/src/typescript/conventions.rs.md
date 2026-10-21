@@ -1,0 +1,41 @@
+---
+kind: file
+source_paths: [src/typescript/conventions.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/typescript/conventions.rs::classify: { source_hash: 908bf0c8a6f2bb97bc5feed5c0cd0e4df84717e8c481b29b9f1ac2eed35b626f, deps_hash: a14267e8b73f64192ab7243df390d897d1687badb13020a9e52f1bd9c4e15fbb, spec_hash: cb5f679c4c0e908c4665e90988e4a80a1825f3fdab8173f868ad5a56ba9148c5 }
+  src/typescript/conventions.rs::is_test_path: { source_hash: 43bd27fc12cb63b5b6e60e8b23cc75ba2d0bc82465e1ffb6cf530d089aab30e1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a511957bab4e03e1d307eb16d4d08b01087428c3d50e9d8673f9d4e459a0ea28 }
+  src/typescript/conventions.rs::is_ui_primitive: { source_hash: 209f4445fe0023de0546da9717f126bbf2a38ed1753a94a50ca314462c748675, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 367ced1d96d513b98d77c48ddb63572c0bcfb1d984742211d1bf495007b8c895 }
+dep_targets:
+  src/typescript/conventions.rs::classify -> src/lang.rs::FileRole: 2e8bc021ccde
+---
+# src/typescript/conventions.rs
+## Summary
+
+
+## `classify`
+`pub fn classify(path: &str) -> FileRole`
+### Summary
+Maps a repo-relative path to its `FileRole` — the JS/Next-convention implementation behind `TypeScriptNextStack::classify`. The one place `is_test_path` and `is_ui_primitive` are consulted.
+### Behavior
+First strips a leading `rollup:` or `feature:` coverage-id prefix, so a directory-rollup id (`rollup:lib/email`) classifies by its bare directory path. Then a fixed precedence: `Test` wins over `Primitive` wins over `Domain` (the default). Precedence matters for a file that matches two rules — a test file under a `ui/` path is `Test`, not `Primitive`. Never returns `Generated` — no Phase 1 path convention produces it.
+### Depends on
+- `src/lang.rs::FileRole` — crate::lang
+
+## `is_test_path`
+`fn is_test_path(path: &str) -> bool`
+### Summary
+The JavaScript/TypeScript-convention test-file detector behind `classify` — recognises the standard e2e-runner trees and unit-test naming patterns.
+### Behavior
+Returns `true` if the path is in or under an `e2e/`, `cypress/`, or `playwright/` directory (checked both as a leading segment and mid-path), or contains `__tests__/`, `.test.`, or `.spec.` anywhere. Pure substring matching — no filesystem access, no awareness of a project's actual test config. It is deliberately JS-shaped: a Rust `tests/` tree or a Java `src/test/java` root matches nothing here, which is why `classify` is a pack-owned seam (`RustStack` supplies its own).
+### Depends on
+- (none)
+
+## `is_ui_primitive`
+`fn is_ui_primitive(path: &str) -> bool`
+### Summary
+Detects a shadcn/ui-style presentational primitive by path — a file in a `components/ui/` directory — so `classify` can keep it out of the shared-code tier despite its high import fan-in.
+### Behavior
+`true` if the path starts with `components/ui/` or contains `/components/ui/`; nothing else. A pure path convention, not a content check — it assumes the shadcn/ui layout where `components/ui/` holds only design-system leaves (`button.tsx`, `dialog.tsx`). A project that puts real logic there, or names the directory differently, would be misclassified — acceptable for Phase 1, and a pack-specific rule a `StackPack` eventually owns.
+### Depends on
+- (none)

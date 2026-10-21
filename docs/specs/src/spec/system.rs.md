@@ -1,0 +1,116 @@
+---
+kind: file
+source_paths: [src/spec/system.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/spec/system.rs::SystemSpec: { source_hash: d192a2ee5363d716290a1c7d01a5dd25b5e7089c780af3178d6e887432a6c768, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 42137e83ce66629d6521687b8825362d4d02ac9d54af51db19570daf41d0a4e7 }
+  src/spec/system.rs::system_spec_path: { source_hash: 8ba6c259a24956630d7e9c0385ca891469bcd40a93431ee9979bd2f7d7984f14, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 158e5bf2464f5042aaf0650fd3eae7250c1c885c82b979b30f7eb7ab2b82d501 }
+  src/spec/system.rs::render_system: { source_hash: a3f11074b137ea6fd9e75638f8d07480ea2ca1e98aa6af0e055996412feb4b32, deps_hash: 181adfc6b8957ded5c73a4bd9efb91c9dfff8e6dc5ee3345c3f20492adc3237d, spec_hash: d47a82481986b94c6b7af19dd12ceb4a42bc4571ad874ecb3efeb539c0e0a8eb }
+  src/spec/system.rs::parse_system: { source_hash: df8622758d35d5fc6009f531d588d805039305829caae646ee339259951126f8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4e9fb8efc93f5d522106c0732a0698b2c2553a0db7fe099742787b73c99f5fe1 }
+  src/spec/system.rs::read_system_spec: { source_hash: e0dc8353e8f2c5f0c4d7839e40e972a4e9821c4bc55f92f14390d6e4577e8cf9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: be368f8e809099b538d77bee39b6acc6b257818578b9fac1adbd1968106bc5e9 }
+  src/spec/system.rs::SystemTask: { source_hash: 7f2c1a3f9668326b809ad069b2bbfeb522895e4a39ac57fa9255aab70d3443a3, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: b0bded9b72856730279775ad565495552e8588d3c26cae5d7571cea0d2d20f2b }
+  src/spec/system.rs::next_system_task: { source_hash: 3ebc7bd684dcd3d71214be55ebf2301a767b4cb59c21a9fe8beb7dccfa038b9d, deps_hash: 5610b760aca04f5943603f23ca475d4bee7861294c7d4e2a6d1d0246f5ebd555, spec_hash: 11a8296520b2ecf20d7d5348c89a6dc08bc79b479a61adf5222ac577d20cf93e }
+  src/spec/system.rs::submit_system: { source_hash: d7740be7663ffc3e667828c0b99d832415c402d1c01b8de391edc1902a35dae0, deps_hash: 95d771bb7e074397c1b0b4d8f3414dce03c969efe263c5362cbbf4ce49cf30c2, spec_hash: 61a46700fbbaca15513677cdfff0cb1008907266cb9ccf78f38b0110e25389f0 }
+dep_targets:
+  src/spec/system.rs::render_system -> src/spec/feature.rs::read_feature_spec: 10898e3d8c74
+  src/spec/system.rs::render_system -> src/spec/format.rs::extract_section: 2f6754bf9a83
+  src/spec/system.rs::render_system -> src/spec/rollup.rs::read_rollup_spec: 819a80a19bf0
+  src/spec/system.rs::next_system_task -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/system.rs::submit_system -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/spec/system.rs::submit_system -> src/hash.rs::hash_text: 70c099c1622c
+---
+# src/spec/system.rs
+## Summary
+
+
+## `SystemSpec`
+`pub struct SystemSpec`
+### Summary
+The stored form of the top-level document describing the whole repo. There is exactly one, and it is the page a newcomer should read first.
+### Behavior
+Fields: `modules` (each module folder's id with its folder-summary hash), `features` (each feature's id with its feature-spec hash), `spec_hash` (a fingerprint of the written prose) and `body` (the agent-written title and summary, title included). The `## Modules` and `## Features` listings shown in the rendered page are not stored; they are rebuilt from the current repo each time, the same way a folder summary's contents list is. The recorded module and feature hashes are compared with the current ones to decide whether the system spec is stale. It is addressed by the fixed id `system`. Plain data, no logic.
+### Depends on
+- (none)
+
+## `system_spec_path`
+`pub fn system_spec_path(root: &Path) -> PathBuf`
+### Summary
+Computes where the one system spec document lives on disk.
+### Behavior
+Joins the repo root with the fixed path `docs/specs/_index.md` — the reserved location that's why a directory rollup at the repo root itself (empty `dir_path`) is refused elsewhere in this file, since it would collide with this same path.
+### Depends on
+- externals: std
+
+## `render_system`
+`pub fn render_system(root: &Path, spec: &SystemSpec) -> String`
+### Summary
+Renders a `SystemSpec` into its markdown-plus-frontmatter document form — the top-level document a newcomer or a BA is meant to read first, with `## Modules` and `## Features` listings assembled deterministically fresh from each module's/feature's own already-generated document.
+### Behavior
+Writes a YAML frontmatter block: `kind: system`, a `modules:` list and a `features:` list (each id paired with its recorded hash), and the overall `spec_hash`. After the closing `---`, writes the stored body (title plus summary, trimmed) as-is. It then builds `## Modules` fresh: for each module, it reads that module's own rollup spec off disk right now and shows the first line of its body as a one-line blurb — so the listing always reflects the module's real current summary, never a stale snapshot. `## Features` is built the same way: for each feature, it reads the feature's own spec, extracts a human title from the spec body's first line (stripping the leading `#` markdown heading marker, falling back to the raw slug if no spec is found), a one-line blurb from its `## Summary` section, and renders it as a markdown link pointing at the feature's own document under `_features/<slug>.md`.
+### Depends on
+- `src/spec/feature.rs::read_feature_spec` — super::feature
+- `src/spec/format.rs::extract_section` — super::format
+- `src/spec/rollup.rs::read_rollup_spec` — super::rollup
+- externals: std
+
+## `parse_system`
+`pub fn parse_system(content: &str) -> Result<SystemSpec>`
+### Summary
+Parses the system spec document's rendered text back into a `SystemSpec` — the inverse of `render_system`.
+### Behavior
+Requires the document to open with `---`. Walks the frontmatter, tracking which named section (`"modules"` or `"features"`) is currently being read; an indented line while inside one of those sections is split with `rsplit_once(':')` into an id and its hash, appended to the matching list. A bare `modules:`/`features:` line switches the active section; any other top-level line is split on the first `:` to look for `spec_hash`. Parsing stops at the closing `---`.
+
+For the body, rather than keeping everything after the frontmatter (the way `parse_feature` does), it specifically cuts the text at the first `\n## Modules` marker and keeps only what comes before — since everything from `## Modules` onward is deterministically CodeOwl-written and recomputed on every render, `render_system` never stores it, so parsing must symmetrically never read it back in either. What remains (title plus the LLM-written summary, trimmed) becomes the stored `body`.
+### Depends on
+- externals: anyhow
+
+## `read_system_spec`
+`pub fn read_system_spec(root: &Path) -> Result<Option<SystemSpec>>`
+### Summary
+Reads and parses the system spec off disk, if it exists — the system-spec counterpart to `read_existing`/`read_feature_spec`/`read_rollup_spec`.
+### Behavior
+Computes the fixed system spec path via `system_spec_path`; returns `Ok(None)` if it doesn't exist yet, otherwise reads and parses via `parse_system`.
+### Depends on
+- externals: anyhow, std
+
+## `SystemTask`
+`pub struct SystemTask`
+### Summary
+What an agent is given to write the top-level repo summary: the summary of every module folder and of every feature. It writes from those alone, never from raw code.
+### Behavior
+Two lists. `modules` has (folder path, that folder's summary text). `features` has (feature slug, "<title> -- <summary>"). The task is only created once every module and feature spec is current, so what the agent reads is up to date. Because it is made of already-written summaries, this is the cheapest and last document in a full run. When `features` is empty, as in a CLI or library, the agent is expected to describe the major end-to-end flows itself from the module summaries. Plain data, no logic.
+### Depends on
+- (none)
+
+## `next_system_task`
+`pub fn next_system_task(graph: &Graph, root: &Path) -> Result<Option<SystemTask>>`
+### Summary
+Decides whether the top-level repo summary needs writing and, if so, collects the module and feature summaries it is built from. It does nothing while any module or feature is unfinished, since the system summary is always the last document written.
+### Behavior
+Computes `current_module_hashes` and `current_feature_hashes`; if any hash is empty (a module or feature whose spec is missing or out of date) it returns `Ok(None)`. Otherwise it reads the stored system spec, which counts as current only if its body passes `body_smells` and the combined stored module and feature hash lists equal the current combined list, so adding, removing or rewriting any of them triggers a rewrite. When a task is needed it builds the module list from each stored folder summary body (an error "has no current rollup yet" if one is missing). For each feature it takes the title from the first line of its body with the leading `#` characters stripped (falling back to the slug), takes the text under `## Summary` (blank if absent), and formats "title -- summary". The result is a `SystemTask`. Read failures are returned as errors.
+### Depends on
+- `src/spec/feature.rs::current_feature_hashes` — super::feature
+- `src/spec/feature.rs::read_feature_spec` — super::feature
+- `src/spec/format.rs::extract_section` — super::format
+- `src/spec/rollup.rs::current_module_hashes` — super::rollup
+- `src/spec/rollup.rs::read_rollup_spec` — super::rollup
+- `src/spec/smells.rs::body_smells` — super::smells
+- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
+- `src/graph.rs::Graph` — crate::graph
+- externals: anyhow, std
+
+## `submit_system`
+`pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<SystemSpec>`
+### Summary
+Saves the agent's top-level repo description as `docs/specs/_index.md`, recording the fingerprints of every module and feature summary it was written from.
+### Behavior
+Validation first: the trimmed content must be non-empty, must start with `# ` (a title line), and must pass `body_smells`; any failure is an error and nothing is written. It then builds a `SystemSpec` with the current module hashes, the current feature hashes, and the body hashed with `hash_text`. Both hash functions can fail on unreadable spec files, which is returned as an error. The target directory is created if needed, the output of `render_system` is written, and the `SystemSpec` is returned. The recorded hashes are what make the system spec stale when any module or feature summary changes. File errors carry "creating ..." or "writing ..." context.
+### Depends on
+- `src/spec/feature.rs::current_feature_hashes` — super::feature
+- `src/spec/format.rs::write_replacing` — super::format
+- `src/spec/rollup.rs::current_module_hashes` — super::rollup
+- `src/spec/smells.rs::body_smells` — super::smells
+- `src/spec/smells.rs::reject_if_smelly` — super::smells
+- `src/graph.rs::Graph` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- externals: anyhow, std
