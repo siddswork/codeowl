@@ -86,6 +86,16 @@ enum Command {
         #[arg(long)]
         write: bool,
     },
+    /// After code was moved, split or renamed, report which of the specs it
+    /// orphaned still apply: for each orphaned symbol that has written prose,
+    /// the symbol with the same text now, and whether what it depends on has
+    /// kept its shape. Read-only; writes nothing.
+    AdoptMovedSpecs {
+        path: PathBuf,
+        /// Also print one line per orphaned symbol.
+        #[arg(long)]
+        list: bool,
+    },
 }
 
 #[tokio::main]
@@ -101,6 +111,13 @@ async fn main() -> Result<()> {
                 .filter_map(|id| codeowl::graph::SymbolView::from_graph(&graph, id))
                 .collect();
             println!("{}", serde_json::to_string_pretty(&views)?);
+            Ok(())
+        }
+        Command::AdoptMovedSpecs { path, list } => {
+            let root = canonical_root(&path)?;
+            let graph = RepoIndex::build(&root)?.rebuild()?;
+            let plan = codeowl::spec::plan_adoption(&graph, &root)?;
+            print!("{}", plan.report(list));
             Ok(())
         }
         Command::MigrateFileFingerprint { path, write } => {
