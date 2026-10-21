@@ -209,7 +209,7 @@ impl FeatureModel for QuarkusFeatureModel {
             // *also* independently producing a duplicate/false entry
             // point for the same endpoint once its annotations are
             // matchable.
-            .filter(|s| graph.file_role(&s.file) != FileRole::Generated)
+            .filter(|s| crate::stack::file_role(graph, &s.file) != FileRole::Generated)
             .filter_map(|s| {
                 let parent_id = s.parent?;
                 let is_rest_client = *is_rest_client_cache
@@ -464,7 +464,7 @@ fn resolve_interface_name(graph: &Graph, from_file: &str, name: &str) -> Option<
             .target?
     };
     let target_file = &graph.get_symbol(target)?.file;
-    (graph.file_role(target_file) == FileRole::Generated).then_some(target)
+    (crate::stack::file_role(graph, target_file) == FileRole::Generated).then_some(target)
 }
 
 /// Every name in a class's `implements` clause, in declaration order.

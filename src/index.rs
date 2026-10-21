@@ -135,7 +135,7 @@ pub struct RepoIndex {
     /// `load` sets it from the path it read the cache from.
     #[serde(skip)]
     root: PathBuf,
-    /// The stack pack for this repo — chosen by `lang::detect` at
+    /// The stack pack for this repo — chosen by `stack::detect` at
     /// `build`/`open`, never serialized (it's derived from the repo, and
     /// M13 design decision 7 keys the cache on `pack.name()` so a pack
     /// change forces a rebuild anyway). `Box`ed rather than a generic
@@ -159,7 +159,7 @@ impl RepoIndex {
     /// if none recognises it).
     pub fn build(root: &Path) -> Result<Self> {
         let root = &canonical_root(root);
-        let pack = crate::lang::detect(root)?;
+        let pack = crate::stack::detect(root)?;
         let mut files = BTreeMap::new();
         // Directory entries the primary walk visits anyway (it just skips
         // them right below) doubled as the candidate module roots M19's
@@ -224,7 +224,7 @@ impl RepoIndex {
         // `pack` and `root` are `#[serde(skip)]` — re-derive them from the
         // repo. `detect` also fail-fasts if the repo lost all its source
         // while nothing was running.
-        let pack = crate::lang::detect(root).ok()?;
+        let pack = crate::stack::detect(root).ok()?;
         // The repo's stack changed since this cache was written — its
         // `FileInputs` were parsed by the wrong grammar (design decision 7).
         if index.pack_name != pack.name() {
@@ -1050,7 +1050,7 @@ mod tests {
             root: &Path,
             file_imports: &HashMap<String, FileImports>,
             graph: &Graph,
-        ) -> Vec<crate::resolve::ResolvedImport> {
+        ) -> Vec<crate::graph::ResolvedImport> {
             self.0.resolve_imports(root, file_imports, graph)
         }
         fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {

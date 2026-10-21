@@ -18,20 +18,21 @@
 //! `TypeScriptNextStack` delegates to the existing free functions, which
 //! stay `pub` as shims. M14 adds `RustStack` (`tree-sitter-rust` over
 //! `.rs`, no feature layer) as the second implementation — the one that
-//! actually exercises the seams. `lang::detect` still hands back the TS
-//! pack unconditionally until M14's `detect()`-branching commit.
+//! actually exercises the seams. [`registered_packs`] is the single list
+//! of packs: `detect` picks one for a repo from it and [`for_name`]
+//! recovers one from a persisted name.
 
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::graph::ResolvedImport;
 use crate::graph::{FlowTarget, Graph, UnresolvedFlowEdge};
 use crate::imports::FileImports;
 use crate::lang::{FileRole, SourceKind};
-use crate::resolve::ResolvedImport;
 use crate::symbol::ExtractedSymbol;
 
 /// Everything the generic core needs a stack to decide. One `StackPack`
-/// per repo, chosen by [`crate::lang::detect`]. `Send + Sync` because the
+/// per repo, chosen by [`detect`]. `Send + Sync` because the
 /// file watcher carries the active pack to its background thread; `Debug`
 /// so the structs that hold one (`RepoIndex`) still derive it.
 pub trait StackPack: Send + Sync + std::fmt::Debug {
@@ -41,7 +42,7 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
 
     /// Which extractor a file's *contents* go to, or `None` when the pack
     /// reads nothing from it. Replaces `lang::is_extractable` +
-    /// `SourceKind::of` — a file is walkable iff this returns `Some`.
+    /// `source_kind` — a file is walkable iff this returns `Some`.
     fn source_kind(&self, path: &Path) -> Option<SourceKind>;
 
     /// The role a repo-relative path plays for spec prioritisation.
@@ -69,14 +70,20 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// The "this file reaches that thing" edges the import graph can't see
     /// — for `TypeScriptNextStack`, `fetch("/api/…")`, `.from("table")`,
     /// `<Component/>`. One raw string per edge; resolution is a separate
-    /// step. A pack with no such conventions returns an empty vec.
-    fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge>;
+    /// step. The default — for a pack with no such conventions — is an
+    /// empty vec.
+    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
+        Vec::new()
+    }
 
     /// Resolve one flow edge against the built graph. Called per edge at
     /// graph-build time, after imports are resolved. `FlowTarget::Unresolved`
     /// for an edge whose raw string points nowhere (external URL, DB view,
-    /// dynamic path, typo).
-    fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget;
+    /// dynamic path, typo) — which is every edge for the default, since the
+    /// default `extract_flow_edges` produces none.
+    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
+        FlowTarget::Unresolved
+    }
 
     /// The stack's model of "what is a feature", or `None` if it has no
     /// runtime entry surface — a CLI or a utility library gets symbol /
@@ -173,19 +180,19 @@ impl StackPack for TypeScriptNextStack {
     fn source_kind(&self, path: &Path) -> Option<SourceKind> {
         match path.extension().and_then(|e| e.to_str()) {
             Some("sql") => Some(SourceKind::Schema),
-            _ => path.to_str().and_then(SourceKind::of),
+            _ => path.to_str().and_then(crate::typescript::source_kind),
         }
     }
 
     fn classify(&self, rel_path: &str) -> FileRole {
-        crate::lang::classify(rel_path)
+        crate::typescript::classify(rel_path)
     }
 
     fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
         if rel_path.ends_with(".sql") {
             crate::schema::extract_tables(source, rel_path)
         } else {
-            crate::lang::extract_symbols(rel_path, source)
+            crate::extract::extract_file(source, rel_path)
         }
     }
 
@@ -255,17 +262,168 @@ pub fn typescript_next() -> Box<dyn StackPack> {
     Box::new(TypeScriptNextStack)
 }
 
+/// One pack in the [`registered_packs`] list: how `detect` names it
+/// to a user, and how to construct it.
+pub struct Registered {
+    /// What an error message calls this stack ("TypeScript/TSX", "Rust").
+    pub label: &'static str,
+    pub build: fn() -> Box<dyn StackPack>,
+}
+
+/// Every pack CodeOwl ships — the **one** list. `detect` walks it to
+/// pick a pack for a repo and [`for_name`] walks it to recover a pack from
+/// a persisted name, so a new language is registered here and nowhere else.
+/// Order is detection order, which only affects the order of an ambiguity
+/// message.
+pub fn registered_packs() -> &'static [Registered] {
+    const PACKS: &[Registered] = &[
+        Registered {
+            label: "TypeScript/TSX",
+            build: || Box::new(TypeScriptNextStack),
+        },
+        Registered {
+            label: "Rust",
+            build: || Box::new(RustStack),
+        },
+        Registered {
+            label: "Java",
+            build: || Box::new(JavaStack),
+        },
+        Registered {
+            label: "Python",
+            build: || Box::new(PythonStack),
+        },
+    ];
+    PACKS
+}
+
 /// The pack for a persisted `StackPack::name()` — how a pure-read caller
 /// (`spec.rs`, `mcp.rs`) recovers the pack from `Graph::pack_name()`
-/// without it being threaded down. Unknown / empty (a test-built graph, a
-/// pre-M14 cache) falls back to the TypeScript pack.
-pub fn for_name(name: &str) -> Box<dyn StackPack> {
-    match name {
-        "rust" => Box::new(RustStack),
-        "java" => Box::new(JavaStack),
-        "python" => Box::new(PythonStack),
-        _ => Box::new(TypeScriptNextStack),
+/// without it being threaded down. The empty name (a graph built by a test
+/// helper, which never called `set_pack_name`) means the TypeScript pack.
+/// Any other name that no registered pack answers to is an error: falling
+/// back to TypeScript would classify, say, a Rust repo with TypeScript
+/// rules and report nothing wrong.
+pub fn for_name(name: &str) -> anyhow::Result<Box<dyn StackPack>> {
+    if name.is_empty() {
+        return Ok(typescript_next());
     }
+    // Called per file from the spec layer, so the match path allocates
+    // nothing; the list of known names is built only to explain a miss.
+    for entry in registered_packs() {
+        let pack = (entry.build)();
+        if pack.name() == name {
+            return Ok(pack);
+        }
+    }
+    let known: Vec<String> = registered_packs()
+        .iter()
+        .map(|entry| (entry.build)().name().to_string())
+        .collect();
+    anyhow::bail!(
+        "no registered stack pack is named `{name}` (registered: {})",
+        known.join(", ")
+    )
+}
+
+/// Pick the one `StackPack` for `root`, or fail fast — rather than
+/// silently building and serving an empty graph. Called once at startup,
+/// from `RepoIndex::build`/`open`.
+///
+/// A pack "recognises" a repo by the count of files whose `source_kind`
+/// is [`SourceKind::Code`] — its *primary* language (`.ts`/`.tsx` for TS,
+/// `.rs` for Rust, `.java` for Java). A `.sql` schema file is
+/// `SourceKind::Schema`, not `Code`, so it never makes a repo "TypeScript"
+/// on its own (a Rust repo with migrations is still a Rust repo).
+///
+/// Exactly one pack may claim the repo (a repo that's genuinely two
+/// stacks is out of scope; multi-pack per repo is deferred). Zero → error
+/// naming the supported stacks.
+pub fn detect(root: &Path) -> anyhow::Result<Box<dyn StackPack>> {
+    // A repo's stack identity is its *source*, not its test trees — a
+    // `tests/fixtures/foo.tsx` read as a string by a Rust test mustn't
+    // make CodeOwl's own repo look like TypeScript. Skip the conventional
+    // test / bench directories for the detection count only (they're still
+    // walked and extracted once a pack is chosen).
+    fn is_non_identity_tree(rel: &str) -> bool {
+        let seg = |d: &str| rel == d || rel.starts_with(&format!("{d}/"));
+        // Test trees: JS/Rust keep tests in a top-level `tests` / `test` /
+        // `benches`; Maven/Gradle keep them under `src/test/...`.
+        let is_test = seg("tests") || seg("test") || seg("benches") || rel.contains("src/test/");
+        // Tooling trees: build / dev / CI scripts don't define a repo's
+        // stack identity — CodeOwl's own `utility/*.py` mustn't make this
+        // Rust repo look ambiguously Python.
+        let is_tooling = seg("utility") || seg("scripts") || seg("tools") || seg("hack");
+        is_test || is_tooling
+    }
+
+    fn primary_count(root: &Path, pack: &dyn StackPack) -> usize {
+        ignore::WalkBuilder::new(root)
+            .build()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
+            .filter(|entry| {
+                entry
+                    .path()
+                    .strip_prefix(root)
+                    .ok()
+                    .and_then(|p| p.to_str())
+                    .is_none_or(|rel| !is_non_identity_tree(rel))
+            })
+            .filter(|entry| pack.source_kind(entry.path()) == Some(SourceKind::Code))
+            .count()
+    }
+
+    let hits: Vec<(&Registered, usize)> = registered_packs()
+        .iter()
+        .map(|entry| (entry, primary_count(root, (entry.build)().as_ref())))
+        .filter(|(_, n)| *n > 0)
+        .collect();
+
+    match hits.as_slice() {
+        [] => {
+            let supported: Vec<&str> = registered_packs().iter().map(|e| e.label).collect();
+            anyhow::bail!(
+                "no source files CodeOwl can extract were found under {} — it handles {} \
+                 (see ROADMAP.md)",
+                root.display(),
+                supported.join(", ")
+            )
+        }
+        [(entry, _)] => Ok((entry.build)()),
+        multiple => {
+            let listed = multiple
+                .iter()
+                .map(|(entry, n)| format!("{} ({n} files)", entry.label))
+                .collect::<Vec<_>>()
+                .join(", ");
+            anyhow::bail!(
+                "{} contains more than one stack CodeOwl recognises — {listed}. CodeOwl \
+                 serves one stack per repo (ROADMAP.md design decision 6). Point it at a \
+                 subdirectory that's a single stack.",
+                root.display()
+            )
+        }
+    }
+}
+
+/// A repo-relative path's [`FileRole`] under the pack that built `graph` —
+/// the shared lookup `spec.rs` and `quarkus.rs` both need. A free function
+/// here rather than a `Graph` method so `graph.rs` never has to know the
+/// packs exist.
+pub fn file_role(graph: &Graph, path: &str) -> FileRole {
+    for_graph(graph).classify(path)
+}
+
+/// The pack that built `graph`. A graph's pack name is written in exactly
+/// one place — `RepoIndex` copies it from the pack it detected — and a
+/// cache built by a different pack is rejected on load, so an unregistered
+/// name here is a bug in CodeOwl, not bad input. Panics with that message
+/// rather than guessing a pack.
+pub fn for_graph(graph: &Graph) -> Box<dyn StackPack> {
+    for_name(graph.pack_name()).unwrap_or_else(|e| {
+        panic!("graph carries an unregistered pack name (a CodeOwl bug): {e:#}")
+    })
 }
 
 /// The Rust stack (M14): `tree-sitter-rust` extraction over `.rs` files,
@@ -317,14 +475,6 @@ impl StackPack for RustStack {
         graph: &Graph,
     ) -> Vec<ResolvedImport> {
         crate::rust::resolve_imports(root, file_imports, graph)
-    }
-
-    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
-        Vec::new()
-    }
-
-    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
-        FlowTarget::Unresolved
     }
 
     fn strip_test_code(&self, _rel_path: &str, source: &str) -> String {
@@ -392,14 +542,6 @@ impl StackPack for JavaStack {
         graph: &Graph,
     ) -> Vec<ResolvedImport> {
         crate::java::resolve_imports(root, file_imports, graph)
-    }
-
-    fn extract_flow_edges(&self, _rel_path: &str, _source: &str) -> Vec<UnresolvedFlowEdge> {
-        Vec::new()
-    }
-
-    fn resolve_flow_edge(&self, _graph: &Graph, _edge: &UnresolvedFlowEdge) -> FlowTarget {
-        FlowTarget::Unresolved
     }
 
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
@@ -591,6 +733,85 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn every_registered_pack_is_found_again_by_its_own_name() {
+        for entry in registered_packs() {
+            let pack = (entry.build)();
+            let found = for_name(pack.name()).expect("a registered pack's name resolves");
+            assert_eq!(found.name(), pack.name());
+        }
+    }
+
+    #[test]
+    fn registered_pack_names_and_labels_are_unique() {
+        let mut names: Vec<String> = registered_packs()
+            .iter()
+            .map(|e| (e.build)().name().to_string())
+            .collect();
+        let mut labels: Vec<&str> = registered_packs().iter().map(|e| e.label).collect();
+        names.sort();
+        labels.sort();
+        let (n, l) = (names.len(), labels.len());
+        names.dedup();
+        labels.dedup();
+        assert_eq!((names.len(), labels.len()), (n, l));
+    }
+
+    #[test]
+    fn detect_errors_name_every_registered_stack() {
+        let dir = std::env::temp_dir().join(format!("codeowl-detect-msg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.md"), "hi\n").unwrap();
+
+        let err = detect(&dir).unwrap_err().to_string();
+        for entry in registered_packs() {
+            assert!(err.contains(entry.label), "missing {}: {err}", entry.label);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn detect_bails_on_a_dir_with_no_source() {
+        let dir = std::env::temp_dir().join(format!("codeowl-lang-detect-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.md"), "hi\n").unwrap();
+        assert!(detect(&dir).is_err());
+
+        std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
+        assert!(detect(&dir).is_ok());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn file_role_classifies_under_the_pack_that_built_the_graph() {
+        // `tests/` is a test root to the Rust pack; the TypeScript pack
+        // (the empty-name default) only knows the JS conventions.
+        let mut graph =
+            crate::graph::build_graph_from_sources(&[("a.ts", "export const a = 1;\n")]);
+        assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Domain);
+        graph.set_pack_name("rust");
+        assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Test);
+    }
+
+    #[test]
+    fn an_empty_pack_name_means_the_typescript_pack() {
+        // A graph built by a test helper never had `set_pack_name` called.
+        assert_eq!(for_name("").unwrap().name(), "typescript-next");
+    }
+
+    #[test]
+    fn an_unknown_pack_name_is_an_error_that_lists_the_registered_names() {
+        // A misspelt name used to fall through to the TypeScript pack and
+        // classify a Rust repo with TypeScript rules, silently.
+        let err = for_name("rsut").unwrap_err().to_string();
+        assert!(err.contains("rsut"), "names the bad value: {err}");
+        for want in ["typescript-next", "rust", "java", "python"] {
+            assert!(err.contains(want), "lists {want}: {err}");
+        }
+    }
+
+    #[test]
     fn typescript_next_delegates_transparently() {
         let pack = TypeScriptNextStack;
         let src = "import { helper } from './b';\nexport function f() { helper(); }\n";
@@ -599,13 +820,16 @@ mod tests {
         // does — M13 is a re-wiring, so the seam has to be invisible.
         assert_eq!(
             pack.extract_symbols("a.ts", src),
-            crate::lang::extract_symbols("a.ts", src)
+            crate::extract::extract_file(src, "a.ts")
         );
         assert_eq!(
             pack.extract_imports("a.ts", src),
             crate::imports::extract_imports(src, "a.ts")
         );
-        assert_eq!(pack.classify("lib/x.ts"), crate::lang::classify("lib/x.ts"));
+        assert_eq!(
+            pack.classify("lib/x.ts"),
+            crate::typescript::classify("lib/x.ts")
+        );
         assert_eq!(pack.classify("x.test.ts"), FileRole::Test);
         assert_eq!(
             pack.source_kind(Path::new("a/b.tsx")),
@@ -705,12 +929,12 @@ mod tests {
         // TS repo (a lone .sql wouldn't be enough — Schema, not Code).
         std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
         std::fs::write(dir.join("schema.sql"), "CREATE TABLE t (id int);\n").unwrap();
-        assert_eq!(crate::lang::detect(&dir).unwrap().name(), "typescript-next");
+        assert_eq!(detect(&dir).unwrap().name(), "typescript-next");
 
         // Rust repo.
         std::fs::remove_file(dir.join("a.ts")).unwrap();
         std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
-        assert_eq!(crate::lang::detect(&dir).unwrap().name(), "rust");
+        assert_eq!(detect(&dir).unwrap().name(), "rust");
 
         // Java repo — a `src/main/java` tree, its `src/test/java` twin
         // excluded from the count (so a test-heavy repo still detects).
@@ -727,24 +951,24 @@ mod tests {
             "package com.ex;\npublic class ATest {}\n",
         )
         .unwrap();
-        assert_eq!(crate::lang::detect(&dir).unwrap().name(), "java");
+        assert_eq!(detect(&dir).unwrap().name(), "java");
 
         // Java + Rust -> one-stack-per-repo error (design decision 6).
         std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
-        assert!(crate::lang::detect(&dir).is_err());
+        assert!(detect(&dir).is_err());
         std::fs::remove_file(dir.join("lib.rs")).unwrap();
         std::fs::remove_dir_all(dir.join("src")).unwrap();
 
         // Both TS and Rust -> also an error.
         std::fs::write(dir.join("a.ts"), "export const x = 1;\n").unwrap();
         std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
-        assert!(crate::lang::detect(&dir).is_err());
+        assert!(detect(&dir).is_err());
 
         // Neither.
         std::fs::remove_file(dir.join("a.ts")).unwrap();
         std::fs::remove_file(dir.join("lib.rs")).unwrap();
         std::fs::write(dir.join("notes.md"), "hi\n").unwrap();
-        assert!(crate::lang::detect(&dir).is_err());
+        assert!(detect(&dir).is_err());
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -753,7 +977,7 @@ mod tests {
     fn detect_recognises_this_crate_as_rust() {
         // The M14 dogfood: CodeOwl's own repo root.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        assert_eq!(crate::lang::detect(root).unwrap().name(), "rust");
+        assert_eq!(detect(root).unwrap().name(), "rust");
     }
 
     #[test]

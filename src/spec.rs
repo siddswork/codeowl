@@ -25,13 +25,14 @@ use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
 use crate::lang::FileRole;
 use crate::symbol::{Symbol, SymbolKind};
+use crate::text::{leading_comment_block, within_scope};
 
 /// A repo-relative path's [`FileRole`] under the stack that built `graph`
 /// — `RustStack` calls `tests/` a test root, `TypeScriptNextStack` uses
-/// the JS conventions. Replaces the direct `lang::classify` call so
-/// prioritisation isn't hard-wired to one stack.
+/// the JS conventions. Goes through the graph's pack, not the TypeScript
+/// rules directly, so prioritisation isn't hard-wired to one stack.
 fn classify_in(graph: &Graph, path: &str) -> FileRole {
-    graph.file_role(path)
+    crate::stack::file_role(graph, path)
 }
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
@@ -114,7 +115,7 @@ pub struct GeneratedSourcesSummary {
 }
 
 pub fn generated_sources_summary(graph: &Graph) -> Option<GeneratedSourcesSummary> {
-    let pack = crate::stack::for_name(graph.pack_name());
+    let pack = crate::stack::for_graph(graph);
     let dirs = pack.generated_source_dirs();
     if dirs.is_empty() {
         return None;
@@ -791,38 +792,6 @@ pub fn choose_file_rung(
     }
 }
 
-/// The comment block at the very top of `text`, as written: leading `//`,
-/// `/* … */` and `#` comment lines up to the first blank or code
-/// line. A Rust `#[…]` / `#![…]` attribute is not a comment. Empty when the
-/// file starts with code. A Python module docstring is not recognised.
-pub(crate) fn leading_comment_block(text: &str) -> String {
-    let mut lines: Vec<&str> = Vec::new();
-    let mut in_block = false;
-    for line in text.lines() {
-        let t = line.trim_start();
-        if in_block {
-            lines.push(line);
-            if t.contains("*/") {
-                in_block = false;
-            }
-            continue;
-        }
-        if t.is_empty() && lines.is_empty() {
-            continue;
-        }
-        let is_hash_comment = t.starts_with('#') && !t.starts_with("#[") && !t.starts_with("#!");
-        if t.starts_with("/*") {
-            lines.push(line);
-            in_block = !t.contains("*/");
-        } else if t.starts_with("//") || is_hash_comment {
-            lines.push(line);
-        } else {
-            break;
-        }
-    }
-    lines.join("\n")
-}
-
 /// The file's largest container (class, struct, …) and its share of
 /// `file_bytes`, in percent. `None` when the file has no container. The
 /// span includes folded-in `impl` blocks, the same text a symbol task shows.
@@ -1017,24 +986,6 @@ pub(crate) fn file_task_input(
 /// Overridable the same way as the generation-task caps (`codeowl
 /// serve`'s `--max-source-bytes` flag, `mcp.rs::with_source_limit`).
 pub const MAX_SOURCE_TEXT_BYTES_DEFAULT: usize = 32_000;
-
-/// Cut `text` to at most `max_bytes`, on a `char` boundary, with **no**
-/// marker appended — unlike [`cap_generation_text`], whose marker text is
-/// meant to be read by an LLM assembling a prompt. `get_source` returns
-/// what's meant to be read *as* source code; splicing an English sentence
-/// into the middle of a function body would corrupt exactly the thing a
-/// caller is trying to verify. The signal is the returned `bool`, which
-/// `get_source`'s `truncated` field carries instead.
-pub(crate) fn cap_source_text(text: String, max_bytes: usize) -> (String, bool) {
-    if text.len() <= max_bytes {
-        return (text, false);
-    }
-    let mut cut = max_bytes.min(text.len());
-    while cut > 0 && !text.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    (text[..cut].to_string(), true)
-}
 
 /// `full_source` (the true full span from [`symbol_span_text`]) unless
 /// `sym` is a `Container` over `threshold` bytes with members to
@@ -1534,8 +1485,7 @@ fn write(root: &Path, graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> Resu
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render(graph, root, file_id, spec))
-        .with_context(|| format!("writing {}", path.display()))
+    write_replacing(&path, &render(graph, root, file_id, spec))
 }
 
 /// One unit of work `/codeowl generate <id>` still needs a spec for,
@@ -2118,13 +2068,29 @@ fn add_file_fingerprint(text: &str, fingerprint: &str) -> Result<String> {
 }
 
 /// Replace `path`'s contents without a window in which it is empty: write a
-/// temp file beside it, then rename over it.
+/// temp file beside it, then rename over it. The one way a spec document
+/// (file, feature, rollup, system) reaches disk, so a crash or a full disk
+/// mid-write leaves the previous spec whole instead of a torn one in git.
+/// The staged bytes are flushed to disk before the rename, and a staging
+/// file whose rename fails is removed rather than left to be committed.
+/// One server process writes specs, so the fixed `.tmp` name is not shared
+/// between writers.
 fn write_replacing(path: &Path, content: &str) -> Result<()> {
+    use std::io::Write;
+
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, content).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+    let mut file =
+        std::fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+    file.write_all(content.as_bytes())
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    drop(file);
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::Error::new(e).context(format!("replacing {}", path.display()))
+    })
 }
 
 /// Test helper: put a hash-*current* symbol spec on disk whose prose would
@@ -2540,8 +2506,7 @@ pub fn submit_feature(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render_feature(&spec))
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_replacing(&path, &render_feature(&spec))?;
 
     Ok(spec)
 }
@@ -2820,8 +2785,7 @@ pub fn submit_rollup(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render_rollup(graph, root, &spec))
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_replacing(&path, &render_rollup(graph, root, &spec))?;
 
     Ok(spec)
 }
@@ -3132,8 +3096,7 @@ pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<System
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render_system(root, &spec))
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_replacing(&path, &render_system(root, &spec))?;
 
     Ok(spec)
 }
@@ -3424,19 +3387,6 @@ fn system_status(graph: &Graph, root: &Path) -> Result<(String, Vec<String>)> {
     }
     .to_string();
     Ok((status, smells))
-}
-
-/// Whether `path` (a file or directory) falls under `scope` — an exact
-/// match, or a true subdirectory (`scope` plus a `/` boundary), never a
-/// bare string-prefix match: `"lib/email"` must not also catch
-/// `"lib/email.ts"` or `"lib/email-utils/"`. An empty `scope` matches
-/// everything (files/rollups only — see `coverage`'s own doc comment on
-/// why an empty-but-`Some` scope still excludes features/system). Shared
-/// with `search_code`'s (M20) `path` filter (`search.rs`) — the same
-/// boundary discipline applies there for the same reason: a query scoped
-/// to `"lib"` shouldn't also match `"library/foo.ts"`.
-pub(crate) fn within_scope(path: &str, scope: &str) -> bool {
-    scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/"))
 }
 
 /// Every document the granularity rules say should exist, each with its
@@ -4178,7 +4128,7 @@ mod tests {
         // reference-only, per the "only spec the hand-written code"
         // principle. `classify_in` reads the graph's own `pack_name`, so
         // this sets it to "java" directly rather than re-deriving it
-        // through `lang::detect` on a throwaway fixture repo.
+        // through `stack::detect` on a throwaway fixture repo.
         let path = "target/generated-sources/foo/HeroesResource.java";
         let mut graph =
             build_graph_from_sources(&[(path, "export function getAllHeroes(): void {}\n")]);
@@ -4343,7 +4293,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 symbols: crate::rust::extract_file(people, "src/people.rs"),
             },
         ]);
-        graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+        graph.set_resolved_imports(vec![crate::graph::ResolvedImport {
             from_file: "src/people.rs".to_string(),
             specifier: "crate::greeter".to_string(),
             imported_name: "Greeter".to_string(),
@@ -4604,7 +4554,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
         let resolved = file_imports
             .imports
             .iter()
-            .map(|imp| crate::resolve::ResolvedImport {
+            .map(|imp| crate::graph::ResolvedImport {
                 from_file: "a.ts".to_string(),
                 specifier: imp.specifier.clone(),
                 imported_name: imp.imported_name.clone(),
@@ -4665,7 +4615,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
             crate::imports::extract_imports(a, "a.ts")
                 .imports
                 .iter()
-                .map(|imp| crate::resolve::ResolvedImport {
+                .map(|imp| crate::graph::ResolvedImport {
                     from_file: "a.ts".to_string(),
                     specifier: imp.specifier.clone(),
                     imported_name: imp.imported_name.clone(),
@@ -4834,7 +4784,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 symbols: crate::rust::extract_file(people, "src/people.rs"),
             },
         ]);
-        graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+        graph.set_resolved_imports(vec![crate::graph::ResolvedImport {
             from_file: "src/people.rs".to_string(),
             specifier: "crate::greeter".to_string(),
             imported_name: "Greeter".to_string(),
@@ -5105,38 +5055,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     }
 
     #[test]
-    fn cap_source_text_leaves_short_text_untouched_and_unflagged() {
-        let text = "hello world".to_string();
-        let (out, truncated) = cap_source_text(text.clone(), MAX_SOURCE_TEXT_BYTES_DEFAULT);
-        assert_eq!(out, text);
-        assert!(!truncated);
-    }
-
-    #[test]
-    fn cap_source_text_cuts_and_flags_but_never_appends_prose() {
-        // Unlike cap_generation_text, get_source's cap must never splice
-        // an English marker into what's meant to be read as real source
-        // code -- the `truncated` bool is the signal, not the text.
-        let text = "x".repeat(1000);
-        let (out, truncated) = cap_source_text(text, 50);
-        assert_eq!(out.len(), 50);
-        assert!(truncated);
-        assert!(
-            out.chars().all(|c| c == 'x'),
-            "no marker text should appear in the capped output: {out}"
-        );
-    }
-
-    #[test]
-    fn cap_source_text_never_splits_a_multi_byte_char() {
-        let text = "☃".repeat(1000); // 3 bytes each, well over any small cap
-        let (out, truncated) = cap_source_text(text, 50);
-        assert!(out.len() <= 50);
-        assert!(truncated);
-        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-    }
-
-    #[test]
     fn next_task_returns_first_uncovered_symbol_then_the_file() {
         let dir = std::env::temp_dir().join(format!("codeowl-spec-test-{}-1", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -5238,6 +5156,101 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         let file_id = graph.find(path).unwrap();
 
         assert_eq!(next_task(&graph, &dir, file_id).unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_spec_write_that_cannot_complete_leaves_the_previous_spec_untouched() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-atomic1", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nDoes one specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "a.ts", "Holds the first specific helper.").unwrap();
+        let path = spec_path(&dir, "a.ts");
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        // The writer stages into `<path>.tmp` and renames over the spec. A
+        // directory squatting on that name makes the staging step fail,
+        // standing in for any failure before the rename (disk full, a
+        // crash): the old spec must still be the whole old spec.
+        std::fs::create_dir_all(format!("{}.tmp", path.display())).unwrap();
+        let result = submit(&graph, &dir, "a.ts", "Holds a different, rewritten helper.");
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_write_whose_rename_fails_removes_its_staging_file() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-atomic3", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A directory where the spec should go: staging succeeds, the
+        // rename over a directory fails. The staged file must not stay
+        // behind to be picked up by `git add -A`.
+        let path = dir.join("x.ts.md");
+        std::fs::create_dir_all(&path).unwrap();
+        assert!(write_replacing(&path, "content").is_err());
+        assert!(!dir.join("x.ts.md.tmp").exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_rollup_write_that_cannot_complete_leaves_the_previous_rollup_untouched() {
+        let dir = rollup_fixture_dir("atomic2");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[
+            ("lib/one.ts", "export function one(): void {}\n"),
+            ("lib/two.ts", "export function two(): void {}\n"),
+        ]);
+        for (id, content) in [
+            (
+                "lib/one.ts::one",
+                "### Summary\nDoes the first specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
+            ),
+            (
+                "lib/two.ts::two",
+                "### Summary\nDoes a second, different thing.\n### Behavior\nAlso runs synchronously with no side effects.\n",
+            ),
+            ("lib/one.ts", "Performs one specific, deliberate task."),
+            ("lib/two.ts", "Performs a couple of related tasks."),
+        ] {
+            submit(&graph, &dir, id, content).unwrap();
+        }
+        submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "Small shared helper functions for this module.",
+        )
+        .unwrap();
+        let path = rollup_spec_path(&dir, "lib");
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        std::fs::create_dir_all(format!("{}.tmp", path.display())).unwrap();
+        let result = submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "A rewritten description of this module.",
+        );
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -6793,18 +6806,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     }
 
     #[test]
-    fn within_scope_respects_path_boundaries_not_bare_string_prefixes() {
-        // A real bug caught dogfooding against the pilot repo: "lib/email"
-        // as a bare string prefix also matches "lib/email.ts", an
-        // unrelated sibling file that merely shares the prefix.
-        assert!(within_scope("lib/email", "lib/email"));
-        assert!(within_scope("lib/email/config.ts", "lib/email"));
-        assert!(!within_scope("lib/email.ts", "lib/email"));
-        assert!(!within_scope("lib/email-utils/x.ts", "lib/email"));
-        assert!(within_scope("anything", ""));
-    }
-
-    #[test]
     fn prose_smells_flags_cop_out_phrases_and_short_text_but_not_real_prose() {
         assert_eq!(
             prose_smells("Returns the cached client. See the source for details."),
@@ -6849,7 +6850,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         let resolved = file_imports
             .imports
             .iter()
-            .map(|imp| crate::resolve::ResolvedImport {
+            .map(|imp| crate::graph::ResolvedImport {
                 from_file: "a.ts".to_string(),
                 specifier: imp.specifier.clone(),
                 imported_name: imp.imported_name.clone(),
@@ -7895,25 +7896,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         assert_eq!(choose_file_rung(4, 1, 49, &l), FileRung::Raw);
         assert_eq!(choose_file_rung(4, 2, 49, &l), FileRung::Summaries);
         assert_eq!(choose_file_rung(4, 1, 50, &l), FileRung::Outline);
-    }
-
-    #[test]
-    fn leading_comment_block_takes_the_top_comment_and_stops_at_code() {
-        let text = "//! Module doc line one.\n//! Line two.\n\nuse std::io;\n// later\n";
-        assert_eq!(
-            leading_comment_block(text),
-            "//! Module doc line one.\n//! Line two."
-        );
-        let block = "/* header\n * more\n */\nexport const A = 1;\n";
-        assert_eq!(leading_comment_block(block), "/* header\n * more\n */");
-        assert_eq!(leading_comment_block("export const A = 1;\n"), "");
-        // A line starting with `*` is a comment only inside a block comment.
-        assert_eq!(leading_comment_block("*ptr = 1;\nfn a() {}\n"), "");
-        // A Rust attribute is not a comment.
-        assert_eq!(
-            leading_comment_block("#![allow(dead_code)]\nfn a() {}\n"),
-            ""
-        );
     }
 
     #[test]

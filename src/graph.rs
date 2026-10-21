@@ -23,9 +23,34 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 use crate::hash::hash_text;
-use crate::resolve::ResolvedImport;
 pub use crate::symbol::SymbolId;
 use crate::symbol::{ExtractedSymbol, Symbol, SymbolKind};
+
+/// One resolved (or unresolved) file-to-file reference edge. Defined here,
+/// with the graph that stores it, because every pack produces them — the
+/// TypeScript resolver in `resolve.rs` is only one producer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedImport {
+    pub from_file: String,
+    pub specifier: String,
+    pub imported_name: String,
+    /// `None` when the specifier resolves outside the walked repo (an
+    /// external package), doesn't resolve at all (a broken import), or
+    /// resolves to a file with no declaration or re-export chain ending in
+    /// `imported_name`.
+    pub target: Option<SymbolId>,
+}
+
+/// A default import (`import <local_name> from '<specifier>'`) whose
+/// specifier lands on `target_file` inside the repo. File-level only: which
+/// file, not which symbol (the rendered-component resolver only needs the
+/// file). Not produced for a specifier that resolves to an external package.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResolvedDefaultImport {
+    pub from_file: String,
+    pub local_name: String,
+    pub target_file: String,
+}
 
 /// The external-safe shape of a `Symbol` — same fields, but `parent`/
 /// `children` are translated back to stable string ids rather than the
@@ -133,7 +158,7 @@ pub struct FileExtraction {
 /// Extract `source` (already read from `rel_path`) and hash it in one
 /// step — the shape every multi-file test fixture in this codebase wants.
 /// Test-only: it mirrors `TypeScriptNextStack::extract_symbols` (TS via
-/// `lang::extract_symbols`, `.sql` via `schema::extract_tables`), not the
+/// `extract::extract_file`, `.sql` via `schema::extract_tables`), not the
 /// repo's detected `StackPack`, so it only produces symbols for TS/SQL
 /// fixtures. Production extraction goes through `RepoIndex::build` →
 /// `pack.extract_symbols`.
@@ -142,7 +167,7 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
     let symbols = if rel_path.ends_with(".sql") {
         crate::schema::extract_tables(source, rel_path)
     } else {
-        crate::lang::extract_symbols(rel_path, source)
+        crate::extract::extract_file(source, rel_path)
     };
     FileExtraction {
         rel_path: rel_path.to_string(),
@@ -348,7 +373,7 @@ pub struct Graph {
     /// a flow edge itself — folds into `pack.resolve_imports`'s output in
     /// M18 when resolution ownership fully moves to the pack.
     #[serde(default)]
-    resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
+    resolved_default_imports: Vec<crate::graph::ResolvedDefaultImport>,
 }
 
 impl Graph {
@@ -454,15 +479,6 @@ impl Graph {
         &self.pack_name
     }
 
-    /// A repo-relative path's [`crate::lang::FileRole`] under this graph's
-    /// active pack — the shared lookup `spec.rs`'s `classify_in` and
-    /// `quarkus.rs`'s entry-point enumeration both need (code review,
-    /// M19: two independent call sites were about to each re-derive
-    /// `crate::stack::for_name(graph.pack_name())` themselves).
-    pub fn file_role(&self, path: &str) -> crate::lang::FileRole {
-        crate::stack::for_name(&self.pack_name).classify(path)
-    }
-
     pub fn get(&self, id: SymbolId) -> &Node {
         &self.nodes[id.index()]
     }
@@ -556,13 +572,13 @@ impl Graph {
         self.flow_edges = flow_edges;
     }
 
-    pub fn resolved_default_imports(&self) -> &[crate::resolve::ResolvedDefaultImport] {
+    pub fn resolved_default_imports(&self) -> &[crate::graph::ResolvedDefaultImport] {
         &self.resolved_default_imports
     }
 
     pub fn set_resolved_default_imports(
         &mut self,
-        resolved_default_imports: Vec<crate::resolve::ResolvedDefaultImport>,
+        resolved_default_imports: Vec<crate::graph::ResolvedDefaultImport>,
     ) {
         self.resolved_default_imports = resolved_default_imports;
     }

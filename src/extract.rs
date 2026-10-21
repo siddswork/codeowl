@@ -20,8 +20,8 @@ use tree_sitter::Node;
 
 use crate::hash::hash_text;
 use crate::imports::{bare_export_clause, export_specs};
-use crate::lang::ts_parser;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
+use crate::typescript::ts_parser;
 
 /// Parse `source` (the contents of `rel_path`) and extract its symbols.
 ///

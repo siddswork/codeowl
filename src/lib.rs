@@ -20,6 +20,7 @@ pub mod spec;
 pub mod stack;
 pub mod symbol;
 pub mod text;
+pub mod typescript;
 pub mod watch;
 
 pub use extract::extract_file;

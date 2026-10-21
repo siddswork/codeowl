@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
-use crate::lang::ts_parser;
+use crate::typescript::ts_parser;
 
 /// One named import: `import { <imported_name> } from '<specifier>'`. A
 /// local alias (`import { Foo as Bar }`), if any, is purely a local rename

@@ -27,10 +27,10 @@ use std::path::Path;
 
 use tree_sitter::{Node, Parser};
 
+use crate::graph::ResolvedImport;
 use crate::graph::{Graph, SymbolId};
 use crate::hash::hash_text;
 use crate::imports::{FileImports, ImportRef};
-use crate::resolve::ResolvedImport;
 use crate::symbol::{ExtractedSymbol, SymbolKind};
 use crate::text::strip_value_for_fold;
 
