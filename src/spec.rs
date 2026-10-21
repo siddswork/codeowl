@@ -1485,8 +1485,7 @@ fn write(root: &Path, graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> Resu
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render(graph, root, file_id, spec))
-        .with_context(|| format!("writing {}", path.display()))
+    write_replacing(&path, &render(graph, root, file_id, spec))
 }
 
 /// One unit of work `/codeowl generate <id>` still needs a spec for,
@@ -2069,7 +2068,9 @@ fn add_file_fingerprint(text: &str, fingerprint: &str) -> Result<String> {
 }
 
 /// Replace `path`'s contents without a window in which it is empty: write a
-/// temp file beside it, then rename over it.
+/// temp file beside it, then rename over it. The one way a spec document
+/// (file, feature, rollup, system) reaches disk, so a crash or a full disk
+/// mid-write leaves the previous spec whole instead of a torn one in git.
 fn write_replacing(path: &Path, content: &str) -> Result<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
@@ -2491,8 +2492,7 @@ pub fn submit_feature(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render_feature(&spec))
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_replacing(&path, &render_feature(&spec))?;
 
     Ok(spec)
 }
@@ -2771,8 +2771,7 @@ pub fn submit_rollup(
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render_rollup(graph, root, &spec))
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_replacing(&path, &render_rollup(graph, root, &spec))?;
 
     Ok(spec)
 }
@@ -3083,8 +3082,7 @@ pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<System
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
     }
-    std::fs::write(&path, render_system(root, &spec))
-        .with_context(|| format!("writing {}", path.display()))?;
+    write_replacing(&path, &render_system(root, &spec))?;
 
     Ok(spec)
 }
@@ -5144,6 +5142,84 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         let file_id = graph.find(path).unwrap();
 
         assert_eq!(next_task(&graph, &dir, file_id).unwrap(), None);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_spec_write_that_cannot_complete_leaves_the_previous_spec_untouched() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-atomic1", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nDoes one specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
+        )
+        .unwrap();
+        submit(&graph, &dir, "a.ts", "Holds the first specific helper.").unwrap();
+        let path = spec_path(&dir, "a.ts");
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        // The writer stages into `<path>.tmp` and renames over the spec. A
+        // directory squatting on that name makes the staging step fail,
+        // standing in for any failure before the rename (disk full, a
+        // crash): the old spec must still be the whole old spec.
+        std::fs::create_dir_all(format!("{}.tmp", path.display())).unwrap();
+        let result = submit(&graph, &dir, "a.ts", "Holds a different, rewritten helper.");
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_rollup_write_that_cannot_complete_leaves_the_previous_rollup_untouched() {
+        let dir = rollup_fixture_dir("atomic2");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = build_graph_from_sources(&[
+            ("lib/one.ts", "export function one(): void {}\n"),
+            ("lib/two.ts", "export function two(): void {}\n"),
+        ]);
+        for (id, content) in [
+            (
+                "lib/one.ts::one",
+                "### Summary\nDoes the first specific thing.\n### Behavior\nRuns synchronously with no side effects.\n",
+            ),
+            (
+                "lib/two.ts::two",
+                "### Summary\nDoes a second, different thing.\n### Behavior\nAlso runs synchronously with no side effects.\n",
+            ),
+            ("lib/one.ts", "Performs one specific, deliberate task."),
+            ("lib/two.ts", "Performs a couple of related tasks."),
+        ] {
+            submit(&graph, &dir, id, content).unwrap();
+        }
+        submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "Small shared helper functions for this module.",
+        )
+        .unwrap();
+        let path = rollup_spec_path(&dir, "lib");
+        let before = std::fs::read_to_string(&path).unwrap();
+
+        std::fs::create_dir_all(format!("{}.tmp", path.display())).unwrap();
+        let result = submit_rollup(
+            &graph,
+            &dir,
+            "lib",
+            "A rewritten description of this module.",
+        );
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
 
         std::fs::remove_dir_all(&dir).ok();
     }
