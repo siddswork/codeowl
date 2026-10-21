@@ -145,7 +145,7 @@ at your own.
 
 You can also **drive the tools yourself in chat** — this is a normal
 workflow, not just something the agent does invisibly: *"ask codeowl who
-calls `SymbolKind`"*, *"get_callees for `src/spec.rs`"*, *"call
+calls `SymbolKind`"*, *"get_callees for `src/mcp.rs`"*, *"call
 get_spec_coverage"*, *"search_code for `TODO`"*.
 
 The *"how does X work?"* questions above are **reading** questions, asked
@@ -181,8 +181,8 @@ you rely on an answer:
   it always comes back empty); and a name that's shadowed by a local of
   the same name is still counted (whole-word match, not scope analysis).
 - **`get_callees(id)`** — what the **file containing `id`** imports.
-  File-level, not per-symbol: naming any symbol in `spec.rs` returns
-  `spec.rs`'s whole import list. `resolved_id` is set for intra-repo
+  File-level, not per-symbol: naming any symbol in `mcp.rs` returns
+  `mcp.rs`'s whole import list. `resolved_id` is set for intra-repo
   targets, null for external packages.
 - **`get_spec(id)`** — the spec for a symbol id, file id, `feature:<slug>`,
   `rollup:<dir_path>`, or `system`. A **pure read** — never triggers
@@ -203,7 +203,7 @@ you rely on an answer:
   written before the file fingerprint existed also says `unknown`, with
   the reason, until it is regenerated or migrated (see "After upgrading"
   below).
-  Ask your agent: *"why is `src/spec.rs` stale?"*
+  Ask your agent: *"why is `src/mcp.rs` stale?"*
 - **`get_spec_coverage(scope?, cursor?)`** — the repo's spec inventory,
   current/stale/missing/smelly, plus `coverage` (what fraction has *any*
   spec) and `freshness` (of what exists, what fraction still matches the

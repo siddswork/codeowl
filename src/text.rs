@@ -2,7 +2,7 @@
 //! spec and search layers — unlike `lang.rs` (shared vocabulary types)
 //! or `hash.rs` (hashing), this module exists purely so identical logic
 //! isn't hand-copied into every pack's own extractor, and so a pack or
-//! `search.rs` never has to import from `spec.rs` for a plain string
+//! `search.rs` never has to import from `spec/` for a plain string
 //! utility.
 
 /// Cut `text` to at most `max_bytes`, on a `char` boundary, with **no**

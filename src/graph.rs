@@ -340,7 +340,7 @@ pub struct Graph {
     /// The `StackPack::name()` of the pack that built this graph
     /// (`"typescript-next"` / `"rust"` / `"java"` / `"python"`). Lets a
     /// pure-read caller
-    /// (`spec.rs`, `mcp.rs`) recover the pack — for `classify` and the
+    /// (`spec/`, `mcp.rs`) recover the pack — for `classify` and the
     /// feature model — without threading it down, and lets `RepoIndex`
     /// reject a cache built by a different pack (M13 design decision 7).
     /// Empty on a graph built by a test helper or a pre-M14 cache → the

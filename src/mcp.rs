@@ -786,7 +786,7 @@ pub struct CodeOwlServer {
     /// to be overridable per MCP client at all (a real user's class hit
     /// VS Code Copilot Chat's overflow threshold at a size well under the
     /// original hardcoded default). Explicit fields, not an env var read
-    /// inside `spec.rs`, so the active values are visible in one place
+    /// inside `spec/`, so the active values are visible in one place
     /// (the `codeowl serve` invocation, via `with_generation_limits`)
     /// rather than ambient process state — and so every existing test
     /// that builds a `CodeOwlServer` via `::new` keeps compiling
@@ -4406,7 +4406,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_source_on_a_folded_rust_impl_includes_the_method_bodies() {
-        // Same fixture shape as spec.rs's
+        // Same fixture shape as `spec::format`'s test
         // symbol_span_text_includes_a_folded_impl_s_method_bodies (M15) --
         // get_source must reach the same folded text through the tool
         // surface, not just internally.

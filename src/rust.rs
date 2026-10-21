@@ -2638,7 +2638,7 @@ pub use crate::stack::RustStack;\n";
         // `use`-based resolution -- no new code needed here, this only
         // confirms it. `impl Add for Stats` here names `Stats` through an
         // ordinary `use crate::stats::Stats;`, which `resolve_imports`
-        // already turns into a real edge -- `dependency_hash` (spec.rs)
+        // already turns into a real edge -- `dependency_hash` (spec::staleness)
         // then finds it the same way it finds any other resolved import.
         let edges = resolved(&[
             (

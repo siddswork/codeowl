@@ -1,5 +1,7 @@
 # CodeOwl — Roadmap (Working Draft)
 
+> **File paths in the milestone text below are the paths at the time each milestone was built.** Since the architecture review of 2026-10-21 (see "Architecture review" near the end, `DECISIONS.md` question 25 and `ARCHITECTURE.md` §9): `src/spec.rs` is the `src/spec/` directory (fifteen modules); `src/lang.rs` keeps only `SourceKind` and `FileRole`, its TypeScript parts are in `src/typescript.rs`, and `lang::detect` is `stack::detect`; `ResolvedImport` and `ResolvedDefaultImport` are in `src/graph.rs`; `leading_comment_block`, `cap_source_text` and `within_scope` are in `src/text.rs`. A citation of the old path names where the code was then.
+
 > Companion to `ARCHITECTURE.md` (how) and `REQUIREMENTS.md` (what/for whom). This document is the *when* and *in what order* — a walking-skeleton sequence where each milestone is independently runnable, has a concrete pass/fail test, and adds real MVP value rather than being scaffolding for its own sake. Pending trims from `CLAUDE.md` (tool surface, commit hygiene) get resolved as they're hit, not decided up front.
 
 ## Test repos
@@ -1020,6 +1022,21 @@ M21 is not complete when field extraction merely lands. It requires all of:
 - The full existing suite passes after the `FORMAT_VERSION` bump, with a fresh `.codeowl/` on every test repo.
 - M21.a's `interface_hash` instrumentation produces a real, reported cascade-count delta for at least two repos (CodeOwl's own, plus one pilot) — this is a required M21.a deliverable, not optional polish.
 - (M21.b, conditional on the decision) If fields fold into `interface_hash`: a field's signature change moves the container's `interface_hash` and invalidates exactly its direct importers' `deps_hash`, one hop, never further. If they don't: no new test — the existing exclusion behavior is already covered.
+
+---
+
+## Architecture review (2026-10-21)
+
+A review of the code itself, not of a feature: where the layering had drifted, and what was wrong rather than merely large. The full plan, the findings (and the ones dropped after checking) are in `docs/architecture-refactor-plan.md`; the reasoning and the measurements are `DECISIONS.md` question 25; the resulting module map is `ARCHITECTURE.md` §9.
+
+| PR | What | Validation |
+|---|---|---|
+| #102 | The plan | — |
+| #103 | **Layering and correctness.** One pack list (`stack::registered_packs`); an unknown pack name is an error, not a silent TypeScript fallback; the resolved-import types move into `graph.rs`; the TypeScript internals move to `typescript.rs`; `detect` moves into `stack.rs`; string helpers move to `text.rs`; every spec document is written atomically. | Module cycle 14 → 4 modules; `graph_stats` identical on `master` and the branch across nine repos in four languages (so no `FORMAT_VERSION` bump); a live generation run on the branch's binary (before its last review-fix commit). |
+| #104 | **`spec.rs` → `spec/`.** Fifteen layered modules, tests beside the code they exercise; explicit `self::` re-exports. A pure move. | The 153 tests carry over by name (581 total); a line-by-line comparison of old and new shows no logic change; no import cycle inside `spec/`; CodeOwl's own index resolves every crate-relative import; a live run, including a 3-page paged file task. |
+| — | Moving the wire types out of `mcp.rs` | Skipped: tidying only, no defect behind it. |
+
+Open from it: question 24 (CodeOwl's resolver does not resolve a bare child-module path). The stored specs for the moved code are regenerated, not edited: `docs/specs/src/spec.rs.md` is orphaned and `src/spec/*` has none until the next full run.
 
 ---
 

@@ -1,6 +1,6 @@
 //! Why a spec is stale: the cause behind each `changed` entry, named.
 //!
-//! Staleness itself is decided in `spec.rs` by comparing stored hashes with
+//! Staleness itself is decided in `spec/` by comparing stored hashes with
 //! freshly computed ones. That says *that* something moved. This module says
 //! *what*, as a short chain: a symbol's own text, a named dependency, or a
 //! child document that is itself stale (with its own cause nested inside).
