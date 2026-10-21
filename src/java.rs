@@ -1,5 +1,5 @@
 //! Walks a single Java source file with tree-sitter and pulls out its
-//! declarations — the Java pack's counterpart to `extract.rs` / `rust.rs`
+//! declarations — the Java pack's counterpart to `typescript/mod.rs` / `rust.rs`
 //! (M16).
 //!
 //! Deliberately shallow like the other extractors: the compilation unit's
@@ -149,7 +149,7 @@ fn visit_item(
 
 /// A type with a body — recurse one level for its members (fully into
 /// nested types), then Merkle-fold their `source_hash`es into the
-/// container's own, matching `extract.rs` / `rust.rs`.
+/// container's own, matching `typescript/mod.rs` / `rust.rs`.
 fn visit_container(
     node: Node,
     raw: &str,
@@ -333,7 +333,7 @@ fn push_named_leaf(
     };
     let sig = signature_before_body(node, source);
     // A member is never independently imported — same stance as
-    // `extract.rs` / `rust.rs` for a class method.
+    // `typescript/mod.rs` / `rust.rs` for a class method.
     let is_exported = parent_id.is_none() && has_public_or_protected(node);
     out.push(ExtractedSymbol {
         id,
@@ -529,7 +529,7 @@ fn node_lines(node: Node) -> [usize; 2] {
 
 // ---------------------------------------------------------------------------
 // Imports — `import` declarations and their resolution against the source
-// tree. The Java pack's counterpart to `imports.rs` + `resolve.rs`. Two
+// tree. The Java pack's counterpart to `typescript/imports.rs` + `typescript/resolve.rs`. Two
 // kinds of reference edge feed the graph:
 //   * explicit `import a.b.C;` / `import static a.b.C.m;` — the FQN maps to
 //     the walked `.java` file whose path ends `a/b/C.java` (a path-suffix
@@ -641,7 +641,7 @@ fn extract_qualified_refs(node: Node, source: &str, out: &mut Vec<ImportRef>) {
 /// Resolve every file's `import`s to a target `SymbolId` and append the
 /// same-package implicit reference edges. Iterates files in path-sorted
 /// order so the persisted edge list is diffable (same reasoning as
-/// `resolve::resolve_imports`). `root` *is* read here because the
+/// `typescript::resolve_imports`). `root` *is* read here because the
 /// same-package scan needs each file's source text, and the graph doesn't
 /// retain bodies. (The Rust pack also reads `root` now, but only for its
 /// `Cargo.toml` files.)

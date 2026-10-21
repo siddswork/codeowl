@@ -1,7 +1,7 @@
 //! Walks a single Rust source file with tree-sitter and pulls out its
-//! top-level items — the Rust pack's counterpart to `extract.rs` (M14).
+//! top-level items — the Rust pack's counterpart to `typescript/mod.rs` (M14).
 //!
-//! Deliberately shallow, like `extract.rs`: `source_file`'s direct
+//! Deliberately shallow, like `typescript/mod.rs`: `source_file`'s direct
 //! children, plus one level into `impl` / `trait` / inline `mod` / `struct`
 //! bodies for the callables and (M21) named fields they contain. A struct's
 //! *named* fields become `Value` members (`field_declaration_list`); a
@@ -697,7 +697,7 @@ fn is_cfg_test(node: Node, source: &str) -> bool {
 /// A `Container` with a body — recurse one level for the callables (and,
 /// as of M21, the fields) it holds, then Merkle-fold their `source_hash`es
 /// into the container's own (an edit to any member is an edit to the
-/// container), matching how `extract.rs` treats a class.
+/// container), matching how `typescript/mod.rs` treats a class.
 fn visit_container(
     node: Node,
     raw: &str,
@@ -794,7 +794,7 @@ fn visit_container(
     }
 
     // Insert the container *before* its members so declaration order in
-    // `out` stays parent-then-children, like `extract.rs`.
+    // `out` stays parent-then-children, like `typescript/mod.rs`.
     out.insert(
         before,
         ExtractedSymbol {
@@ -835,7 +835,7 @@ fn push_leaf(
     };
     let sig = signature_before_body(node, source);
     // A member (inside an impl/trait) is never independently imported —
-    // same stance as `extract.rs` for a class method.
+    // same stance as `typescript/mod.rs` for a class method.
     let is_exported = parent_id.is_none() && has_pub(node, source);
     out.push(ExtractedSymbol {
         id,
@@ -961,7 +961,7 @@ fn strip_leading_generics(s: &str) -> &str {
 
 /// Everything from the item's start up to its `body` (or its terminating
 /// `;` / end) — modifiers, keyword, name, generics, params, return type,
-/// `where` clause. The "text before the `{`" trick from `extract.rs`.
+/// `where` clause. The "text before the `{`" trick from `typescript/mod.rs`.
 fn signature_before_body(node: Node, source: &str) -> String {
     let start = node.start_byte();
     let end = node
@@ -1101,7 +1101,7 @@ fn node_lines(node: Node) -> [usize; 2] {
 
 // ---------------------------------------------------------------------------
 // Imports — `use` statements and their resolution against the module tree.
-// The Rust pack's counterpart to `imports.rs` + `resolve.rs`. Reference
+// The Rust pack's counterpart to `typescript/imports.rs` + `typescript/resolve.rs`. Reference
 // edges only: a `use` names an *item* (type / fn / trait / const / module),
 // never a method, so every target is a top-level symbol like the extractor
 // produces. `mod foo;` is structural, not a symbol reference — skipped.
@@ -1240,7 +1240,7 @@ fn use_targets(arg: Node, source: &str) -> Vec<(String, String)> {
         // `use a::b::Item;`
         "scoped_identifier" => split_last(text(arg, source)).into_iter().collect(),
         // `use a::b::Item as Alias;` — the alias is a local rename, track
-        // the source name like `imports.rs` does for TS.
+        // the source name like `typescript/imports.rs` does for TS.
         "use_as_clause" => arg
             .child_by_field_name("path")
             .or_else(|| arg.named_child(0))

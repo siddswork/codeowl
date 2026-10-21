@@ -1,7 +1,7 @@
 //! The arena that turns per-file extraction output into something
 //! indexable and cross-referenceable.
 //!
-//! `extract.rs` doesn't know about any of this: it only ever sees one file
+//! `typescript/mod.rs` doesn't know about any of this: it only ever sees one file
 //! at a time and produces `ExtractedSymbol`s with string `parent`/
 //! `children` (see `symbol.rs`). `Graph::build` is what turns a whole
 //! repo's worth of those, plus one content hash per file, into the real
@@ -28,7 +28,7 @@ use crate::symbol::{ExtractedSymbol, Symbol, SymbolKind};
 
 /// One resolved (or unresolved) file-to-file reference edge. Defined here,
 /// with the graph that stores it, because every pack produces them — the
-/// TypeScript resolver in `resolve.rs` is only one producer.
+/// TypeScript resolver in `typescript/resolve.rs` is only one producer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResolvedImport {
     pub from_file: String,
@@ -153,27 +153,6 @@ pub struct FileExtraction {
     pub rel_path: String,
     pub source_hash: String,
     pub symbols: Vec<ExtractedSymbol>,
-}
-
-/// Extract `source` (already read from `rel_path`) and hash it in one
-/// step — the shape every multi-file test fixture in this codebase wants.
-/// Test-only: it mirrors `TypeScriptNextStack::extract_symbols` (TS via
-/// `extract::extract_file`, `.sql` via `schema::extract_tables`), not the
-/// repo's detected `StackPack`, so it only produces symbols for TS/SQL
-/// fixtures. Production extraction goes through `RepoIndex::build` →
-/// `pack.extract_symbols`.
-#[cfg(test)]
-pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
-    let symbols = if rel_path.ends_with(".sql") {
-        crate::schema::extract_tables(source, rel_path)
-    } else {
-        crate::extract::extract_file(source, rel_path)
-    };
-    FileExtraction {
-        rel_path: rel_path.to_string(),
-        source_hash: hash_text(source),
-        symbols,
-    }
 }
 
 /// On-disk format stamp for the persisted `.codeowl/graph` (and, in
@@ -353,7 +332,7 @@ pub struct Graph {
     /// entries in a per-process-random order, making the cache differ
     /// byte-for-byte between otherwise-identical runs.
     by_id: BTreeMap<String, SymbolId>,
-    /// File-to-file reference edges — see `resolve.rs`. Empty until
+    /// File-to-file reference edges — see `typescript/resolve.rs`. Empty until
     /// `set_resolved_imports` is called; resolving them needs a `Graph` to
     /// look symbols up in, so they can't be known at `build` time.
     imports: Vec<ResolvedImport>,
@@ -637,22 +616,10 @@ impl Graph {
     }
 }
 
-/// Build a `Graph` straight from `(rel_path, source)` pairs — the shape
-/// every test fixture in this codebase starts from. Test-only, and TS/SQL
-/// only (see `extract_and_hash`); `pub` because tests in other modules
-/// use it.
-#[cfg(test)]
-pub fn build_graph_from_sources(files: &[(&str, &str)]) -> Graph {
-    let extractions = files
-        .iter()
-        .map(|(rel, src)| extract_and_hash(rel, src))
-        .collect();
-    Graph::build(extractions)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fixtures::build_graph_from_sources;
 
     #[test]
     fn find_resolves_a_known_symbol_to_its_id() {

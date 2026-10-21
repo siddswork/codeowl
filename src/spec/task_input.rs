@@ -358,7 +358,7 @@ pub(crate) fn file_task_input(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
 
     use crate::spec::test_support::{BIG_JAVA, java_graph};
 

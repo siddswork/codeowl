@@ -1,5 +1,5 @@
 //! Walks a single Python source file with tree-sitter and pulls out its
-//! declarations — the Python pack's counterpart to `extract.rs` / `java.rs`
+//! declarations — the Python pack's counterpart to `typescript/mod.rs` / `java.rs`
 //! / `rust.rs` (M17).
 //!
 //! Shallow like the others: module-level classes and functions, a class's
@@ -430,7 +430,7 @@ fn node_lines(node: Node) -> [usize; 2] {
 // ---------------------------------------------------------------------------
 // Imports — `import` / `from … import` statements and their resolution
 // against the walked source tree. The Python pack's counterpart to
-// `imports.rs` + `resolve.rs`.
+// `typescript/imports.rs` + `typescript/resolve.rs`.
 //
 // Resolution is a **path match against the walk root**, the same idea as
 // `java.rs` but keyed on the dotted module name rather than an FQN: CodeOwl
@@ -554,7 +554,7 @@ fn module_specifier(module: Node, source: &str) -> String {
 /// the imported module, or the module's own file node for `import a.b.c` /
 /// a submodule import), or `None` (stdlib / third-party / `*` / broken).
 /// Iterates files path-sorted so the persisted edge list is diffable
-/// (same reasoning as `resolve::resolve_imports` / `java::resolve_imports`).
+/// (same reasoning as `typescript::resolve_imports` / `java::resolve_imports`).
 pub fn resolve_imports(
     _root: &Path,
     file_imports: &HashMap<String, FileImports>,

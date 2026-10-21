@@ -135,7 +135,7 @@ pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::spec::coverage::{CoverageItem, coverage, summarize};
     use crate::spec::feature::submit_feature;
     use crate::spec::file_task::submit;
@@ -349,7 +349,7 @@ mod tests {
             item("app/page.tsx", "file", 0), // a leaf
             item("rollup:lib", "rollup", 0),
         ];
-        let graph = crate::graph::build_graph_from_sources(&[]);
+        let graph = crate::fixtures::build_graph_from_sources(&[]);
         let ids: Vec<String> = prioritize(items, &graph)
             .into_iter()
             .map(|i| i.id)
@@ -385,7 +385,7 @@ mod tests {
             item("app/dashboard/card.test.tsx", "file", 0),
             item("system", "system", 0),
         ];
-        let graph = crate::graph::build_graph_from_sources(&[]);
+        let graph = crate::fixtures::build_graph_from_sources(&[]);
         let ids: Vec<String> = prioritize(items, &graph)
             .into_iter()
             .map(|i| i.id)
@@ -495,7 +495,7 @@ mod tests {
         for fan in (9..=20).rev() {
             items.push(item(&format!("lib/f{fan:02}.ts"), "file", fan));
         }
-        let graph = crate::graph::build_graph_from_sources(&[]);
+        let graph = crate::fixtures::build_graph_from_sources(&[]);
         let ids: Vec<String> = prioritize(items, &graph)
             .into_iter()
             .map(|i| i.id)
@@ -532,7 +532,7 @@ mod tests {
         for fan in (12..=19).rev() {
             items.push(item(&format!("lib/hot{fan}.ts"), "file", "current", fan));
         }
-        let graph = crate::graph::build_graph_from_sources(&[]);
+        let graph = crate::fixtures::build_graph_from_sources(&[]);
         let ids: Vec<String> = prioritize(items, &graph)
             .into_iter()
             .map(|i| i.id)
@@ -568,7 +568,7 @@ mod tests {
                 generations: 0,
             },
         ];
-        let graph = crate::graph::build_graph_from_sources(&[]);
+        let graph = crate::fixtures::build_graph_from_sources(&[]);
         let ids: Vec<String> = prioritize(items, &graph)
             .into_iter()
             .map(|i| i.id)

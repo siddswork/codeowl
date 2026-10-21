@@ -177,7 +177,7 @@ pub(super) fn short_name(id: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
 
     #[test]
     fn barrel_file_is_not_spec_bearing() {
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn is_test_path_examples() {
         // An empty graph -> pack_name "" -> the TypeScript pack's classify.
-        let g = crate::graph::build_graph_from_sources(&[]);
+        let g = crate::fixtures::build_graph_from_sources(&[]);
         assert!(is_test_path(&g, "e2e/helpers/api-client.ts"));
         assert!(is_test_path(&g, "src/components/__tests__/button.ts"));
         assert!(is_test_path(&g, "lib/utils.test.ts"));

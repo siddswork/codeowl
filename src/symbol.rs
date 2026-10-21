@@ -34,7 +34,7 @@ impl SymbolId {
 ///   invokes. TS `function`/`method`, Rust `fn`, later Java methods.
 /// - `Value` — a data-carrier with no spec of its own: a TS/Rust `const`
 ///   or `static`, a plain-data record. Rolls up into its file spec.
-/// - `Schema` — M10's SQL `CREATE TABLE` (see `schema.rs`); M18 widens the
+/// - `Schema` — M10's SQL `CREATE TABLE` (see `typescript/schema.rs`); M18 widens the
 ///   source off the `.sql`-file assumption. Resolvable and queryable but
 ///   never spec-bearing.
 ///

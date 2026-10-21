@@ -2,7 +2,7 @@
 //! passes through (M13).
 //!
 //! Phase 1's extractor is TypeScript + SQL + Next.js + Supabase, spread
-//! across `extract.rs` / `imports.rs` / `resolve.rs` / `schema.rs` /
+//! across `typescript/mod.rs` / `typescript/imports.rs` / `typescript/resolve.rs` / `typescript/schema.rs` /
 //! `features.rs` and reached directly from the generic core (`index.rs`,
 //! `graph.rs`, `spec/`). M13 forces every one of those coupling points
 //! through this trait so M14 (`RustStack`) has an interface to implement
@@ -110,7 +110,7 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// (`PythonStack` on SQLModel `table=True` / a SQLAlchemy `Base`
     /// subclass; a JPA `@Entity` at M18) becomes a table without a
     /// dedicated schema file. A `.sql` file is still handled by its own
-    /// extractor (`schema::extract_tables`, which sets `Schema` directly),
+    /// extractor (`typescript::extract_tables`, which sets `Schema` directly),
     /// so this hook is a no-op there. See `ARCHITECTURE.md` open question 8.
     fn is_schema_symbol(&self, _sym: &ExtractedSymbol) -> bool {
         false
@@ -161,12 +161,12 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
 
 /// The Phase 1 stack: TypeScript / TSX + SQL schema files, Next.js App
 /// Router routing, Supabase `.from()`. Every method delegates to the
-/// free functions in `extract.rs` / `imports.rs` / `resolve.rs` /
+/// free functions in `typescript/mod.rs` / `typescript/imports.rs` / `typescript/resolve.rs` /
 /// `lang.rs`; M13 is a re-wiring, not a rewrite.
 ///
 /// **`.sql` is this pack's concern, not the core's (M17).** `lang.rs` no
 /// longer knows the extension — this pack maps it to `SourceKind::Schema`
-/// and routes its contents to `schema::extract_tables`. `SourceKind::Schema`
+/// and routes its contents to `typescript::extract_tables`. `SourceKind::Schema`
 /// still tells `index.rs` to skip the import / flow-edge passes for a
 /// dedicated schema file.
 #[derive(Debug, Default, Clone, Copy)]
@@ -190,14 +190,14 @@ impl StackPack for TypeScriptNextStack {
 
     fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
         if rel_path.ends_with(".sql") {
-            crate::schema::extract_tables(source, rel_path)
+            crate::typescript::extract_tables(source, rel_path)
         } else {
-            crate::extract::extract_file(source, rel_path)
+            crate::typescript::extract_file(source, rel_path)
         }
     }
 
     fn extract_imports(&self, rel_path: &str, source: &str) -> FileImports {
-        crate::imports::extract_imports(source, rel_path)
+        crate::typescript::extract_imports(source, rel_path)
     }
 
     fn resolve_imports(
@@ -206,27 +206,27 @@ impl StackPack for TypeScriptNextStack {
         file_imports: &HashMap<String, FileImports>,
         graph: &Graph,
     ) -> Vec<ResolvedImport> {
-        let resolver = crate::resolve::build_resolver();
-        crate::resolve::resolve_imports(root, &resolver, file_imports, graph)
+        let resolver = crate::typescript::build_resolver();
+        crate::typescript::resolve_imports(root, &resolver, file_imports, graph)
     }
 
     fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {
         let mut out = Vec::new();
-        for rl in crate::features::extract_route_literals(source, rel_path) {
+        for rl in crate::typescript::extract_route_literals(source, rel_path) {
             out.push(UnresolvedFlowEdge {
                 from_file: rl.from_file,
                 kind: "route-literal".to_string(),
                 raw: rl.static_path,
             });
         }
-        for tr in crate::features::extract_table_refs(source, rel_path) {
+        for tr in crate::typescript::extract_table_refs(source, rel_path) {
             out.push(UnresolvedFlowEdge {
                 from_file: tr.from_file,
                 kind: "table-ref".to_string(),
                 raw: tr.table,
             });
         }
-        for rc in crate::features::extract_rendered_components(source, rel_path) {
+        for rc in crate::typescript::extract_rendered_components(source, rel_path) {
             out.push(UnresolvedFlowEdge {
                 from_file: rc.from_file,
                 kind: "rendered-component".to_string(),
@@ -238,10 +238,10 @@ impl StackPack for TypeScriptNextStack {
 
     fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
         let resolved = match edge.kind.as_str() {
-            "route-literal" => crate::features::resolve_route_literal(graph, &edge.raw),
-            "table-ref" => crate::features::resolve_table_ref(graph, &edge.raw),
+            "route-literal" => crate::typescript::resolve_route_literal(graph, &edge.raw),
+            "table-ref" => crate::typescript::resolve_table_ref(graph, &edge.raw),
             "rendered-component" => {
-                crate::features::resolve_rendered_component(graph, &edge.from_file, &edge.raw)
+                crate::typescript::resolve_rendered_component(graph, &edge.from_file, &edge.raw)
                     .and_then(|file| graph.find(&file))
             }
             _ => None,
@@ -250,7 +250,7 @@ impl StackPack for TypeScriptNextStack {
     }
 
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
-        Some(crate::features::default_feature_model())
+        Some(crate::typescript::default_feature_model())
     }
 }
 
@@ -788,7 +788,7 @@ mod tests {
         // `tests/` is a test root to the Rust pack; the TypeScript pack
         // (the empty-name default) only knows the JS conventions.
         let mut graph =
-            crate::graph::build_graph_from_sources(&[("a.ts", "export const a = 1;\n")]);
+            crate::fixtures::build_graph_from_sources(&[("a.ts", "export const a = 1;\n")]);
         assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Domain);
         graph.set_pack_name("rust");
         assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Test);
@@ -820,11 +820,11 @@ mod tests {
         // does — M13 is a re-wiring, so the seam has to be invisible.
         assert_eq!(
             pack.extract_symbols("a.ts", src),
-            crate::extract::extract_file(src, "a.ts")
+            crate::typescript::extract_file(src, "a.ts")
         );
         assert_eq!(
             pack.extract_imports("a.ts", src),
-            crate::imports::extract_imports(src, "a.ts")
+            crate::typescript::extract_imports(src, "a.ts")
         );
         assert_eq!(
             pack.classify("lib/x.ts"),

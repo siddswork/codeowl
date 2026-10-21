@@ -606,7 +606,7 @@ pub struct DependencyContext {
 pub struct TableContext {
     /// The table's schema node id, e.g. `"supabase/schema.sql::payments"`.
     pub id: String,
-    /// `table(col, col, ...)` — the columns `schema.rs` parsed.
+    /// `table(col, col, ...)` — the columns `typescript/schema.rs` parsed.
     pub columns: String,
 }
 
@@ -1832,7 +1832,7 @@ mod tests {
     /// Build a small in-memory server the same way `main.rs`'s `serve`
     /// subcommand will: extract, resolve, wrap in a `Graph`. Files are
     /// still written to a real temp dir because `oxc_resolver` needs real
-    /// paths on disk to resolve against (see `resolve.rs`'s own tests).
+    /// paths on disk to resolve against (see `typescript/resolve.rs`'s own tests).
     ///
     /// The directory name includes a per-call counter, not just the pid:
     /// `#[tokio::test]`s in this module run concurrently in the same

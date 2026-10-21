@@ -2,7 +2,7 @@
 //! (what a pack says about a file it reads) and [`FileRole`] (what kind of
 //! code a file holds). Which extension maps to which kind, and which path
 //! is a test or generated, is each pack's decision, not this module's —
-//! the TypeScript conventions live in `typescript.rs`, and pack selection
+//! the TypeScript conventions live in `typescript/conventions.rs`, and pack selection
 //! (`stack::detect`) next to the pack registry in `stack.rs`.
 
 /// What a `StackPack::source_kind` says about a file it reads. Stack-

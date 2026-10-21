@@ -452,7 +452,7 @@ pub fn by_module(items: &[CoverageItem]) -> Vec<(String, CoverageSummary)> {
 mod tests {
     use super::*;
 
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::hash::hash_text;
     use crate::spec::feature::current_feature_hashes;
     use crate::spec::file_task::submit;
@@ -463,7 +463,7 @@ mod tests {
 
     #[test]
     fn a_classs_field_members_do_not_inflate_generations_remaining_ts() {
-        // Same invariant as the Rust version above, for extract.rs's own
+        // Same invariant as the Rust version above, for typescript/mod.rs's own
         // field extraction -- a field's parent is the class, never the
         // file, so spec_bearing_children can't see it regardless of kind.
         let dir = std::env::temp_dir().join(format!(

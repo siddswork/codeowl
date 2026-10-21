@@ -262,7 +262,7 @@ fn add_file_fingerprint(text: &str, fingerprint: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::spec::file_task::submit;
     use crate::spec::format::{parse, read_file_spec};
     use crate::spec::layout::spec_path;

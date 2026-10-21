@@ -1,12 +1,12 @@
 //! SQL schema extraction (M10) — the SQL pack's counterpart to
-//! `extract.rs`. Parses `CREATE TABLE` statements out of a `.sql`
+//! `mod.rs`. Parses `CREATE TABLE` statements out of a `.sql`
 //! schema/migration file into table nodes, so a `.from("table")` call in
 //! application code has something to resolve to and a feature spec's "Data
 //! touched" section can name real tables.
 //!
 //! **SQL pack — Phase 2 seam here** (companion to the TypeScript + Next.js
 //! pack; see `ROADMAP.md`'s "Stack modularization"). Deliberately shallow,
-//! like `extract.rs`: only `CREATE TABLE` — never views, functions,
+//! like `mod.rs`: only `CREATE TABLE` — never views, functions,
 //! triggers, or RLS policies. Foreign keys and column types are out of
 //! scope for M10.
 //!
