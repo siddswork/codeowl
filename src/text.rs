@@ -1,5 +1,5 @@
 //! Small string-manipulation helpers shared verbatim across packs and the
-//! spec and search layers — unlike `lang.rs` (mostly TypeScript-specific)
+//! spec and search layers — unlike `lang.rs` (shared vocabulary types)
 //! or `hash.rs` (hashing), this module exists purely so identical logic
 //! isn't hand-copied into every pack's own extractor, and so a pack or
 //! `search.rs` never has to import from `spec.rs` for a plain string

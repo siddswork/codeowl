@@ -308,14 +308,18 @@ pub fn for_name(name: &str) -> anyhow::Result<Box<dyn StackPack>> {
     if name.is_empty() {
         return Ok(typescript_next());
     }
-    let mut known = Vec::new();
+    // Called per file from the spec layer, so the match path allocates
+    // nothing; the list of known names is built only to explain a miss.
     for entry in registered_packs() {
         let pack = (entry.build)();
         if pack.name() == name {
             return Ok(pack);
         }
-        known.push(pack.name().to_string());
     }
+    let known: Vec<String> = registered_packs()
+        .iter()
+        .map(|entry| (entry.build)().name().to_string())
+        .collect();
     anyhow::bail!(
         "no registered stack pack is named `{name}` (registered: {})",
         known.join(", ")
@@ -377,11 +381,15 @@ pub fn detect(root: &Path) -> anyhow::Result<Box<dyn StackPack>> {
         .collect();
 
     match hits.as_slice() {
-        [] => anyhow::bail!(
-            "no source files CodeOwl can extract were found under {} — it handles \
-             TypeScript/TSX (+ SQL schema), Rust, Java, and Python (see ROADMAP.md)",
-            root.display()
-        ),
+        [] => {
+            let supported: Vec<&str> = registered_packs().iter().map(|e| e.label).collect();
+            anyhow::bail!(
+                "no source files CodeOwl can extract were found under {} — it handles {} \
+                 (see ROADMAP.md)",
+                root.display(),
+                supported.join(", ")
+            )
+        }
         [(entry, _)] => Ok((entry.build)()),
         multiple => {
             let listed = multiple
@@ -726,7 +734,6 @@ mod tests {
 
     #[test]
     fn every_registered_pack_is_found_again_by_its_own_name() {
-        assert!(registered_packs().len() >= 4);
         for entry in registered_packs() {
             let pack = (entry.build)();
             let found = for_name(pack.name()).expect("a registered pack's name resolves");
@@ -747,6 +754,20 @@ mod tests {
         names.dedup();
         labels.dedup();
         assert_eq!((names.len(), labels.len()), (n, l));
+    }
+
+    #[test]
+    fn detect_errors_name_every_registered_stack() {
+        let dir = std::env::temp_dir().join(format!("codeowl-detect-msg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.md"), "hi\n").unwrap();
+
+        let err = detect(&dir).unwrap_err().to_string();
+        for entry in registered_packs() {
+            assert!(err.contains(entry.label), "missing {}: {err}", entry.label);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

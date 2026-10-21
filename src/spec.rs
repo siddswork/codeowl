@@ -29,8 +29,8 @@ use crate::text::{leading_comment_block, within_scope};
 
 /// A repo-relative path's [`FileRole`] under the stack that built `graph`
 /// — `RustStack` calls `tests/` a test root, `TypeScriptNextStack` uses
-/// the JS conventions. Replaces the direct `lang::classify` call so
-/// prioritisation isn't hard-wired to one stack.
+/// the JS conventions. Goes through the graph's pack, not the TypeScript
+/// rules directly, so prioritisation isn't hard-wired to one stack.
 fn classify_in(graph: &Graph, path: &str) -> FileRole {
     crate::stack::file_role(graph, path)
 }
@@ -2071,12 +2071,26 @@ fn add_file_fingerprint(text: &str, fingerprint: &str) -> Result<String> {
 /// temp file beside it, then rename over it. The one way a spec document
 /// (file, feature, rollup, system) reaches disk, so a crash or a full disk
 /// mid-write leaves the previous spec whole instead of a torn one in git.
+/// The staged bytes are flushed to disk before the rename, and a staging
+/// file whose rename fails is removed rather than left to be committed.
+/// One server process writes specs, so the fixed `.tmp` name is not shared
+/// between writers.
 fn write_replacing(path: &Path, content: &str) -> Result<()> {
+    use std::io::Write;
+
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, content).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))
+    let mut file =
+        std::fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+    file.write_all(content.as_bytes())
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    drop(file);
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::Error::new(e).context(format!("replacing {}", path.display()))
+    })
 }
 
 /// Test helper: put a hash-*current* symbol spec on disk whose prose would
@@ -4114,7 +4128,7 @@ mod tests {
         // reference-only, per the "only spec the hand-written code"
         // principle. `classify_in` reads the graph's own `pack_name`, so
         // this sets it to "java" directly rather than re-deriving it
-        // through `lang::detect` on a throwaway fixture repo.
+        // through `stack::detect` on a throwaway fixture repo.
         let path = "target/generated-sources/foo/HeroesResource.java";
         let mut graph =
             build_graph_from_sources(&[(path, "export function getAllHeroes(): void {}\n")]);
@@ -5173,6 +5187,23 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
 
         assert!(result.is_err());
         assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_write_whose_rename_fails_removes_its_staging_file() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-atomic3", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A directory where the spec should go: staging succeeds, the
+        // rename over a directory fails. The staged file must not stay
+        // behind to be picked up by `git add -A`.
+        let path = dir.join("x.ts.md");
+        std::fs::create_dir_all(&path).unwrap();
+        assert!(write_replacing(&path, "content").is_err());
+        assert!(!dir.join("x.ts.md.tmp").exists());
 
         std::fs::remove_dir_all(&dir).ok();
     }
