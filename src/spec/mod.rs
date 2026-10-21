@@ -32,6 +32,7 @@
 //! `pub use` lists below are that surface. They are lists, not globs: this
 //! repo's own Rust resolver follows a named re-export but not a glob.
 
+mod adopt;
 mod coverage;
 mod feature;
 mod file_task;
@@ -49,6 +50,7 @@ mod task_input;
 #[cfg(test)]
 mod test_support;
 
+pub use self::adopt::{AdoptionPlan, Deps, Finding, Successor, Summary, plan as plan_adoption};
 pub use self::coverage::{
     CoverageItem, CoverageSummary, by_kind, by_module, coverage, summarize, weighted_freshness,
 };
