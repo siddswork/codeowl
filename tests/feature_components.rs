@@ -74,7 +74,7 @@ fn core_follows_the_rendered_component_subtree_into_its_fetches() {
     let dir = tempdir("subtree");
     let graph = build(&dir);
 
-    let fm = codeowl::features::default_feature_model();
+    let fm = codeowl::typescript::default_feature_model();
     let entry = fm
         .enumerate_entry_points(&graph)
         .into_iter()

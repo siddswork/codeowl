@@ -135,7 +135,7 @@ fn a_features_data_participants_are_the_tables_its_core_code_queries() {
     let graph = build(&dir);
 
     // The pay route is an orphan API route -> its own feature entry point.
-    let fm = codeowl::features::default_feature_model();
+    let fm = codeowl::typescript::default_feature_model();
     let entry = fm
         .enumerate_entry_points(&graph)
         .into_iter()

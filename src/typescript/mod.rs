@@ -5,6 +5,8 @@
 //!
 //! - `conventions`: which files are source, which are tests or UI
 //!   primitives, which parser a path gets, which extensions the resolver tries
+//! - `features`: the Next.js App Router feature model and the `fetch`, `.from(...)`
+//!   and JSX extractors it relies on
 //! - `imports`: reads a file's `import` and re-export statements
 //! - `resolve`: turns those into file and symbol edges (`oxc_resolver`)
 //! - `schema`: SQL `CREATE TABLE` files into table nodes
@@ -23,12 +25,18 @@
 //! syntax node.
 
 mod conventions;
+mod features;
 mod imports;
 mod resolve;
 mod schema;
 
 pub(crate) use self::conventions::ts_parser;
 pub use self::conventions::{classify, source_kind};
+pub use self::features::{
+    TypeScriptNextFeatureModel, default_feature_model, extract_rendered_components,
+    extract_route_literals, extract_table_refs, resolve_rendered_component, resolve_route_literal,
+    resolve_table_ref,
+};
 pub use self::imports::extract_imports;
 pub use self::resolve::{build_resolver, resolve_default_imports, resolve_imports};
 pub use self::schema::extract_tables;

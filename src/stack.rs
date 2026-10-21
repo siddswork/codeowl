@@ -212,21 +212,21 @@ impl StackPack for TypeScriptNextStack {
 
     fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {
         let mut out = Vec::new();
-        for rl in crate::features::extract_route_literals(source, rel_path) {
+        for rl in crate::typescript::extract_route_literals(source, rel_path) {
             out.push(UnresolvedFlowEdge {
                 from_file: rl.from_file,
                 kind: "route-literal".to_string(),
                 raw: rl.static_path,
             });
         }
-        for tr in crate::features::extract_table_refs(source, rel_path) {
+        for tr in crate::typescript::extract_table_refs(source, rel_path) {
             out.push(UnresolvedFlowEdge {
                 from_file: tr.from_file,
                 kind: "table-ref".to_string(),
                 raw: tr.table,
             });
         }
-        for rc in crate::features::extract_rendered_components(source, rel_path) {
+        for rc in crate::typescript::extract_rendered_components(source, rel_path) {
             out.push(UnresolvedFlowEdge {
                 from_file: rc.from_file,
                 kind: "rendered-component".to_string(),
@@ -238,10 +238,10 @@ impl StackPack for TypeScriptNextStack {
 
     fn resolve_flow_edge(&self, graph: &Graph, edge: &UnresolvedFlowEdge) -> FlowTarget {
         let resolved = match edge.kind.as_str() {
-            "route-literal" => crate::features::resolve_route_literal(graph, &edge.raw),
-            "table-ref" => crate::features::resolve_table_ref(graph, &edge.raw),
+            "route-literal" => crate::typescript::resolve_route_literal(graph, &edge.raw),
+            "table-ref" => crate::typescript::resolve_table_ref(graph, &edge.raw),
             "rendered-component" => {
-                crate::features::resolve_rendered_component(graph, &edge.from_file, &edge.raw)
+                crate::typescript::resolve_rendered_component(graph, &edge.from_file, &edge.raw)
                     .and_then(|file| graph.find(&file))
             }
             _ => None,
@@ -250,7 +250,7 @@ impl StackPack for TypeScriptNextStack {
     }
 
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
-        Some(crate::features::default_feature_model())
+        Some(crate::typescript::default_feature_model())
     }
 }
 
