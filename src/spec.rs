@@ -25,6 +25,7 @@ use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
 use crate::lang::FileRole;
 use crate::symbol::{Symbol, SymbolKind};
+use crate::text::{leading_comment_block, within_scope};
 
 /// A repo-relative path's [`FileRole`] under the stack that built `graph`
 /// — `RustStack` calls `tests/` a test root, `TypeScriptNextStack` uses
@@ -791,38 +792,6 @@ pub fn choose_file_rung(
     }
 }
 
-/// The comment block at the very top of `text`, as written: leading `//`,
-/// `/* … */` and `#` comment lines up to the first blank or code
-/// line. A Rust `#[…]` / `#![…]` attribute is not a comment. Empty when the
-/// file starts with code. A Python module docstring is not recognised.
-pub(crate) fn leading_comment_block(text: &str) -> String {
-    let mut lines: Vec<&str> = Vec::new();
-    let mut in_block = false;
-    for line in text.lines() {
-        let t = line.trim_start();
-        if in_block {
-            lines.push(line);
-            if t.contains("*/") {
-                in_block = false;
-            }
-            continue;
-        }
-        if t.is_empty() && lines.is_empty() {
-            continue;
-        }
-        let is_hash_comment = t.starts_with('#') && !t.starts_with("#[") && !t.starts_with("#!");
-        if t.starts_with("/*") {
-            lines.push(line);
-            in_block = !t.contains("*/");
-        } else if t.starts_with("//") || is_hash_comment {
-            lines.push(line);
-        } else {
-            break;
-        }
-    }
-    lines.join("\n")
-}
-
 /// The file's largest container (class, struct, …) and its share of
 /// `file_bytes`, in percent. `None` when the file has no container. The
 /// span includes folded-in `impl` blocks, the same text a symbol task shows.
@@ -1017,24 +986,6 @@ pub(crate) fn file_task_input(
 /// Overridable the same way as the generation-task caps (`codeowl
 /// serve`'s `--max-source-bytes` flag, `mcp.rs::with_source_limit`).
 pub const MAX_SOURCE_TEXT_BYTES_DEFAULT: usize = 32_000;
-
-/// Cut `text` to at most `max_bytes`, on a `char` boundary, with **no**
-/// marker appended — unlike [`cap_generation_text`], whose marker text is
-/// meant to be read by an LLM assembling a prompt. `get_source` returns
-/// what's meant to be read *as* source code; splicing an English sentence
-/// into the middle of a function body would corrupt exactly the thing a
-/// caller is trying to verify. The signal is the returned `bool`, which
-/// `get_source`'s `truncated` field carries instead.
-pub(crate) fn cap_source_text(text: String, max_bytes: usize) -> (String, bool) {
-    if text.len() <= max_bytes {
-        return (text, false);
-    }
-    let mut cut = max_bytes.min(text.len());
-    while cut > 0 && !text.is_char_boundary(cut) {
-        cut -= 1;
-    }
-    (text[..cut].to_string(), true)
-}
 
 /// `full_source` (the true full span from [`symbol_span_text`]) unless
 /// `sym` is a `Container` over `threshold` bytes with members to
@@ -3426,19 +3377,6 @@ fn system_status(graph: &Graph, root: &Path) -> Result<(String, Vec<String>)> {
     Ok((status, smells))
 }
 
-/// Whether `path` (a file or directory) falls under `scope` — an exact
-/// match, or a true subdirectory (`scope` plus a `/` boundary), never a
-/// bare string-prefix match: `"lib/email"` must not also catch
-/// `"lib/email.ts"` or `"lib/email-utils/"`. An empty `scope` matches
-/// everything (files/rollups only — see `coverage`'s own doc comment on
-/// why an empty-but-`Some` scope still excludes features/system). Shared
-/// with `search_code`'s (M20) `path` filter (`search.rs`) — the same
-/// boundary discipline applies there for the same reason: a query scoped
-/// to `"lib"` shouldn't also match `"library/foo.ts"`.
-pub(crate) fn within_scope(path: &str, scope: &str) -> bool {
-    scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/"))
-}
-
 /// Every document the granularity rules say should exist, each with its
 /// current status — the whole-repo inventory `get_spec_coverage` reports
 /// (M8), optionally narrowed to files/rollups under `scope` (a directory
@@ -5105,38 +5043,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     }
 
     #[test]
-    fn cap_source_text_leaves_short_text_untouched_and_unflagged() {
-        let text = "hello world".to_string();
-        let (out, truncated) = cap_source_text(text.clone(), MAX_SOURCE_TEXT_BYTES_DEFAULT);
-        assert_eq!(out, text);
-        assert!(!truncated);
-    }
-
-    #[test]
-    fn cap_source_text_cuts_and_flags_but_never_appends_prose() {
-        // Unlike cap_generation_text, get_source's cap must never splice
-        // an English marker into what's meant to be read as real source
-        // code -- the `truncated` bool is the signal, not the text.
-        let text = "x".repeat(1000);
-        let (out, truncated) = cap_source_text(text, 50);
-        assert_eq!(out.len(), 50);
-        assert!(truncated);
-        assert!(
-            out.chars().all(|c| c == 'x'),
-            "no marker text should appear in the capped output: {out}"
-        );
-    }
-
-    #[test]
-    fn cap_source_text_never_splits_a_multi_byte_char() {
-        let text = "☃".repeat(1000); // 3 bytes each, well over any small cap
-        let (out, truncated) = cap_source_text(text, 50);
-        assert!(out.len() <= 50);
-        assert!(truncated);
-        assert!(std::str::from_utf8(out.as_bytes()).is_ok());
-    }
-
-    #[test]
     fn next_task_returns_first_uncovered_symbol_then_the_file() {
         let dir = std::env::temp_dir().join(format!("codeowl-spec-test-{}-1", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -6793,18 +6699,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     }
 
     #[test]
-    fn within_scope_respects_path_boundaries_not_bare_string_prefixes() {
-        // A real bug caught dogfooding against the pilot repo: "lib/email"
-        // as a bare string prefix also matches "lib/email.ts", an
-        // unrelated sibling file that merely shares the prefix.
-        assert!(within_scope("lib/email", "lib/email"));
-        assert!(within_scope("lib/email/config.ts", "lib/email"));
-        assert!(!within_scope("lib/email.ts", "lib/email"));
-        assert!(!within_scope("lib/email-utils/x.ts", "lib/email"));
-        assert!(within_scope("anything", ""));
-    }
-
-    #[test]
     fn prose_smells_flags_cop_out_phrases_and_short_text_but_not_real_prose() {
         assert_eq!(
             prose_smells("Returns the cached client. See the source for details."),
@@ -7895,25 +7789,6 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         assert_eq!(choose_file_rung(4, 1, 49, &l), FileRung::Raw);
         assert_eq!(choose_file_rung(4, 2, 49, &l), FileRung::Summaries);
         assert_eq!(choose_file_rung(4, 1, 50, &l), FileRung::Outline);
-    }
-
-    #[test]
-    fn leading_comment_block_takes_the_top_comment_and_stops_at_code() {
-        let text = "//! Module doc line one.\n//! Line two.\n\nuse std::io;\n// later\n";
-        assert_eq!(
-            leading_comment_block(text),
-            "//! Module doc line one.\n//! Line two."
-        );
-        let block = "/* header\n * more\n */\nexport const A = 1;\n";
-        assert_eq!(leading_comment_block(block), "/* header\n * more\n */");
-        assert_eq!(leading_comment_block("export const A = 1;\n"), "");
-        // A line starting with `*` is a comment only inside a block comment.
-        assert_eq!(leading_comment_block("*ptr = 1;\nfn a() {}\n"), "");
-        // A Rust attribute is not a comment.
-        assert_eq!(
-            leading_comment_block("#![allow(dead_code)]\nfn a() {}\n"),
-            ""
-        );
     }
 
     #[test]

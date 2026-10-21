@@ -1241,7 +1241,7 @@ impl CodeOwlServer {
             spans.last().map(|s| s[1]).unwrap_or(total_lines),
         ];
         let source_text = crate::spec::render_spans(&content, spans);
-        let (source, truncated) = crate::spec::cap_source_text(source_text, self.max_source_bytes);
+        let (source, truncated) = crate::text::cap_source_text(source_text, self.max_source_bytes);
 
         Ok(Json(SourceResponse {
             id: req.id,

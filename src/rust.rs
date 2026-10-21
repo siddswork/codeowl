@@ -526,7 +526,7 @@ pub fn file_fingerprint(
     text.push_str("\nimports ");
     text.push_str(&serde_json::to_string(&imports).unwrap_or_default());
     text.push_str("\nmodule-doc ");
-    text.push_str(&crate::spec::leading_comment_block(source));
+    text.push_str(&crate::text::leading_comment_block(source));
     text.push_str("\nliterals\n");
     text.push_str(&body_literals(source).join("\n"));
     hash_text(&text)

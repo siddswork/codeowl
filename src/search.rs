@@ -54,7 +54,7 @@ const MAX_TOTAL_RESPONSE_BYTES: usize = 100_000;
 #[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
     /// Restrict matches to files under this path — an exact file or a
-    /// directory prefix, same boundary rule as `spec::within_scope`
+    /// directory prefix, same boundary rule as `text::within_scope`
     /// (which this reuses): `"lib"` matches `"lib/foo.ts"`, never
     /// `"library/foo.ts"`. `None` searches the whole repo.
     pub path: Option<String>,
@@ -112,13 +112,13 @@ pub struct SearchResults {
 
 /// Cuts `line` to at most `MAX_MATCH_TEXT_BYTES`, keeping the start of
 /// the line (where the match itself is far more likely to sit than the
-/// tail) rather than the end. Delegates to `spec::cap_source_text` --
+/// tail) rather than the end. Delegates to `text::cap_source_text` --
 /// same contract (cut on a `char` boundary, no marker appended, `bool`
 /// says whether it cut), so this doesn't re-walk the boundary logic a
 /// second time (code review finding, M20: this used to be its own
 /// duplicate of that loop).
 fn truncate_match_text(line: &str) -> (String, bool) {
-    crate::spec::cap_source_text(line.to_string(), MAX_MATCH_TEXT_BYTES)
+    crate::text::cap_source_text(line.to_string(), MAX_MATCH_TEXT_BYTES)
 }
 
 /// One file's context-lines state within one `search_code` call, lazily
@@ -207,7 +207,7 @@ pub fn search_code(root: &Path, query: &str, opts: &SearchOptions) -> Result<Sea
             .replace('\\', "/");
 
         if let Some(scope) = &opts.path
-            && !crate::spec::within_scope(&rel, scope)
+            && !crate::text::within_scope(&rel, scope)
         {
             continue;
         }
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn path_filter_respects_boundaries_not_bare_string_prefixes() {
-        // Mirrors spec::within_scope's own tested property -- "lib" must
+        // Mirrors text::within_scope's own tested property -- "lib" must
         // not also match "library/foo.ts".
         let dir = tmp("pathboundary");
         write_fixture(&dir, "lib/a.ts", "const target = 1;\n");
