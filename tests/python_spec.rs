@@ -3,7 +3,7 @@
 //! class as one `## `Type`` section, its methods folded in and never
 //! offered as their own top-level tasks. Plus: a `from app.models import
 //! Item` reference resolves end to end through `RepoIndex`. The end-to-end
-//! version of `python.rs`'s unit tests, on the path `/codeowl generate`
+//! version of `python/mod.rs`'s unit tests, on the path `/codeowl generate`
 //! drives.
 //!
 //! Plus: a SQLModel `table=True` class is retagged `SymbolKind::Schema`

@@ -1,5 +1,5 @@
 //! Which Cargo crate a Rust file belongs to, and which crate names a `use`
-//! can start with. Rust import resolution (`rust.rs`) needs both: `crate::`
+//! can start with. Rust import resolution (`rust/mod.rs`) needs both: `crate::`
 //! means "the root of *this file's* crate", and `use some_crate::x` names a
 //! library crate by its name, whether that crate is a workspace sibling or
 //! the very package a binary, test or example sits in.

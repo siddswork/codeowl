@@ -1,5 +1,5 @@
 //! Walks a single Java source file with tree-sitter and pulls out its
-//! declarations — the Java pack's counterpart to `typescript/mod.rs` / `rust.rs`
+//! declarations — the Java pack's counterpart to `typescript/mod.rs` / `rust/mod.rs`
 //! (M16).
 //!
 //! Deliberately shallow like the other extractors: the compilation unit's
@@ -7,6 +7,10 @@
 //! and nested types (recursed fully — Java nesting is common). Method
 //! bodies, statements, lambdas, and anonymous classes are implementation
 //! detail, not declarations CodeOwl generates a spec for.
+//!
+//! The rest of the Java pack: this file also holds the import reader and
+//! the package-aware resolver; the `quarkus` submodule is the Quarkus
+//! feature model (JAX-RS routes, Kafka listeners), re-exported from here.
 //!
 //! Kind mapping onto the stack-neutral [`SymbolKind`] (M16): every named
 //! type kind -- `class` / `interface` / `enum` / `@interface` / `record` --
@@ -17,10 +21,14 @@
 //! `constructor` / annotation `element` -> `Callable`; `field` / interface
 //! `constant` -> `Value`. The concrete keyword lands in `raw`.
 //!
-//! Unlike `rust.rs` there is no `merge_inherent_impls` step: a Java type's
+//! Unlike `rust/mod.rs` there is no `merge_inherent_impls` step: a Java type's
 //! body already holds its methods and fields directly, so the walk
 //! produces the parent-then-children shape the Rust merge has to
 //! reconstruct.
+
+mod quarkus;
+
+pub use self::quarkus::QuarkusFeatureModel;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -149,7 +157,7 @@ fn visit_item(
 
 /// A type with a body — recurse one level for its members (fully into
 /// nested types), then Merkle-fold their `source_hash`es into the
-/// container's own, matching `typescript/mod.rs` / `rust.rs`.
+/// container's own, matching `typescript/mod.rs` / `rust/mod.rs`.
 fn visit_container(
     node: Node,
     raw: &str,
@@ -192,7 +200,7 @@ fn visit_container(
     // own signature, value stripped (name+type is public surface, a
     // value assignment isn't -- code-review-shaped finding: `.signature`
     // itself is deliberately left value-inclusive, unlike Rust/TS/Python,
-    // because `quarkus.rs::resolve_channel_name` reads a Kafka channel
+    // because `java/quarkus.rs::resolve_channel_name` reads a Kafka channel
     // constant's literal value straight out of it (`first_string_literal
     // (&s.signature)`) -- stripping the stored field broke that real,
     // load-bearing consumer, caught by a real test failure before this
@@ -333,7 +341,7 @@ fn push_named_leaf(
     };
     let sig = signature_before_body(node, source);
     // A member is never independently imported — same stance as
-    // `typescript/mod.rs` / `rust.rs` for a class method.
+    // `typescript/mod.rs` / `rust/mod.rs` for a class method.
     let is_exported = parent_id.is_none() && has_public_or_protected(node);
     out.push(ExtractedSymbol {
         id,
@@ -419,7 +427,7 @@ fn modifiers_of(node: Node<'_>) -> Option<Node<'_>> {
 /// `node`. A blank line, or any non-comment node, ends the run — so a
 /// comment paragraphs above an unrelated declaration isn't misattributed.
 /// (Annotations sit inside the `modifiers` child, not as prev-siblings, so
-/// there's no "step over attributes" clause to carry from `rust.rs`.)
+/// there's no "step over attributes" clause to carry from `rust/mod.rs`.)
 fn leading_doc(node: Node, source: &str) -> Option<String> {
     let mut lines: Vec<String> = Vec::new();
     let mut expected_row = node.start_position().row;
@@ -490,7 +498,7 @@ fn annotations(node: Node, source: &str) -> Vec<String> {
 /// leading `@`, any package qualification, and anything from the first
 /// `(` or space onward.
 /// Duplicated three ways before this (code review): `stack.rs`'s
-/// `is_entity_annotation`, and `quarkus.rs`'s `is_admitting_annotation`
+/// `is_entity_annotation`, and `java/quarkus.rs`'s `is_admitting_annotation`
 /// and `is_register_rest_client`. All three markers only ever come from
 /// this same pack's `ExtractedSymbol::markers` / `Symbol::markers`, so
 /// sharing this here doesn't cross the "each pack owns its own parsing"
@@ -1070,7 +1078,7 @@ public @interface JsonProperty {\n\
     #[test]
     fn a_fields_signature_still_carries_its_initializer_value() {
         // Deliberately NOT stripped at the source, unlike Rust/TS/Python
-        // -- quarkus.rs::resolve_channel_name reads a Kafka channel
+        // -- java/quarkus.rs::resolve_channel_name reads a Kafka channel
         // constant's literal value straight out of `.signature`
         // (first_string_literal), a real, load-bearing dependency this
         // milestone doesn't own and must not break.
@@ -1096,7 +1104,7 @@ public @interface JsonProperty {\n\
     }
 
     // strip_value_for_fold's own unit tests moved to text.rs (shared
-    // across rust.rs/java.rs/python.rs, code-review finding); this test
+    // across rust/mod.rs/java/mod.rs/python/mod.rs, code-review finding); this test
     // stays here since it's Java-specific end-to-end coverage through
     // extract_file, not a strip_value_for_fold unit test.
     #[test]
@@ -1139,7 +1147,7 @@ public @interface JsonProperty {\n\
     #[test]
     fn a_private_fields_value_containing_the_word_public_is_not_misread_as_a_modifier() {
         // Code-review finding: `.signature` stays value-inclusive for
-        // Java (quarkus.rs needs it -- see the fold's own comment), so a
+        // Java (java/quarkus.rs needs it -- see the fold's own comment), so a
         // naive whitespace-token scan over the *whole* signature can
         // find "public"/"protected" sitting inside a private field's own
         // string value and misclassify it as a visibility keyword.

@@ -22,7 +22,7 @@ pub(crate) struct ScopedDeps {
 
 /// `self_id`, when `Some`, excludes any resolved import whose `target` is
 /// that very symbol — real for M21.g's synthetic same-file impl -> type
-/// edge (`rust.rs::same_file_trait_impl_edges`): that edge's
+/// edge (`rust/mod.rs::same_file_trait_impl_edges`): that edge's
 /// `imported_name` is the *type's* own name, and a type's own declaration
 /// always contains its own name, so without this exclusion the type's own
 /// scan would match its own synthetic edge and appear to depend on

@@ -13,7 +13,7 @@
 //!
 //! **Structurally different from FastAPI's routes**, which matters for
 //! how this is parsed: FastAPI's path and verb are one decorator call
-//! (`@router.get("/x")`), so `fastapi.rs` extracts both from a single
+//! (`@router.get("/x")`), so `python/fastapi.rs` extracts both from a single
 //! marker string. JAX-RS's `@Path` and `@GET`/`@POST`/… are two
 //! *independent* annotations that can appear in either order and with
 //! other annotations (`@Produces`, `@Transactional`, …) interleaved — so
@@ -145,7 +145,7 @@ impl FeatureModel for QuarkusFeatureModel {
         // The containing class's own `@Path` is the same answer for
         // every route method it declares, so it's looked up once per
         // class and cached for this one enumeration call — the same
-        // memoization `fastapi.rs::router_prefix` uses for
+        // memoization `python/fastapi.rs::router_prefix` uses for
         // `APIRouter(prefix=...)` (a code-review finding there).
         let mut class_path_cache: HashMap<SymbolId, Option<String>> = HashMap::new();
         // A `@RegisterRestClient` interface's methods carry the identical
@@ -377,7 +377,7 @@ fn parse_path_annotation(marker: &str) -> Option<String> {
     first_string_literal(marker)
 }
 
-/// The first `"…"` literal in `s`. Same trick as `fastapi.rs`'s helper of
+/// The first `"…"` literal in `s`. Same trick as `python/fastapi.rs`'s helper of
 /// the same name -- kept as its own copy rather than shared, matching
 /// this project's "each pack owns its own parsing" stance (design
 /// decision 5).
@@ -503,7 +503,7 @@ fn implemented_interface_names(signature: &str) -> Vec<String> {
 /// `interface_id` is `None`, or that interface declares no method of the
 /// same name. **Not disambiguated by parameter list**: two overloaded
 /// methods of the same name on the interface collide on one id (a
-/// pre-existing `java.rs` id-scheme limitation this is the first call
+/// pre-existing `java/mod.rs` id-scheme limitation this is the first call
 /// site to resolve *across files* purely by that colliding name —
 /// logged, not fixed, since OpenAPI-generated interfaces don't produce
 /// overloaded methods in any real corpus this project has dogfooded; see
@@ -682,7 +682,7 @@ fn is_grpc_service_class(graph: &Graph, class_id: SymbolId) -> bool {
 
 /// A member has no `is_exported`/visibility field of its own (M13 design
 /// decision 9's `ExtractedSymbol.is_exported` is deliberately
-/// file-level-only — see `java.rs::push_named_leaf`), but `signature` is
+/// file-level-only — see `java/mod.rs::push_named_leaf`), but `signature` is
 /// the declaration's own source text up to its body, so the `public`
 /// modifier is right there to check textually — same "read what's
 /// already captured" spirit as `sym.signature.contains("PanacheRepository")`
@@ -791,7 +791,7 @@ fn outgoing_channel(marker: &str) -> Option<ChannelArg> {
 /// up among `class_id`'s own `Value`-kind members for one whose name
 /// matches, extracting the first string literal out of *that* symbol's
 /// `signature` (a field's signature is its whole declaration text,
-/// initializer included — see `java.rs::signature_before_body`). Same
+/// initializer included — see `java/mod.rs::signature_before_body`). Same
 /// "textual scan within known scope" pattern as `same_package_edges`,
 /// deliberately not a general interpreter: same class only, no cross-
 /// file follow. Falls back to the raw identifier if no matching constant
@@ -829,7 +829,7 @@ fn resolve_channel_name<'g>(
 
 /// `entries` sorted by `(id, file)`: give every id beyond the first in a
 /// run a stable `-2`, `-3`, … suffix instead of silently collapsing a
-/// collision — same fix, same reasoning as `fastapi.rs`'s function of the
+/// collision — same fix, same reasoning as `python/fastapi.rs`'s function of the
 /// same name (a `dedup_by` on `id` alone would drop every route after the
 /// first whenever two different files' routes collided).
 fn disambiguate_colliding_slugs(entries: &mut [EntryPoint]) {

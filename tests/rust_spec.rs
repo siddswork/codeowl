@@ -2,7 +2,7 @@
 //! `next_task`/`submit` loop → `render`, and comes out as the *folded*
 //! shape M15 introduced — an inherent `impl Foo` is part of `## Foo`, not
 //! its own `## impl Foo` section, while a trait impl keeps its own
-//! section. This is the end-to-end version of `rust.rs`'s unit tests,
+//! section. This is the end-to-end version of `rust/mod.rs`'s unit tests,
 //! exercising the same path `/codeowl generate` drives on CodeOwl's own
 //! repo.
 

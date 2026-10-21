@@ -49,7 +49,7 @@ pub struct FileImports {
     /// cross-package FQN both reach another module without ever naming it
     /// at the top of the file, so `imports`/`re_exports` alone miss them.
     /// Kept as its own field rather than folded into `imports`: Java's
-    /// same-package scan (`java.rs::same_package_edges`) treats an
+    /// same-package scan (`java/mod.rs::same_package_edges`) treats an
     /// explicit `imports` entry for a simple name as shadowing a
     /// same-package guess for that name, and a fully-qualified reference
     /// to a *different* same-named type must not trigger that shadow

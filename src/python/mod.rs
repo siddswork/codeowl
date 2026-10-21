@@ -1,11 +1,15 @@
 //! Walks a single Python source file with tree-sitter and pulls out its
-//! declarations — the Python pack's counterpart to `typescript/mod.rs` / `java.rs`
-//! / `rust.rs` (M17).
+//! declarations — the Python pack's counterpart to `typescript/mod.rs` / `java/mod.rs`
+//! / `rust/mod.rs` (M17).
 //!
 //! Shallow like the others: module-level classes and functions, a class's
 //! methods and nested classes (recursed), and module-level `NAME = …`
 //! assignments. Function bodies, comprehensions, and locals are
 //! implementation detail, not declarations CodeOwl generates a spec for.
+//!
+//! The rest of the Python pack: this file also holds the import reader and
+//! the module resolver; the `fastapi` submodule is the FastAPI feature model
+//! (routes found through decorators), re-exported from here.
 //!
 //! Kind mapping onto the stack-neutral [`SymbolKind`]:
 //!   * `class` → `Container` (raw `"class"`)
@@ -14,11 +18,15 @@
 //!
 //! `is_exported` follows Python's leading-underscore convention: `_name` is
 //! private, a `__dunder__` is public (it's API surface). Class members are
-//! never independently exported (same stance as `java.rs` / `rust.rs`).
+//! never independently exported (same stance as `java/mod.rs` / `rust/mod.rs`).
 //!
 //! Decorators are captured verbatim into `markers`, arguments included
-//! (`@router.get("/items/{id}")`), the same way `java.rs::annotations`
+//! (`@router.get("/items/{id}")`), the same way `java/mod.rs::annotations`
 //! captures `@Path("/x")` — the FastAPI feature model (M17) reads them back.
+
+mod fastapi;
+
+pub use self::fastapi::FastApiFeatureModel;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -89,7 +97,7 @@ fn visit_item(
 
 /// A `class` with a body — recurse one level for its members (fully into
 /// nested classes), then Merkle-fold their `source_hash`es into the
-/// container's own, matching `java.rs` / `rust.rs`.
+/// container's own, matching `java/mod.rs` / `rust/mod.rs`.
 fn visit_container(
     node: Node,
     parent_id: Option<&str>,
@@ -296,14 +304,14 @@ fn visit_assignment(
         // attributes only (on the theory that name+type is the only
         // public-surface-relevant part), but `.signature` has other real
         // readers besides the interface_hash fold:
-        // fastapi.rs::router_prefix reads a module-level assignment's
+        // python/fastapi.rs::router_prefix reads a module-level assignment's
         // full value (`s.signature.contains("APIRouter(")`, then parses
         // the prefix kwarg out of that same string), and
         // spec::source_text::maybe_reduce_container_source's God-class reduction
         // shows a member's `.signature` straight to the LLM writing that
         // class's spec -- stripping a class attribute's default value
         // there silently drops real context (`Field(primary_key=True)`)
-        // from what the LLM sees. Same lesson as java.rs's fold: don't
+        // from what the LLM sees. Same lesson as java/mod.rs's fold: don't
         // strip a field the stored, shared record itself carries --
         // strip transiently, only where the fold actually reads it (this
         // function's own caller, in visit_container, below).
@@ -360,7 +368,7 @@ fn collect_decorators(node: Node, source: &str) -> Vec<String> {
 
 /// Everything from the declaration's start up to its body — `def name(…) ->
 /// T` / `class Name(Base, kw=…)` — with the trailing `:` trimmed. The "text
-/// before the block" trick, same as `java.rs::signature_before_body`.
+/// before the block" trick, same as `java/mod.rs::signature_before_body`.
 fn signature_before_body(node: Node, source: &str) -> String {
     let start = node.start_byte();
     let end = node
@@ -379,9 +387,9 @@ fn signature_before_body(node: Node, source: &str) -> String {
 // An assignment's stored `signature` text with any initializer value
 // stripped, for the interface_hash fold only -- never touches the
 // stored field itself (see `visit_assignment`'s own comment for why:
-// other real readers, like `fastapi.rs::router_prefix` and
+// other real readers, like `python/fastapi.rs::router_prefix` and
 // `spec::source_text::maybe_reduce_container_source`, need the full value). Uses
-// `crate::text::strip_value_for_fold`, shared with java.rs/rust.rs.
+// `crate::text::strip_value_for_fold`, shared with java/mod.rs/rust/mod.rs.
 
 /// The module/class/function docstring: a bare string literal as the first
 /// statement of the body. Leading indentation and blank lines trimmed.
@@ -433,7 +441,7 @@ fn node_lines(node: Node) -> [usize; 2] {
 // `typescript/imports.rs` + `typescript/resolve.rs`.
 //
 // Resolution is a **path match against the walk root**, the same idea as
-// `java.rs` but keyed on the dotted module name rather than an FQN: CodeOwl
+// `java/mod.rs` but keyed on the dotted module name rather than an FQN: CodeOwl
 // is pointed at the project root (the dir holding the top package), so
 // `from app.models import Item` → `app/models.py::Item`. No `pyproject.toml`
 // parse, no virtualenv. Relative imports (`from . import x`,
@@ -932,7 +940,7 @@ def get_db():
         assert_eq!(router.raw, "assignment");
         // Module-level signature keeps the full assignment text,
         // deliberately not stripped like a class attribute's is --
-        // fastapi.rs::router_prefix reads the value out of exactly this
+        // python/fastapi.rs::router_prefix reads the value out of exactly this
         // string (`s.signature.contains("APIRouter(")`, then parses the
         // `prefix` kwarg from it).
         assert_eq!(router.signature, "router = APIRouter(prefix=\"/items\")");
@@ -1128,7 +1136,7 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(id_field.raw, "attribute");
         assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
         // `.signature` stays value-inclusive (code-review finding:
-        // fastapi.rs::router_prefix and
+        // python/fastapi.rs::router_prefix and
         // spec::source_text::maybe_reduce_container_source's God-class
         // reduction both need the full value elsewhere) -- the interface_hash
         // fold strips it transiently, at fold time only, never here.

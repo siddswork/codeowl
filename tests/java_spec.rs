@@ -3,7 +3,7 @@
 //! as one `## `Type`` section — its methods and a nested `enum` folded in,
 //! never offered as their own top-level tasks. Plus: a two-file package
 //! resolves its same-package (no-`import`) reference edge end to end through
-//! `RepoIndex`. The end-to-end version of `java.rs`'s unit tests, on the
+//! `RepoIndex`. The end-to-end version of `java/mod.rs`'s unit tests, on the
 //! path `/codeowl generate` drives.
 
 use codeowl::graph::{FileExtraction, Graph};

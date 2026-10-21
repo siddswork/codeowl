@@ -1,5 +1,4 @@
 pub mod explain;
-pub mod fastapi;
 pub mod features;
 #[cfg(test)]
 pub(crate) mod fixtures;
@@ -11,9 +10,7 @@ pub mod java;
 pub mod lang;
 pub mod mcp;
 pub mod python;
-pub mod quarkus;
 pub mod rust;
-pub mod rust_crates;
 pub mod search;
 pub mod spec;
 pub mod stack;
