@@ -2223,6 +2223,42 @@ pub use crate::stack::RustStack;\n";
     }
 
     #[test]
+    fn a_module_that_is_a_directory_resolves_through_its_mod_rs() {
+        // The layout this repo uses for its own packs: `src/rust/mod.rs`
+        // with a child `src/rust/crates.rs`. A `crate::rust::…` path from
+        // another file lands in `mod.rs`, and the child is reached with
+        // `self::crates::…` from inside it.
+        let edges = resolved(&[
+            ("src/lib.rs", "pub mod rust;\npub mod stack;\n"),
+            (
+                "src/rust/mod.rs",
+                "mod crates;\nuse self::crates::CrateMap;\npub fn extract_file(_m: CrateMap) {}\n",
+            ),
+            ("src/rust/crates.rs", "pub struct CrateMap;\n"),
+            (
+                "src/stack.rs",
+                "use crate::rust::extract_file;\npub fn f() {}\n",
+            ),
+        ]);
+        let into_mod_rs = edges
+            .iter()
+            .find(|e| e.from_file == "src/stack.rs" && e.imported_name == "extract_file")
+            .unwrap();
+        assert!(
+            into_mod_rs.target.is_some(),
+            "crate::rust::extract_file should resolve into src/rust/mod.rs"
+        );
+        let into_child = edges
+            .iter()
+            .find(|e| e.from_file == "src/rust/mod.rs" && e.imported_name == "CrateMap")
+            .unwrap();
+        assert!(
+            into_child.target.is_some(),
+            "self::crates::CrateMap should resolve into src/rust/crates.rs"
+        );
+    }
+
+    #[test]
     fn external_crate_and_missing_item_stay_unresolved() {
         let edges = resolved(&[(
             "src/lib.rs",
