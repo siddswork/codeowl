@@ -30,14 +30,14 @@ use crate::imports::FileImports;
 const MAX_REEXPORT_HOPS: u8 = 5;
 
 /// Build a resolver configured for this project: TypeScript-first
-/// extensions (from `lang::RESOLVER_EXTENSIONS`), and `tsconfig.json`
+/// extensions (from `typescript::RESOLVER_EXTENSIONS`), and `tsconfig.json`
 /// path-alias discovery turned on (this is what makes `@/lib/...`-style
 /// aliases resolve without CodeOwl having to locate and parse
 /// `tsconfig.json` itself).
 pub fn build_resolver() -> Resolver {
     Resolver::new(ResolveOptions {
         tsconfig: Some(TsconfigDiscovery::Auto),
-        extensions: crate::lang::RESOLVER_EXTENSIONS
+        extensions: crate::typescript::RESOLVER_EXTENSIONS
             .iter()
             .map(|e| e.to_string())
             .collect(),

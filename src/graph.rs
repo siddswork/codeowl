@@ -158,7 +158,7 @@ pub struct FileExtraction {
 /// Extract `source` (already read from `rel_path`) and hash it in one
 /// step — the shape every multi-file test fixture in this codebase wants.
 /// Test-only: it mirrors `TypeScriptNextStack::extract_symbols` (TS via
-/// `lang::extract_symbols`, `.sql` via `schema::extract_tables`), not the
+/// `extract::extract_file`, `.sql` via `schema::extract_tables`), not the
 /// repo's detected `StackPack`, so it only produces symbols for TS/SQL
 /// fixtures. Production extraction goes through `RepoIndex::build` →
 /// `pack.extract_symbols`.
@@ -167,7 +167,7 @@ pub fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction {
     let symbols = if rel_path.ends_with(".sql") {
         crate::schema::extract_tables(source, rel_path)
     } else {
-        crate::lang::extract_symbols(rel_path, source)
+        crate::extract::extract_file(source, rel_path)
     };
     FileExtraction {
         rel_path: rel_path.to_string(),
