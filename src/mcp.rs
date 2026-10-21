@@ -4406,7 +4406,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_source_on_a_folded_rust_impl_includes_the_method_bodies() {
-        // Same fixture shape as `spec/`'s
+        // Same fixture shape as `spec::format`'s test
         // symbol_span_text_includes_a_folded_impl_s_method_bodies (M15) --
         // get_source must reach the same folded text through the tool
         // surface, not just internally.

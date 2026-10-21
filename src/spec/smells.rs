@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use anyhow::{Result, bail};
+
 use super::format::{FileSpec, dependency_lines, extract_section};
 use crate::graph::{Graph, SymbolId};
 
@@ -107,6 +109,25 @@ pub fn file_spec_smells(
 pub fn body_smells(body: &str) -> Vec<String> {
     let summary = extract_section(body, "## Summary", "\n## ").unwrap_or_else(|| body.to_string());
     prose_smells(&summary)
+}
+
+/// Refuse to persist prose that trips the deterministic quality check
+/// (`prose_smells`) `get_next_spec_task` also runs. Storing smelly prose
+/// isn't harmless: a smell in the "source unchanged, not human-edited"
+/// case is exactly what makes `next_task` re-offer the document, so a
+/// generate loop that keeps resubmitting equally-thin prose never
+/// terminates. Erroring at submit time turns that silent non-termination
+/// into a message naming what to fix — the same stance `submit` already
+/// takes on content missing a `### Summary`.
+pub(super) fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()> {
+    if smells.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "{what} fails a quality check ({}) — expand it; `get_next_spec_task` \
+         re-offers a spec until its prose clears the check",
+        smells.join(", ")
+    );
 }
 
 #[cfg(test)]

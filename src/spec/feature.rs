@@ -4,9 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::file_task::reject_if_smelly;
 use super::format::{read_file_spec, write_replacing};
-use super::smells::body_smells;
+use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
 use crate::features::{
     EntryPoint, Participants, assemble_participants, feature_model_for, feature_slug,

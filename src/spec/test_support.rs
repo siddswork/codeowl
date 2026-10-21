@@ -13,7 +13,6 @@ use crate::hash::hash_text;
 /// refuses to write such prose, so the tests that exercise the
 /// smell-driven `next_task` re-offer plant it directly. Seeds a clean spec
 /// via `submit`, then swaps in the smelly prose and its matching hash.
-#[cfg(test)]
 pub(crate) fn plant_smelly_symbol_spec(
     graph: &Graph,
     root: &Path,

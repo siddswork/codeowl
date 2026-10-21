@@ -10,7 +10,7 @@ use crate::symbol::SymbolKind;
 /// — `RustStack` calls `tests/` a test root, `TypeScriptNextStack` uses
 /// the JS conventions. Goes through the graph's pack, not the TypeScript
 /// rules directly, so prioritisation isn't hard-wired to one stack.
-pub(super) fn classify_in(graph: &Graph, path: &str) -> FileRole {
+fn classify_in(graph: &Graph, path: &str) -> FileRole {
     crate::stack::file_role(graph, path)
 }
 

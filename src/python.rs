@@ -1128,8 +1128,9 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(id_field.raw, "attribute");
         assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
         // `.signature` stays value-inclusive (code-review finding:
-        // fastapi.rs::router_prefix and `spec/`'s God-class reduction
-        // both need the full value elsewhere) -- the interface_hash
+        // fastapi.rs::router_prefix and
+        // spec::source_text::maybe_reduce_container_source's God-class
+        // reduction both need the full value elsewhere) -- the interface_hash
         // fold strips it transiently, at fold time only, never here.
         assert_eq!(id_field.signature, "id: int = Field(primary_key=True)");
         // A class attribute is never independently imported -- same

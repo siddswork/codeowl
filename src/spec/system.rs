@@ -5,10 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::feature::{current_feature_hashes, read_feature_spec};
-use super::file_task::reject_if_smelly;
 use super::format::{extract_section, write_replacing};
 use super::rollup::{current_module_hashes, read_rollup_spec};
-use super::smells::body_smells;
+use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
 use crate::graph::Graph;
 use crate::hash::hash_text;

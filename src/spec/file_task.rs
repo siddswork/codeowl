@@ -2,11 +2,11 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use super::format::{FileSpec, HashPair, SymbolProse, extract_section, read_existing, write};
 use super::layout::{file_is_spec_bearing, spec_bearing_children};
-use super::smells::prose_smells;
+use super::smells::{prose_smells, reject_if_smelly};
 use super::staleness::{dependency_record, file_changes, file_dependency_record, symbol_changes};
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
@@ -247,25 +247,6 @@ pub fn next_task(graph: &Graph, root: &Path, target_file_id: SymbolId) -> Result
 /// id (expects `### Summary` and `### Behavior` headings in `content`) or
 /// a file id (expects plain prose, becomes `## Summary`). Returns the
 /// hashes the persisted entry now carries.
-/// Refuse to persist prose that trips the deterministic quality check
-/// (`prose_smells`) `get_next_spec_task` also runs. Storing smelly prose
-/// isn't harmless: a smell in the "source unchanged, not human-edited"
-/// case is exactly what makes `next_task` re-offer the document, so a
-/// generate loop that keeps resubmitting equally-thin prose never
-/// terminates. Erroring at submit time turns that silent non-termination
-/// into a message naming what to fix — the same stance `submit` already
-/// takes on content missing a `### Summary`.
-pub(super) fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()> {
-    if smells.is_empty() {
-        return Ok(());
-    }
-    bail!(
-        "{what} fails a quality check ({}) — expand it; `get_next_spec_task` \
-         re-offers a spec until its prose clears the check",
-        smells.join(", ")
-    );
-}
-
 pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<HashPair> {
     let node_id = graph
         .find(id)

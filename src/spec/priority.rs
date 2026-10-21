@@ -1,9 +1,9 @@
 //! The order a budgeted generation run spends its calls in, and which stale files matter most.
 
 use super::coverage::CoverageItem;
-use super::layout::classify_in;
 use crate::graph::Graph;
 use crate::lang::FileRole;
+use crate::stack::file_role;
 
 /// The `n` file-kind items most worth regenerating, ranked by blast radius
 /// (`fan_in`) rather than by `prioritize`'s generate-order tiering — "which
@@ -73,7 +73,7 @@ pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> 
     let shared_cutoff = {
         let mut fan_ins: Vec<usize> = items
             .iter()
-            .filter(|i| i.kind == "file" && classify_in(graph, &i.id) == FileRole::Domain)
+            .filter(|i| i.kind == "file" && file_role(graph, &i.id) == FileRole::Domain)
             .map(|i| i.fan_in)
             .filter(|&f| f >= SHARED_CODE_FAN_IN)
             .collect();
@@ -93,7 +93,7 @@ pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem> 
     pending.sort_by(|a, b| {
         let tier = |item: &CoverageItem| -> u8 {
             if item.kind == "file" {
-                return match classify_in(graph, &item.id) {
+                return match file_role(graph, &item.id) {
                     FileRole::Test => 5,
                     FileRole::Domain if item.fan_in >= shared_cutoff => 0,
                     // Below the fan-in cutoff, or a primitive file at any

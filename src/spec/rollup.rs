@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::file_task::{SpecTask, next_task, reject_if_smelly};
+use super::file_task::{SpecTask, next_task};
 use super::format::{extract_section, read_file_spec, write_replacing};
 use super::layout::{
     directory_is_spec_bearing, file_is_spec_bearing, files_in, is_test_path, spec_bearing_files_in,
 };
-use super::smells::body_smells;
+use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::{diff_hash_lists, file_changes};
 use crate::graph::Graph;
 use crate::hash::hash_text;
