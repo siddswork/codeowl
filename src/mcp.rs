@@ -1116,7 +1116,7 @@ impl CodeOwlServer {
         // The writer reads the file without the test code its pack keeps
         // inside source files; the cursor's hash covers this same text.
         let graph = self.graph.load_full();
-        let text = crate::stack::for_name(graph.pack_name()).strip_test_code(&id, &raw);
+        let text = crate::stack::for_graph(&graph).strip_test_code(&id, &raw);
         let file_id = graph.find(&id).ok_or_else(|| Self::not_found(&id))?;
         let crate::spec::FileTaskInput { rung, text, pages } = crate::spec::file_task_input(
             &graph,

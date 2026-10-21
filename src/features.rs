@@ -465,11 +465,11 @@ pub fn default_feature_model() -> &'static dyn FeatureModel {
 /// stack has none (`RustStack`; `TypeScriptNextStack`, `JavaStack` and
 /// `PythonStack` always return one, which for a plain Java library such as
 /// commons-lang simply enumerates zero entry points). Recovered from
-/// `graph.pack_name()` via [`crate::stack::for_name`] so a pure-read
+/// `graph.pack_name()` via [`crate::stack::for_graph`] so a pure-read
 /// caller doesn't need the pack threaded down. This is the M14 completion
 /// of what M13 stubbed as `default_feature_model()`.
 pub fn feature_model_for(graph: &Graph) -> Option<&'static dyn FeatureModel> {
-    crate::stack::for_name(graph.pack_name()).feature_model()
+    crate::stack::for_graph(graph).feature_model()
 }
 
 /// The entry points for `graph`'s stack — empty for a stack with no

@@ -18,8 +18,9 @@
 //! `TypeScriptNextStack` delegates to the existing free functions, which
 //! stay `pub` as shims. M14 adds `RustStack` (`tree-sitter-rust` over
 //! `.rs`, no feature layer) as the second implementation — the one that
-//! actually exercises the seams. `lang::detect` still hands back the TS
-//! pack unconditionally until M14's `detect()`-branching commit.
+//! actually exercises the seams. [`registered_packs`] is the single list
+//! of packs: `lang::detect` picks one for a repo from it and [`for_name`]
+//! recovers one from a persisted name.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -255,17 +256,75 @@ pub fn typescript_next() -> Box<dyn StackPack> {
     Box::new(TypeScriptNextStack)
 }
 
+/// One pack in the [`registered_packs`] list: how `lang::detect` names it
+/// to a user, and how to construct it.
+pub struct Registered {
+    /// What an error message calls this stack ("TypeScript/TSX", "Rust").
+    pub label: &'static str,
+    pub build: fn() -> Box<dyn StackPack>,
+}
+
+/// Every pack CodeOwl ships — the **one** list. `lang::detect` walks it to
+/// pick a pack for a repo and [`for_name`] walks it to recover a pack from
+/// a persisted name, so a new language is registered here and nowhere else.
+/// Order is detection order, which only affects the order of an ambiguity
+/// message.
+pub fn registered_packs() -> &'static [Registered] {
+    const PACKS: &[Registered] = &[
+        Registered {
+            label: "TypeScript/TSX",
+            build: || Box::new(TypeScriptNextStack),
+        },
+        Registered {
+            label: "Rust",
+            build: || Box::new(RustStack),
+        },
+        Registered {
+            label: "Java",
+            build: || Box::new(JavaStack),
+        },
+        Registered {
+            label: "Python",
+            build: || Box::new(PythonStack),
+        },
+    ];
+    PACKS
+}
+
 /// The pack for a persisted `StackPack::name()` — how a pure-read caller
 /// (`spec.rs`, `mcp.rs`) recovers the pack from `Graph::pack_name()`
-/// without it being threaded down. Unknown / empty (a test-built graph, a
-/// pre-M14 cache) falls back to the TypeScript pack.
-pub fn for_name(name: &str) -> Box<dyn StackPack> {
-    match name {
-        "rust" => Box::new(RustStack),
-        "java" => Box::new(JavaStack),
-        "python" => Box::new(PythonStack),
-        _ => Box::new(TypeScriptNextStack),
+/// without it being threaded down. The empty name (a graph built by a test
+/// helper, which never called `set_pack_name`) means the TypeScript pack.
+/// Any other name that no registered pack answers to is an error: falling
+/// back to TypeScript would classify, say, a Rust repo with TypeScript
+/// rules and report nothing wrong.
+pub fn for_name(name: &str) -> anyhow::Result<Box<dyn StackPack>> {
+    if name.is_empty() {
+        return Ok(typescript_next());
     }
+    let mut known = Vec::new();
+    for entry in registered_packs() {
+        let pack = (entry.build)();
+        if pack.name() == name {
+            return Ok(pack);
+        }
+        known.push(pack.name().to_string());
+    }
+    anyhow::bail!(
+        "no registered stack pack is named `{name}` (registered: {})",
+        known.join(", ")
+    )
+}
+
+/// The pack that built `graph`. A graph's pack name is written in exactly
+/// one place — `RepoIndex` copies it from the pack it detected — and a
+/// cache built by a different pack is rejected on load, so an unregistered
+/// name here is a bug in CodeOwl, not bad input. Panics with that message
+/// rather than guessing a pack.
+pub fn for_graph(graph: &Graph) -> Box<dyn StackPack> {
+    for_name(graph.pack_name()).unwrap_or_else(|e| {
+        panic!("graph carries an unregistered pack name (a CodeOwl bug): {e:#}")
+    })
 }
 
 /// The Rust stack (M14): `tree-sitter-rust` extraction over `.rs` files,
@@ -589,6 +648,48 @@ impl StackPack for PythonStack {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn every_registered_pack_is_found_again_by_its_own_name() {
+        assert!(registered_packs().len() >= 4);
+        for entry in registered_packs() {
+            let pack = (entry.build)();
+            let found = for_name(pack.name()).expect("a registered pack's name resolves");
+            assert_eq!(found.name(), pack.name());
+        }
+    }
+
+    #[test]
+    fn registered_pack_names_and_labels_are_unique() {
+        let mut names: Vec<String> = registered_packs()
+            .iter()
+            .map(|e| (e.build)().name().to_string())
+            .collect();
+        let mut labels: Vec<&str> = registered_packs().iter().map(|e| e.label).collect();
+        names.sort();
+        labels.sort();
+        let (n, l) = (names.len(), labels.len());
+        names.dedup();
+        labels.dedup();
+        assert_eq!((names.len(), labels.len()), (n, l));
+    }
+
+    #[test]
+    fn an_empty_pack_name_means_the_typescript_pack() {
+        // A graph built by a test helper never had `set_pack_name` called.
+        assert_eq!(for_name("").unwrap().name(), "typescript-next");
+    }
+
+    #[test]
+    fn an_unknown_pack_name_is_an_error_that_lists_the_registered_names() {
+        // A misspelt name used to fall through to the TypeScript pack and
+        // classify a Rust repo with TypeScript rules, silently.
+        let err = for_name("rsut").unwrap_err().to_string();
+        assert!(err.contains("rsut"), "names the bad value: {err}");
+        for want in ["typescript-next", "rust", "java", "python"] {
+            assert!(err.contains(want), "lists {want}: {err}");
+        }
+    }
 
     #[test]
     fn typescript_next_delegates_transparently() {

@@ -115,7 +115,7 @@ pub struct GeneratedSourcesSummary {
 }
 
 pub fn generated_sources_summary(graph: &Graph) -> Option<GeneratedSourcesSummary> {
-    let pack = crate::stack::for_name(graph.pack_name());
+    let pack = crate::stack::for_graph(graph);
     let dirs = pack.generated_source_dirs();
     if dirs.is_empty() {
         return None;

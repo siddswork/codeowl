@@ -192,18 +192,12 @@ pub fn detect(root: &Path) -> Result<Box<dyn crate::stack::StackPack>> {
     }
 
     type Ctor = fn() -> Box<dyn crate::stack::StackPack>;
-    let candidates: [(&str, Ctor); 4] = [
-        ("TypeScript/TSX", || {
-            Box::new(crate::stack::TypeScriptNextStack)
-        }),
-        ("Rust", || Box::new(crate::stack::RustStack)),
-        ("Java", || Box::new(crate::stack::JavaStack)),
-        ("Python", || Box::new(crate::stack::PythonStack)),
-    ];
-
-    let hits: Vec<(&str, usize, Ctor)> = candidates
+    let hits: Vec<(&str, usize, Ctor)> = crate::stack::registered_packs()
         .iter()
-        .map(|(label, ctor)| (*label, primary_count(root, ctor().as_ref()), *ctor))
+        .map(|entry| {
+            let count = primary_count(root, (entry.build)().as_ref());
+            (entry.label, count, entry.build)
+        })
         .filter(|(_, n, _)| *n > 0)
         .collect();
 

@@ -458,9 +458,9 @@ impl Graph {
     /// active pack — the shared lookup `spec.rs`'s `classify_in` and
     /// `quarkus.rs`'s entry-point enumeration both need (code review,
     /// M19: two independent call sites were about to each re-derive
-    /// `crate::stack::for_name(graph.pack_name())` themselves).
+    /// `crate::stack::for_graph(graph)` themselves).
     pub fn file_role(&self, path: &str) -> crate::lang::FileRole {
-        crate::stack::for_name(&self.pack_name).classify(path)
+        crate::stack::for_graph(self).classify(path)
     }
 
     pub fn get(&self, id: SymbolId) -> &Node {
