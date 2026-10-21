@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::format::{read_file_spec, write_replacing};
+use super::format::{read_file_spec, with_provenance, without_provenance, write_replacing};
 use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
 use crate::features::{
@@ -51,7 +51,7 @@ pub fn render_feature(spec: &FeatureSpec) -> String {
     }
     out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
     out.push_str("---\n");
-    out.push_str(spec.body.trim());
+    out.push_str(&with_provenance(spec.body.trim()));
     out.push('\n');
     out
 }
@@ -98,13 +98,14 @@ pub fn parse_feature(content: &str) -> Result<FeatureSpec> {
         }
     }
 
-    let body = content
-        .lines()
-        .skip(consumed)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string();
+    let body = without_provenance(
+        content
+            .lines()
+            .skip(consumed)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim(),
+    );
     let slug = feature_slug(&entry_point);
 
     Ok(FeatureSpec {
@@ -374,6 +375,7 @@ pub fn current_feature_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String,
 mod tests {
     use super::*;
     use crate::features::enumerate_entry_points;
+    use crate::spec::format::PROVENANCE;
 
     use crate::spec::test_support::{ARTWORK_FIXTURE, build_feature_fixture};
 
@@ -399,6 +401,27 @@ mod tests {
         let rendered = render_feature(&spec);
         let parsed = parse_feature(&rendered).unwrap();
         assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn a_feature_spec_carries_the_provenance_line_and_its_body_is_unchanged() {
+        let spec = FeatureSpec {
+            slug: "submit".to_string(),
+            entry_point: "app/page.tsx".to_string(),
+            participants: vec![],
+            spec_hash: "spechash".to_string(),
+            body: "# Artwork submission\n## Summary\nLets an artist submit artwork.".to_string(),
+        };
+        let rendered = render_feature(&spec);
+        let lines: Vec<&str> = rendered.lines().collect();
+        let title = lines
+            .iter()
+            .position(|l| *l == "# Artwork submission")
+            .unwrap();
+        assert_eq!(lines[title + 1], PROVENANCE);
+        assert_eq!(parse_feature(&rendered).unwrap().body, spec.body);
+        let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
+        assert_eq!(parse_feature(&legacy).unwrap().body, spec.body);
     }
 
     #[test]

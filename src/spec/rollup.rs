@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::file_task::{SpecTask, next_task};
-use super::format::{extract_section, read_file_spec, write_replacing};
+use super::format::{PROVENANCE, extract_section, read_file_spec, write_replacing};
 use super::layout::{
     directory_is_spec_bearing, file_is_spec_bearing, files_in, is_test_path, spec_bearing_files_in,
 };
@@ -58,7 +58,7 @@ pub fn render_rollup(graph: &Graph, root: &Path, spec: &RollupSpec) -> String {
     }
     out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
     out.push_str("---\n");
-    out.push_str(&format!("# {}\n", spec.dir_path));
+    out.push_str(&format!("# {}\n{PROVENANCE}\n", spec.dir_path));
     out.push_str("## Summary\n");
     out.push_str(spec.body.trim());
     out.push('\n');
@@ -432,6 +432,23 @@ mod tests {
         assert!(rendered.contains("lib/one.ts: onehash"));
         let parsed = parse_rollup(&rendered).expect("should parse what we just rendered");
         assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn a_rollup_carries_the_provenance_line_and_parses_without_it() {
+        let graph = build_graph_from_sources(&[("lib/one.ts", "export function one(): void {}\n")]);
+        let spec = RollupSpec {
+            dir_path: "lib".to_string(),
+            files: vec![("lib/one.ts".to_string(), "onehash".to_string())],
+            spec_hash: "rolluphash".to_string(),
+            body: "Small shared helpers.".to_string(),
+        };
+        let rendered = render_rollup(&graph, Path::new("/nonexistent"), &spec);
+        let lines: Vec<&str> = rendered.lines().collect();
+        let title = lines.iter().position(|l| *l == "# lib").unwrap();
+        assert_eq!(lines[title + 1], PROVENANCE);
+        let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
+        assert_eq!(parse_rollup(&legacy).unwrap(), spec);
     }
 
     #[test]
