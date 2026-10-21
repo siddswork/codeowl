@@ -1,90 +1,81 @@
 ---
 kind: file
-source_paths: [src/quarkus.rs]
-file: { source_hash: 6537e38e374bcd339e400e129f91ad267ecb1ed898cd1216a5af2b0cee45249f, deps_hash: c4215c8e937e41b84e2437b2769aa5be82fefe70f7758fdd57c0dec540e638af, spec_hash: acd695696d625f89bd7e339092b6ca15bbeaa0c95238f7188f8c3000f4cbe8e6 }
+source_paths: [src/java/quarkus.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:
-  src/quarkus.rs::QuarkusFeatureModel: { source_hash: 361d7a5471c4700aeff3df58b0ff884c5987ac7aef485d946be582d0dc85ec1d, deps_hash: ea1a40529c9c27cee6cc587fb897a66fceba62dc48d39f3b7d6a706216ff8483, spec_hash: b5952c54b8e27e04d207ffbfa1beb7f1942ae0c8f2bd6e6c89fe93484c764f66 }
-  src/quarkus.rs::is_cdi_managed: { source_hash: 1a4fa3a5622317b5c477975617a04e8974f61c38b5f2f348dfbff0bda8fcae3d, deps_hash: 34a95995527dc5f673d09639b70c27217984732249263b23f878b003a1bf1598, spec_hash: 8afbcfef54c48b1057f7d4d68bd6da11bc5f46c94a3e46c9f8c15f81c6c151fe }
-  src/quarkus.rs::is_admitting_annotation: { source_hash: bf97a2404b7a67972ce68244dd30d0bbf7ffe0337d4f8a368a6b66e0614c397c, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: c525713d95b5259878252fb83be17ac3b06c1f5d334997a6c71cffc5f495f7d5 }
-  src/quarkus.rs::parse_verb: { source_hash: 6db1a58f1f5ef49e0b9bf0964918cc5c675c0e1bec5bddffea5ce6e5c534e3dd, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: ecff650bcf861d4a501fa79978f26a9e36bc350d4bd3a747fd59bf7481b3b7fb }
-  src/quarkus.rs::parse_path_annotation: { source_hash: 58fa3456ebc174a9fddb2c9e2c113197831d8ca2a7e76a992c8f5a4fb1243c19, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: db94fb9d3a67589029522b56977acb2a9e587e4079ef2f09e6bf42217428472a }
-  src/quarkus.rs::first_string_literal: { source_hash: dfa93a877f1cd80f68bb118d289a0f51dc1ec9a8a712a101ec082c64b59a4018, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9b377db3ebecfb82a02cea24fe6d15455e7f79deed470b58bd5c2cda751a4bd8 }
-  src/quarkus.rs::class_path_for: { source_hash: fbe46ae59ec2f61b443f60934d3c36bea78374fc874d045534710f822afe103a, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 6cf66cb42758cb3808f0e04b8a7ba97803cc177d803774f5f31b91f59a425ada }
-  src/quarkus.rs::generated_interface_for: { source_hash: fc83bff5b92c40c0d8c68e2f8ce8946895ece365799a11f6caba3c5a1acf4532, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 35544b5e6059f81d18895e3123192bc227ca820586fcfc1ec770cb559784ac3b }
-  src/quarkus.rs::resolve_interface_name: { source_hash: 39f2a585b1f4f51747ad0ddac9bbf6c78752d2202eae2b274be27d9f350cef3c, deps_hash: a748f7f4e848d95ce62b2bbc54156b30e91ec42a2969c2deae579404b6011c61, spec_hash: dcffa2134f2841963e42fe4871d9d32e345ed28341444f9ed425f0ec39353ef2 }
-  src/quarkus.rs::implemented_interface_names: { source_hash: 85e061653e434a7ed75837dfa21a2d3cc1900b4b6e4b365e04973420efdb6d8c, deps_hash: 302730f1942310128eef45df367a0238da029262c0ba13043652c7d88cbe6b8f, spec_hash: 284b4344bb9776ef9cfed7c14fc37a906be923e9896c401a02d876c07677dc46 }
-  src/quarkus.rs::interface_method_by_name: { source_hash: 10d4275b3d60232997cc959eb01b2ffc0dbcd87e65e732210039ca8a278a8c70, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 20b9919f6883c19560012cf0304a6b6dc335c4de54bbb75f82223f7fe9e61962 }
-  src/quarkus.rs::is_register_rest_client: { source_hash: 3dd92508b43e0dc3cc7dd78418f79267342791786df6596f474ee562797d0fa8, deps_hash: b7a36441efb966394ebc7a6eb8706b4c98a33b05dca00dad338059e7f0d78aba, spec_hash: 3222300a1f3c424da07dad927dccf1fee71d1200d53d91f6d5cc234368b460ad }
-  src/quarkus.rs::join_jaxrs_path: { source_hash: 5f11c3edd79cab8c01d6b534fff5f71afc73c8f58d8ca670949a390fc5855ff5, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ef263efca25b7da8911341d57b9baa2417558ab487199d042ceee4a8fa467c1c }
-  src/quarkus.rs::ascii_words: { source_hash: f8e1deb9ee627daeedd32713218afc3d9f2b03fa2515520fe3e09d4e26bf7c46, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fd7dfa793d840022a05fff7a2485c3431690804d30d24efe8be069af9d256e78 }
-  src/quarkus.rs::kind_slug: { source_hash: 0d923782a25bb11f921e1a5d8e1d690fd2dd4e3cc99157435184a57f2a4678d7, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8b66e22c793a79074710cbadd27f8e32590412724f27e382a063729b7d41e6c6 }
-  src/quarkus.rs::route_slug: { source_hash: cd063d34efd5f7c001edc25885db1498bc7529aa49967321ecf32ece8c6d81ab, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 59560821a7f172067108859ff28b64a624c1e37ada59671adf07dec3b725586d }
-  src/quarkus.rs::kafka_slug: { source_hash: 0fb89601fdf04e8873bcbc2b6414f56bf04f95094b9d6294768036484245ac19, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e2a7fa6b60f255042adfc1e1eb3e131bf191413030e63824c52f48a014731344 }
-  src/quarkus.rs::scheduled_slug: { source_hash: b5202c618629846c0c3ddda3a30e0b831e0c25f1f0a900a1bd99530f29b06684, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 77b38bfd5ffd0b88f2dd916cb56ece2f95c614e099f3ec99cab8ea83a18c6f53 }
-  src/quarkus.rs::is_scheduled_annotation: { source_hash: 0f76a841acbf283451f1749d15dff4107fd9a80c2401b3247f805bac2cb798c7, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: ae09888469d6f79d6244a1f491721011d822c091b9ea0589fff74be4c4a3754d }
-  src/quarkus.rs::attr_value: { source_hash: c243b0b3cb4fd45952d3c33ebfa0f19d9abb9e9498eee04e6bd91ea87141d2c4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a64f35ce870ce54405084a67b67ef3fb9f1e697cd5ea2272f822f0e686cdc456 }
-  src/quarkus.rs::split_top_level_commas: { source_hash: 8cbd1d082ee08f7f7f2ca1bd7608b351544d3b05d8d0c5725fb57fbad5451ca6, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 719738fb1c50ca9bd174da72438377d46a865df6649c4e1ee862b04d37707f45 }
-  src/quarkus.rs::scheduled_detail: { source_hash: 85cd5fc0c435cf6ee68530eb73ffce053d0fb68f1115777a3b2af61dcdf1d2f8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6de36568c5ce1acba0d7291a426d3656598530fe575a74f194be80e661da71d7 }
-  src/quarkus.rs::is_grpc_service_class: { source_hash: a75b999ac9a29c77da55d057ac24906c4a87471759a7de6806c5fbf0f141f368, deps_hash: b7a36441efb966394ebc7a6eb8706b4c98a33b05dca00dad338059e7f0d78aba, spec_hash: 201b0362321608e3d8d6af4ec3fbbb8fd2a1f29b1b4d751ecdd70893e0b2e271 }
-  src/quarkus.rs::is_public_signature: { source_hash: d7c925fb41911b6145e317fde1d659894412a5dcc279666a4b3742363e022d8b, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fad5bd63565b2a2f6dbb9f550c638e3f43f0d7484c12c6b677a7335a472f6a6e }
-  src/quarkus.rs::matching_close_paren: { source_hash: 1e44380b10b1136cca044afa162f50dc40b4f46961fa10694f2805a53cbbca90, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 62430fae09ac6615d1ac84ac77aa8c7f719c7aea47699dc50c632a51319c6d65 }
-  src/quarkus.rs::grpc_slug: { source_hash: 0cd15311706dd640620500c506281c6cf6a3ae9c310891f4a5e73b8f0f355b57, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ecc609d307dce0b6adde9ad2761c108cbabdc44a4651e5e29ffe42038f3e5398 }
-  src/quarkus.rs::ChannelArg: { source_hash: 695faaf6c8af0678f831801daeddac85832d02b41f2cb33eaa218392e14d7a5d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 852a659c8c95f9f10d39ac9d18807f1d92735ab8662de7c37968bb8d29158010 }
-  src/quarkus.rs::channel_arg: { source_hash: e0a06091ceef0372848d22634a2e54d017a34cac6009a559e323ee75cc2671dd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c2cc7ebf7d817a7bc2c95cb91a095b30bce52ae853cb28732ccdc0ef9171260e }
-  src/quarkus.rs::incoming_channel: { source_hash: 1335917d7e3d3bdb2afd7bf795f74d67278ada7b87df589885f3b5005631590f, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: 100bc72738e56acfc75886d7b1063a2be1076a69bae1669b5a759e60a24bea95 }
-  src/quarkus.rs::outgoing_channel: { source_hash: 6400f5033caa959a0e6276ea735b1501c8e3e47b732ecd57f59c997ba27c23b7, deps_hash: f9585774a5bd8c5fd2e5f1e9ec3f94872e564f509c4ded7d9af278e53f55f979, spec_hash: a68d068eabe0ab100069cba15fe34701c331cd0080015041f186203ffbc75c19 }
-  src/quarkus.rs::resolve_channel_name: { source_hash: 049c2e73dd43431332ffbb831dcff62bb4e86c6db32282e5af762f5d99fa86e1, deps_hash: 1026699fa1108e005260d77a5f9109b5f21748ce8056f4b7ccf581455d7f79c7, spec_hash: 61e550cfc502ff2de48fdbfc2a7bbaaf5f6699db1ac7127a3d6c389b7e0005db }
-  src/quarkus.rs::disambiguate_colliding_slugs: { source_hash: 6ca57c0e07fc6cb6f77d6250d901b84c7234d0a98293a540cf13bb5e95c15ab8, deps_hash: dd79b8c0fa0f64d9f5c2fd7ffee003186005ce19f3443d1b51fb6d0fd60f5c6d, spec_hash: b03d34d2aee1283cde79ee02f4671f362fa1c52e594c7638d7e1dec4af330991 }
+  src/java/quarkus.rs::QuarkusFeatureModel: { source_hash: 361d7a5471c4700aeff3df58b0ff884c5987ac7aef485d946be582d0dc85ec1d, deps_hash: ea1a40529c9c27cee6cc587fb897a66fceba62dc48d39f3b7d6a706216ff8483, spec_hash: b5952c54b8e27e04d207ffbfa1beb7f1942ae0c8f2bd6e6c89fe93484c764f66 }
+  src/java/quarkus.rs::is_cdi_managed: { source_hash: 1a4fa3a5622317b5c477975617a04e8974f61c38b5f2f348dfbff0bda8fcae3d, deps_hash: 34a95995527dc5f673d09639b70c27217984732249263b23f878b003a1bf1598, spec_hash: 8afbcfef54c48b1057f7d4d68bd6da11bc5f46c94a3e46c9f8c15f81c6c151fe }
+  src/java/quarkus.rs::is_admitting_annotation: { source_hash: bf97a2404b7a67972ce68244dd30d0bbf7ffe0337d4f8a368a6b66e0614c397c, deps_hash: 28e219792b9e9443466c31c171e07ab3dfdd8c970bb93e28863e00c6f2293e74, spec_hash: c525713d95b5259878252fb83be17ac3b06c1f5d334997a6c71cffc5f495f7d5 }
+  src/java/quarkus.rs::parse_verb: { source_hash: 6db1a58f1f5ef49e0b9bf0964918cc5c675c0e1bec5bddffea5ce6e5c534e3dd, deps_hash: 28e219792b9e9443466c31c171e07ab3dfdd8c970bb93e28863e00c6f2293e74, spec_hash: ecff650bcf861d4a501fa79978f26a9e36bc350d4bd3a747fd59bf7481b3b7fb }
+  src/java/quarkus.rs::parse_path_annotation: { source_hash: 58fa3456ebc174a9fddb2c9e2c113197831d8ca2a7e76a992c8f5a4fb1243c19, deps_hash: 28e219792b9e9443466c31c171e07ab3dfdd8c970bb93e28863e00c6f2293e74, spec_hash: db94fb9d3a67589029522b56977acb2a9e587e4079ef2f09e6bf42217428472a }
+  src/java/quarkus.rs::first_string_literal: { source_hash: dfa93a877f1cd80f68bb118d289a0f51dc1ec9a8a712a101ec082c64b59a4018, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 9b377db3ebecfb82a02cea24fe6d15455e7f79deed470b58bd5c2cda751a4bd8 }
+  src/java/quarkus.rs::class_path_for: { source_hash: fbe46ae59ec2f61b443f60934d3c36bea78374fc874d045534710f822afe103a, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 6cf66cb42758cb3808f0e04b8a7ba97803cc177d803774f5f31b91f59a425ada }
+  src/java/quarkus.rs::generated_interface_for: { source_hash: fc83bff5b92c40c0d8c68e2f8ce8946895ece365799a11f6caba3c5a1acf4532, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 35544b5e6059f81d18895e3123192bc227ca820586fcfc1ec770cb559784ac3b }
+  src/java/quarkus.rs::resolve_interface_name: { source_hash: 39f2a585b1f4f51747ad0ddac9bbf6c78752d2202eae2b274be27d9f350cef3c, deps_hash: a748f7f4e848d95ce62b2bbc54156b30e91ec42a2969c2deae579404b6011c61, spec_hash: dcffa2134f2841963e42fe4871d9d32e345ed28341444f9ed425f0ec39353ef2 }
+  src/java/quarkus.rs::implemented_interface_names: { source_hash: 85e061653e434a7ed75837dfa21a2d3cc1900b4b6e4b365e04973420efdb6d8c, deps_hash: 302730f1942310128eef45df367a0238da029262c0ba13043652c7d88cbe6b8f, spec_hash: 284b4344bb9776ef9cfed7c14fc37a906be923e9896c401a02d876c07677dc46 }
+  src/java/quarkus.rs::interface_method_by_name: { source_hash: 10d4275b3d60232997cc959eb01b2ffc0dbcd87e65e732210039ca8a278a8c70, deps_hash: 1905c59a809cb146e2d62da82589212debb7a142f8d907564aa5b0da29373eae, spec_hash: 20b9919f6883c19560012cf0304a6b6dc335c4de54bbb75f82223f7fe9e61962 }
+  src/java/quarkus.rs::is_register_rest_client: { source_hash: 3dd92508b43e0dc3cc7dd78418f79267342791786df6596f474ee562797d0fa8, deps_hash: b7a36441efb966394ebc7a6eb8706b4c98a33b05dca00dad338059e7f0d78aba, spec_hash: 3222300a1f3c424da07dad927dccf1fee71d1200d53d91f6d5cc234368b460ad }
+  src/java/quarkus.rs::join_jaxrs_path: { source_hash: 5f11c3edd79cab8c01d6b534fff5f71afc73c8f58d8ca670949a390fc5855ff5, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ef263efca25b7da8911341d57b9baa2417558ab487199d042ceee4a8fa467c1c }
+  src/java/quarkus.rs::ascii_words: { source_hash: f8e1deb9ee627daeedd32713218afc3d9f2b03fa2515520fe3e09d4e26bf7c46, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fd7dfa793d840022a05fff7a2485c3431690804d30d24efe8be069af9d256e78 }
+  src/java/quarkus.rs::kind_slug: { source_hash: 0d923782a25bb11f921e1a5d8e1d690fd2dd4e3cc99157435184a57f2a4678d7, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 8b66e22c793a79074710cbadd27f8e32590412724f27e382a063729b7d41e6c6 }
+  src/java/quarkus.rs::route_slug: { source_hash: cd063d34efd5f7c001edc25885db1498bc7529aa49967321ecf32ece8c6d81ab, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 59560821a7f172067108859ff28b64a624c1e37ada59671adf07dec3b725586d }
+  src/java/quarkus.rs::kafka_slug: { source_hash: 0fb89601fdf04e8873bcbc2b6414f56bf04f95094b9d6294768036484245ac19, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: e2a7fa6b60f255042adfc1e1eb3e131bf191413030e63824c52f48a014731344 }
+  src/java/quarkus.rs::scheduled_slug: { source_hash: b5202c618629846c0c3ddda3a30e0b831e0c25f1f0a900a1bd99530f29b06684, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 77b38bfd5ffd0b88f2dd916cb56ece2f95c614e099f3ec99cab8ea83a18c6f53 }
+  src/java/quarkus.rs::is_scheduled_annotation: { source_hash: 0f76a841acbf283451f1749d15dff4107fd9a80c2401b3247f805bac2cb798c7, deps_hash: 28e219792b9e9443466c31c171e07ab3dfdd8c970bb93e28863e00c6f2293e74, spec_hash: ae09888469d6f79d6244a1f491721011d822c091b9ea0589fff74be4c4a3754d }
+  src/java/quarkus.rs::attr_value: { source_hash: c243b0b3cb4fd45952d3c33ebfa0f19d9abb9e9498eee04e6bd91ea87141d2c4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a64f35ce870ce54405084a67b67ef3fb9f1e697cd5ea2272f822f0e686cdc456 }
+  src/java/quarkus.rs::split_top_level_commas: { source_hash: 8cbd1d082ee08f7f7f2ca1bd7608b351544d3b05d8d0c5725fb57fbad5451ca6, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 719738fb1c50ca9bd174da72438377d46a865df6649c4e1ee862b04d37707f45 }
+  src/java/quarkus.rs::scheduled_detail: { source_hash: 85cd5fc0c435cf6ee68530eb73ffce053d0fb68f1115777a3b2af61dcdf1d2f8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6de36568c5ce1acba0d7291a426d3656598530fe575a74f194be80e661da71d7 }
+  src/java/quarkus.rs::is_grpc_service_class: { source_hash: a75b999ac9a29c77da55d057ac24906c4a87471759a7de6806c5fbf0f141f368, deps_hash: b7a36441efb966394ebc7a6eb8706b4c98a33b05dca00dad338059e7f0d78aba, spec_hash: 201b0362321608e3d8d6af4ec3fbbb8fd2a1f29b1b4d751ecdd70893e0b2e271 }
+  src/java/quarkus.rs::is_public_signature: { source_hash: d7c925fb41911b6145e317fde1d659894412a5dcc279666a4b3742363e022d8b, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: fad5bd63565b2a2f6dbb9f550c638e3f43f0d7484c12c6b677a7335a472f6a6e }
+  src/java/quarkus.rs::matching_close_paren: { source_hash: 1e44380b10b1136cca044afa162f50dc40b4f46961fa10694f2805a53cbbca90, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 62430fae09ac6615d1ac84ac77aa8c7f719c7aea47699dc50c632a51319c6d65 }
+  src/java/quarkus.rs::grpc_slug: { source_hash: 0cd15311706dd640620500c506281c6cf6a3ae9c310891f4a5e73b8f0f355b57, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: ecc609d307dce0b6adde9ad2761c108cbabdc44a4651e5e29ffe42038f3e5398 }
+  src/java/quarkus.rs::ChannelArg: { source_hash: 695faaf6c8af0678f831801daeddac85832d02b41f2cb33eaa218392e14d7a5d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 852a659c8c95f9f10d39ac9d18807f1d92735ab8662de7c37968bb8d29158010 }
+  src/java/quarkus.rs::channel_arg: { source_hash: e0a06091ceef0372848d22634a2e54d017a34cac6009a559e323ee75cc2671dd, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c2cc7ebf7d817a7bc2c95cb91a095b30bce52ae853cb28732ccdc0ef9171260e }
+  src/java/quarkus.rs::incoming_channel: { source_hash: 1335917d7e3d3bdb2afd7bf795f74d67278ada7b87df589885f3b5005631590f, deps_hash: 28e219792b9e9443466c31c171e07ab3dfdd8c970bb93e28863e00c6f2293e74, spec_hash: 100bc72738e56acfc75886d7b1063a2be1076a69bae1669b5a759e60a24bea95 }
+  src/java/quarkus.rs::outgoing_channel: { source_hash: 6400f5033caa959a0e6276ea735b1501c8e3e47b732ecd57f59c997ba27c23b7, deps_hash: 28e219792b9e9443466c31c171e07ab3dfdd8c970bb93e28863e00c6f2293e74, spec_hash: a68d068eabe0ab100069cba15fe34701c331cd0080015041f186203ffbc75c19 }
+  src/java/quarkus.rs::resolve_channel_name: { source_hash: 049c2e73dd43431332ffbb831dcff62bb4e86c6db32282e5af762f5d99fa86e1, deps_hash: 1026699fa1108e005260d77a5f9109b5f21748ce8056f4b7ccf581455d7f79c7, spec_hash: 61e550cfc502ff2de48fdbfc2a7bbaaf5f6699db1ac7127a3d6c389b7e0005db }
+  src/java/quarkus.rs::disambiguate_colliding_slugs: { source_hash: 6ca57c0e07fc6cb6f77d6250d901b84c7234d0a98293a540cf13bb5e95c15ab8, deps_hash: dd79b8c0fa0f64d9f5c2fd7ffee003186005ce19f3443d1b51fb6d0fd60f5c6d, spec_hash: b03d34d2aee1283cde79ee02f4671f362fa1c52e594c7638d7e1dec4af330991 }
 dep_targets:
-  file -> src/features.rs::EntryPoint: 60acb942d332
-  file -> src/features.rs::FeatureModel: d0f879980b40
-  file -> src/graph.rs::Graph: 13dbdfa88b0e
-  file -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  file -> src/lang.rs::FileRole: 2e8bc021ccde
-  file -> src/stack.rs::strip_angle_bracket_groups: 9b459b0db653
-  file -> src/symbol.rs::Symbol: 2bab71782e46
-  file -> src/symbol.rs::SymbolId: 6733b5c62e75
-  file -> src/symbol.rs::SymbolKind: 264efecb34de
-  src/quarkus.rs::QuarkusFeatureModel -> src/features.rs::EntryPoint: 60acb942d332
-  src/quarkus.rs::QuarkusFeatureModel -> src/features.rs::FeatureModel: d0f879980b40
-  src/quarkus.rs::QuarkusFeatureModel -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::QuarkusFeatureModel -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::QuarkusFeatureModel -> src/lang.rs::FileRole: 2e8bc021ccde
-  src/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::Symbol: 2bab71782e46
-  src/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::SymbolKind: 264efecb34de
-  src/quarkus.rs::is_cdi_managed -> src/symbol.rs::Symbol: 2bab71782e46
-  src/quarkus.rs::is_admitting_annotation -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::parse_verb -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::parse_path_annotation -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::class_path_for -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::class_path_for -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::generated_interface_for -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::generated_interface_for -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::resolve_interface_name -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::resolve_interface_name -> src/lang.rs::FileRole: 2e8bc021ccde
-  src/quarkus.rs::resolve_interface_name -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::implemented_interface_names -> src/stack.rs::strip_angle_bracket_groups: 9b459b0db653
-  src/quarkus.rs::interface_method_by_name -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::interface_method_by_name -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::is_register_rest_client -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::is_register_rest_client -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::is_register_rest_client -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::is_scheduled_annotation -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::is_grpc_service_class -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::is_grpc_service_class -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::is_grpc_service_class -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::incoming_channel -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::outgoing_channel -> src/java.rs::bare_annotation_name: b3d19daec8ac
-  src/quarkus.rs::resolve_channel_name -> src/graph.rs::Graph: 13dbdfa88b0e
-  src/quarkus.rs::resolve_channel_name -> src/symbol.rs::Symbol: 2bab71782e46
-  src/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolKind: 264efecb34de
-  src/quarkus.rs::disambiguate_colliding_slugs -> src/features.rs::EntryPoint: 60acb942d332
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/features.rs::EntryPoint: 60acb942d332
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/features.rs::FeatureModel: d0f879980b40
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/lang.rs::FileRole: 2e8bc021ccde
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::Symbol: 2bab71782e46
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::QuarkusFeatureModel -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/java/quarkus.rs::is_cdi_managed -> src/symbol.rs::Symbol: 2bab71782e46
+  src/java/quarkus.rs::is_admitting_annotation -> src/java/mod.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::parse_verb -> src/java/mod.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::parse_path_annotation -> src/java/mod.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::class_path_for -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::class_path_for -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::generated_interface_for -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::generated_interface_for -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::resolve_interface_name -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::resolve_interface_name -> src/lang.rs::FileRole: 2e8bc021ccde
+  src/java/quarkus.rs::resolve_interface_name -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::implemented_interface_names -> src/stack.rs::strip_angle_bracket_groups: 9b459b0db653
+  src/java/quarkus.rs::interface_method_by_name -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::interface_method_by_name -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::is_register_rest_client -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::is_register_rest_client -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::is_register_rest_client -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::is_scheduled_annotation -> src/java/mod.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::is_grpc_service_class -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::is_grpc_service_class -> src/java.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::is_grpc_service_class -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::incoming_channel -> src/java/mod.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::outgoing_channel -> src/java/mod.rs::bare_annotation_name: b3d19daec8ac
+  src/java/quarkus.rs::resolve_channel_name -> src/graph.rs::Graph: 13dbdfa88b0e
+  src/java/quarkus.rs::resolve_channel_name -> src/symbol.rs::Symbol: 2bab71782e46
+  src/java/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/java/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolKind: 264efecb34de
+  src/java/quarkus.rs::disambiguate_colliding_slugs -> src/features.rs::EntryPoint: 60acb942d332
 ---
-# src/quarkus.rs
+# src/java/quarkus.rs
 ## Summary
-This file teaches CodeOwl how to find features in a Quarkus project (a Java framework for building web services), the Java counterpart to the FastAPI support for Python. It recognises four kinds of entry point, checked in priority order so a method is never counted as more than one: an HTTP route (a JAX-RS `@Path` plus a verb annotation like `@GET` or `@POST`), a Kafka message handler (`@Incoming` or `@Outgoing`), a scheduled job (`@Scheduled`, including Spring's compatible annotation of the same name), and a gRPC method (any public method of a class marked `@GrpcService`). The route's path and its verb are two independent annotations that can appear in either order with others between them, so they are read separately from a method's annotations, with the class-level `@Path` read from the containing class. When a class carries no annotations of its own because they live on a generated interface it implements, as happens with APIs generated from a contract, the interface's annotations are used. A Kafka channel name that is written as a constant in the same class is looked up there, and falls back to the identifier as written, so an entry point is never dropped over an unresolved name. A scheduled job is identified by its method name, with the schedule detail only enriching its title, since two jobs can share an identical schedule. An interface marked `@RegisterRestClient` describes an outbound call to another service, not something this service serves, so it is deliberately not treated as an entry point. Tracing such calls across several hops would be call-level analysis, which this project has repeatedly declined to build. The file also decides which classes join a feature's core: those the framework manages (an `@ApplicationScoped` or `@Singleton` bean, or a Panache repository), judged by what a resolved reference points at and not by where files sit on disk, with database entities handled as data instead. The rest is small helpers for reading one annotation's arguments, building a stable, collision-safe name for each kind of entry point, and a few Java text routines such as matching balanced parentheses, splitting on top-level commas, and reading a quoted string.
+
 
 ## `QuarkusFeatureModel`
 `pub struct QuarkusFeatureModel`
@@ -108,7 +99,8 @@ An HTTP route's title is `VERB /full/path` (class `@Path` joined with method `@P
 - `src/symbol.rs::SymbolId` — crate::symbol
 - `src/symbol.rs::SymbolKind` — crate::symbol
 - `src/symbol.rs::Symbol` — crate::symbol
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/stack.rs::file_role` — crate::stack
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 - externals: std
 
 ## `is_cdi_managed`
@@ -127,7 +119,7 @@ Checks whether one Java annotation is a Quarkus dependency-injection scope that 
 ### Behavior
 Strips the annotation down to its bare name (via `bare_annotation_name`, which drops any `@`, package qualification, and arguments) and returns `true` only if that name is exactly `"ApplicationScoped"` or `"Singleton"` — the two scope annotations `is_cdi_managed` treats as evidence a class is managed this way. Any other annotation, including other dependency-injection scopes not covered here, returns `false`.
 ### Depends on
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `parse_verb`
 `fn parse_verb(marker: &str) -> Option<String>`
@@ -136,7 +128,7 @@ Turns a JAX-RS HTTP annotation like `@GET` or `@POST` into the plain lowercase v
 ### Behavior
 Strips the annotation to its bare name (bare or fully package-qualified, via `bare_annotation_name`) and checks it for an *exact* match against the list of known HTTP verb annotations (`HTTP_VERBS`) — not a prefix or substring check, so a hypothetical custom annotation like `@GetSomething` is never mistaken for the real `@GET`. On a match, returns the verb lowercased (`Some("get")`); otherwise returns `None`.
 ### Depends on
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `parse_path_annotation`
 `fn parse_path_annotation(marker: &str) -> Option<String>`
@@ -145,7 +137,7 @@ Pulls the URL path out of a JAX-RS `@Path` annotation — e.g. `@Path("entity/fr
 ### Behavior
 Checks the annotation's bare name (bare or fully package-qualified, e.g. `@jakarta.ws.rs.Path(...)`, via `bare_annotation_name`); if it isn't exactly `"Path"`, returns `None` immediately. Otherwise, extracts the first string literal found inside the annotation's text (`first_string_literal`) and returns it. If a `@Path` annotation somehow has no string literal — which shouldn't happen, since JAX-RS requires one — this simply returns `None` for that method-level path rather than panicking.
 ### Depends on
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `first_string_literal`
 `fn first_string_literal(s: &str) -> Option<String>`
@@ -192,6 +184,7 @@ In either case it then checks that the target's file has the generated-code role
 - `src/graph.rs::Graph` — crate::graph
 - `src/lang.rs::FileRole` — crate::lang
 - `src/symbol.rs::SymbolId` — crate::symbol
+- `src/stack.rs::file_role` — crate::stack
 
 ## `implemented_interface_names`
 `fn implemented_interface_names(signature: &str) -> Vec<String>`
@@ -227,7 +220,7 @@ Looks up the class and returns false if the id is not a symbol. Otherwise it ret
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `join_jaxrs_path`
 `fn join_jaxrs_path(class_path: Option<&str>, method_path: Option<&str>) -> String`
@@ -290,7 +283,7 @@ Checks whether an annotation is `@Scheduled`, the marker for a method that runs 
 ### Behavior
 Strips the annotation to its bare name (dropping `@` and any package qualification) and compares it exactly against `"Scheduled"`.
 ### Depends on
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `attr_value`
 `fn attr_value(marker: &str, attr: &str) -> Option<String>`
@@ -328,7 +321,7 @@ Looks up the class and returns false if the id is not a symbol. Otherwise it ret
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::symbol
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `is_public_signature`
 `fn is_public_signature(signature: &str) -> bool`
@@ -382,7 +375,7 @@ Reads the channel argument out of an annotation, but only if that annotation is 
 ### Behavior
 Returns `None` if the annotation's bare name isn't exactly `"Incoming"`. Otherwise delegates to `channel_arg` to read and classify its argument.
 ### Depends on
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `outgoing_channel`
 `fn outgoing_channel(marker: &str) -> Option<ChannelArg>`
@@ -391,7 +384,7 @@ Reads the channel argument out of an annotation, but only if that annotation is 
 ### Behavior
 Returns `None` if the annotation's bare name isn't exactly `"Outgoing"`. Otherwise delegates to `channel_arg` to read and classify its argument.
 ### Depends on
-- `src/java.rs::bare_annotation_name` — crate::java
+- `src/java/mod.rs::bare_annotation_name` — crate::java
 
 ## `resolve_channel_name`
 `fn resolve_channel_name<'g>(

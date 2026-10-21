@@ -1,18 +1,17 @@
 ---
 kind: file
-source_paths: [src/rust_crates.rs]
-file: { source_hash: d8ef26c21d633a7516d5065397f681b5dc0a928ffb9462a928720e8a50a56fd0, fingerprint: ba26a2b2ee50efcf475e98cfd7156dc5420fb1b044a74bc11e0cfb34f576b663, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: 4d9c479b0ec2aa5d113cd6b39804533923218700c91512d92146907228338817 }
+source_paths: [src/rust/crates.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:
-  src/rust_crates.rs::CrateMap: { source_hash: f6e77727f3b6b0983dbe8bcde4dbff3680ab3911335a751ed719268f8bd2b672, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: d34659ec7926decddac26e2e0cc669a3fef37eeef34abd91fda8dab318248df5 }
-  src/rust_crates.rs::parent_dir: { source_hash: 49a05a4c58fc3ce114cce587fc428abf0ffcfd6f5ee6dd23a2f5855edbe7b2bf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c74a2c391544e98bf03f5eab36d3760543cf4f83e53c3260b1843fd2f8e75320 }
-  src/rust_crates.rs::join: { source_hash: 4206c372ea95a10c667ed752248cf276c12d4bca01dab72d96cc6dad0460f7b9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3fd583fd0b82a57b3288cb2881ac4564c4cbdff8ba1361514dbb2cccbe838c9a }
+  src/rust/crates.rs::CrateMap: { source_hash: f6e77727f3b6b0983dbe8bcde4dbff3680ab3911335a751ed719268f8bd2b672, deps_hash: baf806a55f27b576723e1a9bc9913fd5657a443ce71840b90578afc60daa8162, spec_hash: d34659ec7926decddac26e2e0cc669a3fef37eeef34abd91fda8dab318248df5 }
+  src/rust/crates.rs::parent_dir: { source_hash: 49a05a4c58fc3ce114cce587fc428abf0ffcfd6f5ee6dd23a2f5855edbe7b2bf, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c74a2c391544e98bf03f5eab36d3760543cf4f83e53c3260b1843fd2f8e75320 }
+  src/rust/crates.rs::join: { source_hash: 4206c372ea95a10c667ed752248cf276c12d4bca01dab72d96cc6dad0460f7b9, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3fd583fd0b82a57b3288cb2881ac4564c4cbdff8ba1361514dbb2cccbe838c9a }
 dep_targets:
-  file -> src/imports.rs::FileImports: 7a834189d6b3
-  src/rust_crates.rs::CrateMap -> src/imports.rs::FileImports: 7a834189d6b3
+  src/rust/crates.rs::CrateMap -> src/imports.rs::FileImports: 7a834189d6b3
 ---
-# src/rust_crates.rs
+# src/rust/crates.rs
 ## Summary
-This file works out which Cargo crate a Rust file belongs to and which crate names a `use` statement can begin with, which Rust import resolution needs in two places. In `crate::x`, `crate` means the root of this file's own crate, not the whole repo. In `use some_crate::x`, `some_crate` names a library crate, which may be a sibling in a multi-crate workspace or the very package a binary, test or example sits in. It reads the `Cargo.toml` files above the indexed source files to learn each package's library name and where its root file is, skipping any manifest that is missing or does not parse. It answers two questions: `lib_root(name)` returns the folder of a library crate that is part of the repo, and `crate_root(file)` returns the folder `crate::` refers to for a file, found by walking up to the nearest folder holding a `lib.rs`, a `main.rs` or a declared library root. Files in no such folder, such as `tests/` and `examples/`, fall back to their own package's `src`. Everything is computed from the indexed files and manifests and visited in sorted order, so two crates claiming one name always resolve the same way. The two small text helpers, `parent_dir` and `join`, handle repo-relative paths with forward slashes.
+
 
 ## `CrateMap`
 `pub struct CrateMap`

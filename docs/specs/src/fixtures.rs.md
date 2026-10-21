@@ -1,0 +1,36 @@
+---
+kind: file
+source_paths: [src/fixtures.rs]
+file: { source_hash: , deps_hash: , spec_hash:  }
+symbols:
+  src/fixtures.rs::extract_and_hash: { source_hash: 90b73a4ee99da81bd1bf071b59a555179cedb73e224d9146186258778cd78f72, deps_hash: dea75763eb06a70a4b24fa5e633ae7315ae0b2349ee4246fbb0ec52edb4dc9af, spec_hash: 643963be19a0907607eebde105c58aba43ea9e31b0c0b6d52a58ca56c9903f1a }
+  src/fixtures.rs::build_graph_from_sources: { source_hash: dd5e3e0c36327ad645a76af4a2c9fd5bb8cbe4f36f51ed9217dc8a15a1d80028, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 55df20b1897ceed56015a0ace1c249b8db22646e47caf5beeb18422d4b6caa47 }
+dep_targets:
+  src/fixtures.rs::extract_and_hash -> src/hash.rs::hash_text: 70c099c1622c
+  src/fixtures.rs::extract_and_hash -> src/lang.rs::extract_symbols: 86f13d92fbdd
+  src/fixtures.rs::extract_and_hash -> src/schema.rs::extract_tables: ac1e0de7c6f8
+---
+# src/fixtures.rs
+## Summary
+
+
+## `extract_and_hash`
+`pub(crate) fn extract_and_hash(rel_path: &str, source: &str) -> FileExtraction`
+### Summary
+A shortcut for tests: given a file's path and text, it parses the file and fingerprints it in one call, returning the per-file result the graph builder takes.
+### Behavior
+If the path ends in `.sql` it extracts tables with `schema::extract_tables`, otherwise it extracts declarations with the TypeScript extractor `lang::extract_symbols`. It then builds a `FileExtraction` with the path, a hash of the source text via `hash_text`, and the symbols. It is for test fixtures only: it always uses the TypeScript and SQL rules, not whichever language pack the repo was detected as, so it produces nothing useful for Rust, Java or Python text. Real extraction goes through `RepoIndex::build` and the detected pack. It cannot fail.
+### Depends on
+- `src/graph.rs::FileExtraction` — crate::graph
+- `src/hash.rs::hash_text` — crate::hash
+- `src/typescript/schema.rs::extract_tables` — crate::typescript
+- `src/typescript/mod.rs::extract_file` — crate::typescript
+
+## `build_graph_from_sources`
+`pub(crate) fn build_graph_from_sources(files: &[(&str, &str)]) -> Graph`
+### Summary
+Test helper: build a `Graph` straight from `(path, source)` pairs, extracting and hashing each. Used by unit tests that need a real arena but not a `RepoIndex` or a temp directory.
+### Behavior
+Maps each pair through `extract_and_hash` and calls `Graph::build`. Because `extract_and_hash` routes through the TypeScript pack's extension dispatch, the graph it produces has TypeScript symbols and no `pack_name` stamp — `for_name("")` then resolves it as the TypeScript pack. Fine for TS-oriented tests; Rust and other packs' tests build their `FileExtraction`s directly.
+### Depends on
+- `src/graph.rs::Graph` — crate::graph
