@@ -154,7 +154,7 @@ why CodeOwl cares.
   it looks at one file at a time and knows nothing about what any other
   file contains. Its output is a list of symbols whose parent/child links
   are still just strings, not resolved graph edges.
-  (`src/extract.rs`, `src/rust.rs`, `src/java.rs`, `src/schema.rs`)
+  (`src/typescript/mod.rs`, `src/rust.rs`, `src/java.rs`, `src/typescript/schema.rs`)
 
 **Resolution**
 : The second pass, which needs the whole repo in view: take an `import` or

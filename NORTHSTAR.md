@@ -1,6 +1,6 @@
 # CodeOwl — North Star
 
-> **File paths in the measurement log are the paths at the time of each measurement.** Since 2026-10-21 `src/spec.rs` is the `src/spec/` directory, and `src/lang.rs` keeps only `SourceKind` and `FileRole` (`DECISIONS.md` question 25). The log is append-only; its entries are left as written.
+> **File paths in the measurement log are the paths at the time of each measurement.** Since 2026-10-21 `src/spec.rs` is the `src/spec/` directory, `src/lang.rs` keeps only `SourceKind` and `FileRole`, and the TypeScript pack (`extract.rs`, `resolve.rs`, `schema.rs`, part of `features.rs`) is the `src/typescript/` directory (`DECISIONS.md` question 25). The log is append-only; its entries are left as written.
 
 > How CodeOwl compares with tools that solve the same problem, and the
 > measurable numbers that say whether it is getting better. Companion to
