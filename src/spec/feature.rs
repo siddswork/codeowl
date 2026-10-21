@@ -309,7 +309,7 @@ pub fn submit_feature(
     entry_id: &str,
     content: &str,
 ) -> Result<FeatureSpec> {
-    let body = content.trim().to_string();
+    let body = without_provenance(content.trim());
     if body.is_empty() {
         bail!("submitted feature content is empty");
     }
@@ -422,6 +422,28 @@ mod tests {
         assert_eq!(parse_feature(&rendered).unwrap().body, spec.body);
         let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
         assert_eq!(parse_feature(&legacy).unwrap().body, spec.body);
+    }
+
+    #[test]
+    fn resubmitting_a_rendered_feature_does_not_double_the_provenance_line() {
+        let (graph, dir) = build_feature_fixture(ARTWORK_FIXTURE, "provenance-resubmit");
+        let rendered = format!(
+            "# Artwork submission\n{PROVENANCE}\n## Summary\nLets an artist submit artwork.\n"
+        );
+        let spec = submit_feature(&graph, &dir, "submit", &rendered).unwrap();
+        assert!(!spec.body.contains(PROVENANCE), "{}", spec.body);
+        let on_disk = std::fs::read_to_string(feature_spec_path(&dir, "submit")).unwrap();
+        assert_eq!(on_disk.matches(PROVENANCE).count(), 1);
+        // Same hash as the same text submitted without the line.
+        let plain = submit_feature(
+            &graph,
+            &dir,
+            "submit",
+            "# Artwork submission\n## Summary\nLets an artist submit artwork.\n",
+        )
+        .unwrap();
+        assert_eq!(plain.spec_hash, spec.spec_hash);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

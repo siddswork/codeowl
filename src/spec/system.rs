@@ -232,7 +232,7 @@ pub fn next_system_task(graph: &Graph, root: &Path) -> Result<Option<SystemTask>
 /// Persist `content` (the agent's LLM-written product narrative, title
 /// included) as the system spec.
 pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<SystemSpec> {
-    let body = content.trim().to_string();
+    let body = without_provenance(content.trim());
     if body.is_empty() {
         bail!("submitted system content is empty");
     }
@@ -300,6 +300,18 @@ mod tests {
         assert_eq!(parse_system(&rendered).unwrap(), spec);
         let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
         assert_eq!(parse_system(&legacy).unwrap(), spec);
+    }
+
+    #[test]
+    fn resubmitting_a_rendered_system_spec_does_not_double_the_provenance_line() {
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "provenance-system");
+        let rendered =
+            format!("# Acme\n{PROVENANCE}\n## Summary\nA platform for running art competitions.\n");
+        let spec = submit_system(&graph, &dir, &rendered).unwrap();
+        assert!(!spec.body.contains(PROVENANCE), "{}", spec.body);
+        let on_disk = std::fs::read_to_string(system_spec_path(&dir)).unwrap();
+        assert_eq!(on_disk.matches(PROVENANCE).count(), 1);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
