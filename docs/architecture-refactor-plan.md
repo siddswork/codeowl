@@ -1,6 +1,8 @@
 # Architectural review: refactoring plan
 
-Status: **PR 1 approved, PR 3 skipped (Sidd, 2026-10-21); PR 2 not yet decided.** D1 yes, D2 keep the by-name lookup, D3 skip. Written 2026-10-21 on branch `refactor-plan` (cut from `master` at `1940316`). No source file has been edited.
+Status (2026-10-21): **PR 1 merged (#103). PR 2 built on branch `split-spec-module`, in review. PR 3 skipped.** D1 yes, D2 keep the by-name lookup, D3 skip. Written on branch `refactor-plan`, cut from `master` at `1940316`.
+
+PR 2 as built differs from the table below in three ways, all found by checking the code: the module list gained `source_text` (the span and size-cap helpers both `format` and `staleness` read, which removed a `format` and `task_input` cycle), `orphans` and `priority` were split out of `coverage`, and the tests did not stay together in one file: a private helper is invisible to a sibling module, so each test moved into the module it exercises, with fixtures shared across modules in `test_support`. The re-exports in `spec/mod.rs` are written `pub use self::module::{...}`, because this repo's own Rust resolver follows a named re-export but not a glob, and does not resolve a bare child-module path (`pub use module::{...}` left 70 imports unresolved in its self-index; a gap in the resolver, not fixed here).
 
 Scope: the code only. Docs and stored specs are out of scope; the specs can be regenerated from scratch after the refactor.
 
