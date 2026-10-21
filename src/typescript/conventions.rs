@@ -11,7 +11,7 @@ use crate::lang::{FileRole, SourceKind};
 
 /// Extensions the module resolver (`resolve.rs`) tries when following an
 /// import specifier — Node/TypeScript resolution order.
-pub const RESOLVER_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".d.ts", ".js", ".jsx", ".json"];
+pub(super) const RESOLVER_EXTENSIONS: &[&str] = &[".ts", ".tsx", ".d.ts", ".js", ".jsx", ".json"];
 
 /// The kind for a TypeScript path — `.ts`/`.tsx` (never `.d.ts`, whose
 /// grammar shapes aren't handled). Only `TypeScriptNextStack` calls this;

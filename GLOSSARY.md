@@ -164,7 +164,7 @@ why CodeOwl cares.
   forwards `Graph` from that other file"), and each language's
   module-to-file convention. The output turns the string links from
   extraction into real graph edges.
-  (`src/resolve.rs`, `rust::resolve_imports`, `java::resolve_imports`)
+  (`src/typescript/resolve.rs`, `rust::resolve_imports`, `java::resolve_imports`)
 
 **tree-sitter**
 : The parser library CodeOwl is built on. It has one grammar per language
