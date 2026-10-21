@@ -1,6 +1,6 @@
 # Architectural review: refactoring plan
 
-Status (2026-10-21): **PR 1 merged (#103). PR 2 built on branch `split-spec-module`, in review. PR 3 skipped.** D1 yes, D2 keep the by-name lookup, D3 skip. Written on branch `refactor-plan`, cut from `master` at `1940316`.
+Status (2026-10-21): **PR 1 merged (#103). PR 2 open as #104. PR 3 skipped.** The outcome, the measurements and the reasoning are recorded in `DECISIONS.md` question 25; the module map is `ARCHITECTURE.md` §9. D1 yes, D2 keep the by-name lookup, D3 skip. Written on branch `refactor-plan`, cut from `master` at `1940316`.
 
 PR 2 as built differs from the table below in three ways, all found by checking the code: the module list gained `source_text` (the span and size-cap helpers both `format` and `staleness` read, which removed a `format` and `task_input` cycle), `orphans` and `priority` were split out of `coverage`, and the tests did not stay together in one file: a private helper is invisible to a sibling module, so each test moved into the module it exercises, with fixtures shared across modules in `test_support`. The re-exports in `spec/mod.rs` are written `pub use self::module::{...}`, because this repo's own Rust resolver follows a named re-export but not a glob, and does not resolve a bare child-module path (`pub use module::{...}` left 70 imports unresolved in its self-index; a gap in the resolver, not fixed here).
 
@@ -120,6 +120,21 @@ Move the ~770 lines of request/response types and their `From` impls to `mcp/wir
 | D1 | Approve PR 1 as written, including that an unknown pack name becomes an error instead of the TypeScript fallback (1b) | Yes |
 | D2 | Keep the by-name pack lookup (so `features ↔ stack` stays a cycle) | Keep |
 | D3 | Do PR 3 at all | Skip for now |
+
+All three were decided as recommended (2026-10-21): D1 yes, D2 keep, D3 skip.
+
+## Outcome
+
+| Check promised above | Result |
+|---|---|
+| Module cycle after PR 1 | 14 modules down to 4 (`fastapi`, `features`, `quarkus`, `stack`), the by-name lookup kept under D2 |
+| `graph_stats` identical on `master` and the branch | Yes, nine repos across TypeScript, Rust, Java and Python; no `FORMAT_VERSION` bump |
+| PR 2: no logic change | A line-by-line comparison shows only re-wrapped signatures, imports, `mod tests` wrappers and visibility prefixes |
+| PR 2: test count identical | 153 spec tests carried over by name; 581 in total (573 on `master` before PR 1, plus 8 new from PR 1 and the review fixes) |
+| PR 2: no cycle inside `spec/` | Checked with a dependency script, twice |
+| CodeOwl's own index stays complete | After writing the re-exports as `self::module::…`; the bare form left 70 imports unresolved (`DECISIONS.md` question 24) |
+
+Where the build departed from the table above is in the status note at the top. The review findings that were declined, and why, are in `DECISIONS.md` question 25.
 
 ## Not in this plan
 

@@ -311,6 +311,17 @@ why CodeOwl cares.
   `--outline-container-percent`) are `codeowl serve` flags. See
   `DECISIONS.md` open question 22.
 
+**Atomic spec write (also: staging file)**
+: How a spec document reaches disk. The text is written to a sibling file
+  named like the target with `.tmp` appended, flushed, then renamed over
+  the target; if the rename fails the staging file is removed. A rename
+  within one directory replaces the target in a single step, so a reader or
+  a crash sees the old document whole or the new one whole, never a
+  half-written one that would then be committed to git. One server process
+  writes specs, so the fixed staging name is not shared between writers.
+  Every document kind (file, feature, rollup, system) is written this way.
+  (`src/spec/format.rs::write_replacing`)
+
 **Spec-bearing**
 : A piece of code that gets **its own spec section or file**, rather than
   being folded into its parent's.
@@ -336,7 +347,7 @@ why CodeOwl cares.
   - A **directory** is spec-bearing (it gets a rollup) only if it contains
     at least two spec-bearing files.
 
-  (`src/spec.rs`, `ARCHITECTURE.md` "granularity rules")
+  (`src/spec/layout.rs`, `ARCHITECTURE.md` "granularity rules")
 
 **Granularity rules**
 : The fixed, no-LLM rules that decide *which specs should exist at all* —
@@ -636,7 +647,7 @@ checking that the socket didn't have to change shape to fit them.
   (`resolve_imports`), the flow-edge hooks (`extract_flow_edges` /
   `resolve_flow_edge`), and — optionally — a `feature_model`.
 
-  The whole point: the generic files (`spec.rs`, `mcp.rs`, `graph.rs`,
+  The whole point: the generic files (`spec/`, `mcp.rs`, `graph.rs`,
   `index.rs`) call these methods and never contain a stack-specific `if`.
   (`src/stack.rs`)
 
@@ -656,7 +667,16 @@ checking that the socket didn't have to change shape to fit them.
   Exactly one pack may win. Zero → CodeOwl errors, naming the stacks it
   supports. More than one (a repo that's genuinely a Next app *and* a Rust
   service) → CodeOwl errors rather than guessing. One stack per repo is a
-  deliberate Phase-2 limit. (`src/lang.rs::detect`)
+  deliberate Phase-2 limit. (`src/stack.rs::detect`)
+
+**Pack registry**
+: The one list of every pack CodeOwl ships, each entry a label for error
+  messages and a constructor. `detect` walks it to choose a pack for a
+  repo, and `for_name` searches it to recover a pack from the name stored
+  on a graph, so adding a language means adding one entry here and nothing
+  else. A name no entry answers to is an error, never a silent fallback to
+  the TypeScript pack; only the empty name, which a graph built by a test
+  helper carries, means TypeScript. (`src/stack.rs::registered_packs`)
 
 **Pack hook (also: seam)**
 : One of the specific methods the generic pipeline calls out to the pack
@@ -686,7 +706,7 @@ checking that the socket didn't have to change shape to fit them.
 
 **The generic pipeline (also: the stack-neutral core)**
 : Everything that *isn't* a pack: `graph.rs` (the arena and edge types),
-  `spec.rs` (granularity rules, the four hashes, rendering), `index.rs`
+  `spec/` (granularity rules, the four hashes, rendering), `index.rs`
   (incremental re-indexing), `mcp.rs` (the tool surface). This code is
   fixed across all stacks — it only ever reasons about the generic
   `SymbolKind`, the two edge types, and the pack hooks. If a change to
@@ -697,7 +717,7 @@ checking that the socket didn't have to change shape to fit them.
 : Shorthand for "the abstraction actually held up."
 
   When a genuinely different stack was added (Rust after TypeScript, then
-  Java), the test was: did any generic file — `spec.rs`, `mcp.rs` — need a
+  Java), the test was: did any generic file — `spec/`, `mcp.rs` — need a
   stack-specific `if` added to it? Or did everything new fit behind the
   `StackPack` trait? Each time it fit: "the socket held," "no trait shape
   leaks." A leak would mean the trait was drawn in the wrong place, and
