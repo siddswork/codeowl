@@ -160,7 +160,7 @@ fn visit_container(
     // own signature, value stripped -- transiently, here, never touching
     // the stored field (code-review finding: an earlier version stripped
     // the value at the source, which silently broke
-    // spec.rs::maybe_reduce_container_source's God-class reduction --
+    // spec::source_text::maybe_reduce_container_source's God-class reduction --
     // see `strip_value_for_fold`'s own doc comment). The same way
     // source_hash already folds every member. Methods stay excluded,
     // unchanged. Python has no visibility keyword, so "public" reuses
@@ -299,7 +299,7 @@ fn visit_assignment(
         // fastapi.rs::router_prefix reads a module-level assignment's
         // full value (`s.signature.contains("APIRouter(")`, then parses
         // the prefix kwarg out of that same string), and
-        // spec.rs::maybe_reduce_container_source's God-class reduction
+        // spec::source_text::maybe_reduce_container_source's God-class reduction
         // shows a member's `.signature` straight to the LLM writing that
         // class's spec -- stripping a class attribute's default value
         // there silently drops real context (`Field(primary_key=True)`)
@@ -380,7 +380,7 @@ fn signature_before_body(node: Node, source: &str) -> String {
 // stripped, for the interface_hash fold only -- never touches the
 // stored field itself (see `visit_assignment`'s own comment for why:
 // other real readers, like `fastapi.rs::router_prefix` and
-// `spec.rs::maybe_reduce_container_source`, need the full value). Uses
+// `spec::source_text::maybe_reduce_container_source`, need the full value). Uses
 // `crate::text::strip_value_for_fold`, shared with java.rs/rust.rs.
 
 /// The module/class/function docstring: a bare string literal as the first
@@ -1128,7 +1128,7 @@ def read_item(id: int) -> ItemPublic:
         assert_eq!(id_field.raw, "attribute");
         assert_eq!(id_field.parent.as_deref(), Some("models.py::Item"));
         // `.signature` stays value-inclusive (code-review finding:
-        // fastapi.rs::router_prefix and spec.rs's God-class reduction
+        // fastapi.rs::router_prefix and `spec/`'s God-class reduction
         // both need the full value elsewhere) -- the interface_hash
         // fold strips it transiently, at fold time only, never here.
         assert_eq!(id_field.signature, "id: int = Field(primary_key=True)");

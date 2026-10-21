@@ -38,7 +38,7 @@ impl SymbolId {
 ///   source off the `.sql`-file assumption. Resolvable and queryable but
 ///   never spec-bearing.
 ///
-/// `spec.rs`'s granularity rule generates a document for a *top-level*
+/// `spec/`'s granularity rule generates a document for a *top-level*
 /// `Container` or `Callable` (a method is a `Callable` whose parent is a
 /// `Container`, so it stays inside the container's section) — pack-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -1,0 +1,1049 @@
+//! The per-file spec document: its types, the hand-rolled frontmatter render and parse, and the read and write that put it on disk.
+
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, bail};
+
+use super::layout::{short_name, spec_path};
+use super::source_text::{scoped_symbol_deps, symbol_span_text};
+use crate::graph::{Graph, Node, SymbolId};
+use crate::symbol::Symbol;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct HashPair {
+    pub source_hash: String,
+    /// A file's own entry only (empty for a symbol): the pack's fingerprint
+    /// of what a file summary could quote, as observed at generation time.
+    /// A file spec is current while this still equals the graph's
+    /// `FileNode.fingerprint`; `source_hash` stays the raw-text hash. Empty
+    /// on a spec written before the fingerprint existed (a *legacy* spec),
+    /// which therefore reads as changed until it is migrated or regenerated.
+    pub fingerprint: String,
+    /// The reference-edge contribution to this entry's staleness key: a
+    /// hash of every resolved dependency's current `interfaceHash` (see
+    /// `dependency_hash`/`file_dependency_hash`) as observed *at generation
+    /// time*. Compared against a freshly recomputed value to detect the
+    /// case `source_hash` alone can't: nothing in this symbol/file's own
+    /// text changed, but something it imports changed shape (M7 — see
+    /// `ARCHITECTURE.md`'s "Caching and invalidation").
+    pub deps_hash: String,
+    pub spec_hash: String,
+    /// The per-target `(target id, hash)` pairs `deps_hash` was made from,
+    /// each hash shortened to `DEP_TARGET_HASH_LEN` hex characters --
+    /// recorded so a later check can say *which* dependency moved, not just
+    /// that one did. Empty for a spec written before this record existed
+    /// (its cause then reads "unknown"), and when there are no resolved
+    /// dependencies. Never compared against `deps_hash`: that stays the
+    /// single staleness key.
+    pub dep_targets: Vec<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SymbolProse {
+    pub summary: String,
+    pub behavior: String,
+}
+
+/// The full, parsed shape of a file spec — frontmatter plus body, kept
+/// apart from their markdown rendering so submit/merge logic never has to
+/// re-parse what it just wrote.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FileSpec {
+    pub source_path: String,
+    pub file: HashPair,
+    /// Per top-level `Callable`/`Container` symbol, in declaration order.
+    pub symbols: Vec<(String, HashPair)>,
+    /// The file's own `## Summary` prose (LLM-written).
+    pub file_summary: String,
+    /// Per symbol id: its `### Summary` / `### Behavior` prose.
+    pub sections: Vec<(String, SymbolProse)>,
+}
+
+impl FileSpec {
+    pub(super) fn blank(source_path: &str) -> Self {
+        Self {
+            source_path: source_path.to_string(),
+            ..Default::default()
+        }
+    }
+
+    pub(crate) fn symbol_hash(&self, id: &str) -> Option<&HashPair> {
+        self.symbols
+            .iter()
+            .find(|(sid, _)| sid == id)
+            .map(|(_, h)| h)
+    }
+
+    pub(super) fn section(&self, id: &str) -> Option<&SymbolProse> {
+        self.sections
+            .iter()
+            .find(|(sid, _)| sid == id)
+            .map(|(_, p)| p)
+    }
+}
+
+/// The per-target record behind each `deps_hash`, as the `dep_targets:`
+/// frontmatter block: one line per `<owner> -> <target>: <hash>`, owner `file`
+/// for the file itself, then each symbol in order. Empty when nothing is
+/// recorded, so a spec with no resolved dependencies (or one written before
+/// the record existed) renders as it always has.
+pub(crate) fn dep_target_block(spec: &FileSpec) -> String {
+    let owners = std::iter::once(("file", &spec.file))
+        .chain(spec.symbols.iter().map(|(id, h)| (id.as_str(), h)));
+    let lines: Vec<String> = owners
+        .flat_map(|(owner, h)| {
+            h.dep_targets
+                .iter()
+                .map(move |(target, hash)| format!("  {owner} -> {target}: {hash}\n"))
+        })
+        .collect();
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("dep_targets:\n{}", lines.concat())
+}
+
+/// Render a `FileSpec` to the markdown+frontmatter document
+/// `ARCHITECTURE.md`'s "File spec shape" describes. `graph`/`file_id` are
+/// needed to pull each symbol's current signature and the file's
+/// dependency list — both CodeOwl-written, so they're recomputed fresh on
+/// every render rather than stored in `FileSpec` itself (see the module
+/// doc comment on what CodeOwl writes vs. what the LLM writes). `root` is
+/// needed to read each symbol's own source text back off disk, so its
+/// "Depends on" section can be scoped to what *that symbol* actually
+/// references (see `dependency_lines`) rather than every import the whole
+/// file happens to have.
+pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str("kind: file\n");
+    out.push_str(&format!("source_paths: [{}]\n", spec.source_path));
+    let fingerprint = if spec.file.fingerprint.is_empty() {
+        String::new()
+    } else {
+        format!(" fingerprint: {},", spec.file.fingerprint)
+    };
+    out.push_str(&format!(
+        "file: {{ source_hash: {},{fingerprint} deps_hash: {}, spec_hash: {} }}\n",
+        spec.file.source_hash, spec.file.deps_hash, spec.file.spec_hash
+    ));
+    if !spec.symbols.is_empty() {
+        out.push_str("symbols:\n");
+        for (id, h) in &spec.symbols {
+            out.push_str(&format!(
+                "  {id}: {{ source_hash: {}, deps_hash: {}, spec_hash: {} }}\n",
+                h.source_hash, h.deps_hash, h.spec_hash
+            ));
+        }
+    }
+    out.push_str(&dep_target_block(spec));
+    out.push_str("---\n");
+    out.push_str(&format!("# {}\n", spec.source_path));
+    out.push_str("## Summary\n");
+    out.push_str(spec.file_summary.trim());
+    out.push('\n');
+
+    for (id, _) in &spec.symbols {
+        let name = short_name(id);
+        out.push_str(&format!("\n## `{name}`\n"));
+        if let Some(sym_id) = graph.find(id)
+            && let Some(sym) = graph.get_symbol(sym_id)
+        {
+            out.push_str(&format!("`{}`\n", sym.signature));
+        }
+        let prose = spec.section(id).cloned().unwrap_or_default();
+        out.push_str("### Summary\n");
+        out.push_str(prose.summary.trim());
+        out.push('\n');
+        out.push_str("### Behavior\n");
+        out.push_str(prose.behavior.trim());
+        out.push('\n');
+        out.push_str("### Depends on\n");
+        let deps = graph
+            .find(id)
+            .and_then(|sym_id| graph.get_symbol(sym_id))
+            .map(|sym| dependency_lines(graph, root, file_id, sym))
+            .unwrap_or_default();
+        if deps.is_empty() {
+            out.push_str("- (none)\n");
+        } else {
+            for dep in deps {
+                out.push_str(&format!("- {dep}\n"));
+            }
+        }
+    }
+    out
+}
+
+/// `sym`'s dependency list — CodeOwl-written, never the LLM's job (see
+/// `ARCHITECTURE.md`'s "What CodeOwl writes vs. what the LLM writes").
+/// Scoped to `sym` specifically: M2 only resolves imports at file
+/// granularity, but listing every one of the *file's* imports against
+/// every symbol in it is actively misleading, not just imprecise (a
+/// symbol that never touches half the file's imports would still claim
+/// to depend on them). Narrowed with a whole-word text search over the
+/// symbol's own source span instead — a heuristic, not semantic analysis,
+/// but far closer to the truth than file-wide attribution, and needs no
+/// new resolution machinery.
+///
+/// Resolved intra-repo dependencies get one line each; unresolved
+/// imports (a stdlib type, a third-party crate, an npm package) are
+/// collapsed into a single trailing `externals: …` line by package name.
+/// Rust code names `Vec` / `BTreeMap` / `Result` constantly and every one
+/// is an unresolved external, so a line apiece would bury the signal
+/// that this section exists for — what *else in this repo* the symbol
+/// leans on (M14).
+pub(super) fn dependency_lines(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym: &Symbol,
+) -> Vec<String> {
+    let Node::File(file) = graph.get(file_id) else {
+        return Vec::new();
+    };
+    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
+        return Vec::new();
+    };
+    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text, graph.find(&sym.id));
+
+    let mut lines: Vec<String> = scoped
+        .resolved
+        .iter()
+        .map(|(target, specifier)| format!("`{target}` — {specifier}"))
+        .collect();
+    if !scoped.externals.is_empty() {
+        lines.push(format!("externals: {}", scoped.externals.join(", ")));
+    }
+    lines
+}
+
+/// Parse a spec file's own rendered output back into a `FileSpec`. Only
+/// needs to tolerate what `render` produces — human-edit tolerance
+/// (arbitrary reordering, reformatting) is M8's "Human corrections"
+/// mechanics, not in scope yet.
+pub fn parse(content: &str) -> Result<FileSpec> {
+    let mut lines = content.lines();
+    if lines.next().map(str::trim) != Some("---") {
+        bail!("spec file missing frontmatter opening `---`");
+    }
+
+    let mut source_path = String::new();
+    let mut file = HashPair::default();
+    let mut symbols = Vec::new();
+    let mut in_symbols_block = false;
+    let mut in_dep_block = false;
+
+    let mut consumed = 1; // the opening "---"
+    for line in lines.by_ref() {
+        consumed += 1;
+        if line.trim() == "---" {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix("  ")
+            && in_symbols_block
+        {
+            // Split on the flow map's opening `{`, not the first `:` — a
+            // symbol id itself contains `::` (`file.ts::name`), so
+            // `split_once(':')` would cut the id in half.
+            let brace = rest
+                .find('{')
+                .context("malformed symbols entry in spec frontmatter")?;
+            let id = rest[..brace].trim().trim_end_matches(':').trim();
+            symbols.push((id.to_string(), parse_hash_pair(&rest[brace..])));
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("  ")
+            && in_dep_block
+        {
+            record_dep_target(rest, &mut file, &mut symbols);
+            continue;
+        }
+        in_dep_block = line.trim() == "dep_targets:";
+        in_symbols_block = line.trim() == "symbols:";
+        if in_symbols_block || in_dep_block {
+            continue;
+        }
+        let (key, value) = line
+            .split_once(':')
+            .context("malformed frontmatter line in spec file")?;
+        match key.trim() {
+            "source_paths" => {
+                source_path = value
+                    .trim()
+                    .trim_start_matches('[')
+                    .trim_end_matches(']')
+                    .trim()
+                    .to_string();
+            }
+            "file" => file = parse_hash_pair(value),
+            _ => {}
+        }
+    }
+
+    let body: String = content
+        .lines()
+        .skip(consumed)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let file_summary = extract_section(&body, "## Summary", "\n## ").unwrap_or_default();
+
+    let mut sections = Vec::new();
+    for (id, _) in &symbols {
+        let heading = format!("## `{}`\n", short_name(id));
+        let Some(start) = body.find(&heading) else {
+            continue;
+        };
+        let rest = &body[start..];
+        let end = rest[heading.len()..]
+            .find("\n## ")
+            .map(|p| p + heading.len())
+            .unwrap_or(rest.len());
+        let block = &rest[..end];
+        sections.push((
+            id.clone(),
+            SymbolProse {
+                summary: extract_section(block, "### Summary", "\n### ").unwrap_or_default(),
+                behavior: extract_section(block, "### Behavior", "\n### ").unwrap_or_default(),
+            },
+        ));
+    }
+
+    Ok(FileSpec {
+        source_path,
+        file,
+        symbols,
+        file_summary,
+        sections,
+    })
+}
+
+/// Read one `dep_targets:` line (`<owner> -> <target>: <hash>`, already
+/// stripped of its two-space indent) into the owner's `HashPair`. The owner
+/// is `file` or one of the symbol ids this frontmatter declared, matched by
+/// the longest `<id> -> ` prefix: a symbol id may itself contain ` -> `
+/// (an `impl Fn() -> u8` header), so splitting at the first arrow would
+/// cut the id in half. The hash is whatever follows the last `: `, because
+/// a target id can contain `: ` too (`impl<T: Clone> ...`). A line whose
+/// owner is not declared, or that has no hash, is skipped, not an error.
+fn record_dep_target(line: &str, file: &mut HashPair, symbols: &mut [(String, HashPair)]) {
+    let owner_and_rest = std::iter::once("file")
+        .chain(symbols.iter().map(|(id, _)| id.as_str()))
+        .filter_map(|owner| {
+            let rest = line.strip_prefix(owner)?.strip_prefix(" -> ")?;
+            Some((owner, rest))
+        })
+        .max_by_key(|(owner, _)| owner.len());
+    // Copy the owner out so the borrow of `symbols` ends before it is mutated.
+    let Some((owner, rest)) = owner_and_rest.map(|(o, r)| (o.to_string(), r)) else {
+        return;
+    };
+    let Some((target, hash)) = rest.rsplit_once(": ") else {
+        return;
+    };
+    let pair = (target.to_string(), hash.trim().to_string());
+    if owner == "file" {
+        file.dep_targets.push(pair);
+    } else if let Some((_, h)) = symbols.iter_mut().find(|(id, _)| *id == owner) {
+        h.dep_targets.push(pair);
+    }
+}
+
+fn parse_hash_pair(flow_map: &str) -> HashPair {
+    let inner = flow_map
+        .trim()
+        .trim_start_matches('{')
+        .trim_end_matches('}');
+    let mut pair = HashPair::default();
+    for kv in inner.split(',') {
+        if let Some((k, v)) = kv.split_once(':') {
+            match k.trim() {
+                "source_hash" => pair.source_hash = v.trim().to_string(),
+                "fingerprint" => pair.fingerprint = v.trim().to_string(),
+                "deps_hash" => pair.deps_hash = v.trim().to_string(),
+                "spec_hash" => pair.spec_hash = v.trim().to_string(),
+                _ => {}
+            }
+        }
+    }
+    pair
+}
+
+/// Find `heading` in `text`, return the trimmed text between it and the
+/// next `next_marker` (or end of `text`).
+pub(super) fn extract_section(text: &str, heading: &str, next_marker: &str) -> Option<String> {
+    let idx = text.find(heading)?;
+    let after = &text[idx + heading.len()..];
+    let after = after.strip_prefix('\n').unwrap_or(after);
+    let end = after.find(next_marker).unwrap_or(after.len());
+    Some(after[..end].trim().to_string())
+}
+
+/// Read back a file's persisted spec, if one has ever been generated —
+/// `mcp.rs`'s `get_spec` uses this directly (a pure read, never triggers
+/// generation); `next_task`/`submit` use it internally too.
+pub fn read_file_spec(root: &Path, source_path: &str) -> Result<Option<FileSpec>> {
+    read_existing(root, source_path)
+}
+
+pub(super) fn read_existing(root: &Path, source_path: &str) -> Result<Option<FileSpec>> {
+    let path = spec_path(root, source_path);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    parse(&content).map(Some)
+}
+
+pub(super) fn write(root: &Path, graph: &Graph, file_id: SymbolId, spec: &FileSpec) -> Result<()> {
+    let path = spec_path(root, &spec.source_path);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+    }
+    write_replacing(&path, &render(graph, root, file_id, spec))
+}
+
+/// Replace `path`'s contents without a window in which it is empty: write a
+/// temp file beside it, then rename over it. The one way a spec document
+/// (file, feature, rollup, system) reaches disk, so a crash or a full disk
+/// mid-write leaves the previous spec whole instead of a torn one in git.
+/// The staged bytes are flushed to disk before the rename, and a staging
+/// file whose rename fails is removed rather than left to be committed.
+/// One server process writes specs, so the fixed `.tmp` name is not shared
+/// between writers.
+pub(super) fn write_replacing(path: &Path, content: &str) -> Result<()> {
+    use std::io::Write;
+
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let mut file =
+        std::fs::File::create(&tmp).with_context(|| format!("writing {}", tmp.display()))?;
+    file.write_all(content.as_bytes())
+        .and_then(|()| file.sync_all())
+        .with_context(|| format!("writing {}", tmp.display()))?;
+    drop(file);
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        anyhow::Error::new(e).context(format!("replacing {}", path.display()))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::build_graph_from_sources;
+    use crate::hash::hash_text;
+    use crate::spec::source_text::{
+        LARGE_CONTAINER_BYTES_DEFAULT, maybe_reduce_container_source, symbol_span_text,
+    };
+
+    use std::path::Path;
+
+    /// Build a one-file Rust graph and return that file's span text for `name`.
+    fn rust_span_text(src: &str, name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-hdr-{}",
+            std::process::id(),
+            name
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/t.rs"), src).unwrap();
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/t.rs".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::rust::extract_file(src, "src/t.rs"),
+        }]);
+        let sym = graph
+            .get_symbol(graph.find(&format!("src/t.rs::{name}")).unwrap())
+            .unwrap();
+        let text = symbol_span_text(&dir, &graph, "src/t.rs", sym).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        text
+    }
+
+    #[test]
+    fn render_then_parse_round_trips() {
+        let graph = build_graph_from_sources(&[(
+            "a.ts",
+            "/** Doubles a number. */\nexport function double(x: number): number { return x * 2; }\n",
+        )]);
+        let file_id = graph.find("a.ts").unwrap();
+        let sym = graph
+            .get_symbol(graph.find("a.ts::double").unwrap())
+            .unwrap();
+
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair {
+                source_hash: "filehash".to_string(),
+                fingerprint: "filefp".to_string(),
+                deps_hash: "filedepshash".to_string(),
+                spec_hash: "filespechash".to_string(),
+                dep_targets: vec![],
+            },
+            symbols: vec![(
+                "a.ts::double".to_string(),
+                HashPair {
+                    source_hash: sym.source_hash.clone(),
+                    fingerprint: String::new(),
+                    deps_hash: "symdepshash".to_string(),
+                    spec_hash: "symspechash".to_string(),
+                    dep_targets: vec![],
+                },
+            )],
+            file_summary: "Doubles numbers.".to_string(),
+            sections: vec![(
+                "a.ts::double".to_string(),
+                SymbolProse {
+                    summary: "Doubles its input.".to_string(),
+                    behavior: "Multiplies by two and returns.".to_string(),
+                },
+            )],
+        };
+
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        assert!(rendered.contains("function double(x: number): number"));
+        let parsed = parse(&rendered).expect("should parse what we just rendered");
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn dependency_targets_round_trip_through_the_frontmatter() {
+        // The per-target pairs behind a deps_hash are written as a
+        // `dep_targets:` block (`<owner> -> <target>: <hash>`, owner `file`
+        // for the file itself) and read back. The second symbol's id
+        // contains ` -> ` (a Rust `impl Fn() -> u8` header), which must not
+        // be mistaken for the separator.
+        let graph = build_graph_from_sources(&[("a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let arrow_id = "a.ts::impl Fn() -> u8 for Wrapper";
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair {
+                source_hash: "fh".to_string(),
+                fingerprint: String::new(),
+                deps_hash: "fd".to_string(),
+                spec_hash: "fs".to_string(),
+                dep_targets: vec![("src/b.rs::Beta".to_string(), "a1b2c3d4e5f6".to_string())],
+            },
+            symbols: vec![
+                (
+                    "a.ts::one".to_string(),
+                    HashPair {
+                        source_hash: "sh".to_string(),
+                        fingerprint: String::new(),
+                        deps_hash: "sd".to_string(),
+                        spec_hash: "ss".to_string(),
+                        dep_targets: vec![
+                            ("src/b.rs::Beta".to_string(), "a1b2c3d4e5f6".to_string()),
+                            (
+                                "src/c.rs::Gamma: Sized".to_string(),
+                                "0123456789ab".to_string(),
+                            ),
+                        ],
+                    },
+                ),
+                (
+                    arrow_id.to_string(),
+                    HashPair {
+                        source_hash: "sh2".to_string(),
+                        fingerprint: String::new(),
+                        deps_hash: "sd2".to_string(),
+                        spec_hash: "ss2".to_string(),
+                        dep_targets: vec![(
+                            "src/b.rs::Beta".to_string(),
+                            "ffffffffffff".to_string(),
+                        )],
+                    },
+                ),
+            ],
+            file_summary: "A file.".to_string(),
+            // `render` writes an (empty) section for every symbol and
+            // `parse` reads it back, so the round trip carries them too.
+            sections: vec![
+                ("a.ts::one".to_string(), SymbolProse::default()),
+                (arrow_id.to_string(), SymbolProse::default()),
+            ],
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        assert!(
+            rendered.contains("dep_targets:\n"),
+            "block missing:\n{rendered}"
+        );
+        assert!(rendered.contains("  file -> src/b.rs::Beta: a1b2c3d4e5f6\n"));
+        let parsed = parse(&rendered).expect("should parse what we just rendered");
+        assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn a_spec_without_dependency_targets_parses_and_renders_unchanged() {
+        // Every spec written before the record existed. It must parse with
+        // empty pairs, and re-rendering it must not invent an empty block.
+        let graph = build_graph_from_sources(&[("a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let legacy = "\
+---\nkind: file\nsource_paths: [a.ts]\n\
+file: { source_hash: fh, deps_hash: fd, spec_hash: fs }\n\
+symbols:\n  a.ts::one: { source_hash: sh, deps_hash: sd, spec_hash: ss }\n\
+---\n# a.ts\n## Summary\nA file.\n";
+        let parsed = parse(legacy).expect("legacy frontmatter must parse");
+        assert!(parsed.file.dep_targets.is_empty());
+        assert!(parsed.symbols[0].1.dep_targets.is_empty());
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &parsed);
+        assert!(
+            !rendered.contains("dep_targets"),
+            "invented a block:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn the_dependency_block_is_empty_without_records_and_lists_file_first() {
+        let hash = |targets: &[(&str, &str)]| HashPair {
+            dep_targets: targets
+                .iter()
+                .map(|(t, h)| (t.to_string(), h.to_string()))
+                .collect(),
+            ..HashPair::default()
+        };
+        let mut spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: hash(&[]),
+            symbols: vec![("a.ts::one".to_string(), hash(&[]))],
+            ..FileSpec::default()
+        };
+        assert_eq!(dep_target_block(&spec), "");
+        spec.file = hash(&[("b.ts", "aaaaaaaaaaaa")]);
+        spec.symbols[0].1 = hash(&[("b.ts::f", "bbbbbbbbbbbb")]);
+        assert_eq!(
+            dep_target_block(&spec),
+            "dep_targets:\n  file -> b.ts: aaaaaaaaaaaa\n  a.ts::one -> b.ts::f: bbbbbbbbbbbb\n"
+        );
+    }
+
+    #[test]
+    fn an_unrecognised_frontmatter_block_is_ignored_not_an_error() {
+        // What lets a reader that predates `dep_targets:` still read a spec
+        // that has it: an unknown top-level key and its indented lines are
+        // skipped, and the known keys still parse.
+        let content = "\
+---\nkind: file\nsource_paths: [a.ts]\n\
+file: { source_hash: fh, deps_hash: fd, spec_hash: fs }\n\
+mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
+---\n# a.ts\n## Summary\nA file.\n";
+        let parsed = parse(content).expect("an unknown block must not break parsing");
+        assert_eq!(parsed.file.source_hash, "fh");
+        assert_eq!(parsed.file.deps_hash, "fd");
+    }
+
+    #[test]
+    fn depends_on_is_scoped_to_what_each_symbol_actually_uses() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-depends", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let a_content = "import { clsx } from 'clsx';\nimport { twMerge } from 'tailwind-merge';\n\nexport function usesClsx(x: string) {\n  return clsx(x);\n}\n\nexport function usesNeither() {\n  return 1;\n}\n";
+        let b_content = "export function clsx(x: string): string { return x; }\n";
+        let c_content = "export function twMerge(x: string): string { return x; }\n";
+        for (rel, content) in [
+            ("a.ts", a_content),
+            ("clsx.ts", b_content),
+            ("tailwind-merge.ts", c_content),
+        ] {
+            let path = dir.join(rel);
+            std::fs::write(&path, content).unwrap();
+        }
+        // Only need a.ts's own imports resolved against real sibling
+        // files here (module resolution isn't the point of this test),
+        // so build a minimal graph + resolved imports by hand rather than
+        // pulling in a real tsconfig/node_modules fixture.
+        let extractions = vec![
+            crate::graph::extract_and_hash("a.ts", a_content),
+            crate::graph::extract_and_hash("clsx.ts", b_content),
+            crate::graph::extract_and_hash("tailwind-merge.ts", c_content),
+        ];
+        let mut graph = Graph::build(extractions);
+        let file_imports = crate::imports::extract_imports(a_content, "a.ts");
+        let resolved = file_imports
+            .imports
+            .iter()
+            .map(|imp| crate::graph::ResolvedImport {
+                from_file: "a.ts".to_string(),
+                specifier: imp.specifier.clone(),
+                imported_name: imp.imported_name.clone(),
+                target: graph.find(&format!(
+                    "{}.ts::{}",
+                    imp.specifier.trim_start_matches("./"),
+                    imp.imported_name
+                )),
+            })
+            .collect();
+        graph.set_resolved_imports(resolved);
+
+        let file_id = graph.find("a.ts").unwrap();
+        let uses_clsx = graph
+            .get_symbol(graph.find("a.ts::usesClsx").unwrap())
+            .unwrap();
+        let uses_neither = graph
+            .get_symbol(graph.find("a.ts::usesNeither").unwrap())
+            .unwrap();
+
+        let clsx_deps = dependency_lines(&graph, &dir, file_id, uses_clsx);
+        assert_eq!(clsx_deps.len(), 1);
+        assert!(clsx_deps[0].contains("clsx.ts::clsx"));
+
+        let neither_deps = dependency_lines(&graph, &dir, file_id, uses_neither);
+        assert!(neither_deps.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn depends_on_collapses_unresolved_externals_into_one_line() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-externals",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two unresolved externals (`react`, `next/navigation`) plus one
+        // resolved sibling — the external ones must fold into a single
+        // `externals: next, react` line, not a line each.
+        let a = "import { useState } from 'react';\nimport { redirect } from 'next/navigation';\nimport { helper } from './helper';\n\nexport function widget() {\n  useState();\n  redirect('/x');\n  return helper();\n}\n";
+        std::fs::write(dir.join("a.ts"), a).unwrap();
+        std::fs::write(
+            dir.join("helper.ts"),
+            "export function helper(): number { return 1; }\n",
+        )
+        .unwrap();
+
+        let mut graph = Graph::build(vec![
+            crate::graph::extract_and_hash("a.ts", a),
+            crate::graph::extract_and_hash(
+                "helper.ts",
+                "export function helper(): number { return 1; }\n",
+            ),
+        ]);
+        graph.set_resolved_imports(
+            crate::imports::extract_imports(a, "a.ts")
+                .imports
+                .iter()
+                .map(|imp| crate::graph::ResolvedImport {
+                    from_file: "a.ts".to_string(),
+                    specifier: imp.specifier.clone(),
+                    imported_name: imp.imported_name.clone(),
+                    target: graph.find(&format!(
+                        "{}.ts::{}",
+                        imp.specifier.trim_start_matches("./"),
+                        imp.imported_name
+                    )),
+                })
+                .collect(),
+        );
+
+        let file_id = graph.find("a.ts").unwrap();
+        let widget = graph
+            .get_symbol(graph.find("a.ts::widget").unwrap())
+            .unwrap();
+        let deps = dependency_lines(&graph, &dir, file_id, widget);
+
+        assert_eq!(
+            deps.len(),
+            2,
+            "one resolved line + one externals line, got {deps:?}"
+        );
+        assert!(deps[0].contains("helper.ts::helper"));
+        assert_eq!(deps[1], "externals: next, react");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn symbol_span_text_includes_a_folded_impl_s_method_bodies() {
+        // M15: a Rust type's inherent `impl` is folded into the type
+        // symbol, but the method bodies sit outside the `struct`'s own line
+        // span. `symbol_span_text` must still surface them — otherwise a
+        // dep in a method (here `anyhow::Context`) is invisible to
+        // `### Depends on` and the generation task never sees the method.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-span", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let src = "\
+use anyhow::Context;\n\n\
+pub struct Counter {\n    n: u64,\n}\n\n\
+impl Counter {\n\
+    pub fn bump(&mut self) -> anyhow::Result<()> {\n\
+        self.n += 1;\n        Ok(()).context(\"never\")\n    }\n\
+}\n";
+        std::fs::write(dir.join("src/counter.rs"), src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/counter.rs".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::rust::extract_file(src, "src/counter.rs"),
+        }]);
+        let counter = graph
+            .get_symbol(graph.find("src/counter.rs::Counter").unwrap())
+            .unwrap();
+
+        let text = symbol_span_text(&dir, &graph, "src/counter.rs", counter).unwrap();
+        assert!(
+            text.contains("self.n += 1"),
+            "folded method body missing from span text:\n{text}"
+        );
+        assert!(text.contains("pub struct Counter"), "struct decl missing");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn span_text_covers_a_folded_trait_impl_header_with_several_methods() {
+        // Open question 19: a degenerate-fold type's impl header
+        // (`impl Greeter for Polite {`) is the one line naming the trait,
+        // and sits outside both the struct's span and the methods' spans.
+        // The blank line after the struct matters: without it the
+        // gap-merge (<= 1 line apart) would cover the header by accident.
+        let src = "\
+use crate::greeter::Greeter;\n\n\
+pub struct Polite;\n\n\
+impl Greeter for Polite {\n\
+    fn greet(&self) -> String {\n        \"Good day\".to_string()\n    }\n\n\
+    fn farewell(&self) -> String {\n        \"Goodbye\".to_string()\n    }\n\
+}\n";
+        let text = rust_span_text(src, "Polite");
+        assert!(
+            text.contains("impl Greeter for Polite"),
+            "impl header missing:\n{text}"
+        );
+        assert!(text.contains("fn farewell"), "second method missing");
+    }
+
+    #[test]
+    fn span_text_covers_an_empty_trait_impl() {
+        let src = "\
+use crate::marker::Auditable;\n\n\
+pub struct LoginEvent;\n\n\
+impl Auditable for LoginEvent {}\n";
+        let text = rust_span_text(src, "LoginEvent");
+        assert!(
+            text.contains("impl Auditable for LoginEvent"),
+            "empty impl block missing:\n{text}"
+        );
+    }
+
+    #[test]
+    fn span_text_covers_an_inherent_impl_header_with_a_generic_bound() {
+        let src = "\
+use crate::render::Render;\n\n\
+pub struct Panel<T> {\n    pub inner: T,\n}\n\n\
+impl<T: Render> Panel<T> {\n\
+    pub fn show(&self) -> String {\n        self.inner.render()\n    }\n\
+}\n";
+        let text = rust_span_text(src, "Panel");
+        assert!(
+            text.contains("impl<T: Render> Panel<T>"),
+            "inherent impl header missing:\n{text}"
+        );
+    }
+
+    #[test]
+    fn maybe_reduce_container_source_replaces_bodies_with_signatures_over_the_threshold() {
+        // M18: the God-class fix. A synthetic large class -- one
+        // documented method padded well past `LARGE_CONTAINER_BYTES_DEFAULT`
+        // -- must come back as signature + docstring only, its body gone.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-godclass", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let padding = "x".repeat(LARGE_CONTAINER_BYTES_DEFAULT + 1000);
+        let src = format!(
+            "public class Big {{\n\
+             \x20   /** Adds one to a running total. */\n\
+             \x20   public int bump(int n) {{\n\
+             \x20       // {padding}\n\
+             \x20       return n + 1;\n\
+             \x20   }}\n\
+             }}\n"
+        );
+        std::fs::write(dir.join("src/Big.java"), &src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/Big.java".to_string(),
+            source_hash: hash_text(&src),
+            symbols: crate::java::extract_file(&src, "src/Big.java"),
+        }]);
+        let big = graph
+            .get_symbol(graph.find("src/Big.java::Big").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/Big.java", big).unwrap();
+        assert!(
+            full.len() > LARGE_CONTAINER_BYTES_DEFAULT,
+            "fixture must actually clear the threshold"
+        );
+
+        let reduced =
+            maybe_reduce_container_source(big, &graph, full.clone(), LARGE_CONTAINER_BYTES_DEFAULT);
+        assert!(
+            reduced.contains("Adds one to a running total"),
+            "docstring must survive:\n{reduced}"
+        );
+        assert!(
+            reduced.contains("public int bump(int n)"),
+            "signature must survive:\n{reduced}"
+        );
+        assert!(
+            !reduced.contains("return n + 1"),
+            "body must be dropped:\n{reduced}"
+        );
+        assert!(
+            reduced.len() < full.len(),
+            "reduced text must actually be smaller"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn maybe_reduce_container_source_keeps_a_python_fields_default_value() {
+        // Code-review finding: a reduced God-class's per-member text
+        // comes straight from `.signature` -- if a field's default
+        // value were stripped from the *stored* field (as an earlier
+        // version of M21.b's interface_hash fold did), the LLM writing
+        // this class's spec would silently lose real context like which
+        // field is the primary key. `.signature` must stay
+        // value-inclusive; the fold strips it transiently, elsewhere.
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-godclass-py",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let padding = "x".repeat(LARGE_CONTAINER_BYTES_DEFAULT + 1000);
+        let src = format!(
+            "class Big:\n    id: int = Field(primary_key=True)\n\n    def bump(self):\n        # {padding}\n        return self.id + 1\n"
+        );
+        std::fs::write(dir.join("src/big.py"), &src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/big.py".to_string(),
+            source_hash: hash_text(&src),
+            symbols: crate::python::extract_file(&src, "src/big.py"),
+        }]);
+        let big = graph
+            .get_symbol(graph.find("src/big.py::Big").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/big.py", big).unwrap();
+        assert!(
+            full.len() > LARGE_CONTAINER_BYTES_DEFAULT,
+            "fixture must actually clear the threshold"
+        );
+
+        let reduced =
+            maybe_reduce_container_source(big, &graph, full.clone(), LARGE_CONTAINER_BYTES_DEFAULT);
+        assert!(
+            reduced.contains("Field(primary_key=True)"),
+            "the field's default value must survive reduction:\n{reduced}"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn maybe_reduce_container_source_leaves_an_ordinary_class_untouched() {
+        let dir = std::env::temp_dir().join(format!(
+            "codeowl-spec-test-{}-smallclass",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let src = "public class Small {\n    public int bump(int n) { return n + 1; }\n}\n";
+        std::fs::write(dir.join("src/Small.java"), src).unwrap();
+
+        let graph = Graph::build(vec![crate::graph::FileExtraction {
+            rel_path: "src/Small.java".to_string(),
+            source_hash: hash_text(src),
+            symbols: crate::java::extract_file(src, "src/Small.java"),
+        }]);
+        let small = graph
+            .get_symbol(graph.find("src/Small.java::Small").unwrap())
+            .unwrap();
+
+        let full = symbol_span_text(&dir, &graph, "src/Small.java", small).unwrap();
+        let reduced = maybe_reduce_container_source(
+            small,
+            &graph,
+            full.clone(),
+            LARGE_CONTAINER_BYTES_DEFAULT,
+        );
+        assert_eq!(
+            reduced, full,
+            "an ordinary-sized class is returned unchanged"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_write_whose_rename_fails_removes_its_staging_file() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-atomic3", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A directory where the spec should go: staging succeeds, the
+        // rename over a directory fails. The staged file must not stay
+        // behind to be picked up by `git add -A`.
+        let path = dir.join("x.ts.md");
+        std::fs::create_dir_all(&path).unwrap();
+        assert!(write_replacing(&path, "content").is_err());
+        assert!(!dir.join("x.ts.md.tmp").exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_line_with_a_fingerprint_parses_and_renders_back() {
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file: HashPair {
+                source_hash: "rawhash".to_string(),
+                fingerprint: "fp123".to_string(),
+                deps_hash: "deps".to_string(),
+                spec_hash: "spec".to_string(),
+                dep_targets: vec![],
+            },
+            file_summary: "A file.".to_string(),
+            ..FileSpec::default()
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        assert!(
+            rendered.contains(
+                "file: { source_hash: rawhash, fingerprint: fp123, deps_hash: deps, spec_hash: spec }"
+            ),
+            "{rendered}"
+        );
+        assert_eq!(parse(&rendered).unwrap().file.fingerprint, "fp123");
+    }
+
+    #[test]
+    fn a_legacy_file_line_without_a_fingerprint_still_parses_and_renders_unchanged() {
+        let legacy = "---\nkind: file\nsource_paths: [a.ts]\nfile: { source_hash: rawhash, deps_hash: deps, spec_hash: spec }\n---\n# a.ts\n## Summary\nA file.\n";
+        let spec = parse(legacy).unwrap();
+        assert_eq!(
+            spec.file.fingerprint, "",
+            "no key means legacy, not an error"
+        );
+        let graph = build_graph_from_sources(&[("a.ts", "export function f(): void {}\n")]);
+        let rendered = render(
+            &graph,
+            Path::new("/nonexistent"),
+            graph.find("a.ts").unwrap(),
+            &spec,
+        );
+        assert!(
+            !rendered.contains("fingerprint"),
+            "an empty fingerprint is not written: {rendered}"
+        );
+    }
+}

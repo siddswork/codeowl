@@ -19,9 +19,9 @@
 //! baseline -- the same "one baseline, several independent edits checked
 //! against it" pattern `mcp.rs`'s own
 //! `dependency_signature_change_stales_importer_but_implementation_change_does_not`
-//! test already uses, at the lower `spec.rs` API level instead of through
+//! test already uses, at the lower `spec/` API level instead of through
 //! the async MCP tool wrappers (no tokio runtime needed, and the hash-level
-//! mechanics this file cares about are `spec.rs`'s directly, not `mcp.rs`'s).
+//! mechanics this file cares about are `spec/`'s directly, not `mcp.rs`'s).
 
 use std::path::Path;
 

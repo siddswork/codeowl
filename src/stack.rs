@@ -4,7 +4,7 @@
 //! Phase 1's extractor is TypeScript + SQL + Next.js + Supabase, spread
 //! across `extract.rs` / `imports.rs` / `resolve.rs` / `schema.rs` /
 //! `features.rs` and reached directly from the generic core (`index.rs`,
-//! `graph.rs`, `spec.rs`). M13 forces every one of those coupling points
+//! `graph.rs`, `spec/`). M13 forces every one of those coupling points
 //! through this trait so M14 (`RustStack`) has an interface to implement
 //! against rather than a scatter of free functions to shadow.
 //!
@@ -298,7 +298,7 @@ pub fn registered_packs() -> &'static [Registered] {
 }
 
 /// The pack for a persisted `StackPack::name()` — how a pure-read caller
-/// (`spec.rs`, `mcp.rs`) recovers the pack from `Graph::pack_name()`
+/// (`spec/`, `mcp.rs`) recovers the pack from `Graph::pack_name()`
 /// without it being threaded down. The empty name (a graph built by a test
 /// helper, which never called `set_pack_name`) means the TypeScript pack.
 /// Any other name that no registered pack answers to is an error: falling
@@ -408,7 +408,7 @@ pub fn detect(root: &Path) -> anyhow::Result<Box<dyn StackPack>> {
 }
 
 /// A repo-relative path's [`FileRole`] under the pack that built `graph` —
-/// the shared lookup `spec.rs` and `quarkus.rs` both need. A free function
+/// the shared lookup `spec/` and `quarkus.rs` both need. A free function
 /// here rather than a `Graph` method so `graph.rs` never has to know the
 /// packs exist.
 pub fn file_role(graph: &Graph, path: &str) -> FileRole {
