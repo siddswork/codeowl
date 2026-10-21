@@ -440,6 +440,49 @@ new fingerprint rule, specs migrated under the old one read stale and are
 regenerated; on a large corpus in a stack that has no rule yet (TypeScript,
 Java, Python), it is worth waiting for that rule before migrating.
 
+### After moving or splitting code: carry the specs over
+
+A spec is keyed by the path-based id of the code it describes, so when code is
+moved, split or renamed its spec is left behind at the old id (reported as
+`orphaned` by `get_spec_coverage`) and the new location reads as missing. A
+regeneration would write the same prose again. If the code itself did not
+change, the old prose is still true. Before regenerating, run:
+
+```
+codeowl adopt-moved-specs <path>             # dry run: reports only
+codeowl adopt-moved-specs <path> --list      # also one line per symbol
+codeowl adopt-moved-specs <path> --write     # carry the prose over
+```
+
+For each orphaned symbol that has written prose it finds the symbol with the
+same text now, and compares what the two depend on (by what the dependencies
+look like, not where they live). Then:
+
+- Same text, same dependencies: the prose is written to the new place as
+  **current**, with the new place's hashes. No generation is needed for it.
+- Same text but a dependency changed, or the same name with edited text: the
+  prose is written as a **stale draft**. `get_next_spec_task` then hands the
+  writer the old prose as `previous_summary` and `previous_behavior` to revise.
+- Left where it is, and its document kept: prose a person edited, prose that
+  fails the quality check, prose that names a file that no longer exists,
+  several equally good successors, two orphans claiming one successor, a
+  successor that already has different prose, a successor that is not a
+  top-level function or class.
+
+It removes an orphaned file document only when everything in it was carried or
+has no successor, and it drops a section from a file that still exists once
+that section's prose has moved or its code is gone. File, directory and system
+summaries describe a whole and are regenerated, never carried. Whatever it
+leaves is still listed as orphaned. A leftover section in a file that still
+exists is dropped the next time that file's spec is written (a regeneration of
+that file does it); nothing removes it in the background.
+
+It compares against the code as it is now, so run it once the move is final:
+a later edit to a moved symbol turns its old prose into a draft. Running it
+twice changes nothing the second time, and a run that was interrupted is
+finished by running it again. Commit its result on its own, before the
+regeneration. `get_spec` stays a pure read; specs change only with `--write`.
+
 ---
 
 ## When to (re)generate — you run `/codeowl-generate`

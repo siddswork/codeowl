@@ -1,6 +1,6 @@
 # Experiment 7: can a restructuring re-key the specs it orphans?
 
-Status (2026-10-21): **dry-run done; no kill criterion triggered; decision recorded in `DECISIONS.md` question 26.** The protocol below was written before any result.
+Status (2026-10-21): **dry-run done; no kill criterion triggered; the write step is built and was run on a copy of the repository (see "The write step on a copy"); decision recorded in `DECISIONS.md` question 26.** The protocol below was written before any result.
 
 ## Question
 
@@ -89,3 +89,18 @@ Build the feature as agreed (`DECISIONS.md` question 26): the planner stays, and
 3. Never adopt: nothing, several candidates after the lineage vote, a hand-edited spec (its prose hash does not match).
 4. File, rollup, system and feature summaries are regenerated, not adopted.
 5. Strip or refuse a stray `</content>` before carrying prose over.
+
+## The write step on a copy
+
+`codeowl adopt-moved-specs <copy> --write` on a copy of the repository (the stored specs and the code as they stand on the branch), nothing written to the real corpus. Before and after, from `coverage()`:
+
+| | Before | After |
+|---|---|---|
+| File specs current / stale / missing | 1 / 24 / 31 | 1 / 51 / 4 |
+| Generations still needed | 566 | **358** |
+| Orphaned documents | 10 | 5 |
+| Spec files on disk | 39 | 61 |
+
+The fall of 208 generations is exactly the 208 carried as current. The 103 carried as drafts still need a generation each, but a revision of given prose and not a first writing. Carried: 208 current, 103 drafts; not carried: 5 naming a vanished file and 5 with several same-name candidates (their documents kept), 1 with no successor (nothing to carry). Removed: 5 orphaned documents and 44 sections from files that still exist. All 52 file specs parse afterwards; no staging file is left; the next run reports the 5 documents it kept and nothing else.
+
+The planner's 211 adoptable became 208 here because three of the moved functions (`prose_smells`, `symbol_prose_is_human_edited`, `file_prose_is_human_edited`) were edited on the same branch, so their old prose describes text that is no longer there. That is the source-hash match being exact, and the reason the real run belongs after the code is final.
