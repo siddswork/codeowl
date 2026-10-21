@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::feature::{current_feature_hashes, read_feature_spec};
-use super::format::{extract_section, write_replacing};
+use super::format::{extract_section, with_provenance, without_provenance, write_replacing};
 use super::rollup::{current_module_hashes, read_rollup_spec};
 use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
@@ -45,7 +45,7 @@ pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
     }
     out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
     out.push_str("---\n");
-    out.push_str(spec.body.trim());
+    out.push_str(&with_provenance(spec.body.trim()));
     out.push('\n');
 
     out.push_str("\n## Modules\n");
@@ -141,12 +141,13 @@ pub fn parse_system(content: &str) -> Result<SystemSpec> {
         .skip(consumed)
         .collect::<Vec<_>>()
         .join("\n");
-    let body = full_body
-        .split("\n## Modules")
-        .next()
-        .unwrap_or(&full_body)
-        .trim()
-        .to_string();
+    let body = without_provenance(
+        full_body
+            .split("\n## Modules")
+            .next()
+            .unwrap_or(&full_body)
+            .trim(),
+    );
 
     Ok(SystemSpec {
         modules,
@@ -231,7 +232,7 @@ pub fn next_system_task(graph: &Graph, root: &Path) -> Result<Option<SystemTask>
 /// Persist `content` (the agent's LLM-written product narrative, title
 /// included) as the system spec.
 pub fn submit_system(graph: &Graph, root: &Path, content: &str) -> Result<SystemSpec> {
-    let body = content.trim().to_string();
+    let body = without_provenance(content.trim());
     if body.is_empty() {
         bail!("submitted system content is empty");
     }
@@ -262,6 +263,7 @@ mod tests {
 
     use crate::spec::feature::submit_feature;
     use crate::spec::file_task::submit;
+    use crate::spec::format::PROVENANCE;
     use crate::spec::layout::directory_is_spec_bearing;
     use crate::spec::rollup::submit_rollup;
     use crate::spec::test_support::{SYSTEM_FIXTURE, build_feature_fixture};
@@ -281,6 +283,35 @@ mod tests {
         assert!(rendered.contains("submit: featurehash"));
         let parsed = parse_system(&rendered).expect("should parse what we just rendered");
         assert_eq!(parsed, spec);
+    }
+
+    #[test]
+    fn a_system_spec_carries_the_provenance_line_and_its_body_is_unchanged() {
+        let spec = SystemSpec {
+            modules: vec![],
+            features: vec![],
+            spec_hash: "systemhash".to_string(),
+            body: "# Acme\n## Summary\nA competition platform.".to_string(),
+        };
+        let rendered = render_system(Path::new("/nonexistent"), &spec);
+        let lines: Vec<&str> = rendered.lines().collect();
+        let title = lines.iter().position(|l| *l == "# Acme").unwrap();
+        assert_eq!(lines[title + 1], PROVENANCE);
+        assert_eq!(parse_system(&rendered).unwrap(), spec);
+        let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
+        assert_eq!(parse_system(&legacy).unwrap(), spec);
+    }
+
+    #[test]
+    fn resubmitting_a_rendered_system_spec_does_not_double_the_provenance_line() {
+        let (graph, dir) = build_feature_fixture(SYSTEM_FIXTURE, "provenance-system");
+        let rendered =
+            format!("# Acme\n{PROVENANCE}\n## Summary\nA platform for running art competitions.\n");
+        let spec = submit_system(&graph, &dir, &rendered).unwrap();
+        assert!(!spec.body.contains(PROVENANCE), "{}", spec.body);
+        let on_disk = std::fs::read_to_string(system_spec_path(&dir)).unwrap();
+        assert_eq!(on_disk.matches(PROVENANCE).count(), 1);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
