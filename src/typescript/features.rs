@@ -433,7 +433,7 @@ fn entry_route_path(entry_file: &str) -> String {
 mod tests {
     use super::*;
     use crate::features::fixture;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
 
     #[test]
     fn plain_string_fetch_is_extracted() {

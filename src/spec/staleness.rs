@@ -251,7 +251,7 @@ pub fn file_changes(graph: &Graph, file_id: SymbolId, stored: &HashPair) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::spec::format::{HashPair, dependency_lines};
 
     fn stored_for(graph: &Graph, file: &str, fingerprint: &str, raw: &str) -> HashPair {

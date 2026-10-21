@@ -433,7 +433,7 @@ pub(super) fn write_replacing(path: &Path, content: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::hash::hash_text;
     use crate::spec::source_text::{
         LARGE_CONTAINER_BYTES_DEFAULT, maybe_reduce_container_source, symbol_span_text,
@@ -659,9 +659,9 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
         // so build a minimal graph + resolved imports by hand rather than
         // pulling in a real tsconfig/node_modules fixture.
         let extractions = vec![
-            crate::graph::extract_and_hash("a.ts", a_content),
-            crate::graph::extract_and_hash("clsx.ts", b_content),
-            crate::graph::extract_and_hash("tailwind-merge.ts", c_content),
+            crate::fixtures::extract_and_hash("a.ts", a_content),
+            crate::fixtures::extract_and_hash("clsx.ts", b_content),
+            crate::fixtures::extract_and_hash("tailwind-merge.ts", c_content),
         ];
         let mut graph = Graph::build(extractions);
         let file_imports = crate::typescript::extract_imports(a_content, "a.ts");
@@ -719,8 +719,8 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
         .unwrap();
 
         let mut graph = Graph::build(vec![
-            crate::graph::extract_and_hash("a.ts", a),
-            crate::graph::extract_and_hash(
+            crate::fixtures::extract_and_hash("a.ts", a),
+            crate::fixtures::extract_and_hash(
                 "helper.ts",
                 "export function helper(): number { return 1; }\n",
             ),

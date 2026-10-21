@@ -362,7 +362,7 @@ fn reorder_symbols(graph: &Graph, file_id: SymbolId, spec: &mut FileSpec) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::spec::format::{HashPair, SymbolProse, read_existing, read_file_spec};
     use crate::spec::layout::spec_path;
     use crate::spec::staleness::{

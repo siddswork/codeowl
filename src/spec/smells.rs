@@ -133,7 +133,7 @@ pub(super) fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::hash::hash_text;
     use crate::spec::format::{FileSpec, HashPair, SymbolProse};
 
@@ -176,8 +176,8 @@ mod tests {
             std::fs::write(dir.join(rel), content).unwrap();
         }
         let extractions = vec![
-            crate::graph::extract_and_hash("a.ts", a_content),
-            crate::graph::extract_and_hash("util.ts", util_content),
+            crate::fixtures::extract_and_hash("a.ts", a_content),
+            crate::fixtures::extract_and_hash("util.ts", util_content),
         ];
         let mut graph = Graph::build(extractions);
         let file_imports = crate::typescript::extract_imports(a_content, "a.ts");

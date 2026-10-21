@@ -216,7 +216,7 @@ mod tests {
             let path = dir.join(rel);
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, content).unwrap();
-            extractions.push(crate::graph::extract_and_hash(rel, content));
+            extractions.push(crate::fixtures::extract_and_hash(rel, content));
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
         }
 
@@ -266,7 +266,7 @@ mod tests {
         let mut file_imports = HashMap::new();
         for (rel, content) in files {
             std::fs::write(real.join(rel), content).unwrap();
-            extractions.push(crate::graph::extract_and_hash(rel, content));
+            extractions.push(crate::fixtures::extract_and_hash(rel, content));
             file_imports.insert(rel.to_string(), extract_imports(content, rel));
         }
         let graph = Graph::build(extractions);

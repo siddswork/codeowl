@@ -343,7 +343,7 @@ pub fn current_module_hashes(graph: &Graph, root: &Path) -> Result<Vec<(String, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::spec::file_task::{SpecTask, submit};
     use crate::spec::layout::directory_is_spec_bearing;
     use crate::spec::test_support::temp_dir_for;

@@ -788,7 +788,7 @@ mod tests {
         // `tests/` is a test root to the Rust pack; the TypeScript pack
         // (the empty-name default) only knows the JS conventions.
         let mut graph =
-            crate::graph::build_graph_from_sources(&[("a.ts", "export const a = 1;\n")]);
+            crate::fixtures::build_graph_from_sources(&[("a.ts", "export const a = 1;\n")]);
         assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Domain);
         graph.set_pack_name("rust");
         assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Test);

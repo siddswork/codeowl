@@ -1,6 +1,8 @@
 pub mod explain;
 pub mod fastapi;
 pub mod features;
+#[cfg(test)]
+pub(crate) mod fixtures;
 pub mod graph;
 pub mod hash;
 pub mod imports;

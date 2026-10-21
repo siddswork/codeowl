@@ -452,7 +452,7 @@ pub fn by_module(items: &[CoverageItem]) -> Vec<(String, CoverageSummary)> {
 mod tests {
     use super::*;
 
-    use crate::graph::build_graph_from_sources;
+    use crate::fixtures::build_graph_from_sources;
     use crate::hash::hash_text;
     use crate::spec::feature::current_feature_hashes;
     use crate::spec::file_task::submit;
