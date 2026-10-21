@@ -41,14 +41,17 @@ Run on 2026-10-21 against CodeOwl's own corpus at `d2094d4` (the restructuring m
 
 | Outcome for the 322 orphaned symbols with written prose | Count | Share |
 |---|---|---|
-| **Adoptable**: one successor with the same text, dependencies unchanged | **216** | **67 %** |
-| of which dependencies equal | 199 | |
+| **Adoptable as current**: one successor with the same text, dependencies unchanged, prose naming no vanished file | **211** | **66 %** |
+| of which dependencies equal | 194 | |
 | of which only additions (a same-file helper that became an import) | 17 | |
+| Same text and dependencies, but the prose names a file this repo no longer has: a draft, not adopted as current | 5 | 2 % |
 | A dependency changed shape | 60 | 19 % |
 | Same name elsewhere, text differs | 45 | 14 % |
 | of which exactly one candidate | 40 | |
 | No successor | 1 | 0.3 % |
 | Several identical successors, none preferred | 0 | (8 before the lineage vote) |
+| Several orphans claim one successor (merged helpers) | 0 | (the check was added after review; none here) |
+| The successor already has written prose | 0 | (likewise) |
 
 Ten orphaned file documents sit behind these; their summaries are not adopted.
 
@@ -56,9 +59,9 @@ Ten orphaned file documents sit behind these; their summaries are not adopted.
 
 | Measure | Result | Verdict |
 |---|---|---|
-| **Reach** | 67 % adoptable. Counting the 60 whose only blocker is a changed dependency as "re-key and mark stale with the old prose as a draft", 276 of 322 (86 %) have a same-text successor. | Pass (bar: 50 %) |
-| **Saving** | The regeneration of `src` needs 494 generations (`get_spec_coverage`); adoption removes 216 of them, 44 %, at the measured 1.5k tokens per cycle (`NORTHSTAR.md` K7) at most, so up to roughly 325k tokens, and about 170k at a lower per-symbol cost. A further 100 symbols (60 changed dependency, 40 single text-differs candidate) become revisions of a draft instead of writes from nothing. | Pass |
-| **Correctness** | 5 of the 216 adoptable (2.3 %) have prose that names a file this repo no longer has (a stale aside such as "the same wrapper `extract.rs`, `features.rs` and `rust.rs` define"); the check is exact, because it only counts names that are an orphaned spec document. Of the 20 the broad heuristic first flagged, 15 were illustrations (`lib/utils.ts`, `app/page.tsx`, `a/b/C.java`, `crud.py`) and are fine. A sample of 8 (every 27th adoptable symbol) read against the current code: 8 of 8 accurate, one of them carrying a stale file name the check catches. | Pass |
+| **Reach** | 66 % adoptable as current. Counting the 60 whose only blocker is a changed dependency as "re-key and mark stale with the old prose as a draft", 276 of 322 (86 %) have a same-text successor. | Pass (bar: 50 %) |
+| **Saving** | The regeneration of `src` needs 494 generations (`get_spec_coverage`); adoption removes 211 of them, 43 %, at the measured 1.5k tokens per cycle (`NORTHSTAR.md` K7) at most, so up to roughly 315k tokens, and about 170k at a lower per-symbol cost. A further 105 symbols (5 naming a vanished file, 60 changed dependency, 40 single text-differs candidate) become revisions of a draft instead of writes from nothing. | Pass |
+| **Correctness** | 5 of the 216 symbols with the same text and unchanged dependencies (2.3 %) have prose that names a file this repo no longer has, so they are drafts and none of the 211 adopted as current does (a stale aside such as "the same wrapper `extract.rs`, `features.rs` and `rust.rs` define"); the check is exact, because it only counts names that are an orphaned spec document. Of the 20 the broad heuristic first flagged, 15 were illustrations (`lib/utils.ts`, `app/page.tsx`, `a/b/C.java`, `crud.py`) and are fine. A sample of 8 (every 27th of the 216) read against the current code: 8 of 8 accurate, one of them carrying a stale file name the check catches. | Pass |
 | **Quality** | Limited: not the planned ten. For the three symbols I had also written fresh in the same session (`join`, `parent_dir`, `is_crud_module`) the old and the new prose agree; the fresh text states edge cases the old does not (only one leading `./` is stripped; a top-level `crud/` directory does not match), because the current prompt asks for limits. The old prose is a little less precise, not wrong. | Pass, thin evidence |
 
 ### What the numbers also say
@@ -73,11 +76,15 @@ Ten orphaned file documents sit behind these; their summaries are not adopted.
 
 63 stray `</content>` tags in 5 of the 39 stored spec files, left by an earlier generation at the end of a section, and not caught by the prose checks. Any carry-over would copy them, and a new `prose_smells` entry would stop a new one being submitted.
 
+### Review changes
+
+The first version of the planner counted 216 as adoptable. A review of the pull request found three things the headline had to respect: an orphan whose prose names a vanished file is a draft by the design rule (it was in the 216); two orphans can resolve to one successor, and only one spec can live there (none do here); and a successor that already has written prose must not be overwritten (none here). All three are now buckets of their own, with tests; the first moved 5 symbols out of the headline, 216 to 211. The report also now counts the rollup and feature orphans it does not adopt (0 here), so it does not read as the whole orphan population.
+
 ## Decision
 
 Build the feature as agreed (`DECISIONS.md` question 26): the planner stays, and gains a write step that re-keys what is safe and a prune of what is left. The rules the measurements support:
 
-1. Adopt as **current**: a single successor, dependencies equal or only additions, prose naming no vanished file.
+1. Adopt as **current**: a single successor that has no written prose of its own and that no other orphan claims, dependencies equal or only additions, prose naming no vanished file.
 2. Adopt as **stale with the old prose as `previous`** (the writer revises): a dependency changed, or the prose names a vanished file, or the text differs and there is exactly one same-name candidate.
 3. Never adopt: nothing, several candidates after the lineage vote, a hand-edited spec (its prose hash does not match).
 4. File, rollup, system and feature summaries are regenerated, not adopted.

@@ -13,8 +13,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use super::format::{HashPair, SymbolProse, read_file_spec};
-use super::orphans::find_orphaned_specs;
+use super::format::{FileSpec, HashPair, SymbolProse, read_file_spec};
+use super::orphans::{OrphanedSpec, find_orphaned_specs};
 use super::staleness::{hash_dependency_pairs, shorten_dep_targets, try_dependency_pairs};
 use crate::graph::Graph;
 use crate::symbol::Symbol;
@@ -41,10 +41,17 @@ pub enum Deps {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Successor {
     /// Exactly one current symbol has the same text (and, if several did,
-    /// the same name and a path under the old file's stem).
+    /// the same name and a path under the old file's stem, or the file where
+    /// the rest of the old file went).
     One { id: String, deps: Deps },
     /// Several current symbols have the same text and nothing picks one.
     Ambiguous(Vec<String>),
+    /// Several orphans resolve to this one symbol (two helpers merged into
+    /// one). Only one spec can live at an id, so none is adopted.
+    Contested(String),
+    /// The successor already has written prose of its own; adopting would
+    /// overwrite it.
+    Occupied(String),
     /// No symbol has the same text, but these have the same name.
     TextDiffers(Vec<String>),
     /// Nothing in the current tree corresponds to it.
@@ -66,8 +73,19 @@ pub struct Finding {
 }
 
 impl Finding {
-    /// A single successor whose dependencies did not change shape.
+    /// One successor with unchanged dependencies, and prose that names no
+    /// file this repo has lost: safe to carry over as current.
     pub fn adoptable(&self) -> bool {
+        self.same_text_and_dependencies() && self.names_vanished_file.is_empty()
+    }
+
+    /// The same, except the prose names a file that is gone: carry it over
+    /// as a draft for the writer to revise, not as current.
+    pub fn draft_only(&self) -> bool {
+        self.same_text_and_dependencies() && !self.names_vanished_file.is_empty()
+    }
+
+    fn same_text_and_dependencies(&self) -> bool {
         matches!(
             self.successor,
             Successor::One {
@@ -85,26 +103,33 @@ pub struct AdoptionPlan {
     /// Orphaned file documents (their file summaries describe a whole and
     /// are not adopted).
     pub orphaned_file_docs: Vec<String>,
+    /// Orphaned rollup and feature documents: regenerated, not adopted, and
+    /// counted so the report does not look like the whole orphan population.
+    pub orphaned_other_docs: usize,
 }
 
 /// The plan's counts. Every orphaned symbol lands in exactly one of
-/// `adoptable`, `deps_changed`, `deps_unknown`, `ambiguous`, `text_differs`
-/// and `no_successor`; `equal` and `only_additions` split `adoptable`.
+/// `adoptable`, `draft_vanished_file`, `deps_changed`, `deps_unknown`,
+/// `ambiguous`, `contested`, `occupied`, `text_differs` and `no_successor`;
+/// `equal` and `only_additions` split `adoptable`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Summary {
     pub total: usize,
     pub adoptable: usize,
     pub equal: usize,
     pub only_additions: usize,
+    /// Same text and dependencies, but the prose names a file this repo no
+    /// longer has (a stale reference, as opposed to an example path).
+    pub draft_vanished_file: usize,
     pub deps_changed: usize,
     pub deps_unknown: usize,
     pub ambiguous: usize,
+    pub contested: usize,
+    pub occupied: usize,
     pub text_differs: usize,
     pub no_successor: usize,
-    /// Of the adoptable, how many have prose naming a file this repo no
-    /// longer has (a stale reference, as opposed to an example path).
-    pub adoptable_naming_a_vanished_file: usize,
     pub orphaned_file_docs: usize,
+    pub orphaned_other_docs: usize,
 }
 
 impl AdoptionPlan {
@@ -112,22 +137,25 @@ impl AdoptionPlan {
         let mut s = Summary {
             total: self.findings.len(),
             orphaned_file_docs: self.orphaned_file_docs.len(),
+            orphaned_other_docs: self.orphaned_other_docs,
             ..Summary::default()
         };
         for f in &self.findings {
             match &f.successor {
                 Successor::One { deps, .. } => match deps {
+                    Deps::Equal | Deps::OnlyAdditions if !f.names_vanished_file.is_empty() => {
+                        s.draft_vanished_file += 1;
+                    }
                     Deps::Equal => s.equal += 1,
                     Deps::OnlyAdditions => s.only_additions += 1,
                     Deps::Changed => s.deps_changed += 1,
                     Deps::Unknown => s.deps_unknown += 1,
                 },
                 Successor::Ambiguous(_) => s.ambiguous += 1,
+                Successor::Contested(_) => s.contested += 1,
+                Successor::Occupied(_) => s.occupied += 1,
                 Successor::TextDiffers(_) => s.text_differs += 1,
                 Successor::None => s.no_successor += 1,
-            }
-            if f.adoptable() && !f.names_vanished_file.is_empty() {
-                s.adoptable_naming_a_vanished_file += 1;
             }
         }
         s.adoptable = s.equal + s.only_additions;
@@ -147,27 +175,33 @@ impl AdoptionPlan {
         };
         let mut out = format!(
             "orphaned symbols with written prose: {}\n\
-             adoptable: {} ({:.0}%)  [dependencies equal {}, only additions {}]\n\
-             not adoptable:\n\
+             adoptable as current: {} ({:.0}%)  [dependencies equal {}, only additions {}]\n\
+             not adopted as current:\n\
+             \x20 same text, but the prose names a file this repo no longer has (a draft): {}\n\
              \x20 a dependency changed shape: {}\n\
              \x20 dependencies not comparable (old spec recorded none): {}\n\
              \x20 several identical successors, none preferred: {}\n\
+             \x20 several orphans claim the same successor: {}\n\
+             \x20 the successor already has written prose: {}\n\
              \x20 same name elsewhere, text differs: {}\n\
              \x20 no successor: {}\n\
-             adoptable, but the prose names a file this repo no longer has: {}\n\
-             orphaned file documents (their summaries are not adopted): {}\n",
+             orphaned file documents (their summaries are regenerated): {}\n\
+             orphaned rollup and feature documents (regenerated): {}\n",
             s.total,
             s.adoptable,
             pct(s.adoptable),
             s.equal,
             s.only_additions,
+            s.draft_vanished_file,
             s.deps_changed,
             s.deps_unknown,
             s.ambiguous,
+            s.contested,
+            s.occupied,
             s.text_differs,
             s.no_successor,
-            s.adoptable_naming_a_vanished_file,
-            s.orphaned_file_docs
+            s.orphaned_file_docs,
+            s.orphaned_other_docs
         );
         if list {
             out.push('\n');
@@ -177,6 +211,8 @@ impl AdoptionPlan {
                     Successor::Ambiguous(ids) => {
                         format!("{} ambiguous: {}", f.old_id, ids.join(", "))
                     }
+                    Successor::Contested(id) => format!("{} contested: {id}", f.old_id),
+                    Successor::Occupied(id) => format!("{} occupied: {id}", f.old_id),
                     Successor::TextDiffers(ids) => {
                         format!("{} text differs: {}", f.old_id, ids.join(", "))
                     }
@@ -196,45 +232,13 @@ impl AdoptionPlan {
     }
 }
 
+/// An orphaned symbol with the hashes and prose it was documented with.
+type Old = BTreeMap<String, (HashPair, SymbolProse)>;
+
 /// Plan the adoption of orphaned symbol prose against the current `graph`.
 pub fn plan(graph: &Graph, root: &Path) -> Result<AdoptionPlan> {
     let orphans = find_orphaned_specs(graph, root, None)?;
-
-    // Every orphaned symbol with written prose, with the hashes it was
-    // documented against. A symbol shows up once whether its file is gone
-    // (a "file" orphan lists all its symbols) or still there (a "symbol"
-    // orphan names just the one that left).
-    let mut old: BTreeMap<String, (HashPair, SymbolProse)> = BTreeMap::new();
-    let mut orphaned_file_docs = Vec::new();
-    for orphan in &orphans {
-        let (source_path, wanted): (String, Option<&str>) = match orphan.kind.as_str() {
-            "file" => {
-                orphaned_file_docs.push(orphan.id.clone());
-                (orphan.id.clone(), None)
-            }
-            "symbol" => (
-                orphan.id.split("::").next().unwrap_or("").to_string(),
-                Some(orphan.id.as_str()),
-            ),
-            _ => continue,
-        };
-        let Some(spec) = read_file_spec(root, &source_path)? else {
-            continue;
-        };
-        for (id, hashes) in &spec.symbols {
-            if wanted.is_some_and(|w| w != id) || graph.find(id).is_some() {
-                continue;
-            }
-            let Some(prose) = spec.sections.iter().find(|(sid, _)| sid == id) else {
-                continue;
-            };
-            if prose.1.summary.trim().is_empty() && prose.1.behavior.trim().is_empty() {
-                continue;
-            }
-            old.insert(id.clone(), (hashes.clone(), prose.1.clone()));
-        }
-    }
-    orphaned_file_docs.sort();
+    let (old, orphaned_file_docs, orphaned_other_docs) = collect_orphans(graph, root, &orphans)?;
 
     // The current tree, indexed the two ways a successor is looked up.
     let mut by_hash: HashMap<&str, Vec<&Symbol>> = HashMap::new();
@@ -246,7 +250,6 @@ pub fn plan(graph: &Graph, root: &Path) -> Result<AdoptionPlan> {
             .push(sym);
         by_name.entry(short_name(&sym.id)).or_default().push(sym);
     }
-    let files: Vec<String> = graph.files().map(|f| f.id.clone()).collect();
 
     let mut resolved: Vec<(String, HashPair, SymbolProse, Successor)> = old
         .into_iter()
@@ -255,52 +258,10 @@ pub fn plan(graph: &Graph, root: &Path) -> Result<AdoptionPlan> {
             (old_id, hashes, prose, successor)
         })
         .collect();
+    apply_lineage(graph, root, &mut resolved);
+    mark_claimed_successors(root, &mut resolved)?;
 
-    // Where did each old file's code go? Count the files its uniquely
-    // matched symbols landed in. A symbol with several identical successors
-    // (a helper copied into every pack) then goes where the rest of its old
-    // file went, when exactly one file leads.
-    let mut lineage: HashMap<String, HashMap<String, usize>> = HashMap::new();
-    for (old_id, _, _, successor) in &resolved {
-        if let Successor::One { id, .. } = successor {
-            *lineage
-                .entry(file_of(old_id).to_string())
-                .or_default()
-                .entry(file_of(id).to_string())
-                .or_default() += 1;
-        }
-    }
-    for (old_id, hashes, _, successor) in &mut resolved {
-        let Successor::Ambiguous(candidates) = successor else {
-            continue;
-        };
-        let Some(votes) = lineage.get(file_of(old_id)) else {
-            continue;
-        };
-        let top = votes.values().copied().max();
-        let leaders: Vec<&String> = votes
-            .iter()
-            .filter(|(_, n)| Some(**n) == top)
-            .map(|(file, _)| file)
-            .collect();
-        let [leader] = leaders.as_slice() else {
-            continue;
-        };
-        let in_leader: Vec<&String> = candidates
-            .iter()
-            .filter(|id| file_of(id) == leader.as_str())
-            .collect();
-        let [only] = in_leader.as_slice() else {
-            continue;
-        };
-        if let Some(sym) = graph.find(only).and_then(|id| graph.get_symbol(id)) {
-            *successor = Successor::One {
-                id: sym.id.clone(),
-                deps: compare_deps(graph, root, sym, hashes),
-            };
-        }
-    }
-
+    let files: Vec<String> = graph.files().map(|f| f.id.clone()).collect();
     let findings = resolved
         .into_iter()
         .map(|(old_id, _, prose, successor)| {
@@ -326,7 +287,58 @@ pub fn plan(graph: &Graph, root: &Path) -> Result<AdoptionPlan> {
     Ok(AdoptionPlan {
         findings,
         orphaned_file_docs,
+        orphaned_other_docs,
     })
+}
+
+/// Every orphaned symbol with written prose, with the hashes it was
+/// documented against. A symbol shows up once whether its file is gone (a
+/// "file" orphan lists all its symbols) or still there (a "symbol" orphan
+/// names just the one that left). Also the orphaned file documents, and a
+/// count of the rollup and feature ones, which are regenerated.
+fn collect_orphans(
+    graph: &Graph,
+    root: &Path,
+    orphans: &[OrphanedSpec],
+) -> Result<(Old, Vec<String>, usize)> {
+    let mut old: Old = BTreeMap::new();
+    let mut orphaned_file_docs = Vec::new();
+    let mut orphaned_other_docs = 0;
+    for orphan in orphans {
+        let (source_path, wanted): (&str, Option<&str>) = match orphan.kind.as_str() {
+            "file" => {
+                orphaned_file_docs.push(orphan.id.clone());
+                (orphan.id.as_str(), None)
+            }
+            "symbol" => (file_of(&orphan.id), Some(orphan.id.as_str())),
+            _ => {
+                orphaned_other_docs += 1;
+                continue;
+            }
+        };
+        let Some(spec) = read_file_spec(root, source_path)? else {
+            continue;
+        };
+        for (id, hashes) in &spec.symbols {
+            if wanted.is_some_and(|w| w != id) || graph.find(id).is_some() {
+                continue;
+            }
+            if let Some(prose) = written_prose(&spec, id) {
+                old.insert(id.clone(), (hashes.clone(), prose.clone()));
+            }
+        }
+    }
+    orphaned_file_docs.sort();
+    Ok((old, orphaned_file_docs, orphaned_other_docs))
+}
+
+/// `id`'s section in `spec`, if it has any text.
+fn written_prose<'a>(spec: &'a FileSpec, id: &str) -> Option<&'a SymbolProse> {
+    spec.sections
+        .iter()
+        .find(|(sid, _)| sid == id)
+        .map(|(_, p)| p)
+        .filter(|p| !p.summary.trim().is_empty() || !p.behavior.trim().is_empty())
 }
 
 fn successor_of(
@@ -377,12 +389,13 @@ fn successor_of(
     } else {
         // `lib/a.ts` became a directory `lib/a/`, the way `java.rs` became
         // `java/mod.rs`: the successor lives under the old file's stem.
-        let old_file = old_id.split("::").next().unwrap_or("");
+        let old_file = file_of(old_id);
         let stem = old_file.rsplit_once('.').map_or(old_file, |(s, _)| s);
+        let prefix = format!("{stem}/");
         let under_stem: Vec<&Symbol> = pool
             .iter()
             .copied()
-            .filter(|s| s.file.starts_with(&format!("{stem}/")))
+            .filter(|s| s.file.starts_with(&prefix))
             .collect();
         (under_stem.len() == 1).then(|| under_stem[0])
     };
@@ -397,6 +410,93 @@ fn successor_of(
             Successor::Ambiguous(ids)
         }
     }
+}
+
+/// Where did each old file's code go? Count the files its uniquely matched
+/// symbols landed in. A symbol with several identical successors (a helper
+/// copied into every pack) then goes where the rest of its old file went,
+/// when exactly one file leads.
+fn apply_lineage(
+    graph: &Graph,
+    root: &Path,
+    resolved: &mut [(String, HashPair, SymbolProse, Successor)],
+) {
+    let mut lineage: HashMap<String, HashMap<String, usize>> = HashMap::new();
+    for (old_id, _, _, successor) in resolved.iter() {
+        if let Successor::One { id, .. } = successor {
+            *lineage
+                .entry(file_of(old_id).to_string())
+                .or_default()
+                .entry(file_of(id).to_string())
+                .or_default() += 1;
+        }
+    }
+    for (old_id, hashes, _, successor) in resolved.iter_mut() {
+        let Successor::Ambiguous(candidates) = successor else {
+            continue;
+        };
+        let Some(votes) = lineage.get(file_of(old_id)) else {
+            continue;
+        };
+        let top = votes.values().copied().max();
+        let leaders: Vec<&String> = votes
+            .iter()
+            .filter(|(_, n)| Some(**n) == top)
+            .map(|(file, _)| file)
+            .collect();
+        let [leader] = leaders.as_slice() else {
+            continue;
+        };
+        let in_leader: Vec<&String> = candidates
+            .iter()
+            .filter(|id| file_of(id) == leader.as_str())
+            .collect();
+        let [only] = in_leader.as_slice() else {
+            continue;
+        };
+        if let Some(sym) = graph.find(only).and_then(|id| graph.get_symbol(id)) {
+            *successor = Successor::One {
+                id: sym.id.clone(),
+                deps: compare_deps(graph, root, sym, hashes),
+            };
+        }
+    }
+}
+
+/// Two orphans that resolved to one symbol (merged helpers) cannot both be
+/// written there, and a successor that already has written prose must not
+/// be overwritten: neither is adoptable.
+fn mark_claimed_successors(
+    root: &Path,
+    resolved: &mut [(String, HashPair, SymbolProse, Successor)],
+) -> Result<()> {
+    let mut claims: HashMap<String, usize> = HashMap::new();
+    for (_, _, _, successor) in resolved.iter() {
+        if let Successor::One { id, .. } = successor {
+            *claims.entry(id.clone()).or_default() += 1;
+        }
+    }
+    let mut spec_cache: HashMap<String, Option<FileSpec>> = HashMap::new();
+    for (_, _, _, successor) in resolved.iter_mut() {
+        let Successor::One { id, .. } = successor else {
+            continue;
+        };
+        if claims.get(id).copied().unwrap_or(0) > 1 {
+            *successor = Successor::Contested(id.clone());
+            continue;
+        }
+        let file = file_of(id).to_string();
+        if !spec_cache.contains_key(&file) {
+            spec_cache.insert(file.clone(), read_file_spec(root, &file)?);
+        }
+        let occupied = spec_cache[&file]
+            .as_ref()
+            .is_some_and(|spec| written_prose(spec, id).is_some());
+        if occupied {
+            *successor = Successor::Occupied(id.clone());
+        }
+    }
+    Ok(())
 }
 
 /// The dependencies `old` was documented against, against `sym`'s now.
@@ -457,7 +557,9 @@ fn file_of(id: &str) -> &str {
 
 /// File-like names in `text`: runs of path characters that end in a source
 /// extension (`lib/a.ts`, `spec.rs`). A heuristic for prose that names the
-/// place its code used to live, not a parser.
+/// place its code used to live, not a parser. It knows the extensions of
+/// the languages CodeOwl reads, matched in lower case, and does not tell a
+/// lower-case product name (`node.js`) from a file.
 fn file_like_names(text: &str) -> Vec<String> {
     const EXTENSIONS: [&str; 7] = [".rs", ".ts", ".tsx", ".java", ".py", ".js", ".jsx"];
     let mut found: BTreeSet<String> = BTreeSet::new();
@@ -483,7 +585,10 @@ fn file_like_names(text: &str) -> Vec<String> {
 /// Whether `name`, as prose wrote it (a full path or just a file name), is
 /// `file`.
 fn names_file(name: &str, file: &str) -> bool {
-    file == name || file.ends_with(&format!("/{name}"))
+    file == name
+        || file
+            .strip_suffix(name)
+            .is_some_and(|rest| rest.ends_with('/'))
 }
 
 #[cfg(test)]
@@ -882,47 +987,130 @@ mod tests {
                 ),
                 made("a::7", Successor::TextDiffers(vec!["z".into()]), &[]),
                 made("a::8", Successor::None, &[]),
+                made("a::9", Successor::Contested("b::9".into()), &[]),
+                made("a::10", Successor::Occupied("b::10".into()), &[]),
             ],
             orphaned_file_docs: vec!["a.rs".to_string()],
+            orphaned_other_docs: 2,
         };
         let s = plan.summary();
-        assert_eq!(s.total, 8);
-        assert_eq!((s.adoptable, s.equal, s.only_additions), (3, 2, 1));
+        assert_eq!(s.total, 10);
+        assert_eq!((s.adoptable, s.equal, s.only_additions), (2, 1, 1));
+        assert_eq!(s.draft_vanished_file, 1, "a::2 names a vanished file");
         assert_eq!((s.deps_changed, s.deps_unknown), (1, 1));
         assert_eq!((s.ambiguous, s.text_differs, s.no_successor), (1, 1, 1));
-        assert_eq!(s.adoptable_naming_a_vanished_file, 1);
-        assert_eq!(s.orphaned_file_docs, 1);
+        assert_eq!((s.contested, s.occupied), (1, 1));
+        assert_eq!((s.orphaned_file_docs, s.orphaned_other_docs), (1, 2));
         assert_eq!(
             s.total,
             s.adoptable
+                + s.draft_vanished_file
                 + s.deps_changed
                 + s.deps_unknown
                 + s.ambiguous
                 + s.text_differs
-                + s.no_successor,
+                + s.no_successor
+                + s.contested
+                + s.occupied,
             "every orphaned symbol lands in exactly one bucket"
         );
     }
 
     #[test]
     fn the_report_names_the_buckets_and_lists_findings_only_when_asked() {
+        let one = |id: &str| Successor::One {
+            id: id.to_string(),
+            deps: Deps::Equal,
+        };
         let plan = AdoptionPlan {
-            findings: vec![made(
-                "a::1",
-                Successor::One {
-                    id: "b::1".to_string(),
-                    deps: Deps::Equal,
+            findings: vec![
+                made("a::1", one("b::1"), &[]),
+                Finding {
+                    names_vanished_file: vec!["a.rs".to_string()],
+                    ..made("a::2", one("b::2"), &[])
                 },
-                &["a.rs"],
-            )],
+            ],
             orphaned_file_docs: vec![],
+            orphaned_other_docs: 3,
         };
         let brief = plan.report(false);
-        assert!(brief.contains("adoptable: 1"));
+        assert!(brief.contains("adoptable as current: 1"));
+        assert!(
+            brief.contains("a draft): 1"),
+            "the vanished-file one is a draft"
+        );
+        assert!(brief.contains("rollup and feature documents (regenerated): 3"));
         assert!(!brief.contains("a::1"));
         let long = plan.report(true);
         assert!(long.contains("a::1 -> b::1"));
         assert!(long.contains("names vanished a.rs"));
+    }
+
+    #[test]
+    fn two_orphans_merged_into_one_symbol_contest_it() {
+        // lib/a.ts and lib/b.ts each had helper(); now only lib/c.ts does.
+        // Both specs cannot be written to one id.
+        let h = "export function helper(): number { return 7; }\n";
+        let dir = documented(
+            "adopt-contested",
+            &[("lib/a.ts", h), ("lib/b.ts", h)],
+            &["lib/a.ts::helper", "lib/b.ts::helper"],
+            PROSE,
+        );
+        std::fs::remove_file(dir.join("lib/a.ts")).unwrap();
+        std::fs::remove_file(dir.join("lib/b.ts")).unwrap();
+        write(&dir, "lib/c.ts", h);
+
+        let plan = plan(&rebuild(&dir), &dir).unwrap();
+        for old in ["lib/a.ts::helper", "lib/b.ts::helper"] {
+            let f = finding(&plan, old);
+            assert_eq!(
+                f.successor,
+                Successor::Contested("lib/c.ts::helper".to_string())
+            );
+            assert!(!f.adoptable(), "{old} must not be adopted over its twin");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_successor_that_already_has_written_prose_is_left_alone() {
+        // lib/a.ts and lib/b.ts both define f and both were documented;
+        // then lib/a.ts is deleted. lib/b.ts::f has its own spec.
+        let dir = documented(
+            "adopt-occupied",
+            &[("lib/a.ts", F), ("lib/b.ts", F)],
+            &["lib/a.ts::f", "lib/b.ts::f"],
+            PROSE,
+        );
+        std::fs::remove_file(dir.join("lib/a.ts")).unwrap();
+
+        let plan = plan(&rebuild(&dir), &dir).unwrap();
+        let f = finding(&plan, "lib/a.ts::f");
+        assert_eq!(f.successor, Successor::Occupied("lib/b.ts::f".to_string()));
+        assert!(!f.adoptable());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn prose_naming_a_vanished_file_is_a_draft_not_a_current_adoption() {
+        let prose = "### Summary\nSame as lib/a.ts in spirit.\n### Behavior\nReturns the number one with no side effects.\n";
+        let dir = documented("adopt-draft", &[("lib/a.ts", F)], &["lib/a.ts::f"], prose);
+        std::fs::remove_file(dir.join("lib/a.ts")).unwrap();
+        write(&dir, "lib/b.ts", F);
+
+        let plan = plan(&rebuild(&dir), &dir).unwrap();
+        let f = finding(&plan, "lib/a.ts::f");
+        assert_eq!(
+            f.successor,
+            Successor::One {
+                id: "lib/b.ts::f".to_string(),
+                deps: Deps::Equal
+            }
+        );
+        assert!(!f.adoptable(), "it names a file that is gone");
+        assert!(f.draft_only());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
