@@ -3,7 +3,7 @@
 //! (`@GET`/`@POST`/…) and Kafka `@Incoming`/`@Outgoing` annotations end
 //! to end through `RepoIndex` (real `detect()` → `JavaStack` →
 //! `QuarkusFeatureModel`), not just the unit tests on the parsing
-//! helpers themselves (see `src/quarkus.rs`).
+//! helpers themselves (see `src/java/quarkus.rs`).
 //!
 //! HTTP fixtures are drawn from real `quarkus-quickstarts` shapes (M18's
 //! chosen test repo — see `ARCHITECTURE.md` open question 11 for why
@@ -20,7 +20,7 @@
 //! annotations at once plus same-class constant channel names
 //! (`quarkus-super-heroes/event-statistics`'s `SuperStats.processFight`,
 //! the actual milestone corpus's shape) — real evidence census in
-//! `src/quarkus.rs`'s module doc comment.
+//! `src/java/quarkus.rs`'s module doc comment.
 
 use codeowl::index::RepoIndex;
 
@@ -86,8 +86,8 @@ fn fully_qualified_annotations_with_no_imports_are_still_recognized() {
     // than the bare `@Path`/`@GET` every hand-written class in this
     // project's other test repos uses -- generated code has no reason to
     // import anything a human will never read. `bare_annotation_name`
-    // (java.rs) and `parse_verb`/`parse_path_annotation`'s own inline
-    // `@`-stripping (quarkus.rs) both missed this: they stopped at
+    // (java/mod.rs) and `parse_verb`/`parse_path_annotation`'s own inline
+    // `@`-stripping (java/quarkus.rs) both missed this: they stopped at
     // stripping the leading `@`, so `@jakarta.ws.rs.Path(...)` never
     // matched a bare `"Path"` comparison anywhere in this file. This is
     // exactly the shape M19 commit 3's generated-interface lookup will

@@ -408,7 +408,7 @@ pub fn detect(root: &Path) -> anyhow::Result<Box<dyn StackPack>> {
 }
 
 /// A repo-relative path's [`FileRole`] under the pack that built `graph` —
-/// the shared lookup `spec/` and `quarkus.rs` both need. A free function
+/// the shared lookup `spec/` and `java/quarkus.rs` both need. A free function
 /// here rather than a `Graph` method so `graph.rs` never has to know the
 /// packs exist.
 pub fn file_role(graph: &Graph, path: &str) -> FileRole {
@@ -545,7 +545,7 @@ impl StackPack for JavaStack {
     }
 
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
-        Some(&crate::quarkus::QuarkusFeatureModel)
+        Some(&crate::java::QuarkusFeatureModel)
     }
 
     fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {
@@ -558,7 +558,7 @@ impl StackPack for JavaStack {
         // table itself (no columns to report via `get_symbol`), and
         // tagging it Schema would exclude its file from ever joining a
         // feature's `core` via `admits_to_core`'s `schema_files` guard —
-        // see `quarkus.rs`'s `is_cdi_managed`, which already treats an
+        // see `java/quarkus.rs`'s `is_cdi_managed`, which already treats an
         // injected repository as a `core`-worthy CDI/data-access type.
         sym.raw == "class"
             && (sym.markers.iter().any(|m| is_entity_annotation(m))
@@ -571,7 +571,7 @@ impl StackPack for JavaStack {
 }
 
 /// `@Entity` / `@Entity(name = "…")` -> true. Exact match on the
-/// annotation name, not a prefix check, matching `quarkus.rs`'s
+/// annotation name, not a prefix check, matching `java/quarkus.rs`'s
 /// `is_admitting_annotation` convention.
 fn is_entity_annotation(marker: &str) -> bool {
     crate::java::bare_annotation_name(marker) == "Entity"
@@ -605,9 +605,9 @@ fn extends_panache_entity(signature: &str) -> bool {
 /// Remove every balanced `<...>` span from `s` (Java generic type
 /// parameters/arguments), e.g. `"Foo<T extends Bar>"` -> `"Foo"`. Not a
 /// general parser: assumes `<`/`>` only ever mean generics here, true
-/// for a class *signature* (`java.rs::signature_before_body`'s output,
+/// for a class *signature* (`java/mod.rs::signature_before_body`'s output,
 /// which never includes a method body where `<`/`>` could be comparison
-/// operators instead). `pub(crate)`, not private: `quarkus.rs`'s
+/// operators instead). `pub(crate)`, not private: `java/quarkus.rs`'s
 /// `implemented_interface_names` reuses it for the identical
 /// `implements`-clause parsing job `extends_panache_entity` already does
 /// for `extends` (M19 code review — was hand-rolled there, duplicating
@@ -706,7 +706,7 @@ impl StackPack for PythonStack {
     }
 
     fn feature_model(&self) -> Option<&'static dyn crate::features::FeatureModel> {
-        Some(&crate::fastapi::FastApiFeatureModel)
+        Some(&crate::python::FastApiFeatureModel)
     }
 
     fn is_schema_symbol(&self, sym: &ExtractedSymbol) -> bool {
@@ -718,7 +718,7 @@ impl StackPack for PythonStack {
         // strings that look identical to a method's (no kind signal
         // reachable from `sym` alone to tell them apart) — so a table
         // with zero methods and one field could never pass either.
-        // Dropped rather than patched around: `java.rs`'s own
+        // Dropped rather than patched around: `java/mod.rs`'s own
         // `is_schema_symbol` never had this restriction at all, and an
         // `@Entity` class with real methods is tagged Schema there
         // without issue, so Python matching that precedent isn't a new
@@ -910,7 +910,7 @@ mod tests {
         );
         // A plain library with no `@Path`-annotated classes (commons-lang)
         // enumerates zero entry points through this model rather than
-        // taking the trait's `None` default — see `quarkus.rs`'s module
+        // taking the trait's `None` default — see `java/quarkus.rs`'s module
         // doc comment and `ARCHITECTURE.md` open question 10.
         assert!(pack.feature_model().is_some());
 
@@ -1010,7 +1010,7 @@ mod tests {
         // A table class with real members (fields, methods, both) is
         // still Schema -- the M17 leaf-only guard was dropped in M21
         // (field extraction made every real table fail it trivially),
-        // matching java.rs's is_schema_symbol, which never had it either.
+        // matching java/mod.rs's is_schema_symbol, which never had it either.
         let mut with_members = mk("class Item(SQLModel, table=True)");
         with_members.children = vec!["m.py::Item::save".into()];
         assert!(pack.is_schema_symbol(&with_members));
@@ -1056,7 +1056,7 @@ mod tests {
         // exclude its file from ever joining a feature's `core` via
         // `admits_to_core`'s `schema_files` guard -- regressing the real,
         // tested case of an injected repository belonging in `core`
-        // (`quarkus.rs`'s `is_cdi_managed`). Stays a plain Container.
+        // (`java/quarkus.rs`'s `is_cdi_managed`). Stays a plain Container.
         assert!(!pack.is_schema_symbol(&mk(
             "public class FruitRepository implements PanacheRepository<Fruit>",
             &[]

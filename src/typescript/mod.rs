@@ -12,7 +12,7 @@
 //! - `schema`: SQL `CREATE TABLE` files into table nodes
 //!
 //! `TypeScriptNextStack` (in `stack.rs`) delegates to what is re-exported
-//! here, the way `RustStack` delegates to `rust.rs`. The tree-sitter grammar
+//! here, the way `RustStack` delegates to `rust/mod.rs`. The tree-sitter grammar
 //! and every `node.kind()` string below are TypeScript-specific; a second
 //! language needs its own extractor.
 //!

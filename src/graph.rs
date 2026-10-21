@@ -213,7 +213,7 @@ pub struct FileExtraction {
 /// same fold for a class's fields/constants -- `public`/`protected`
 /// only, matching `has_public_or_protected`'s existing rule; the value
 /// is stripped transiently at fold time only, since `.signature` itself
-/// stays value-inclusive for `quarkus.rs::resolve_channel_name`, a real
+/// stays value-inclusive for `java/quarkus.rs::resolve_channel_name`, a real
 /// consumer that reads a Kafka channel constant's literal value out of
 /// it). 14 = M21.e (Rust: a trait impl also folds into its target type's
 /// symbol, not just an inherent impl -- but only in the narrow degenerate
@@ -221,7 +221,7 @@ pub struct FileExtraction {
 /// inherent methods, exactly one trait impl targeting the type. Moves
 /// `source_hash`/`children` for every Rust type matching that shape --
 /// the real trigger was `stack.rs::JavaStack`/`PythonStack`/`RustStack`/
-/// `TypeScriptNextStack` and `quarkus.rs`/`fastapi.rs`'s
+/// `TypeScriptNextStack` and `java/quarkus.rs`/`python/fastapi.rs`'s
 /// `QuarkusFeatureModel`/`FastApiFeatureModel`, all zero-field marker
 /// types in this repo). 15 = M21.h (Rust + Java: a fully-qualified
 /// same-crate/cross-package reference with no `use`/`import` statement at

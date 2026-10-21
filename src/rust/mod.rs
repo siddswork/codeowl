@@ -11,6 +11,11 @@
 //! `fn`s remain implementation detail, not declarations CodeOwl generates
 //! a spec for.
 //!
+//! The rest of the Rust pack: this file also holds the import reader, the
+//! module-tree resolver and the file fingerprint; the `crates` submodule
+//! works out which Cargo crate a file belongs to, so `crate::` resolves to
+//! the right root.
+//!
 //! Kind mapping onto the stack-neutral [`SymbolKind`] (M14 / design
 //! decision 1): `fn` -> `Callable`, `struct`/`enum`/`union`/`trait`/`impl`/
 //! `mod` -> `Container`, `const`/`static` -> `Value`, `macro_rules!` ->
@@ -23,6 +28,8 @@
 //! already is. Trait impls (`impl Trait for Foo`) stay their own symbols —
 //! "how `Foo` satisfies `Trait`" is a distinct concern, and other languages
 //! express it separately too (`class Foo implements Trait`).
+
+mod crates;
 
 use tree_sitter::{Node, Parser};
 
@@ -724,7 +731,7 @@ fn visit_container(
     // already pushed its own members into this same flat `out` range, so
     // filtering by `parent == id` here (not just "anything after
     // `before`") avoids treating a grandchild as this container's own
-    // direct member. Matches `java.rs::visit_container`'s identical guard.
+    // direct member. Matches `java/mod.rs::visit_container`'s identical guard.
     let direct: Vec<&ExtractedSymbol> = out[before..]
         .iter()
         .filter(|s| s.parent.as_deref() == Some(id.as_str()))
@@ -1110,10 +1117,10 @@ fn node_lines(node: Node) -> [usize; 2] {
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use self::crates::CrateMap;
 use crate::graph::ResolvedImport;
 use crate::graph::{Graph, SymbolId};
 use crate::imports::{FileImports, ImportRef, ReExport};
-use crate::rust_crates::CrateMap;
 
 /// Parse a `.rs` file's `use` declarations. A `pub use` is a re-export
 /// (the barrel pattern — `lib.rs` is all of these); a plain `use` is an
@@ -1200,7 +1207,7 @@ fn extract_qualified_refs(node: Node, source: &str, out: &mut Vec<ImportRef>) {
 /// if it isn't rooted at `crate` (an external crate, or `self::`/`super::`
 /// -- out of scope for this phase; only `crate::` was actually measured).
 /// `scoped_identifier` whose own `path` is itself a `scoped_type_identifier`
-/// is the "one segment short" shape measured in `mcp.rs`/`quarkus.rs`
+/// is the "one segment short" shape measured in `mcp.rs`/`java/quarkus.rs`
 /// (`crate::symbol::SymbolKind::Callable`, an enum-variant/associated-item
 /// access) -- the real dependency is the *type* one level up
 /// (`SymbolKind`), not `Callable`, which isn't a symbol of its own.
@@ -2016,7 +2023,7 @@ pub struct FileNode {\n\
 
     #[test]
     fn a_private_field_is_still_extracted_as_a_member() {
-        // Matches java.rs's precedent: a member is extracted regardless
+        // Matches java/mod.rs's precedent: a member is extracted regardless
         // of its own visibility, same as a private method already is.
         let syms = extract_file("pub struct C {\n    n: u64,\n}\n", "a.rs");
         assert_eq!(syms.len(), 2);
@@ -2062,7 +2069,7 @@ pub struct FileNode {\n\
 
     #[test]
     fn tuple_struct_fields_are_not_yet_extracted_as_members() {
-        // Deliberately out of scope for this pass (see rust.rs's module
+        // Deliberately out of scope for this pass (see rust/mod.rs's module
         // doc): a tuple field has no `name` field in the grammar at all
         // (`ordered_field_declaration_list`, not `field_declaration_list`),
         // so it falls through visit_item's catch-all and is skipped --

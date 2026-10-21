@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn a_classs_field_members_do_not_inflate_generations_remaining_python() {
-        // Same invariant as the Rust/TS versions above, for python.rs's
+        // Same invariant as the Rust/TS versions above, for python/mod.rs's
         // own class-body-assignment extraction.
         let dir = std::env::temp_dir().join(format!(
             "codeowl-spec-test-{}-field-generations-py",

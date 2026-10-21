@@ -2,7 +2,7 @@
 //! source, which tree-sitter grammar to load, which extensions the module
 //! resolver tries, the JS test-path / UI-primitive heuristics.
 //! `TypeScriptNextStack` (in `stack.rs`) delegates to the free functions
-//! here, the way `RustStack` delegates to `rust.rs`. The stack-neutral
+//! here, the way `RustStack` delegates to `rust/mod.rs`. The stack-neutral
 //! vocabulary (`SourceKind`, `FileRole`) stays in `lang.rs`.
 
 use tree_sitter::Parser;
