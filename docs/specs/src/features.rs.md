@@ -1,46 +1,38 @@
 ---
 kind: file
 source_paths: [src/features.rs]
-file: { source_hash: 93ba22f70a1b253e705c2493fca5048726112ac583621d637edd529b2a674e50, fingerprint: 293b54acd38a7d6e1a376889561cf22bc607815f8157cb2b2b8ee33d5e2f86a2, deps_hash: 8d20d6999e10dd123397f5f916b55ea3550f3996debce4d88eefeff27830b2ee, spec_hash: 6e112a417d84fc1442a7808340c6bf121f7e4b250cfe77ea8dd083f68c7e3b11 }
+file: { source_hash: e5d2f74cd755a51fac7889ba52513ada062b6ff211f4eecfef39ab386a06a35b, fingerprint: b118cff938f0f47ed455626eee64646e8d7aa9f16fc9614f4da6428203f18b1f, deps_hash: 56ced55cdf902cdd830e203b1575467609dd585e771bc8c420bbac80caa9b2e2, spec_hash: 8b0a9d604ef448d0fe34fcdfa9720766b925963de4d44c2a21a8fc104005cf15 }
 symbols:
-  src/features.rs::extract_route_literals: { source_hash: 015937105e99f9bae9eff259e3fc6ce15962516f3e776e20cf8ce7987baf47cf, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 34ad8aa56f43b2d6cc9c2f9de69b6d8f227b697502a3426578522ef207fc9abf }
   src/features.rs::EntryPoint: { source_hash: e9a78fbd8ea6896f5669332c918968c1651df69a8c2fa5ed7f2c6388365679f4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 14310da16b5d25452474b693f600d997e68941243081af421bb5694d59be8ff7 }
-  src/features.rs::FeatureModel: { source_hash: 5d8016218b72d79bdab048db932382dbfb6bdc6fe10aa18147377772c4c29756, deps_hash: deac4854f07368c67ce2d119873eea569a66158733a7f2a110b499cffac6e07a, spec_hash: 988ceebb1a30c709947b5732f8efff5a71f8758db438df4ad3381b830d836448 }
-  src/features.rs::feature_model_for: { source_hash: 4d2a3d5fdbf79640569bd6597bc27b964db51f1f54587ea7e977e7c79b9090c5, deps_hash: 70618c6975fe2acc8c5587f0d2c55d7a41a278af0c8c181454af0664bdb26d54, spec_hash: 90b2c5c266eee402d3f693a6c13bb836d6fc3eaa36501750321b22be2d4e81b2 }
-  src/features.rs::enumerate_entry_points: { source_hash: 0e088455650a81e947a6091adc4287372c0ad40b8834ba4d326cc9172b742d69, deps_hash: deac4854f07368c67ce2d119873eea569a66158733a7f2a110b499cffac6e07a, spec_hash: 1ad5281f08a783e8143285afba6bce667620c665ac3167b9d3199d1369bcbf66 }
+  src/features.rs::FeatureModel: { source_hash: 5d8016218b72d79bdab048db932382dbfb6bdc6fe10aa18147377772c4c29756, deps_hash: 01f4295ee1ac66ab83805a3dc337a64a4cd6562aaeb1018442a21ad6ad27f8da, spec_hash: b1214669279ff59825fe9e6dc8706ba37de207699f0661846cd3870e69695a6e }
+  src/features.rs::feature_model_for: { source_hash: 5beaa341a2933e8a92c9ca98e0b607edc831715960dbfce49dbc33d224b78217, deps_hash: d5b4e5529a86b32333e3f73b5264f75f8547b23ba9a3ffc5ad78035612959fc1, spec_hash: 9c2551c10b7ee79cbbd6ed6214385d7229b7a3f9cfecce4b1642dc494735cd84 }
+  src/features.rs::enumerate_entry_points: { source_hash: 0e088455650a81e947a6091adc4287372c0ad40b8834ba4d326cc9172b742d69, deps_hash: 01f4295ee1ac66ab83805a3dc337a64a4cd6562aaeb1018442a21ad6ad27f8da, spec_hash: bd944c46d349bee212f5ba05729b48fc018a29ba576b3581a2859cbb5fc189ac }
   src/features.rs::feature_slug: { source_hash: b7249fe722139aed12c34ceffdc0fccec63396317314e4adbe16baa0aeed894f, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 68151d633e2ee8d0e4c95d1d39467905538a67b1862432ae1775082dba85db63 }
   src/features.rs::Participants: { source_hash: 30442c4153843c182830e7de2f8d7c02a252efccc3e88efb93c3526598556e68, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c3a921ea219f43a30a401f678af8384ff8a4d13e4e07567a1cae4a285b8c6fed }
-  src/features.rs::assemble_participants: { source_hash: efbcf677d434fff3d43cb0d274663d6b989c4ba92836ff4d4ef46dc0e7cdb654, deps_hash: a2c032ae4dd328475a9f5329808b63a6401dc2fd62ed3b7896bbe539f845f987, spec_hash: 2ba65b7c8f11c1831712e3959c87f580be5deeaffc0d61c207a6dcc9ada88fed }
+  src/features.rs::assemble_participants: { source_hash: efbcf677d434fff3d43cb0d274663d6b989c4ba92836ff4d4ef46dc0e7cdb654, deps_hash: 6b6faca68362bbc530a820070bd7d12159452a43aea831e1c9cbe41e25e9dfcb, spec_hash: 2ba65b7c8f11c1831712e3959c87f580be5deeaffc0d61c207a6dcc9ada88fed }
+  src/features.rs::fixture: { source_hash: 8a60643b827032d79272b519ab45e8ed442eb82ced26de0eef73f59f20a75cd9, deps_hash: 01f4295ee1ac66ab83805a3dc337a64a4cd6562aaeb1018442a21ad6ad27f8da, spec_hash: a639daea5d1f9728ecdf5b03ea8959073ae91635d698fddd07631473771e0e34 }
 dep_targets:
   file -> src/graph.rs::FlowEdge: d62382a78a55
   file -> src/graph.rs::FlowTarget: fec70e24a6f3
-  file -> src/graph.rs::Graph: a0fadcfbc2bc
-  file -> src/lang.rs::ts_parser: ca09f16dafc1
-  file -> src/resolve.rs::ResolvedImport: cfdf3812ee69
-  file -> src/stack.rs::for_name: 45d7be46f14a
+  file -> src/graph.rs::Graph: 8d4d56d40124
+  file -> src/graph.rs::ResolvedImport: cfdf3812ee69
+  file -> src/stack.rs::for_graph: 838a63e2b771
   file -> src/symbol.rs::SymbolId: 6733b5c62e75
-  src/features.rs::extract_route_literals -> src/lang.rs::ts_parser: ca09f16dafc1
-  src/features.rs::FeatureModel -> src/graph.rs::Graph: a0fadcfbc2bc
-  src/features.rs::feature_model_for -> src/graph.rs::Graph: a0fadcfbc2bc
-  src/features.rs::feature_model_for -> src/stack.rs::for_name: 45d7be46f14a
-  src/features.rs::enumerate_entry_points -> src/graph.rs::Graph: a0fadcfbc2bc
+  src/features.rs::FeatureModel -> src/graph.rs::Graph: 8d4d56d40124
+  src/features.rs::feature_model_for -> src/graph.rs::Graph: 8d4d56d40124
+  src/features.rs::feature_model_for -> src/stack.rs::for_graph: 838a63e2b771
+  src/features.rs::enumerate_entry_points -> src/graph.rs::Graph: 8d4d56d40124
   src/features.rs::assemble_participants -> src/graph.rs::FlowEdge: d62382a78a55
   src/features.rs::assemble_participants -> src/graph.rs::FlowTarget: fec70e24a6f3
-  src/features.rs::assemble_participants -> src/graph.rs::Graph: a0fadcfbc2bc
-  src/features.rs::assemble_participants -> src/resolve.rs::ResolvedImport: cfdf3812ee69
+  src/features.rs::assemble_participants -> src/graph.rs::Graph: 8d4d56d40124
+  src/features.rs::assemble_participants -> src/graph.rs::ResolvedImport: cfdf3812ee69
   src/features.rs::assemble_participants -> src/symbol.rs::SymbolId: 6733b5c62e75
+  src/features.rs::fixture -> src/graph.rs::Graph: 8d4d56d40124
 ---
 # src/features.rs
+> Generated by [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
-This file implements the "feature" layer, the part of CodeOwl that groups code around the things a person actually uses (a page, an API route) instead of just around folders. It looks past plain declarations and import statements into three deliberately narrow patterns, found by walking the syntax tree: a `fetch("/api/...")` call whose first argument is a plain string or a template string whose path part is fully static (the query string is stripped; a path with an interpolated segment is skipped rather than guessed at); a `.from("table")` call with exactly one plain string argument shaped like a lowercase table name, ignoring receivers that start with an uppercase letter so `Array.from` and `Buffer.from` are not mistaken for queries; and a `<Component/>` tag with an uppercase first letter, deduplicated per file, with namespaced tags like `<Foo.Bar/>` skipped. Each is matched to real targets: a route path to an `app/api/.../route.ts` file by directory convention, where a `[id]` or `[...slug]` segment matches any single piece and segment counts must be equal; a table name to a schema symbol by exact name; and a component to the file that defines it, via default imports first and then named imports. Resolving those is what lets a feature's description include code that following imports alone would never reach. Most of the file is generic. `assemble_participants` walks the graph's flow edges and imports from the entry file, breadth first, to build a feature's full set of core files, supporting symbols (one hop, tracked by public shape only) and tables, the same way for any framework, and it keeps a file that declares tables out of the core so they appear as data. Only resolved edges are followed. The framework-specific part is behind the `FeatureModel` interface, implemented here once by `TypeScriptNextFeatureModel`, which says what a feature is in a Next.js project (every `page.tsx` under `app/`, plus any API route that no resolved call targets) and which reached files belong inside it (API routes, files in the entry's own directory tree, and files that themselves call an API route or query a table). Slugs and titles come from the entry path (`app/page.tsx` becomes `home`, and folders join with hyphens). A stack with no features, such as a command-line tool, supplies no model, so `feature_model_for` and `enumerate_entry_points` give nothing for it. The matching is syntactic and narrow by design: a non-literal fetch URL, a renamed named import, or an ORM query style other than `.from()` is invisible, and general call-graph analysis is deferred.
-
-## `extract_route_literals`
-### Summary
-The per-file pass that finds every `fetch("/api/...")` string-literal call in a TypeScript source, producing the `RouteLiteral`s that become client→API-route flow edges.
-### Behavior
-Parses the file with `ts_parser` (returning an empty vec on a parse failure), then hands the whole tree to `walk_for_fetch` for a full recursive descent — deliberately not the shallow top-level walk `extract.rs` uses, since a `fetch` call is almost always buried inside a handler or effect. Only `fetch(<string literal>)` forms are matched; a `fetch(url)` with a computed argument produces nothing. Runs once per file at index time; the results are cached on `Graph`.
-### Depends on
-- (none)
+This file is the generic half of the feature layer: it knows what a feature is in the abstract and how to assemble one, but nothing about any particular framework. A feature is a framework entry point plus what it reaches. `EntryPoint` names one (its kind, a unique id that becomes the spec filename, a title, and the file it starts in). `FeatureModel` is the interface a language pack implements to say what its framework's entry points are and which reached files belong inside a feature; the Next.js model lives in the TypeScript pack, and the Quarkus and FastAPI models in the Java and Python packs. `feature_model_for` recovers the model of the stack that built a graph (none for a stack with no runtime entry surface such as a command-line tool, so it has no feature specs at all), and `enumerate_entry_points` wraps it, giving an empty list when there is no model. `assemble_participants` is the framework-neutral walk: from the entry file it follows resolved flow edges and imports breadth first, asks the model whether each reached file belongs in the feature's own code, and sorts everything else into one-hop dependencies or data tables, so the result is three tiers (`core`, `dependencies`, `data`) in a `Participants` value. Core files are tracked by their whole source hash, dependencies by their public shape, and data by its source hash, so a body change to a core file changes the feature while only a public-surface change to a dependency does. A file that declares tables never also becomes core, and only resolved edges are followed, so an unresolved call adds nothing. `feature_slug` turns a route path into a filename-safe slug (`app/submit/page.tsx` becomes `submit`, the root page becomes `home`, folders join with hyphens); it is written for the Next.js layout even though it sits in the generic layer. A test-only `fixture` helper builds a real graph from a few files in a temp directory for this file's tests and the packs' feature tests. The layer is deliberately narrow and is not general call-graph analysis, which stays deferred.
 
 ## `EntryPoint`
 `pub struct EntryPoint`
@@ -56,7 +48,7 @@ One entry point a framework's own conventions expose — a page, an API route, a
 ### Summary
 The interface a language or framework supplies to say what a "feature" is in its codebase, such as a page or an API route in Next.js, or an HTTP endpoint in a Java service. A stack with nothing like that, such as a command-line tool or a library, simply provides none.
 ### Behavior
-Two methods are required, and the trait must be safe to share across threads. `enumerate_entry_points(graph)` returns every feature entry point the framework's file or annotation conventions expose in the graph. `admits_to_core(graph, entry, candidate_file)` is asked about a file reached from an entry point by a resolved flow edge into a file node, and answers whether that file belongs inside the feature's core (tracked by its whole `source_hash`, so any edit to it changes the feature) or is merely a one-hop dependency (tracked by its public shape, the `interface_hash`). Those two judgments are the only ones the generic walk in `assemble_participants` cannot make itself; where a flow edge points is decided separately by the pack's flow-edge resolution. A stack without such a model returns no feature model, and its documents are symbol, file, folder and system specs only. The trait is deliberately kept to these two methods, and implementations are stateless.
+Two methods are required, and the trait must be safe to share across threads. `enumerate_entry_points(graph)` returns every feature entry point the framework's file or annotation conventions expose in the graph. `admits_to_core(graph, entry, candidate_file)` is asked about a file reached from an entry point by a resolved flow edge into a file node, and answers whether that file belongs inside the feature's core (tracked by its whole `source_hash`, so any edit to it changes the feature) or is merely a one-hop dependency (tracked by its public shape, the `interface_hash`). Those two judgments are the only ones the generic walk in `assemble_participants` cannot make itself; where a flow edge points is decided separately by the pack's flow-edge resolution. A stack without such a model returns none from its pack, and its documents are symbol, file, folder and system specs only. The trait is deliberately kept to these two methods.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 
@@ -65,7 +57,7 @@ Two methods are required, and the trait must be safe to share across threads. `e
 ### Summary
 Returns the feature model for the language stack a repo was indexed with, or nothing if that stack has no concept of features, as is the case for a command-line tool or a library.
 ### Behavior
-Reads the pack name stored on the graph, looks the pack up with `stack::for_name`, and returns whatever that pack's `feature_model()` gives: a shared reference valid for the whole program, or `None`. Doing the lookup from the graph means read-only callers such as the spec code do not need the pack passed down to them. A graph with an empty or unknown pack name falls back to the TypeScript pack, so it gets the Next.js feature model. Only the Rust pack returns `None`; Java and Python always return a model, which for a plain Java library simply finds zero entry points, so a `Some` result does not mean any feature exists. Callers treat `None` as "this repo has no feature layer" and skip feature work entirely. A new pack object is created and dropped on each call, which is cheap because packs have no fields.
+Recovers the pack from the graph through `stack::for_graph` and returns whatever that pack's `feature_model()` gives: a shared reference valid for the whole program, or `None`. Doing the lookup from the graph means read-only callers such as the spec code do not need the pack passed down to them. A graph with an empty pack name (one built by a test helper, or an old cache) gets the TypeScript pack, so it gets the Next.js feature model; a non-empty name that is not a registered pack is not tolerated, and `for_graph` panics on it rather than guessing. Only the Rust pack returns `None`; Java and Python always return a model, which for a plain Java library simply finds zero entry points, so a `Some` result does not mean any feature exists. Callers treat `None` as "this repo has no feature layer" and skip feature work entirely.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 - `src/stack.rs::for_graph` — crate::stack
@@ -75,7 +67,7 @@ Reads the pack name stored on the graph, looks the pack up with `stack::for_name
 ### Summary
 Lists every feature entry point in the repo, such as each page and each unreferenced API route in a Next.js project. For a stack with no features it returns an empty list.
 ### Behavior
-Gets the stack's feature model with `feature_model_for`. If there is one, it calls that model's own `enumerate_entry_points` on the graph and returns the result; if there is none, it returns an empty list. This free function is the convenient entry point for callers that do not want to handle the `Option` themselves; it is imported by `src/mcp.rs` and `src/spec.rs`. It does no filtering or sorting of its own, so the order is whatever the model returns. Pure read.
+Gets the stack's feature model with `feature_model_for`. If there is one, it calls that model's own `enumerate_entry_points` on the graph and returns the result; if there is none, it returns an empty list. This free function is the convenient entry point for callers that do not want to handle the `Option` themselves; it is imported by `src/mcp.rs`, `src/spec/coverage.rs` and `src/spec/orphans.rs`. It does no filtering or sorting of its own, so the order is whatever the model returns. Pure read.
 ### Depends on
 - `src/graph.rs::Graph` — crate::graph
 
@@ -128,3 +120,12 @@ The result is `Participants`: `core` in walk order with the entry file first, `d
 - `src/graph.rs::Graph` — crate::graph
 - `src/symbol.rs::SymbolId` — crate::graph
 - externals: std
+
+## `fixture`
+`pub(crate) fn fixture(tag: &str, files: &[(&str, &str)]) -> (Graph, std::path::PathBuf)`
+### Summary
+A test-only helper that builds a real graph from a handful of source files written to a temporary directory, the same way production builds one. It is shared by this file's tests and by the tests of the language packs' feature models.
+### Behavior
+It creates a fresh directory under the system temp folder named from the given tag and the process id, writes each `(relative path, content)` pair into it (creating parent folders), then indexes that directory with `RepoIndex::build` and runs `rebuild`, so imports are resolved and flow edges are set exactly as in production. It returns the graph together with the directory so the caller can read files back and remove it; nothing cleans up automatically. It is compiled only under test. Every step uses `unwrap`, so a failure to write or to index panics the test, and two tests passing the same tag in one process would share a directory.
+### Depends on
+- `src/graph.rs::Graph` — crate::graph
