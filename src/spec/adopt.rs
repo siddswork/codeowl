@@ -70,6 +70,10 @@ pub struct Finding {
     /// file this repo used to have. That is a stale reference, not an
     /// illustration.
     pub names_vanished_file: Vec<String>,
+    /// The written prose the old spec held, and the hashes it was written
+    /// against: what a write step carries over.
+    pub prose: SymbolProse,
+    pub old_hashes: HashPair,
 }
 
 impl Finding {
@@ -264,7 +268,7 @@ pub fn plan(graph: &Graph, root: &Path) -> Result<AdoptionPlan> {
     let files: Vec<String> = graph.files().map(|f| f.id.clone()).collect();
     let findings = resolved
         .into_iter()
-        .map(|(old_id, _, prose, successor)| {
+        .map(|(old_id, old_hashes, prose, successor)| {
             let text = format!("{}\n{}", prose.summary, prose.behavior);
             let moved_paths_named: Vec<String> = file_like_names(&text)
                 .into_iter()
@@ -280,6 +284,8 @@ pub fn plan(graph: &Graph, root: &Path) -> Result<AdoptionPlan> {
                 successor,
                 moved_paths_named,
                 names_vanished_file,
+                prose,
+                old_hashes,
             }
         })
         .collect();
@@ -551,7 +557,7 @@ fn short_name(id: &str) -> &str {
 }
 
 /// The file part of a symbol id (`lib/a.ts::f` is in `lib/a.ts`).
-fn file_of(id: &str) -> &str {
+pub(super) fn file_of(id: &str) -> &str {
     id.split("::").next().unwrap_or(id)
 }
 
@@ -594,34 +600,9 @@ fn names_file(name: &str, file: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::file_task::submit;
-    use crate::spec::test_support::build_feature_fixture;
-    use std::path::PathBuf;
-
-    const PROSE: &str = "### Summary\nDoes the one thing it is named for.\n### Behavior\nRuns synchronously and has no side effects.\n";
-
-    fn write(dir: &Path, rel: &str, text: &str) {
-        let path = dir.join(rel);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, text).unwrap();
-    }
-
-    fn rebuild(dir: &Path) -> Graph {
-        crate::index::RepoIndex::build(dir)
-            .unwrap()
-            .rebuild()
-            .unwrap()
-    }
-
-    /// Specs written for `files`, with `rel::name` given `prose`; returns the
-    /// directory so the test can then move code around and rebuild.
-    fn documented(tag: &str, files: &[(&str, &str)], symbols: &[&str], prose: &str) -> PathBuf {
-        let (graph, dir) = build_feature_fixture(files, tag);
-        for id in symbols {
-            submit(&graph, &dir, id, prose).unwrap();
-        }
-        dir
-    }
+    use crate::spec::test_support::{
+        PROSE, documented, rebuild_graph as rebuild, write_file as write,
+    };
 
     fn finding<'a>(plan: &'a AdoptionPlan, old: &str) -> &'a Finding {
         plan.findings
@@ -964,6 +945,8 @@ mod tests {
             successor,
             moved_paths_named: named.iter().map(|s| s.to_string()).collect(),
             names_vanished_file: named.iter().map(|s| s.to_string()).collect(),
+            prose: SymbolProse::default(),
+            old_hashes: HashPair::default(),
         }
     }
 

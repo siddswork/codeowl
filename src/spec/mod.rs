@@ -33,6 +33,7 @@
 //! repo's own Rust resolver follows a named re-export but not a glob.
 
 mod adopt;
+mod adopt_write;
 mod coverage;
 mod feature;
 mod file_task;
@@ -51,6 +52,9 @@ mod task_input;
 mod test_support;
 
 pub use self::adopt::{AdoptionPlan, Deps, Finding, Successor, Summary, plan as plan_adoption};
+pub use self::adopt_write::{
+    ApplyReport, WritePlan, WriteSummary, apply as apply_adoption, plan_writes,
+};
 pub use self::coverage::{
     CoverageItem, CoverageSummary, by_kind, by_module, coverage, summarize, weighted_freshness,
 };

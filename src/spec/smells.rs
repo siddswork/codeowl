@@ -37,6 +37,11 @@ pub fn prose_smells(text: &str) -> Vec<String> {
     if text.split_whitespace().count() < 4 {
         smells.push("suspiciously_short".to_string());
     }
+    // A generator's closing tag left in the text (an earlier run wrote 63
+    // of them into five stored specs). Real prose never contains one.
+    if text.contains("</content>") {
+        smells.push("stray_markup".to_string());
+    }
     smells
 }
 
@@ -138,6 +143,19 @@ mod tests {
     use crate::spec::format::{FileSpec, HashPair, SymbolProse};
 
     use std::path::Path;
+
+    #[test]
+    fn prose_smells_flags_markup_a_generator_left_at_the_end_of_the_text() {
+        // 63 of these sat in five stored specs, written by an earlier run.
+        assert_eq!(
+            prose_smells("Formats a date into a readable form and returns it.</content>"),
+            vec!["stray_markup"]
+        );
+        assert!(
+            prose_smells("Formats a date into a readable form and returns it.").is_empty(),
+            "prose without the tag is untouched"
+        );
+    }
 
     #[test]
     fn prose_smells_flags_cop_out_phrases_and_short_text_but_not_real_prose() {

@@ -92,9 +92,15 @@ enum Command {
     /// kept its shape. Read-only; writes nothing.
     AdoptMovedSpecs {
         path: PathBuf,
-        /// Also print one line per orphaned symbol.
+        /// Also print one line per orphaned symbol and why a document stays.
         #[arg(long)]
         list: bool,
+        /// Carry the prose over, drop what it was moved out of, and remove
+        /// the orphaned documents everything in which was carried. Without
+        /// it nothing is written. Run it before the regeneration, which
+        /// would otherwise rewrite the same prose from nothing.
+        #[arg(long)]
+        write: bool,
     },
 }
 
@@ -113,11 +119,20 @@ async fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&views)?);
             Ok(())
         }
-        Command::AdoptMovedSpecs { path, list } => {
+        Command::AdoptMovedSpecs { path, list, write } => {
             let root = canonical_root(&path)?;
             let graph = RepoIndex::build(&root)?.rebuild()?;
             let plan = codeowl::spec::plan_adoption(&graph, &root)?;
             print!("{}", plan.report(list));
+            let writes = codeowl::spec::plan_writes(&graph, &root, &plan)?;
+            if write {
+                codeowl::spec::apply_adoption(&graph, &root, &writes)?;
+            }
+            println!();
+            print!("{}", writes.report(write, list));
+            if !write && writes.summary().current + writes.summary().draft > 0 {
+                println!("dry run: nothing written; pass --write to apply");
+            }
             Ok(())
         }
         Command::MigrateFileFingerprint { path, write } => {
