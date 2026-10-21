@@ -267,6 +267,11 @@ pub fn plan_writes(graph: &Graph, root: &Path, plan: &AdoptionPlan) -> Result<Wr
                     not_carried.join(", ")
                 ),
             ));
+        } else if has_unlisted_section(root, doc)? {
+            keep_docs.push((
+                doc.clone(),
+                "it holds a section with no hash record".to_string(),
+            ));
         } else if file_summary_was_edited(root, doc)? {
             keep_docs.push((
                 doc.clone(),
@@ -386,6 +391,21 @@ fn already_documented(root: &Path, id: &str, prose: &SymbolProse) -> Result<Opti
     }))
 }
 
+/// Whether the document has more `## \`name\`` sections than it has hash
+/// records. The parser only reads a section whose id is in the front matter,
+/// so the planner never saw the extra one, and removing the document would
+/// delete text nobody evaluated.
+fn has_unlisted_section(root: &Path, source_path: &str) -> Result<bool> {
+    let path = spec_path(root, source_path);
+    let Some(spec) = read_file_spec(root, source_path)? else {
+        return Ok(false);
+    };
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let sections = text.lines().filter(|l| l.starts_with("## `")).count();
+    Ok(sections > spec.symbols.len())
+}
+
 fn file_summary_was_edited(root: &Path, source_path: &str) -> Result<bool> {
     let Some(spec) = read_file_spec(root, source_path)? else {
         return Ok(false);
@@ -457,10 +477,14 @@ pub fn apply(graph: &Graph, root: &Path, plan: &WritePlan) -> Result<ApplyReport
         else {
             continue;
         };
+        let before = spec.symbols.len();
         spec.symbols.retain(|(id, _)| !ids.contains(&id.as_str()));
         spec.sections.retain(|(id, _)| !ids.contains(&id.as_str()));
-        write_file_spec(root, graph, file_id, &spec)?;
-        report.removed_sections += ids.len();
+        let removed = before - spec.symbols.len();
+        if removed > 0 {
+            write_file_spec(root, graph, file_id, &spec)?;
+            report.removed_sections += removed;
+        }
     }
 
     for doc in &plan.remove_docs {
@@ -775,6 +799,54 @@ mod tests {
         let left = read_file_spec(&dir, "lib/a.ts").unwrap().unwrap();
         assert!(left.sections.iter().all(|(id, _)| id != "lib/a.ts::f"));
         assert!(left.sections.iter().any(|(id, _)| id == "lib/a.ts::k"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_section_with_no_hash_entry_keeps_its_document() {
+        // The planner only sees prose that has a hash record. A section
+        // without one was never looked at, so deleting its document would
+        // destroy text nothing evaluated.
+        let g = "export function g(): number { return 9; }\n";
+        let both = format!("{F}{g}");
+        let dir = documented(
+            "w-hashless",
+            &[("lib/a.ts", both.as_str())],
+            &["lib/a.ts::f", "lib/a.ts::g"],
+            PROSE,
+        );
+        // A hand-added section the parser never reads (no hash record).
+        let path = spec_path(&dir, "lib/a.ts");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("\n## `extra`\n### Summary\nNotes written by hand.\n### Behavior\nKept.\n");
+        std::fs::write(&path, text).unwrap();
+        std::fs::remove_file(dir.join("lib/a.ts")).unwrap();
+        write(&dir, "lib/b.ts", F);
+
+        let (_, wp, _) = run(&dir);
+        assert!(wp.remove_docs.is_empty(), "{:?}", wp.remove_docs);
+        assert_eq!(wp.keep_docs.len(), 1);
+        assert!(wp.keep_docs[0].1.contains("no hash record"));
+        assert!(spec_path(&dir, "lib/a.ts").exists());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_section_that_is_already_absent_is_not_counted_as_removed() {
+        let k = "export function k(): number { return 2; }\n";
+        let both = format!("{F}{k}");
+        let dir = documented(
+            "w-count",
+            &[("lib/a.ts", both.as_str())],
+            &["lib/a.ts::f", "lib/a.ts::k"],
+            PROSE,
+        );
+        write(&dir, "lib/a.ts", k);
+        let (graph, wp, first) = run(&dir);
+        assert_eq!(first.removed_sections, 1);
+        // The same plan again, as after an interrupted run.
+        let again = apply(&graph, &dir, &wp).unwrap();
+        assert_eq!(again.removed_sections, 0);
         std::fs::remove_dir_all(&dir).ok();
     }
 

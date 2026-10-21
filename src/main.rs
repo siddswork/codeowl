@@ -130,7 +130,11 @@ async fn main() -> Result<()> {
             }
             println!();
             print!("{}", writes.report(write, list));
-            if !write && writes.summary().current + writes.summary().draft > 0 {
+            if !write
+                && (writes.summary().current + writes.summary().draft > 0
+                    || !writes.remove_docs.is_empty()
+                    || !writes.remove_sections.is_empty())
+            {
                 println!("dry run: nothing written; pass --write to apply");
             }
             Ok(())

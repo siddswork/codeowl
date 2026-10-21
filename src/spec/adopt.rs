@@ -83,8 +83,9 @@ impl Finding {
         self.same_text_and_dependencies() && self.names_vanished_file.is_empty()
     }
 
-    /// The same, except the prose names a file that is gone: carry it over
-    /// as a draft for the writer to revise, not as current.
+    /// The same, except the prose names a file that is gone: it cannot be
+    /// carried as current, and the write step leaves it, and its document,
+    /// for a person to rewrite.
     pub fn draft_only(&self) -> bool {
         self.same_text_and_dependencies() && !self.names_vanished_file.is_empty()
     }
@@ -181,7 +182,7 @@ impl AdoptionPlan {
             "orphaned symbols with written prose: {}\n\
              adoptable as current: {} ({:.0}%)  [dependencies equal {}, only additions {}]\n\
              not adopted as current:\n\
-             \x20 same text, but the prose names a file this repo no longer has (a draft): {}\n\
+             \x20 same text, but the prose names a file this repo no longer has (left for a person): {}\n\
              \x20 a dependency changed shape: {}\n\
              \x20 dependencies not comparable (old spec recorded none): {}\n\
              \x20 several identical successors, none preferred: {}\n\
@@ -1019,8 +1020,8 @@ mod tests {
         let brief = plan.report(false);
         assert!(brief.contains("adoptable as current: 1"));
         assert!(
-            brief.contains("a draft): 1"),
-            "the vanished-file one is a draft"
+            brief.contains("left for a person): 1"),
+            "the vanished-file one is left for a person"
         );
         assert!(brief.contains("rollup and feature documents (regenerated): 3"));
         assert!(!brief.contains("a::1"));

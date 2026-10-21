@@ -48,19 +48,19 @@ pub enum SpecTask {
     },
 }
 
-/// Whether `spec`'s currently-parsed prose for `id` no longer matches the
-/// `spec_hash` last recorded for it — i.e. a human edited the `.md` file
-/// directly (never through `submit_spec`) since it was last machine-
-/// written. `spec_hash` is defined as `hash_text` of exactly this prose at
-/// generation time (see `submit`), so any drift between the two can only
-/// come from an edit that didn't also fix up the hash — not something a
-/// human would do by hand. See `ARCHITECTURE.md`'s "Human corrections".
 /// The `spec_hash` of a symbol's prose: the one formula `submit` stores and
 /// every human-edit check compares against.
 pub(super) fn symbol_prose_hash(summary: &str, behavior: &str) -> String {
     hash_text(&format!("{summary}\n{behavior}"))
 }
 
+/// Whether a symbol's currently-parsed prose no longer matches the
+/// `spec_hash` last recorded for it — i.e. a human edited the `.md` file
+/// directly (never through `submit_spec`) since it was last machine-
+/// written. `spec_hash` is defined as `hash_text` of exactly this prose at
+/// generation time (see `submit`), so any drift between the two can only
+/// come from an edit that didn't also fix up the hash — not something a
+/// human would do by hand. See `ARCHITECTURE.md`'s "Human corrections".
 pub(super) fn symbol_prose_is_human_edited(hash: &HashPair, prose: &SymbolProse) -> bool {
     symbol_prose_hash(&prose.summary, &prose.behavior) != hash.spec_hash
 }
