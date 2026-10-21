@@ -32,7 +32,7 @@ use crate::text::{leading_comment_block, within_scope};
 /// the JS conventions. Replaces the direct `lang::classify` call so
 /// prioritisation isn't hard-wired to one stack.
 fn classify_in(graph: &Graph, path: &str) -> FileRole {
-    graph.file_role(path)
+    crate::stack::file_role(graph, path)
 }
 
 /// Where a file's spec lives, mirrored under `docs/specs/` — never strips
@@ -4281,7 +4281,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 symbols: crate::rust::extract_file(people, "src/people.rs"),
             },
         ]);
-        graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+        graph.set_resolved_imports(vec![crate::graph::ResolvedImport {
             from_file: "src/people.rs".to_string(),
             specifier: "crate::greeter".to_string(),
             imported_name: "Greeter".to_string(),
@@ -4542,7 +4542,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
         let resolved = file_imports
             .imports
             .iter()
-            .map(|imp| crate::resolve::ResolvedImport {
+            .map(|imp| crate::graph::ResolvedImport {
                 from_file: "a.ts".to_string(),
                 specifier: imp.specifier.clone(),
                 imported_name: imp.imported_name.clone(),
@@ -4603,7 +4603,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
             crate::imports::extract_imports(a, "a.ts")
                 .imports
                 .iter()
-                .map(|imp| crate::resolve::ResolvedImport {
+                .map(|imp| crate::graph::ResolvedImport {
                     from_file: "a.ts".to_string(),
                     specifier: imp.specifier.clone(),
                     imported_name: imp.imported_name.clone(),
@@ -4772,7 +4772,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
                 symbols: crate::rust::extract_file(people, "src/people.rs"),
             },
         ]);
-        graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+        graph.set_resolved_imports(vec![crate::graph::ResolvedImport {
             from_file: "src/people.rs".to_string(),
             specifier: "crate::greeter".to_string(),
             imported_name: "Greeter".to_string(),
@@ -6743,7 +6743,7 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
         let resolved = file_imports
             .imports
             .iter()
-            .map(|imp| crate::resolve::ResolvedImport {
+            .map(|imp| crate::graph::ResolvedImport {
                 from_file: "a.ts".to_string(),
                 specifier: imp.specifier.clone(),
                 imported_name: imp.imported_name.clone(),

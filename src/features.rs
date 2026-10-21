@@ -29,9 +29,9 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use tree_sitter::Node;
 
+use crate::graph::ResolvedImport;
 use crate::graph::{FlowEdge, FlowTarget, Graph, SymbolId};
 use crate::lang::ts_parser;
-use crate::resolve::ResolvedImport;
 
 /// One `fetch("/api/...")` call site found anywhere in a file — not just
 /// top-level, since these calls are almost always inside event handlers or

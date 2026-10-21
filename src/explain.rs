@@ -576,7 +576,7 @@ mod tests {
             },
         ]);
         if import {
-            graph.set_resolved_imports(vec![crate::resolve::ResolvedImport {
+            graph.set_resolved_imports(vec![crate::graph::ResolvedImport {
                 from_file: "src/people.rs".to_string(),
                 specifier: "crate::greeter".to_string(),
                 imported_name: "Greeter".to_string(),

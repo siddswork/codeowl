@@ -1050,7 +1050,7 @@ mod tests {
             root: &Path,
             file_imports: &HashMap<String, FileImports>,
             graph: &Graph,
-        ) -> Vec<crate::resolve::ResolvedImport> {
+        ) -> Vec<crate::graph::ResolvedImport> {
             self.0.resolve_imports(root, file_imports, graph)
         }
         fn extract_flow_edges(&self, rel_path: &str, source: &str) -> Vec<UnresolvedFlowEdge> {

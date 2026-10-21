@@ -25,10 +25,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::graph::ResolvedImport;
 use crate::graph::{FlowTarget, Graph, UnresolvedFlowEdge};
 use crate::imports::FileImports;
 use crate::lang::{FileRole, SourceKind};
-use crate::resolve::ResolvedImport;
 use crate::symbol::ExtractedSymbol;
 
 /// Everything the generic core needs a stack to decide. One `StackPack`
@@ -314,6 +314,14 @@ pub fn for_name(name: &str) -> anyhow::Result<Box<dyn StackPack>> {
         "no registered stack pack is named `{name}` (registered: {})",
         known.join(", ")
     )
+}
+
+/// A repo-relative path's [`FileRole`] under the pack that built `graph` —
+/// the shared lookup `spec.rs` and `quarkus.rs` both need. A free function
+/// here rather than a `Graph` method so `graph.rs` never has to know the
+/// packs exist.
+pub fn file_role(graph: &Graph, path: &str) -> FileRole {
+    for_graph(graph).classify(path)
 }
 
 /// The pack that built `graph`. A graph's pack name is written in exactly
@@ -672,6 +680,17 @@ mod tests {
         names.dedup();
         labels.dedup();
         assert_eq!((names.len(), labels.len()), (n, l));
+    }
+
+    #[test]
+    fn file_role_classifies_under_the_pack_that_built_the_graph() {
+        // `tests/` is a test root to the Rust pack; the TypeScript pack
+        // (the empty-name default) only knows the JS conventions.
+        let mut graph =
+            crate::graph::build_graph_from_sources(&[("a.ts", "export const a = 1;\n")]);
+        assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Domain);
+        graph.set_pack_name("rust");
+        assert_eq!(file_role(&graph, "tests/it.rs"), FileRole::Test);
     }
 
     #[test]

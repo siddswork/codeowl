@@ -20,28 +20,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use oxc_resolver::{ResolveOptions, Resolver, TsconfigDiscovery};
-use serde::{Deserialize, Serialize};
 
-use crate::graph::{Graph, SymbolId};
+use crate::graph::{Graph, ResolvedDefaultImport, ResolvedImport, SymbolId};
 use crate::imports::FileImports;
 
 /// Chasing `export { X } from './barrel-of-barrels'` chains shouldn't be
 /// able to loop forever on a circular re-export — 5 hops is generous for
 /// any real barrel structure and cheap to bound.
 const MAX_REEXPORT_HOPS: u8 = 5;
-
-/// One resolved (or unresolved) file-to-file reference edge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedImport {
-    pub from_file: String,
-    pub specifier: String,
-    pub imported_name: String,
-    /// `None` when the specifier resolves outside the walked repo (an
-    /// external package), doesn't resolve at all (a broken import), or
-    /// resolves to a file with no declaration or re-export chain ending in
-    /// `imported_name`.
-    pub target: Option<SymbolId>,
-}
 
 /// Build a resolver configured for this project: TypeScript-first
 /// extensions (from `lang::RESOLVER_EXTENSIONS`), and `tsconfig.json`
@@ -114,18 +100,6 @@ fn sorted_by_key(file_imports: &HashMap<String, FileImports>) -> Vec<(&String, &
     let mut entries: Vec<_> = file_imports.iter().collect();
     entries.sort_by(|a, b| a.0.cmp(b.0));
     entries
-}
-
-/// One default import resolved to the file it points at — `import
-/// <local_name> from '<specifier>'` where `<specifier>` lands on
-/// `target_file` inside the repo. File-level only: which file, not which
-/// symbol (the M11 rendered-component resolver only needs the file). Not
-/// produced for a specifier that resolves to an external package.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ResolvedDefaultImport {
-    pub from_file: String,
-    pub local_name: String,
-    pub target_file: String,
 }
 
 /// Resolve every file's default imports to the repo-relative file each

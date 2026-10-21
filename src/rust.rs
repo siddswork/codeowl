@@ -1110,9 +1110,9 @@ fn node_lines(node: Node) -> [usize; 2] {
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
+use crate::graph::ResolvedImport;
 use crate::graph::{Graph, SymbolId};
 use crate::imports::{FileImports, ImportRef, ReExport};
-use crate::resolve::ResolvedImport;
 use crate::rust_crates::CrateMap;
 
 /// Parse a `.rs` file's `use` declarations. A `pub use` is a re-export
