@@ -10,6 +10,7 @@ use super::smells::{prose_smells, reject_if_smelly};
 use super::staleness::{dependency_record, file_changes, file_dependency_record, symbol_changes};
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
+use crate::symbol::Symbol;
 
 /// One unit of work `/codeowl generate <id>` still needs a spec for,
 /// bottom-up: a file's top-level symbols before the file itself (see
@@ -47,18 +48,24 @@ pub enum SpecTask {
     },
 }
 
-/// Whether `spec`'s currently-parsed prose for `id` no longer matches the
+/// The `spec_hash` of a symbol's prose: the one formula `submit` stores and
+/// every human-edit check compares against.
+pub(super) fn symbol_prose_hash(summary: &str, behavior: &str) -> String {
+    hash_text(&format!("{summary}\n{behavior}"))
+}
+
+/// Whether a symbol's currently-parsed prose no longer matches the
 /// `spec_hash` last recorded for it — i.e. a human edited the `.md` file
 /// directly (never through `submit_spec`) since it was last machine-
 /// written. `spec_hash` is defined as `hash_text` of exactly this prose at
 /// generation time (see `submit`), so any drift between the two can only
 /// come from an edit that didn't also fix up the hash — not something a
 /// human would do by hand. See `ARCHITECTURE.md`'s "Human corrections".
-fn symbol_prose_is_human_edited(hash: &HashPair, prose: &SymbolProse) -> bool {
-    hash_text(&format!("{}\n{}", prose.summary, prose.behavior)) != hash.spec_hash
+pub(super) fn symbol_prose_is_human_edited(hash: &HashPair, prose: &SymbolProse) -> bool {
+    symbol_prose_hash(&prose.summary, &prose.behavior) != hash.spec_hash
 }
 
-fn file_prose_is_human_edited(hash: &HashPair, file_summary: &str) -> bool {
+pub(super) fn file_prose_is_human_edited(hash: &HashPair, file_summary: &str) -> bool {
     hash_text(file_summary) != hash.spec_hash
 }
 
@@ -279,9 +286,6 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
             let file_id = sym
                 .parent
                 .context("symbol has no containing file to attach its spec to")?;
-            let file = graph
-                .get_file(file_id)
-                .context("symbol's parent is not a file")?;
             let summary = extract_section(content, "### Summary", "\n### ")
                 .filter(|s| !s.is_empty())
                 .context("submitted content missing a non-empty `### Summary` section")?;
@@ -301,27 +305,48 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
                     .collect(),
             )?;
 
-            let mut spec =
-                read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
             let (deps_hash, dep_targets) = dependency_record(graph, root, file_id, sym);
             let hash = HashPair {
                 source_hash: sym.source_hash.clone(),
                 fingerprint: String::new(),
                 deps_hash,
-                spec_hash: hash_text(&format!("{summary}\n{behavior}")),
+                spec_hash: symbol_prose_hash(&summary, &behavior),
                 dep_targets,
             };
-            upsert(&mut spec.symbols, sym.id.clone(), hash.clone());
-            upsert_section(
-                &mut spec.sections,
-                sym.id.clone(),
+            store_symbol_spec(
+                graph,
+                root,
+                sym,
                 SymbolProse { summary, behavior },
-            );
-            reorder_symbols(graph, file_id, &mut spec);
-            write(root, graph, file_id, &spec)?;
+                hash.clone(),
+            )?;
             Ok(hash)
         }
     }
+}
+
+/// Put `prose` and its `hash` in `sym`'s section of its file's spec, creating
+/// the file spec (with a blank file summary) if there is none, and write it.
+/// The one place a symbol's entry reaches disk, so `submit` and the adoption
+/// of moved specs cannot store it differently.
+pub(super) fn store_symbol_spec(
+    graph: &Graph,
+    root: &Path,
+    sym: &Symbol,
+    prose: SymbolProse,
+    hash: HashPair,
+) -> Result<()> {
+    let file_id = sym
+        .parent
+        .context("symbol has no containing file to attach its spec to")?;
+    let file = graph
+        .get_file(file_id)
+        .context("symbol's parent is not a file")?;
+    let mut spec = read_existing(root, &file.id)?.unwrap_or_else(|| FileSpec::blank(&file.id));
+    upsert(&mut spec.symbols, sym.id.clone(), hash);
+    upsert_section(&mut spec.sections, sym.id.clone(), prose);
+    reorder_symbols(graph, file_id, &mut spec);
+    write(root, graph, file_id, &spec)
 }
 
 fn upsert(entries: &mut Vec<(String, HashPair)>, id: String, value: HashPair) {

@@ -1,6 +1,6 @@
 //! Fixtures and helpers shared by the spec modules' tests.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::file_task::submit;
 use super::layout::spec_path;
@@ -160,5 +160,38 @@ pub(crate) fn java_graph(src: &str) -> Graph {
 pub(crate) fn temp_dir_for(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("codeowl-spec-test-{}-{tag}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// Prose that passes the quality check, for a symbol spec.
+pub(crate) const PROSE: &str = "### Summary\nDoes the one thing it is named for.\n### Behavior\nRuns synchronously and has no side effects.\n";
+
+/// Write `text` to `rel` under `dir`, creating its directories.
+pub(crate) fn write_file(dir: &Path, rel: &str, text: &str) {
+    let path = dir.join(rel);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, text).unwrap();
+}
+
+/// The graph of whatever is on disk under `dir` now.
+pub(crate) fn rebuild_graph(dir: &Path) -> Graph {
+    crate::index::RepoIndex::build(dir)
+        .unwrap()
+        .rebuild()
+        .unwrap()
+}
+
+/// Specs written for `files`, with each of `symbols` given `prose`; returns
+/// the directory so a test can then move code around and rebuild.
+pub(crate) fn documented(
+    tag: &str,
+    files: &[(&str, &str)],
+    symbols: &[&str],
+    prose: &str,
+) -> PathBuf {
+    let (graph, dir) = build_feature_fixture(files, tag);
+    for id in symbols {
+        submit(&graph, &dir, id, prose).unwrap();
+    }
     dir
 }

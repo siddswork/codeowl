@@ -38,7 +38,7 @@ pub struct HashPair {
     pub dep_targets: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SymbolProse {
     pub summary: String,
     pub behavior: String,
