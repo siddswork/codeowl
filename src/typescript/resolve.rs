@@ -30,14 +30,14 @@ use crate::imports::FileImports;
 const MAX_REEXPORT_HOPS: u8 = 5;
 
 /// Build a resolver configured for this project: TypeScript-first
-/// extensions (from `typescript::RESOLVER_EXTENSIONS`), and `tsconfig.json`
+/// extensions (from `conventions::RESOLVER_EXTENSIONS`), and `tsconfig.json`
 /// path-alias discovery turned on (this is what makes `@/lib/...`-style
 /// aliases resolve without CodeOwl having to locate and parse
 /// `tsconfig.json` itself).
 pub fn build_resolver() -> Resolver {
     Resolver::new(ResolveOptions {
         tsconfig: Some(TsconfigDiscovery::Auto),
-        extensions: crate::typescript::RESOLVER_EXTENSIONS
+        extensions: super::conventions::RESOLVER_EXTENSIONS
             .iter()
             .map(|e| e.to_string())
             .collect(),
@@ -195,7 +195,7 @@ impl ResolveCtx<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::imports::extract_imports;
+    use crate::typescript::extract_imports;
 
     /// Write a small fixture repo to a fresh temp dir, extract symbols +
     /// imports from every file the same way `main.rs` would, and resolve.

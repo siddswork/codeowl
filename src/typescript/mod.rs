@@ -1,10 +1,18 @@
-//! Walks a single TypeScript/TSX source file with tree-sitter and pulls out
-//! its top-level `Symbol`s.
+//! The TypeScript + Next.js pack: everything specific to reading a
+//! TypeScript/TSX repo (and its SQL schema). This file is the symbol
+//! extractor, which walks a single source file with tree-sitter and pulls
+//! out its top-level `Symbol`s; the rest of the pack is in the submodules:
 //!
-//! **TypeScript + Next.js pack — Phase 2 seam here.** The tree-sitter
-//! grammar and every `node.kind()` string below are TypeScript-specific; a
-//! second language needs its own extractor. See `ROADMAP.md`'s "Stack
-//! modularization".
+//! - `conventions`: which files are source, which are tests or UI
+//!   primitives, which parser a path gets, which extensions the resolver tries
+//! - `imports`: reads a file's `import` and re-export statements
+//! - `resolve`: turns those into file and symbol edges (`oxc_resolver`)
+//! - `schema`: SQL `CREATE TABLE` files into table nodes
+//!
+//! `TypeScriptNextStack` (in `stack.rs`) delegates to what is re-exported
+//! here, the way `RustStack` delegates to `rust.rs`. The tree-sitter grammar
+//! and every `node.kind()` string below are TypeScript-specific; a second
+//! language needs its own extractor.
 //!
 //! Deliberately *not* a recursive walk of every node in the tree: we only
 //! look at `program`'s direct children (unwrapping `export` statements) and,
@@ -14,14 +22,24 @@
 //! generation only recurses containment edges between *symbols*, not every
 //! syntax node.
 
+mod conventions;
+mod imports;
+mod resolve;
+mod schema;
+
+pub(crate) use self::conventions::ts_parser;
+pub use self::conventions::{classify, source_kind};
+pub use self::imports::extract_imports;
+pub use self::resolve::{build_resolver, resolve_default_imports, resolve_imports};
+pub use self::schema::extract_tables;
+
 use std::collections::{HashMap, HashSet};
 
 use tree_sitter::Node;
 
+use self::imports::{bare_export_clause, export_specs};
 use crate::hash::hash_text;
-use crate::imports::{bare_export_clause, export_specs};
 use crate::symbol::{ExtractedSymbol, SymbolKind};
-use crate::typescript::ts_parser;
 
 /// Parse `source` (the contents of `rel_path`) and extract its symbols.
 ///

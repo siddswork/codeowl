@@ -423,9 +423,9 @@ impl RepoIndex {
         // import-resolution plumbing for the rendered-component flow edge,
         // not a flow edge itself — folds into `pack.resolve_imports`'s
         // output in M18.
-        graph.set_resolved_default_imports(crate::resolve::resolve_default_imports(
+        graph.set_resolved_default_imports(crate::typescript::resolve_default_imports(
             &self.root,
-            &crate::resolve::build_resolver(),
+            &crate::typescript::build_resolver(),
             &file_imports,
         ));
 

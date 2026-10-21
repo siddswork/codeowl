@@ -1,5 +1,4 @@
 pub mod explain;
-pub mod extract;
 pub mod fastapi;
 pub mod features;
 pub mod graph;
@@ -11,10 +10,8 @@ pub mod lang;
 pub mod mcp;
 pub mod python;
 pub mod quarkus;
-pub mod resolve;
 pub mod rust;
 pub mod rust_crates;
-pub mod schema;
 pub mod search;
 pub mod spec;
 pub mod stack;
@@ -23,8 +20,6 @@ pub mod text;
 pub mod typescript;
 pub mod watch;
 
-pub use extract::extract_file;
 pub use graph::{FileNode, Graph, Node, SymbolId, SymbolView};
-pub use imports::extract_imports;
-pub use resolve::{build_resolver, resolve_imports};
 pub use symbol::{ExtractedSymbol, Symbol, SymbolKind};
+pub use typescript::{build_resolver, extract_file, extract_imports, resolve_imports};

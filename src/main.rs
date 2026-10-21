@@ -201,7 +201,7 @@ async fn main() -> Result<()> {
 }
 
 /// Canonicalize `path` to an absolute root before anything else touches
-/// it. `resolve.rs` strips this same root off `oxc_resolver`'s (always
+/// it. `typescript/resolve.rs` strips this same root off `oxc_resolver`'s (always
 /// absolute) resolutions to recover a repo-relative path — passed a
 /// relative root like `.`, that `strip_prefix` silently fails for every
 /// single import (an absolute path never has a relative path as a

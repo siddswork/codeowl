@@ -180,7 +180,7 @@ mod tests {
             crate::graph::extract_and_hash("util.ts", util_content),
         ];
         let mut graph = Graph::build(extractions);
-        let file_imports = crate::imports::extract_imports(a_content, "a.ts");
+        let file_imports = crate::typescript::extract_imports(a_content, "a.ts");
         let resolved = file_imports
             .imports
             .iter()

@@ -168,7 +168,7 @@ fn is_dynamic_segment(seg: &str) -> bool {
 
 /// One `.from("<table>")` call site — the Supabase/PostgREST convention for
 /// naming the table a query runs against (M10). Stored on `Graph` like
-/// `RouteLiteral`, resolved against the schema nodes `schema.rs` extracts.
+/// `RouteLiteral`, resolved against the schema nodes `typescript/schema.rs` extracts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableRef {
     pub from_file: String,
@@ -240,7 +240,7 @@ fn is_builtin_from_receiver(member: Node, source: &str) -> bool {
 }
 
 /// Resolve a table name to its schema node, by exact name match against the
-/// `SymbolKind::Schema` symbols `schema.rs` produced. `None` for a name with
+/// `SymbolKind::Schema` symbols `typescript/schema.rs` produced. `None` for a name with
 /// no `CREATE TABLE` (a database view, or a typo) — the "resolves to a
 /// plausible candidate" bar from `ROADMAP.md`'s M10 validation, not a
 /// guarantee.

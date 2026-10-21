@@ -664,7 +664,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
             crate::graph::extract_and_hash("tailwind-merge.ts", c_content),
         ];
         let mut graph = Graph::build(extractions);
-        let file_imports = crate::imports::extract_imports(a_content, "a.ts");
+        let file_imports = crate::typescript::extract_imports(a_content, "a.ts");
         let resolved = file_imports
             .imports
             .iter()
@@ -726,7 +726,7 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
             ),
         ]);
         graph.set_resolved_imports(
-            crate::imports::extract_imports(a, "a.ts")
+            crate::typescript::extract_imports(a, "a.ts")
                 .imports
                 .iter()
                 .map(|imp| crate::graph::ResolvedImport {
