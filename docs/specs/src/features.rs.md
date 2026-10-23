@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/features.rs"
+description: "Specification for `src/features.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/features.rs"
 source_paths: [src/features.rs]
 file: { source_hash: e5d2f74cd755a51fac7889ba52513ada062b6ff211f4eecfef39ab386a06a35b, fingerprint: b118cff938f0f47ed455626eee64646e8d7aa9f16fc9614f4da6428203f18b1f, deps_hash: 56ced55cdf902cdd830e203b1575467609dd585e771bc8c420bbac80caa9b2e2, spec_hash: 8b0a9d604ef448d0fe34fcdfa9720766b925963de4d44c2a21a8fc104005cf15 }
 symbols:

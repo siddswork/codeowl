@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/symbol.rs"
+description: "Specification for `src/symbol.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/symbol.rs"
 source_paths: [src/symbol.rs]
 file: { source_hash: 370984743d7528c6fb683920859d0fcd627ec4dca2a96bff3ac3488a33f4b8ba, fingerprint: 460b1ff448044823e12992d3dbc6c8531440c95888cebeb917c6edbf013fad5d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 0bbbfc1acbec1d5c1e671039285710b2ef991121bbe9c0bda2c9ef0d22164180 }
 symbols:

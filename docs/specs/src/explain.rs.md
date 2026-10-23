@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/explain.rs"
+description: "Specification for `src/explain.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/explain.rs"
 source_paths: [src/explain.rs]
 file: { source_hash: 74f0ddd702ef551d6726fef64d3a73d7325951095eee5034f899760e19fc57f2, fingerprint: d48d5590ba373408a1c18df435f44a7362f0ed8ce78efc4408b34d59736bbda6, deps_hash: 158ca25fa7e87a69417c118ec63a3d3561c832ab8946426f258599de1b393e63, spec_hash: cd8fc1b6b840e7c849d1d3fc7aeaa731ed9426188dacd505eea1c2dc843c4f39 }
 symbols:

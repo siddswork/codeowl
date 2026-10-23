@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/priority.rs"
+description: "Specification for `src/spec/priority.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/priority.rs"
 source_paths: [src/spec/priority.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

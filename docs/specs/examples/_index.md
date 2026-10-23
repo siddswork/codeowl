@@ -1,5 +1,9 @@
 ---
-kind: rollup
+type: rollup
+title: "examples"
+description: "Overview of the `examples` directory."
+generated: { by: CodeOwl }
+resource: "../../../examples"
 dir: examples
 files:
   examples/graph_stats.rs: 9db3f004080f625d4409ca2c4c9ffd1b4f3ff49b966c36d8fdd4c978b7a91186

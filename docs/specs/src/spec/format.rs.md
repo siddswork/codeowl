@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/format.rs"
+description: "Specification for `src/spec/format.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/format.rs"
 source_paths: [src/spec/format.rs]
 file: { source_hash: 7838db1bf2025a829f0484f31ea31ff34be2a203d1e7ebae29605d72e480bcd3, fingerprint: cbd90ab80ec878f8ef31acf5a73c70431d2e9443ede20ef4f6315ef4eef101c3, deps_hash: 31a36f51fd185253e65342408e1409375cb5d89903830806fad98b2ad4bb9fbf, spec_hash: 14233fface43a58d25aba98a105e5638659e33f29c3414d2ab0b7574e7cc4e89 }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/graph.rs"
+description: "Specification for `src/graph.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/graph.rs"
 source_paths: [src/graph.rs]
 file: { source_hash: c5ab154498e8544a8629c3ef47c1efa0c475c3239cd515de68c83abedcd53039, fingerprint: 0b0b147a2a24251dd372eccc64c74160e53daaa569c6af1f34a6e2e6c29aef5d, deps_hash: 638b07ecf55696735542b2528d40677e579d62e22dbd4c49ac226e9ec6c201f6, spec_hash: 5812a820e52dc555cd7e6a0605ad6d853a7f84573c934cbb33a1d8a41494c5da }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/rust.rs"
+description: "Specification for `src/rust.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/rust.rs"
 source_paths: [src/rust.rs]
 file: { source_hash: a3a31a028af7e9bc0740f99f4797d324e98a10e2f0d8e0b4d392fc4b618a3f75, deps_hash: d5d9dda1fe2d98de6d349a5d1ef12609be9279fc4c7678fb1cce0361a9260646, spec_hash: abc5a420c76b517c0ba5a39ee7a1e620f7ea3c2c5c2f81bb664a4e63147b6ca5 }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/schema.rs"
+description: "Specification for `tests/schema.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/schema.rs"
 source_paths: [tests/schema.rs]
 file: { source_hash: 0cf2625a31d748f035d7263d1f10052f267049ed3271ca5ba5a757396ab5c9b5, fingerprint: 9413bae4549b0b4d735be69ac3fe3a7244f4c310d5a98168f5d99f3dcba5fc12, deps_hash: 1df444dd72a2653710a1e710b05bfc39ccb25af714e552f0cda93375b9bcc0ea, spec_hash: 4eea2a084db22b4ed1aa6c2ceabd810e5d3c446f5aaf5b0a531d0b8fa3980d3b }
 symbols:

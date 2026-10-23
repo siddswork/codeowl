@@ -2,7 +2,7 @@
 
 OKF (Open Knowledge Format) is a Google Cloud spec for giving agents knowledge as a directory of markdown files with YAML frontmatter (`okf/SPEC.md` in `GoogleCloudPlatform/knowledge-catalog`, v0.2). A bundle is conformant if every non-reserved `.md` file has parseable frontmatter with a non-empty `type`, and any `index.md` / `log.md` follow their formats. Everything else is optional. `docs/specs/` is the bundle; a concept's ID is its path without `.md`.
 
-Status: brainstormed and decided with Sidd, 2026-10-23. Nothing built. The reasoning goes into `DECISIONS.md` q27 with the first code commit.
+Status (2026-10-23): decided with Sidd; reasoning in `DECISIONS.md` q27. PR 1 is merged (#113: renderers, `migrate-to-okf`, `STYLE.md` moved, docs). PR 3 (the migration run on `docs/specs/`) is done on its own branch. PR 2 (links) is not started.
 
 ## Decisions
 

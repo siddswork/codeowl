@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "examples/graph_stats.rs"
+description: "Specification for `examples/graph_stats.rs`."
+generated: { by: CodeOwl }
+resource: "../../../examples/graph_stats.rs"
 source_paths: [examples/graph_stats.rs]
 file: { source_hash: 3a9635e32089bc73606089db63a79383531541691cf5715d304149a35f8fe7ee, deps_hash: bfc3e45e10445c8906eaa6b40d2ae4352846ce28ee32def3316a690807103aac, spec_hash: 9db3f004080f625d4409ca2c4c9ffd1b4f3ff49b966c36d8fdd4c978b7a91186 }
 symbols:

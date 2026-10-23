@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/python.rs"
+description: "Specification for `src/python.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/python.rs"
 source_paths: [src/python.rs]
 file: { source_hash: d0125a6143c652905080f615dcab73e80a5fa3474dc0ca551656aab8a880b0c1, fingerprint: 93855ce8aef749ac090d2facd428850720c7ae485e065e8968f6d2c7ffd20d7d, deps_hash: 2ffd79ddea5fc2b0585ccc30f98ee1ed61271dd336d617b0ad646a407d7ead96, spec_hash: b335e487fac8b11db8c421c1953f86ee2b2f482016e574e65f59f65eb1a033ed }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/python_spec.rs"
+description: "Specification for `tests/python_spec.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/python_spec.rs"
 source_paths: [tests/python_spec.rs]
 file: { source_hash: cefb22a3522e1f44e37876f9d5b3bd5d88b154d8514b287a36b404001f3422bb, deps_hash: 79c4a84bd83881d6d3e203ca569b918810f2a977acfa4f1d805692aee2c48a84, spec_hash: 9e7e355bef8bf11ec6c9ec35a600f1656146f4ad4b04e8a8ff1d159c77669cf4 }
 symbols:

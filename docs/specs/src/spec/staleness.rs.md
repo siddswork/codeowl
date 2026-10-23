@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/staleness.rs"
+description: "Specification for `src/spec/staleness.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/staleness.rs"
 source_paths: [src/spec/staleness.rs]
 file: { source_hash: 89c0fb42618f9ec84c768f91d1d4c683fe68eacc2216634364a8c55c78c64975, fingerprint: 09e24e279bd337875fe0cc9bdbdfa1ca40a5938d151e8903f07f6794e2c3fcc9, deps_hash: 1cd55d72116cd1d8977b6f67bd0dfa67d6358c78cfbb8448b7dde35cc0ffa4b7, spec_hash: 50b613642a3fcf9ffc0fbf4e95165072e77fe28e664b5287dcae507ab7282b55 }
 symbols:

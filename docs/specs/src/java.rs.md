@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/java.rs"
+description: "Specification for `src/java.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/java.rs"
 source_paths: [src/java.rs]
 file: { source_hash: f26fcb284e237dcaddcd403b2521876c759e3b208014904b51694eb7eb0dac51, fingerprint: 9bbb5f154eb48b2d5f9c089c819166aac3e8ad43ce401ac3570f1ffa37c14ade, deps_hash: 4dcba4523eb64b6f0983159753feeef168eeb49a6644dfbe9da0bcc6af20292c, spec_hash: 41902c6a09b820e04cbce89941a1972168d0ae2cd6f69324dc442338a46f2c18 }
 symbols:

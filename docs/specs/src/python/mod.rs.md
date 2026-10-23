@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/python/mod.rs"
+description: "Specification for `src/python/mod.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/python/mod.rs"
 source_paths: [src/python/mod.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

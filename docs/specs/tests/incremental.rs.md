@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/incremental.rs"
+description: "Specification for `tests/incremental.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/incremental.rs"
 source_paths: [tests/incremental.rs]
 file: { source_hash: 1ad5a485214e403dcaec67a871efd35f4bfdae7e700e40bf0f430500c38948f5, deps_hash: ad8f991c443fc9d8b732781de3051224e6b4521e821e5f8b04fb5480ecd1267b, spec_hash: 5579561847c62b04b36cb74eac37a3db67661c53917463e9d1858b3ae4771766 }
 symbols:

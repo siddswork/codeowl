@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/rust/crates.rs"
+description: "Specification for `src/rust/crates.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/rust/crates.rs"
 source_paths: [src/rust/crates.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

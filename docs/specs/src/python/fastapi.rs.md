@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/python/fastapi.rs"
+description: "Specification for `src/python/fastapi.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/python/fastapi.rs"
 source_paths: [src/python/fastapi.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/java/quarkus.rs"
+description: "Specification for `src/java/quarkus.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/java/quarkus.rs"
 source_paths: [src/java/quarkus.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

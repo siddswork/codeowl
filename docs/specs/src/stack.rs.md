@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/stack.rs"
+description: "Specification for `src/stack.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/stack.rs"
 source_paths: [src/stack.rs]
 file: { source_hash: 92f37e031ebf3d9879da5a27698846d102096f4527f8845608869aa94c403331, fingerprint: 1c5450f59362c39b8c68c2f0b1bd7c4512143ed22f60fd5dee011583f7dae95a, deps_hash: 3ae4bce9fec26006e39da4effd39a13b73a746fffc51def517a4aa43b83d3bc5, spec_hash: beded8c9bf2bf42c3cdff56700542fd8d3802fd8d48cabea007403abebb84b51 }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/hash.rs"
+description: "Specification for `src/hash.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/hash.rs"
 source_paths: [src/hash.rs]
 file: { source_hash: cc20920f6b3ad8a75b6f2a992f5def7182810a96edcd6818a7995014485694bd, fingerprint: 4c2f55225b9b3eebc43f62c6bd1fdea54d5ed971f3a307b92658b8914c44e8e4, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 676a175ccd5d2ddca7ddb6bb5ba588f4f87f1131cbc9c806b0a0e659a4e4c56f }
 symbols:

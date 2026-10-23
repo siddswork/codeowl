@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/typescript/resolve.rs"
+description: "Specification for `src/typescript/resolve.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/typescript/resolve.rs"
 source_paths: [src/typescript/resolve.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/java_spec.rs"
+description: "Specification for `tests/java_spec.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/java_spec.rs"
 source_paths: [tests/java_spec.rs]
 file: { source_hash: 56c01160389a76624891d254a2c2991562674d5fec4fe2238882e24c7e1fc75c, deps_hash: 79c4a84bd83881d6d3e203ca569b918810f2a977acfa4f1d805692aee2c48a84, spec_hash: ef64c8cd9235d39abcf70e1845e835fcf6ca93888661cb3f48a37b62a70a57da }
 symbols:

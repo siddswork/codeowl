@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/text.rs"
+description: "Specification for `src/text.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/text.rs"
 source_paths: [src/text.rs]
 file: { source_hash: 1c77c1ee16b4008d3decc29776d4c4bc40cf9e52829f03e7c977fcff9ad0eb1e, fingerprint: 70ed67bae98cf918ad9b0146ff9a62a327a90725324e92fae5a0d6a255205256, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: c437c0d8eec1915dd71b33d9fac761b3a17b3a7e5e04bacbb3c2ff380a49e994 }
 symbols:
