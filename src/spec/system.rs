@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::feature::{current_feature_hashes, read_feature_spec};
-use super::format::{extract_section, with_provenance, without_provenance, write_replacing};
+use super::format::{
+    extract_section, heading_title, okf_frontmatter, path_from_doc, with_provenance,
+    without_provenance, write_replacing,
+};
 use super::rollup::{current_module_hashes, read_rollup_spec};
 use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
@@ -34,7 +37,23 @@ pub fn system_spec_path(root: &Path) -> PathBuf {
 pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    out.push_str("kind: system\n");
+    let repo = root.file_name().map_or_else(
+        || "system".to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    let title = heading_title(&spec.body).unwrap_or(&repo);
+    let sources: Vec<String> = spec
+        .modules
+        .iter()
+        .map(|(dir, _)| path_from_doc("", dir))
+        .collect();
+    out.push_str(&okf_frontmatter(
+        "system",
+        title,
+        &format!("Overview of the {title} codebase."),
+        None,
+        &sources,
+    ));
     out.push_str("modules:\n");
     for (dir, hash) in &spec.modules {
         out.push_str(&format!("  {dir}: {hash}\n"));
@@ -300,6 +319,37 @@ mod tests {
         assert_eq!(parse_system(&rendered).unwrap(), spec);
         let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
         assert_eq!(parse_system(&legacy).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_system_spec_leads_with_the_okf_keys_and_lists_each_module_as_a_source() {
+        let spec = SystemSpec {
+            modules: vec![
+                ("lib/email".to_string(), "rolluphash".to_string()),
+                ("app".to_string(), "rolluphash2".to_string()),
+            ],
+            features: vec![("submit".to_string(), "featurehash".to_string())],
+            spec_hash: "systemhash".to_string(),
+            body: "# Acme\n## Summary\nA competition platform.".to_string(),
+        };
+        let rendered = render_system(Path::new("/nonexistent"), &spec);
+        let head: Vec<&str> = rendered.lines().take(9).collect();
+        assert_eq!(
+            head,
+            vec![
+                "---",
+                "type: system",
+                "title: \"Acme\"",
+                "description: \"Overview of the Acme codebase.\"",
+                "generated: { by: CodeOwl }",
+                "sources:",
+                "  - { resource: \"../../lib/email\" }",
+                "  - { resource: \"../../app\" }",
+                "modules:",
+            ]
+        );
+        assert!(!rendered.contains("kind:"), "{rendered}");
+        assert_eq!(parse_system(&rendered).unwrap(), spec);
     }
 
     #[test]

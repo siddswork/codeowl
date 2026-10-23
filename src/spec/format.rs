@@ -136,6 +136,103 @@ pub(super) fn without_provenance(text: &str) -> String {
     }
 }
 
+/// `s` as a YAML double-quoted scalar. Only the quote and the backslash
+/// need escaping for the strings written here (paths and one-line sentences).
+pub(super) fn yaml_quoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// The inverse of [`yaml_quoted`]; a value that is not quoted is returned as
+/// it is (trimmed), so specs written before quoting existed read the same.
+pub(super) fn yaml_unquoted(s: &str) -> String {
+    let s = s.trim();
+    let Some(inner) = s.strip_prefix('"').and_then(|r| r.strip_suffix('"')) else {
+        return s.to_string();
+    };
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            out.extend(chars.next());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A path as an item of an unquoted YAML flow sequence: left as it is when
+/// it is made only of characters that cannot confuse a YAML parser, quoted
+/// otherwise (`app/api/[id]/route.ts` would not parse unquoted). Keeping the
+/// plain form for ordinary paths leaves every existing spec byte for byte.
+pub(super) fn yaml_flow_item(path: &str) -> String {
+    let plain = !path.is_empty()
+        && !path.starts_with('-')
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-' | '+'));
+    if plain {
+        path.to_string()
+    } else {
+        yaml_quoted(path)
+    }
+}
+
+/// `target`, a repo-relative path, as seen from a document stored under
+/// `docs/specs/<doc_dir>/`: out of `docs/specs` and `doc_dir`, then down to
+/// the target. OKF resolves a relative path against the document naming it.
+pub(super) fn path_from_doc(doc_dir: &str, target: &str) -> String {
+    let ups = 2 + doc_dir.split('/').filter(|c| !c.is_empty()).count();
+    format!("{}{target}", "../".repeat(ups))
+}
+
+/// The text of a document's title: its first line, when that is a level-1
+/// heading. A feature or system spec stores its title as part of its body.
+pub(super) fn heading_title(text: &str) -> Option<&str> {
+    text.lines().next()?.strip_prefix("# ").map(str::trim)
+}
+
+/// The frontmatter keys Open Knowledge Format asks of a concept document,
+/// in a fixed order: `type` (the one required key), a `title`, a one-line
+/// `description`, who `generated` it, and either the `resource` it is about
+/// or the `sources` it covers. They are written first, ahead of the keys
+/// CodeOwl keeps for itself, because the parsers read a block (`modules:`,
+/// `participants:`) until the next non-indented key. Strings are quoted, so
+/// a path or sentence cannot break the YAML.
+pub(super) fn okf_frontmatter(
+    doc_type: &str,
+    title: &str,
+    description: &str,
+    resource: Option<&str>,
+    sources: &[String],
+) -> String {
+    let mut out = format!(
+        "type: {doc_type}\ntitle: {}\ndescription: {}\ngenerated: {{ by: CodeOwl }}\n",
+        yaml_quoted(title),
+        yaml_quoted(description)
+    );
+    if let Some(resource) = resource {
+        out.push_str(&format!("resource: {}\n", yaml_quoted(resource)));
+    }
+    if !sources.is_empty() {
+        out.push_str("sources:\n");
+        for source in sources {
+            out.push_str(&format!("  - {{ resource: {} }}\n", yaml_quoted(source)));
+        }
+    }
+    out
+}
+
 /// Render a `FileSpec` to the markdown+frontmatter document
 /// `ARCHITECTURE.md`'s "File spec shape" describes. `graph`/`file_id` are
 /// needed to pull each symbol's current signature and the file's
@@ -149,8 +246,18 @@ pub(super) fn without_provenance(text: &str) -> String {
 pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    out.push_str("kind: file\n");
-    out.push_str(&format!("source_paths: [{}]\n", spec.source_path));
+    let doc_dir = spec.source_path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    out.push_str(&okf_frontmatter(
+        "file",
+        &spec.source_path,
+        &format!("Specification for `{}`.", spec.source_path),
+        Some(&path_from_doc(doc_dir, &spec.source_path)),
+        &[],
+    ));
+    out.push_str(&format!(
+        "source_paths: [{}]\n",
+        yaml_flow_item(&spec.source_path)
+    ));
     let fingerprint = if spec.file.fingerprint.is_empty() {
         String::new()
     } else {
@@ -302,12 +409,8 @@ pub fn parse(content: &str) -> Result<FileSpec> {
             .context("malformed frontmatter line in spec file")?;
         match key.trim() {
             "source_paths" => {
-                source_path = value
-                    .trim()
-                    .trim_start_matches('[')
-                    .trim_end_matches(']')
-                    .trim()
-                    .to_string();
+                source_path =
+                    yaml_unquoted(value.trim().trim_start_matches('[').trim_end_matches(']'));
             }
             "file" => file = parse_hash_pair(value),
             _ => {}
@@ -1128,5 +1231,137 @@ impl<T: Render> Panel<T> {\n\
             !rendered.contains("fingerprint"),
             "an empty fingerprint is not written: {rendered}"
         );
+    }
+
+    #[test]
+    fn a_yaml_string_is_double_quoted_with_its_quotes_and_backslashes_escaped() {
+        assert_eq!(yaml_quoted("src/hash.rs"), "\"src/hash.rs\"");
+        assert_eq!(yaml_quoted("app/[id]/route.ts"), "\"app/[id]/route.ts\"");
+        assert_eq!(yaml_quoted("say \"hi\""), "\"say \\\"hi\\\"\"");
+        assert_eq!(yaml_quoted("a\\b"), "\"a\\\\b\"");
+        assert_eq!(yaml_unquoted("\"say \\\"hi\\\"\""), "say \"hi\"");
+        assert_eq!(yaml_unquoted("\"a\\\\b\""), "a\\b");
+        assert_eq!(yaml_unquoted("plain"), "plain", "an unquoted value is kept");
+    }
+
+    #[test]
+    fn a_path_is_given_as_seen_from_the_document_that_names_it() {
+        // docs/specs/src/hash.rs.md -> repo root is three directories up.
+        assert_eq!(path_from_doc("src", "src/hash.rs"), "../../../src/hash.rs");
+        // A top-level file's spec sits directly under docs/specs.
+        assert_eq!(path_from_doc("", "Cargo.toml"), "../../Cargo.toml");
+        assert_eq!(
+            path_from_doc("src/spec", "src/spec"),
+            "../../../../src/spec"
+        );
+        assert_eq!(path_from_doc("_features", "app/x.ts"), "../../../app/x.ts");
+    }
+
+    #[test]
+    fn the_okf_keys_come_in_a_fixed_order_and_omit_what_is_absent() {
+        let with_resource = okf_frontmatter(
+            "file",
+            "a.ts",
+            "Specification for `a.ts`.",
+            Some("../../a.ts"),
+            &[],
+        );
+        assert_eq!(
+            with_resource,
+            "type: file\n\
+             title: \"a.ts\"\n\
+             description: \"Specification for `a.ts`.\"\n\
+             generated: { by: CodeOwl }\n\
+             resource: \"../../a.ts\"\n"
+        );
+        let with_sources = okf_frontmatter(
+            "feature",
+            "Artwork submission",
+            "Specification for the Artwork submission feature.",
+            None,
+            &["../../../a.ts".to_string(), "../../../b.ts".to_string()],
+        );
+        assert!(
+            !with_sources.lines().any(|l| l.starts_with("resource:")),
+            "{with_sources}"
+        );
+        assert!(
+            with_sources.ends_with(
+                "sources:\n  - { resource: \"../../../a.ts\" }\n  - { resource: \"../../../b.ts\" }\n"
+            ),
+            "{with_sources}"
+        );
+    }
+
+    #[test]
+    fn a_file_spec_leads_with_the_okf_keys_and_no_longer_writes_kind() {
+        let graph = build_graph_from_sources(&[("lib/a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("lib/a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "lib/a.ts".to_string(),
+            file_summary: "One thing.".to_string(),
+            ..FileSpec::blank("lib/a.ts")
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        let head: Vec<&str> = rendered.lines().take(6).collect();
+        assert_eq!(
+            head,
+            vec![
+                "---",
+                "type: file",
+                "title: \"lib/a.ts\"",
+                "description: \"Specification for `lib/a.ts`.\"",
+                "generated: { by: CodeOwl }",
+                "resource: \"../../../lib/a.ts\"",
+            ]
+        );
+        assert!(!rendered.contains("kind:"), "{rendered}");
+        assert_eq!(parse(&rendered).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_path_with_brackets_is_written_so_it_is_valid_yaml_and_read_back() {
+        // A Next.js dynamic route. `[id]` inside an unquoted flow sequence is
+        // not valid YAML, so the path is quoted and the parser unquotes it.
+        let path = "app/api/[id]/route.ts";
+        let graph = build_graph_from_sources(&[(path, "export function GET() {}\n")]);
+        let file_id = graph.find(path).unwrap();
+        let spec = FileSpec {
+            source_path: path.to_string(),
+            file_summary: "A route.".to_string(),
+            ..FileSpec::blank(path)
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        assert!(
+            rendered.contains("source_paths: [\"app/api/[id]/route.ts\"]\n"),
+            "{rendered}"
+        );
+        assert_eq!(parse(&rendered).unwrap(), spec);
+        // A file written before the quoting existed still reads the same.
+        let legacy = rendered.replace(
+            "source_paths: [\"app/api/[id]/route.ts\"]",
+            "source_paths: [app/api/[id]/route.ts]",
+        );
+        assert_eq!(parse(&legacy).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_documents_title_is_its_first_level_one_heading() {
+        assert_eq!(heading_title("# Acme\n## Summary\nText."), Some("Acme"));
+        assert_eq!(heading_title("# Acme"), Some("Acme"));
+        assert_eq!(
+            heading_title("## Summary\nText."),
+            None,
+            "only a level-1 heading"
+        );
+        assert_eq!(heading_title("Text.\n# Late"), None, "only the first line");
+        assert_eq!(heading_title(""), None);
+    }
+
+    #[test]
+    fn a_spec_written_with_kind_still_parses_and_the_okf_keys_are_skipped() {
+        let old = "---\nkind: file\nsource_paths: [a.ts]\nfile: { source_hash: s, deps_hash: d, spec_hash: p }\n---\n# a.ts\n## Summary\nA file.\n";
+        let new = "---\ntype: file\ntitle: \"a.ts\"\ndescription: \"Specification for `a.ts`.\"\ngenerated: { by: CodeOwl }\nresource: \"../../a.ts\"\nsource_paths: [a.ts]\nfile: { source_hash: s, deps_hash: d, spec_hash: p }\n---\n# a.ts\n## Summary\nA file.\n";
+        assert_eq!(parse(old).unwrap(), parse(new).unwrap());
     }
 }
