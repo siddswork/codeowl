@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/typescript/conventions.rs"
+description: "Specification for `src/typescript/conventions.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/typescript/conventions.rs"
 source_paths: [src/typescript/conventions.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

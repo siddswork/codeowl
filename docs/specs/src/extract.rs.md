@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/extract.rs"
+description: "Specification for `src/extract.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/extract.rs"
 source_paths: [src/extract.rs]
 file: { source_hash: 5a092b27253793bd1f357b81de71d601df24b6d758ef1461457d3913e795f97a, fingerprint: 666fea3fde69a1a4d7a632cb846d62af17ee27ffc75c8b529d564ed52b3adb74, deps_hash: a469f3de54636f1fa8782176580650d4a3355b3ae9a24c031a5b28b7243baf17, spec_hash: 6e48d00a5e29e00d9b69de93d01f5afbe57e0ad8a58d9a9f3f1a4a20e7de3499 }
 symbols:

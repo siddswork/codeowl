@@ -1,5 +1,9 @@
 ---
-kind: rollup
+type: rollup
+title: "src"
+description: "Overview of the `src` directory."
+generated: { by: CodeOwl }
+resource: "../../../src"
 dir: src
 files:
   src/extract.rs: 6e48d00a5e29e00d9b69de93d01f5afbe57e0ad8a58d9a9f3f1a4a20e7de3499

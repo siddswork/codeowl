@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/mcp.rs"
+description: "Specification for `src/mcp.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/mcp.rs"
 source_paths: [src/mcp.rs]
 file: { source_hash: 88e3218a8211427c7f15c2f89351fb53063991a5ca91befc6aae21332a6f10d1, deps_hash: 9444e52185555f611607b32518e97fa859338da2fec05d5fc9f83b1823fcf766, spec_hash: 980c9cf0ea48a13476da1c34104a2fe426ad9ddc024789af3c50465b4fd3b070 }
 symbols:

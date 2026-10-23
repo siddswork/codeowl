@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "examples/measure_signature_fold.rs"
+description: "Specification for `examples/measure_signature_fold.rs`."
+generated: { by: CodeOwl }
+resource: "../../../examples/measure_signature_fold.rs"
 source_paths: [examples/measure_signature_fold.rs]
 file: { source_hash: fadc95706043b18f00e3109413c468c258a0005d4d60d51ce9993337640da873, deps_hash: b6a3272c4057cc497094fdae34762d5fb193ee39662db690a6e0f5aae3be4a4f, spec_hash: 7318492554ac15ab6200c0a592bcadc1d50b78ec47b5291a6daf15aca1db1920 }
 symbols:

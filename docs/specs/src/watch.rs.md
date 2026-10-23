@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/watch.rs"
+description: "Specification for `src/watch.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/watch.rs"
 source_paths: [src/watch.rs]
 file: { source_hash: 5a233068bb9858d0af025543cd933f7a6552e39e98d4b90ae1326c5bb2f369b3, deps_hash: aec1102fdf89ae067eb2fba4cc0acad666f9a5a607fcab4c157bffe92cd5df8c, spec_hash: 7bb2d2c9cbeb9f34e907198177e01513bde421264895192a7a4bee03e5ee5cde }
 symbols:

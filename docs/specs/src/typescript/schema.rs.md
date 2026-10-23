@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/typescript/schema.rs"
+description: "Specification for `src/typescript/schema.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/typescript/schema.rs"
 source_paths: [src/typescript/schema.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

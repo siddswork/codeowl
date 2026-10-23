@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/coverage.rs"
+description: "Specification for `src/spec/coverage.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/coverage.rs"
 source_paths: [src/spec/coverage.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

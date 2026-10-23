@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/feature_components.rs"
+description: "Specification for `tests/feature_components.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/feature_components.rs"
 source_paths: [tests/feature_components.rs]
 file: { source_hash: 05559633a59efc94b982786afaa20540ead46b6a43fe4bd476273c323c0a4e48, fingerprint: 872f50b38c71a22daacbab8ad0ea226758ed3dd3630cd90963e7360f9fba33dd, deps_hash: dcd610b167fad1e8e0a2001ef3e19bdedc1c1481e981a771bcc324d95fc550f9, spec_hash: 6473b3f73450cfdcae2d9349f72df3f6b54828d41dbc4733131b985ec019d488 }
 symbols:

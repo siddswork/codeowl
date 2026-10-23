@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/quarkus_spec.rs"
+description: "Specification for `tests/quarkus_spec.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/quarkus_spec.rs"
 source_paths: [tests/quarkus_spec.rs]
 file: { source_hash: 56f6df770c6394191954f6c91812205b71ede1141cb239955fe4f5f3b208a7c7, fingerprint: b75d2c9d910c79497632af6ea3148d7921b380eb383c4480ff55440b05464354, deps_hash: 454bac184e033d6d0f341c4aa6393dccebb041ea2e972089f7985c7b7f001acd, spec_hash: 9ffe36c2b5388c8a2a1283692993043884f3f28ff465bd86b92f84b367fd6cc7 }
 symbols:

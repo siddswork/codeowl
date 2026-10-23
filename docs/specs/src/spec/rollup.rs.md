@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/rollup.rs"
+description: "Specification for `src/spec/rollup.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/rollup.rs"
 source_paths: [src/spec/rollup.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/imports.rs"
+description: "Specification for `src/imports.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/imports.rs"
 source_paths: [src/imports.rs]
 file: { source_hash: 031fcec6569ec878281bec18a5fbc2d836581047d476664867aa3edf1814c138, fingerprint: d35615cccfb69523fdb2cec75d63dfac20496d414077aa7cda2eb856f3b4ea66, deps_hash: a1964b774915f48932ea74e02999d3d269ef7b4814dc96c0fd8d0cd974b40435, spec_hash: 3748d51ee7f67b6b67ab68eb386301ce8aff42ddb57f5853cf266c68a5247fa0 }
 symbols:

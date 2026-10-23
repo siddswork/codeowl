@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "tests/lifecycle_matrix.rs"
+description: "Specification for `tests/lifecycle_matrix.rs`."
+generated: { by: CodeOwl }
+resource: "../../../tests/lifecycle_matrix.rs"
 source_paths: [tests/lifecycle_matrix.rs]
 file: { source_hash: ac49515f99df4818e83554be213434674794ad30734b57d9a1886cabcb3f64d4, deps_hash: 31be960c157adfea5125b5be13987c7851fd5e2daab35f469d0bc5a4c2bd55ae, spec_hash: da5d982833b6f9035427ee5f0b5aed5eef9855828426139d2d26dded8f8bed46 }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/java/mod.rs"
+description: "Specification for `src/java/mod.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/java/mod.rs"
 source_paths: [src/java/mod.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

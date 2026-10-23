@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/lang.rs"
+description: "Specification for `src/lang.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/lang.rs"
 source_paths: [src/lang.rs]
 file: { source_hash: 265ae6a607d0aeb3634623f5573365d76832769b01ae177ad47707feaafda5e6, fingerprint: a2bb150eb112ce790fb6083c73df811365b95f63f3e9d109e77f6b5a304b45f1, deps_hash: 67a48b24191b515fc09307d7ac000c448b56f790acab54e1bc729df0768a141a, spec_hash: 2dab468e0eef6bfebf0a19bb31c9f1e136ec25ceb288fd087e02e7ffe0cbf961 }
 symbols:

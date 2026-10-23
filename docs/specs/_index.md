@@ -1,5 +1,11 @@
 ---
-kind: system
+type: system
+title: "CodeOwl"
+description: "Overview of the CodeOwl codebase."
+generated: { by: CodeOwl }
+sources:
+  - { resource: "../../examples" }
+  - { resource: "../../src" }
 modules:
   examples: 28f8858603a60163c9bf65bd0f65dfb0a68a9439f4b4c67537d27847b0a9a5ba
   src: 075ddec4b054e9a3f51fca517968e76b1c4b11c156e564f9130c51ee69aa2ecc

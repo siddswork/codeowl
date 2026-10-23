@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/fixtures.rs"
+description: "Specification for `src/fixtures.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/fixtures.rs"
 source_paths: [src/fixtures.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

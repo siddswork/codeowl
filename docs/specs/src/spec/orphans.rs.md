@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/orphans.rs"
+description: "Specification for `src/spec/orphans.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/orphans.rs"
 source_paths: [src/spec/orphans.rs]
 file: { source_hash: , deps_hash: , spec_hash:  }
 symbols:

@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/main.rs"
+description: "Specification for `src/main.rs`."
+generated: { by: CodeOwl }
+resource: "../../../src/main.rs"
 source_paths: [src/main.rs]
 file: { source_hash: 011cba8b4809093175b58307e20a155e9b18ad9ccdb4066a088a2876fc382c78, deps_hash: ad8f991c443fc9d8b732781de3051224e6b4521e821e5f8b04fb5480ecd1267b, spec_hash: cfeafeda7432fcd8c88c31b99895f9eabbcfe53b74300f1a50a82b7ded6fac33 }
 symbols:

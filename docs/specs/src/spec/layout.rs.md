@@ -1,5 +1,9 @@
 ---
-kind: file
+type: file
+title: "src/spec/layout.rs"
+description: "Specification for `src/spec/layout.rs`."
+generated: { by: CodeOwl }
+resource: "../../../../src/spec/layout.rs"
 source_paths: [src/spec/layout.rs]
 file: { source_hash: 81a3707631c193c527e7a7c490a2d26c8625a16e435c158020b250d44583c740, fingerprint: fa92627011f6ef4a8eeedc401840b69a4d9036170090e790c681c6c6713c8f35, deps_hash: 65205747e590744ed7ea34c41df8e27ea7309f76aa40da203218e7882104e30d, spec_hash: 13a318792463a619c6f5cd57546e5b1dc25ea01e3e50af0fb88261a3dd7da370 }
 symbols:
