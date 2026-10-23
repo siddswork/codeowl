@@ -342,8 +342,14 @@ target loop above:
    run another batch or target something specific. If that same call's
    `orphaned` list is non-empty, say so — those are spec documents whose
    target no longer exists in the graph at all (a deleted file, a
-   collapsed rollup, a removed feature entry point), dead weight to
-   delete, not something another generate run will ever pick up. If the
+   collapsed rollup, a removed feature entry point), not something
+   another generate run will ever pick up. Do not delete them yet: if
+   the code was moved, split or renamed rather than removed, the prose
+   may still apply. Tell the user to run `codeowl adopt-moved-specs
+   <path>` in a terminal (a dry run that reports what it would carry
+   over), then again with `--write`, and to delete only what it leaves.
+   That is a CLI command, not a tool you can call; never run `--write`
+   yourself unasked. If the
    system spec is the only thing left, say so and suggest
    `/codeowl-generate system`.
 

@@ -700,7 +700,8 @@ Two places, with opposite lifecycles:
   goes `stale` when its target still exists but moved; it becomes
   `orphaned` when the target is gone entirely (a deleted file, a removed
   route). Orphaned specs are excluded from `coverage`/`freshness`/`pending`
-  — flagged as dead weight, never mistaken for a real gap.
+  — flagged, never mistaken for a real gap. If the code only moved or was
+  renamed, run `codeowl adopt-moved-specs` before deleting anything.
 
 - **If I change one widely-shared utility, does that cascade into
   regenerating half the repo?**
