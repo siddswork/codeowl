@@ -89,7 +89,7 @@ enum Command {
     /// After code was moved, split or renamed, report which of the specs it
     /// orphaned still apply: for each orphaned symbol that has written prose,
     /// the symbol with the same text now, and whether what it depends on has
-    /// kept its shape. Read-only; writes nothing.
+    /// kept its shape. Read-only unless `--write` is given.
     AdoptMovedSpecs {
         path: PathBuf,
         /// Also print one line per orphaned symbol and why a document stays.

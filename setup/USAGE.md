@@ -493,10 +493,10 @@ a terminal, for the jobs that rewrite or inspect files on disk. They are
 deliberately not MCP tools: a command that changes `docs/specs/` should run
 because you ran it, not because an agent decided to.
 
-| Command | Use it to | Writes? |
+| Command | Use it to | Changes `docs/specs/`? |
 |---|---|---|
-| `codeowl serve <repo>` | Serve the MCP tools to your agent. Your MCP config runs this; you rarely type it. | Nothing on its own. Specs are written only when your agent calls `submit_spec`. |
-| `codeowl extract <repo>` | Print every symbol CodeOwl found, as JSON. A debugging and scripting aid. | No spec files. |
+| `codeowl serve <repo>` | Serve the MCP tools to your agent. Your MCP config runs this; you rarely type it. | Not on its own. Specs are written only when your agent calls `submit_spec`. |
+| `codeowl extract <repo>` | Print every symbol CodeOwl found, as JSON. A debugging and scripting aid. | No. |
 | `codeowl adopt-moved-specs <repo>` | Keep the specs of code you moved, split or renamed. | Only with `--write`. |
 | `codeowl migrate-file-fingerprint <repo>` | After upgrading, keep file specs that were current. | Only with `--write`. |
 | `codeowl backfill-dep-targets <repo>` | Let `explain_stale` name the dependency behind an old spec. | Only with `--write`. |
@@ -513,8 +513,9 @@ What every command has in common:
 - **The repo's stack is detected first**, the same way as for `serve`. In a
   folder CodeOwl does not recognise they stop with an error and touch
   nothing.
-- **Each run reads the whole repo again** and refreshes a local cache folder,
-  `.codeowl/`, in it. Keep that folder out of git. It holds nothing you
+- **Every command, `serve` and `extract` included, writes a local cache
+  folder, `.codeowl/`, in the repo** (so none of them runs on a read-only
+  checkout). Each run reads the whole repo again and refreshes it. Keep that folder out of git. It holds nothing you
   cannot rebuild; deleting it only makes the next `serve` start slower.
 - **Run them with the same `codeowl` binary your MCP config points at.** A
   run from an older build can apply an older rule.
@@ -527,7 +528,8 @@ command in the `args` of `.mcp.json` (Claude Code) and `.vscode/mcp.json`
 (VS Code); see [`README.md`](README.md). Running it by hand in a terminal
 only waits for MCP input, which is not useful.
 
-The flags below cap how much text one response carries. All six are optional;
+The first three flags cap how much text one response carries; the last three
+choose how a file summary is built from a too-big file. All six are optional;
 `["serve", "."]` alone runs with the defaults. After changing one, reconnect
 the server (`/mcp` in Claude Code), because a running server keeps the values
 it was started with.
@@ -555,7 +557,7 @@ entry has:
 | Field | Meaning |
 |---|---|
 | `id` | The symbol's id, `<file>::<name>`, the same id the MCP tools take. |
-| `kind`, `raw` | The general kind (`callable`, `container`, `value`) and the language's own word for it (`fn`, `class`, ...). |
+| `kind`, `raw` | The general kind (`callable`, `container`, `value`, or `schema` for a SQL table) and the language's own word for it (`fn`, `class`, ...). |
 | `file`, `lines` | Where it is: the repo-relative file and `[first, last]` line. |
 | `signature`, `docstring` | The declaration line and its doc comment, if any. |
 | `is_exported` | Whether code outside the file can import it. |
@@ -568,7 +570,7 @@ file, to feed a script, or to compare two runs:
 
 ```
 codeowl extract . > symbols.json
-codeowl extract . | jq -r '.[] | select(.is_exported) | .id' | head
+jq -r '.[] | select(.is_exported) | .id' symbols.json | head
 ```
 
 It never touches `docs/specs/`. Do not pipe it into a command that stops
