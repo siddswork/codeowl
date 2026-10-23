@@ -288,6 +288,12 @@ target loop above:
    entry's `id` is ready to use as-is: a file path, `feature:<slug>`,
    `rollup:<dir>`, or `system` — `get_next_spec_task` accepts all of
    them.
+   - **If `orphaned` is non-empty**, tell the user once, before the first
+     generation: code may have been moved or renamed, and
+     `codeowl adopt-moved-specs` can carry its prose over, which saves
+     most of the budget a moved file would otherwise spend rewriting it
+     (the commands are in the final report below). Do not stop the run
+     for it.
    - **If `--stale` was given**, drop every `pending` item whose `status`
      is `"missing"` — keep only `"stale"` ones (a spec that exists but
      the code moved underneath it). This *refreshes* the corpus without
@@ -342,9 +348,29 @@ target loop above:
    run another batch or target something specific. If that same call's
    `orphaned` list is non-empty, say so — those are spec documents whose
    target no longer exists in the graph at all (a deleted file, a
-   collapsed rollup, a removed feature entry point), dead weight to
-   delete, not something another generate run will ever pick up. If the
-   system spec is the only thing left, say so and suggest
+   collapsed rollup, a removed feature entry point), not something
+   another generate run will ever pick up. Do not delete them yet: if
+   the code was moved, split or renamed rather than removed, the prose
+   may still apply. Tell the user to run these in a terminal, with
+   `<repo>` the repo root (the folder that holds `docs/specs/`) and
+   `codeowl` the binary their MCP config runs (the `command` in
+   `.mcp.json`, usually `./target/release/codeowl` in a built checkout;
+   it is not on the PATH unless they put it there):
+
+   ```
+   codeowl adopt-moved-specs <repo>           # dry run: counts only, writes nothing
+   codeowl adopt-moved-specs <repo> --list    # dry run, one line per symbol and why
+   codeowl adopt-moved-specs <repo> --write   # carry the prose over, then prune
+   ```
+
+   and to delete by hand only what it leaves (it reports why each
+   one stayed). Run `--write` before the next generation, which would
+   otherwise rewrite the same prose from nothing. These are CLI
+   commands, not MCP tools. If you have a shell you may run the two
+   dry runs yourself to report the numbers; run `--write` only when the
+   user asks you to.
+
+   If the system spec is the only thing left, say so and suggest
    `/codeowl-generate system`.
 
 ## Termination and reporting

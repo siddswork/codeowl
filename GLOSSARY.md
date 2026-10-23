@@ -602,7 +602,8 @@ each document:
   Distinct from `stale`: a stale spec's target still exists, an input just
   moved, so there's something to regenerate against. An orphaned spec's
   target is simply gone — there's nothing left to regenerate, only
-  something to delete. `find_orphaned_specs` is the one place CodeOwl
+  something to delete (unless the code only moved or was renamed: then
+  `codeowl adopt-moved-specs` carries the prose to the new id first). `find_orphaned_specs` is the one place CodeOwl
   checks spec → graph instead of graph → spec (everywhere else, coverage
   is computed by walking the graph outward looking for specs, so a spec
   whose target was deleted entirely, not just edited, would otherwise be

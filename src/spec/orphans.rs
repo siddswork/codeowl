@@ -18,7 +18,8 @@ use crate::text::within_scope;
 /// still exists and its inputs moved, so there's something to regenerate
 /// against; an orphan's target is simply gone, so there's nothing left to
 /// regenerate — it's dead weight to flag for deletion, not a generation
-/// task. See `find_orphaned_specs`.
+/// task (unless the code only moved: `adopt-moved-specs` carries its prose
+/// over first). See `find_orphaned_specs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrphanedSpec {
     /// The same id vocabulary `coverage()` uses (`kind == "feature"` ids
