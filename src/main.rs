@@ -89,9 +89,11 @@ enum Command {
     /// Give every spec under `docs/specs/` the frontmatter keys Open
     /// Knowledge Format asks of it: `kind:` becomes `type:`, and a title,
     /// description, `generated` and resource or sources are added, exactly as
-    /// a fresh render writes them. Only the frontmatter changes, so no hash
-    /// or prose moves and no spec turns stale; running it twice changes
-    /// nothing. Prints what it would do unless `--write` is given.
+    /// a fresh render writes them. It also puts the provenance line under the
+    /// title of a spec written before that line existed. Nothing else
+    /// changes, so no hash or prose moves and no spec turns stale; running it
+    /// twice changes nothing. Prints what it would do unless `--write` is
+    /// given.
     MigrateToOkf {
         path: PathBuf,
         /// Apply the changes; without it nothing is written.
@@ -181,9 +183,14 @@ async fn main() -> Result<()> {
                 "{verb} {} spec(s): {} file, {} rollup, {} feature, {} system",
                 r.migrated, r.files, r.rollups, r.features, r.systems
             );
+            let verb = if write { "added" } else { "would add" };
             println!(
-                "skipped: {} already in the new format, {} with no frontmatter",
-                r.already_okf, r.no_frontmatter
+                "{verb} the provenance line to {} spec(s) that lacked it",
+                r.provenance_added
+            );
+            println!(
+                "skipped: {} needing neither change, {} with no frontmatter",
+                r.unchanged, r.no_frontmatter
             );
             if !r.unreadable.is_empty() {
                 println!(
@@ -202,7 +209,7 @@ async fn main() -> Result<()> {
                      file with no frontmatter keeps the folder from conforming"
                 );
             }
-            if !write && r.migrated > 0 {
+            if !write && (r.migrated > 0 || r.provenance_added > 0) {
                 println!("dry run: nothing written; pass --write to apply");
             }
             Ok(())
