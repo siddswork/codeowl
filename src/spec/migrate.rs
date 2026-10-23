@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use super::feature::{feature_okf_frontmatter, parse_feature};
-use super::format::{file_okf_frontmatter, parse, write_replacing};
+use super::format::{file_okf_frontmatter, parse, write_replacing, yaml_flow_item};
 use super::layout::spec_path;
 use super::rollup::{parse_rollup, rollup_okf_frontmatter};
 use super::staleness::{
@@ -277,9 +277,14 @@ pub struct OkfReport {
     /// Markdown files under `docs/specs/` with no frontmatter (a style guide,
     /// say); left as they are.
     pub no_frontmatter: usize,
-    /// Documents that could not be read, are of a kind CodeOwl does not
-    /// write, or do not parse; left as they are.
-    pub unreadable_files: usize,
+    /// Documents left as they are because they could not be read, are of a
+    /// kind CodeOwl does not write, or do not parse: each as the path under
+    /// `docs/specs/`, a colon, and the reason.
+    pub unreadable: Vec<String>,
+    /// `docs/specs/STYLE.md` exists: the style guide now lives at
+    /// `docs/STYLE.md`, and a file with no frontmatter inside the folder keeps
+    /// it from being a conformant bundle.
+    pub style_guide_in_bundle: bool,
 }
 
 /// Give every spec document under `docs/specs/` the keys Open Knowledge
@@ -290,17 +295,29 @@ pub struct OkfReport {
 /// which makes a second run change nothing. With `write` false nothing is
 /// written and the report says what would be.
 pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
-    let mut report = OkfReport::default();
-    for path in markdown_files(&root.join("docs").join("specs")) {
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            report.unreadable_files += 1;
-            continue;
+    let specs = root.join("docs").join("specs");
+    let mut report = OkfReport {
+        style_guide_in_bundle: specs.join("STYLE.md").exists(),
+        ..OkfReport::default()
+    };
+    for path in markdown_files(&specs) {
+        let shown = path
+            .strip_prefix(&specs)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+        let text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(err) => {
+                report.unreadable.push(format!("{shown}: {err}"));
+                continue;
+            }
         };
         if text.lines().next().map(str::trim) != Some("---") {
             report.no_frontmatter += 1;
             continue;
         }
-        match with_okf_keys(root, &text) {
+        match with_okf_keys(&text) {
             Ok(None) => report.already_okf += 1,
             Ok(Some((kind, updated))) => {
                 report.migrated += 1;
@@ -315,16 +332,18 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
                         .with_context(|| format!("updating {}", path.display()))?;
                 }
             }
-            Err(_) => report.unreadable_files += 1,
+            Err(err) => report.unreadable.push(format!("{shown}: {err:#}")),
         }
     }
     Ok(report)
 }
 
 /// `text` with its frontmatter converted, and the kind of document it was;
-/// `None` when it already carries a `type:` key. The `kind:` line is dropped,
-/// the OKF keys go first, and every other byte stays as it was.
-fn with_okf_keys(root: &Path, text: &str) -> Result<Option<(&'static str, String)>> {
+/// `None` when it already carries a `type:` key. The `kind:` line is dropped
+/// and the OKF keys go first. A file spec's `source_paths:` line is written
+/// as a fresh render writes it, so a path with brackets becomes valid YAML;
+/// every other byte stays as it was.
+fn with_okf_keys(text: &str) -> Result<Option<(&'static str, String)>> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let close = lines
         .iter()
@@ -341,21 +360,32 @@ fn with_okf_keys(root: &Path, text: &str) -> Result<Option<(&'static str, String
         .find_map(|l| l.strip_prefix("kind:"))
         .map(str::trim)
         .context("the frontmatter has no kind")?;
+    let mut source_path = None;
     let (kind, header) = match kind {
-        "file" => ("file", file_okf_frontmatter(&parse(text)?.source_path)),
+        "file" => {
+            let path = parse(text)?.source_path;
+            let header = file_okf_frontmatter(&path);
+            source_path = Some(path);
+            ("file", header)
+        }
         "rollup" => (
             "rollup",
             rollup_okf_frontmatter(&parse_rollup(text)?.dir_path),
         ),
         "feature" => ("feature", feature_okf_frontmatter(&parse_feature(text)?)),
-        "system" => ("system", system_okf_frontmatter(root, &parse_system(text)?)),
+        "system" => ("system", system_okf_frontmatter(&parse_system(text)?)),
         other => bail!("a spec of kind `{other}` is not one CodeOwl writes"),
     };
     let mut out = String::with_capacity(text.len() + header.len());
     out.push_str(lines[0]);
     out.push_str(&header);
     for line in frontmatter.iter().filter(|l| !l.starts_with("kind:")) {
-        out.push_str(line);
+        match &source_path {
+            Some(path) if line.starts_with("source_paths:") => {
+                out.push_str(&format!("source_paths: [{}]\n", yaml_flow_item(path)));
+            }
+            _ => out.push_str(line),
+        }
     }
     for line in &lines[close..] {
         out.push_str(line);
@@ -829,35 +859,33 @@ mod tests {
         let rollup_doc = render_rollup(&graph, dir, &rollup);
         let feature_doc = render_feature(&feature);
         let system_doc = render_system(dir, &system);
-        let legacy = |fresh: &str, header: String, kind: &str| {
+        // The same document with its OKF header put back as the old `kind:`.
+        let as_legacy = |fresh: &str, header: String, kind: &str| {
             assert!(fresh.contains(&header), "{fresh}");
             fresh.replacen(&header, &format!("kind: {kind}\n"), 1)
         };
         vec![
             (
                 "lib/a.ts.md",
-                legacy(&file_doc, file_okf_frontmatter("lib/a.ts"), "file"),
                 file_doc.clone(),
+                as_legacy(&file_doc, file_okf_frontmatter("lib/a.ts"), "file"),
             ),
             (
                 "lib/_index.md",
-                legacy(&rollup_doc, rollup_okf_frontmatter("lib"), "rollup"),
                 rollup_doc.clone(),
+                as_legacy(&rollup_doc, rollup_okf_frontmatter("lib"), "rollup"),
             ),
             (
                 "_features/home.md",
-                legacy(&feature_doc, feature_okf_frontmatter(&feature), "feature"),
                 feature_doc.clone(),
+                as_legacy(&feature_doc, feature_okf_frontmatter(&feature), "feature"),
             ),
             (
                 "_index.md",
-                legacy(&system_doc, system_okf_frontmatter(dir, &system), "system"),
                 system_doc.clone(),
+                as_legacy(&system_doc, system_okf_frontmatter(&system), "system"),
             ),
         ]
-        .into_iter()
-        .map(|(path, legacy, fresh)| (path, fresh, legacy))
-        .collect()
     }
 
     fn put_spec(dir: &Path, rel: &str, text: &str) -> std::path::PathBuf {
@@ -942,7 +970,22 @@ mod tests {
         let report = migrate_to_okf(&dir, true).unwrap();
         assert_eq!(report.migrated, 0);
         assert_eq!(report.no_frontmatter, 1);
-        assert_eq!(report.unreadable_files, 2);
+        // Each file that was left alone is named, with the reason.
+        assert_eq!(report.unreadable.len(), 2, "{:?}", report.unreadable);
+        assert!(
+            report.unreadable[0].starts_with("lib/b.ts.md: ")
+                && report.unreadable[0].contains("malformed frontmatter line"),
+            "{:?}",
+            report.unreadable
+        );
+        assert!(
+            report.unreadable[1].starts_with("lib/odd.md: ")
+                && report.unreadable[1].contains("custom"),
+            "{:?}",
+            report.unreadable
+        );
+        // And a style guide left inside the bundle is flagged.
+        assert!(report.style_guide_in_bundle);
         assert!(
             std::fs::read_to_string(&style)
                 .unwrap()
@@ -958,6 +1001,53 @@ mod tests {
                 .unwrap()
                 .contains("no colon here")
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_legacy_file_spec_with_a_bracketed_path_gets_a_valid_source_paths_line() {
+        let dir = temp_dir_for("okf-bracket-path");
+        let path = "app/api/[id]/route.ts";
+        let legacy = format!(
+            "---\nkind: file\nsource_paths: [{path}]\n\
+             file: {{ source_hash: s, deps_hash: d, spec_hash: p }}\n---\n# {path}\n## Summary\nA route.\n"
+        );
+        let doc = put_spec(&dir, &format!("{path}.md"), &legacy);
+        let before = parse(&legacy).unwrap();
+
+        migrate_to_okf(&dir, true).unwrap();
+        let migrated = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            migrated.contains("source_paths: [\"app/api/[id]/route.ts\"]\n"),
+            "{migrated}"
+        );
+        assert!(!migrated.contains("source_paths: [app/"), "{migrated}");
+        assert_eq!(parse(&migrated).unwrap(), before, "still the same spec");
+        // A plain path keeps its line as it was.
+        let plain = put_spec(
+            &dir,
+            "lib/a.ts.md",
+            "---\nkind: file\nsource_paths: [lib/a.ts]\nfile: { source_hash: s, deps_hash: d, spec_hash: p }\n---\n# lib/a.ts\n## Summary\nA.\n",
+        );
+        migrate_to_okf(&dir, true).unwrap();
+        assert!(
+            std::fs::read_to_string(&plain)
+                .unwrap()
+                .contains("source_paths: [lib/a.ts]\n")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_style_guide_beside_the_bundle_is_not_flagged() {
+        let dir = temp_dir_for("okf-style-outside");
+        let style = dir.join("docs").join("STYLE.md");
+        std::fs::create_dir_all(style.parent().unwrap()).unwrap();
+        std::fs::write(&style, "# Style\n").unwrap();
+        put_spec(&dir, "lib/a.ts.md", "---\ntype: file\n---\n# a\n");
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert!(!report.style_guide_in_bundle);
+        assert_eq!(report.already_okf, 1);
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -185,11 +185,21 @@ async fn main() -> Result<()> {
                 "skipped: {} already in the new format, {} with no frontmatter",
                 r.already_okf, r.no_frontmatter
             );
-            if r.unreadable_files > 0 {
+            if !r.unreadable.is_empty() {
                 println!(
-                    "{} spec file(s) could not be read or are not a kind CodeOwl writes \
-                     and were left alone",
-                    r.unreadable_files
+                    "{} spec file(s) could not be read, did not parse, or are not a kind \
+                     CodeOwl writes, and were left alone:",
+                    r.unreadable.len()
+                );
+                for line in &r.unreadable {
+                    println!("  docs/specs/{line}");
+                }
+            }
+            if r.style_guide_in_bundle {
+                println!(
+                    "note: docs/specs/STYLE.md is inside the spec folder. Move it to \
+                     docs/STYLE.md: /codeowl-generate no longer reads it from there, and a \
+                     file with no frontmatter keeps the folder from conforming"
                 );
             }
             if !write && r.migrated > 0 {

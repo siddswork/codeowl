@@ -136,8 +136,10 @@ pub(super) fn without_provenance(text: &str) -> String {
     }
 }
 
-/// `s` as a YAML double-quoted scalar. Only the quote and the backslash
-/// need escaping for the strings written here (paths and one-line sentences).
+/// `s` as a YAML double-quoted scalar. The quote and the backslash are
+/// escaped, and so is every control character and Unicode line separator
+/// (`\uXXXX`): a heading written by a model can hold one, and raw it would
+/// end the line the value sits on.
 pub(super) fn yaml_quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -145,6 +147,9 @@ pub(super) fn yaml_quoted(s: &str) -> String {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
+            c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') => {
+                out.push_str(&format!("\\u{:04X}", c as u32));
+            }
             c => out.push(c),
         }
     }
@@ -162,10 +167,23 @@ pub(super) fn yaml_unquoted(s: &str) -> String {
     let mut out = String::with_capacity(inner.len());
     let mut chars = inner.chars();
     while let Some(c) = chars.next() {
-        if c == '\\' {
-            out.extend(chars.next());
-        } else {
+        if c != '\\' {
             out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('u') => {
+                let hex: String = chars.by_ref().take(4).collect();
+                match u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    Some(decoded) => out.push(decoded),
+                    None => {
+                        out.push_str("\\u");
+                        out.push_str(&hex);
+                    }
+                }
+            }
+            Some(other) => out.push(other),
+            None => {}
         }
     }
     out
@@ -196,10 +214,11 @@ pub(super) fn path_from_doc(doc_dir: &str, target: &str) -> String {
     format!("{}{target}", "../".repeat(ups))
 }
 
-/// The text of a document's title: its first line, when that is a level-1
+/// The text of a document's title: its first line, when that is a non-empty level-1
 /// heading. A feature or system spec stores its title as part of its body.
 pub(super) fn heading_title(text: &str) -> Option<&str> {
-    text.lines().next()?.strip_prefix("# ").map(str::trim)
+    let title = text.lines().next()?.strip_prefix("# ")?.trim();
+    (!title.is_empty()).then_some(title)
 }
 
 /// The frontmatter keys Open Knowledge Format asks of a concept document,
@@ -1251,6 +1270,17 @@ impl<T: Render> Panel<T> {\n\
     }
 
     #[test]
+    fn a_yaml_string_escapes_control_and_line_separator_characters() {
+        // A heading written by a model can hold a stray control character or
+        // a Unicode line separator; raw, either ends the quoted line.
+        let nasty = "a\u{2028}b\u{85}c\u{7}d\te";
+        let quoted = yaml_quoted(nasty);
+        assert_eq!(quoted, "\"a\\u2028b\\u0085c\\u0007d\\u0009e\"");
+        assert!(!quoted.chars().any(|c| c.is_control() || c == '\u{2028}'));
+        assert_eq!(yaml_unquoted(&quoted), nasty, "and it reads back");
+    }
+
+    #[test]
     fn a_path_is_given_as_seen_from_the_document_that_names_it() {
         // docs/specs/src/hash.rs.md -> repo root is three directories up.
         assert_eq!(path_from_doc("src", "src/hash.rs"), "../../../src/hash.rs");
@@ -1362,6 +1392,8 @@ impl<T: Render> Panel<T> {\n\
         );
         assert_eq!(heading_title("Text.\n# Late"), None, "only the first line");
         assert_eq!(heading_title(""), None);
+        assert_eq!(heading_title("# \n## Summary"), None, "an empty heading");
+        assert_eq!(heading_title("#   "), None);
     }
 
     #[test]

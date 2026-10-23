@@ -36,31 +36,26 @@ pub fn system_spec_path(root: &Path) -> PathBuf {
 
 /// The OKF keys of the system spec: the same text a fresh render writes and
 /// the migration adds to one written before them. Its `sources` are the
-/// module directories; the title falls back to the repo's folder name.
-pub(super) fn system_okf_frontmatter(root: &Path, spec: &SystemSpec) -> String {
-    let repo = root.file_name().map_or_else(
-        || "system".to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    );
-    let title = heading_title(&spec.body).unwrap_or(&repo);
+/// module directories. A body with no heading is titled "System": the folder
+/// the repo happens to be checked out in would change the committed file from
+/// one clone to the next.
+pub(super) fn system_okf_frontmatter(spec: &SystemSpec) -> String {
+    let (title, description) = match heading_title(&spec.body) {
+        Some(title) => (title, format!("Overview of the {title} codebase.")),
+        None => ("System", "Overview of the codebase.".to_string()),
+    };
     let sources: Vec<String> = spec
         .modules
         .iter()
         .map(|(dir, _)| path_from_doc("", dir))
         .collect();
-    okf_frontmatter(
-        "system",
-        title,
-        &format!("Overview of the {title} codebase."),
-        None,
-        &sources,
-    )
+    okf_frontmatter("system", title, &description, None, &sources)
 }
 
 pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    out.push_str(&system_okf_frontmatter(root, spec));
+    out.push_str(&system_okf_frontmatter(spec));
     out.push_str("modules:\n");
     for (dir, hash) in &spec.modules {
         out.push_str(&format!("  {dir}: {hash}\n"));
@@ -357,6 +352,26 @@ mod tests {
         );
         assert!(!rendered.contains("kind:"), "{rendered}");
         assert_eq!(parse_system(&rendered).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_system_spec_without_a_heading_is_titled_the_same_wherever_it_is_checked_out() {
+        let spec = SystemSpec {
+            modules: vec![],
+            features: vec![],
+            spec_hash: "systemhash".to_string(),
+            body: "## Summary\nA competition platform.".to_string(),
+        };
+        let here = render_system(Path::new("/work/acme"), &spec);
+        let there = render_system(Path::new("/elsewhere/clone-2"), &spec);
+        let bare = render_system(Path::new("."), &spec);
+        assert_eq!(here, there);
+        assert_eq!(here, bare);
+        assert!(here.contains("title: \"System\"\n"), "{here}");
+        assert!(
+            here.contains("description: \"Overview of the codebase.\"\n"),
+            "{here}"
+        );
     }
 
     #[test]

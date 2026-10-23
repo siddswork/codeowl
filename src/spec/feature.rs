@@ -48,12 +48,12 @@ pub fn feature_spec_path(root: &Path, slug: &str) -> PathBuf {
 /// files of its participants, each once, in the order they are listed.
 pub(super) fn feature_okf_frontmatter(spec: &FeatureSpec) -> String {
     let title = heading_title(&spec.body).unwrap_or(&spec.entry_point);
+    let mut seen = std::collections::HashSet::new();
     let mut files: Vec<String> = Vec::new();
     for (id, _) in &spec.participants {
         let file = id.split("::").next().unwrap_or(id);
-        let source = path_from_doc("_features", file);
-        if !files.contains(&source) {
-            files.push(source);
+        if seen.insert(file) {
+            files.push(path_from_doc("_features", file));
         }
     }
     okf_frontmatter(

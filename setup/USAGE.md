@@ -631,8 +631,10 @@ hash and the provenance line stay byte for byte, so no spec turns stale. It
 writes the same keys a fresh render would, and a second run changes nothing.
 The dry run prints how many it would convert, by kind, and how many it
 skipped: already converted, or a markdown file with no frontmatter (a style
-guide, say). A file that cannot be read or is not a kind CodeOwl writes is
-left alone and counted.
+guide, say). A file that cannot be read, does not parse, or is not a kind
+CodeOwl writes is left alone and listed with the reason, so you can fix it
+and run the command again. If `docs/specs/STYLE.md` exists it says so, because
+the file belongs at `docs/STYLE.md`.
 
 A repo's own style guide (`docs/STYLE.md`, read by `/codeowl-generate`) now
 lives beside `docs/specs/`, not inside it, because a file with no frontmatter
