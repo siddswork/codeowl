@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 
 use super::feature::{feature_okf_frontmatter, parse_feature};
 use super::format::{
-    PROVENANCE, file_okf_frontmatter, parse, with_provenance, write_replacing, yaml_flow_item,
+    file_okf_frontmatter, has_provenance, parse, with_provenance, write_replacing, yaml_flow_item,
 };
 use super::layout::spec_path;
 use super::rollup::{parse_rollup, rollup_okf_frontmatter};
@@ -278,9 +278,10 @@ pub struct OkfReport {
     /// a spec written before the line existed has none until it is rewritten.
     /// Counted apart from `migrated`; a document can be in both.
     pub provenance_added: usize,
-    /// Documents that needed neither change: they have a `type:` key and the
-    /// provenance line (or no title to put it under).
-    pub already_okf: usize,
+    /// Documents that needed neither change: the OKF keys and the provenance
+    /// line are there (or there is no title to put it under), or the page has
+    /// a `type:` key that CodeOwl did not write.
+    pub unchanged: usize,
     /// Markdown files under `docs/specs/` with no frontmatter (a style guide,
     /// say); left as they are.
     pub no_frontmatter: usize,
@@ -297,10 +298,13 @@ pub struct OkfReport {
 /// Give every spec document under `docs/specs/` the keys Open Knowledge
 /// Format asks of it: `kind:` becomes `type:` and the title, description,
 /// `generated`, and resource or sources are added, exactly as a fresh render
-/// writes them. Only the frontmatter changes, so no hash and no prose moves
-/// and no spec turns stale; a document that already has `type:` is skipped,
-/// which makes a second run change nothing. With `write` false nothing is
-/// written and the report says what would be.
+/// writes them, and the provenance line goes under the title of a spec that
+/// lacks it. Nothing else changes: the line is in no hash and every parser
+/// skips it, so no hash and no prose moves and no spec turns stale. A
+/// document that already has both is skipped, which makes a second run
+/// change nothing, and so is a page with a `type:` key that CodeOwl did not
+/// write. With `write` false nothing is written and the report says what
+/// would be.
 pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
     let specs = root.join("docs").join("specs");
     let mut report = OkfReport {
@@ -325,7 +329,7 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
             continue;
         }
         match with_okf_keys(&text) {
-            Ok(None) => report.already_okf += 1,
+            Ok(None) => report.unchanged += 1,
             Ok(Some(change)) => {
                 if let Some(kind) = change.keys_added_to {
                     report.migrated += 1;
@@ -363,7 +367,7 @@ struct Change {
 /// A body that already has the line, or that does not open with a `# ` title,
 /// is returned as it is.
 fn with_missing_provenance(body: &str) -> (String, bool) {
-    if body.lines().nth(1) == Some(PROVENANCE) {
+    if has_provenance(body) {
         return (body.to_string(), false);
     }
     let with = with_provenance(body);
@@ -387,8 +391,15 @@ fn with_okf_keys(text: &str) -> Result<Option<Change>> {
         .context("the frontmatter is never closed")?;
     let frontmatter = &lines[1..close];
     let (body, line_added) = with_missing_provenance(&lines[close + 1..].concat());
-    if frontmatter.iter().any(|l| l.starts_with("type:")) {
-        if !line_added {
+    if let Some(doc_type) = frontmatter.iter().find_map(|l| l.strip_prefix("type:")) {
+        // Already has the keys. Give it the line only if CodeOwl wrote it: a
+        // hand-written or foreign page with a `type:` key is not "Generated
+        // by CodeOwl".
+        let ours = matches!(doc_type.trim(), "file" | "rollup" | "feature" | "system")
+            && frontmatter
+                .iter()
+                .any(|l| l.trim_end() == "generated: { by: CodeOwl }");
+        if !ours || !line_added {
             return Ok(None);
         }
         let text = format!("{}{}{body}", lines[..close].concat(), lines[close]);
@@ -467,7 +478,9 @@ mod tests {
     use crate::fixtures::build_graph_from_sources;
     use crate::spec::feature::{FeatureSpec, feature_okf_frontmatter, render_feature};
     use crate::spec::file_task::submit;
-    use crate::spec::format::{FileSpec, file_okf_frontmatter, parse, read_file_spec, render};
+    use crate::spec::format::{
+        FileSpec, PROVENANCE, file_okf_frontmatter, parse, read_file_spec, render,
+    };
     use crate::spec::layout::spec_path;
     use crate::spec::rollup::{RollupSpec, render_rollup, rollup_okf_frontmatter};
     use crate::spec::staleness::file_changes;
@@ -976,7 +989,7 @@ mod tests {
 
         // A second run finds them all converted and changes nothing.
         let again = migrate_to_okf(&dir, true).unwrap();
-        assert_eq!((again.migrated, again.already_okf), (0, 4));
+        assert_eq!((again.migrated, again.unchanged), (0, 4));
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
             assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
         }
@@ -1097,7 +1110,7 @@ mod tests {
         );
         let report = migrate_to_okf(&dir, true).unwrap();
         assert!(!report.style_guide_in_bundle);
-        assert_eq!(report.already_okf, 1);
+        assert_eq!(report.unchanged, 1);
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1129,7 +1142,7 @@ mod tests {
 
         let report = migrate_to_okf(&dir, true).unwrap();
         assert_eq!(
-            (report.migrated, report.provenance_added, report.already_okf),
+            (report.migrated, report.provenance_added, report.unchanged),
             (0, 4, 0)
         );
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
@@ -1137,7 +1150,7 @@ mod tests {
         }
         let again = migrate_to_okf(&dir, true).unwrap();
         assert_eq!(
-            (again.migrated, again.provenance_added, again.already_okf),
+            (again.migrated, again.provenance_added, again.unchanged),
             (0, 0, 4)
         );
         std::fs::remove_dir_all(&dir).ok();
@@ -1174,12 +1187,30 @@ mod tests {
     }
 
     #[test]
+    fn a_document_with_a_type_key_that_codeowl_did_not_write_is_left_alone() {
+        // Only a spec CodeOwl wrote is given the line: it says "Generated by
+        // CodeOwl", which would be false of a hand-written or foreign page.
+        let dir = temp_dir_for("okf-foreign-type");
+        let article = "---\ntype: article\n---\n# My notes\nText.\n";
+        let unattributed = "---\ntype: file\ntitle: \"x\"\n---\n# x\nText.\n";
+        let a = put_spec(&dir, "notes.md", article);
+        let b = put_spec(&dir, "lib/x.ts.md", unattributed);
+
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!((report.migrated, report.provenance_added), (0, 0));
+        assert_eq!(report.unchanged, 2);
+        assert_eq!(std::fs::read_to_string(&a).unwrap(), article);
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), unattributed);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_body_that_does_not_open_with_a_title_gets_no_line() {
         let dir = temp_dir_for("okf-line-no-title");
         let text = "---\ntype: system\ntitle: \"X\"\n---\n## Summary\nNo title line.\n";
         let path = put_spec(&dir, "_index.md", text);
         let report = migrate_to_okf(&dir, true).unwrap();
-        assert_eq!((report.provenance_added, report.already_okf), (0, 1));
+        assert_eq!((report.provenance_added, report.unchanged), (0, 1));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -190,7 +190,7 @@ async fn main() -> Result<()> {
             );
             println!(
                 "skipped: {} needing neither change, {} with no frontmatter",
-                r.already_okf, r.no_frontmatter
+                r.unchanged, r.no_frontmatter
             );
             if !r.unreadable.is_empty() {
                 println!(
