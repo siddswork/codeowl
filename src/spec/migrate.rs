@@ -4,12 +4,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use super::format::{parse, write_replacing};
+use super::feature::{feature_okf_frontmatter, parse_feature};
+use super::format::{file_okf_frontmatter, parse, write_replacing};
 use super::layout::spec_path;
+use super::rollup::{parse_rollup, rollup_okf_frontmatter};
 use super::staleness::{
     file_dependency_hash, hash_dependency_pairs, shorten_dep_targets, try_dependency_pairs,
     try_file_dependency_pairs,
 };
+use super::system::{parse_system, system_okf_frontmatter};
 use crate::graph::Graph;
 
 /// What `backfill_dep_targets` found, counted per owner (a file's own record,
@@ -259,14 +262,140 @@ fn add_file_fingerprint(text: &str, fingerprint: &str) -> Result<String> {
     Ok(out)
 }
 
+/// What `migrate_to_okf` found, counted per spec document.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OkfReport {
+    /// Documents that got the OKF keys (or would, on a dry run); the four
+    /// counts below say of which kind.
+    pub migrated: usize,
+    pub files: usize,
+    pub rollups: usize,
+    pub features: usize,
+    pub systems: usize,
+    /// Documents that already have a `type:` key.
+    pub already_okf: usize,
+    /// Markdown files under `docs/specs/` with no frontmatter (a style guide,
+    /// say); left as they are.
+    pub no_frontmatter: usize,
+    /// Documents that could not be read, are of a kind CodeOwl does not
+    /// write, or do not parse; left as they are.
+    pub unreadable_files: usize,
+}
+
+/// Give every spec document under `docs/specs/` the keys Open Knowledge
+/// Format asks of it: `kind:` becomes `type:` and the title, description,
+/// `generated`, and resource or sources are added, exactly as a fresh render
+/// writes them. Only the frontmatter changes, so no hash and no prose moves
+/// and no spec turns stale; a document that already has `type:` is skipped,
+/// which makes a second run change nothing. With `write` false nothing is
+/// written and the report says what would be.
+pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
+    let mut report = OkfReport::default();
+    for path in markdown_files(&root.join("docs").join("specs")) {
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            report.unreadable_files += 1;
+            continue;
+        };
+        if text.lines().next().map(str::trim) != Some("---") {
+            report.no_frontmatter += 1;
+            continue;
+        }
+        match with_okf_keys(root, &text) {
+            Ok(None) => report.already_okf += 1,
+            Ok(Some((kind, updated))) => {
+                report.migrated += 1;
+                match kind {
+                    "file" => report.files += 1,
+                    "rollup" => report.rollups += 1,
+                    "feature" => report.features += 1,
+                    _ => report.systems += 1,
+                }
+                if write {
+                    write_replacing(&path, &updated)
+                        .with_context(|| format!("updating {}", path.display()))?;
+                }
+            }
+            Err(_) => report.unreadable_files += 1,
+        }
+    }
+    Ok(report)
+}
+
+/// `text` with its frontmatter converted, and the kind of document it was;
+/// `None` when it already carries a `type:` key. The `kind:` line is dropped,
+/// the OKF keys go first, and every other byte stays as it was.
+fn with_okf_keys(root: &Path, text: &str) -> Result<Option<(&'static str, String)>> {
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let close = lines
+        .iter()
+        .skip(1)
+        .position(|l| l.trim_end() == "---")
+        .map(|i| i + 1)
+        .context("the frontmatter is never closed")?;
+    let frontmatter = &lines[1..close];
+    if frontmatter.iter().any(|l| l.starts_with("type:")) {
+        return Ok(None);
+    }
+    let kind = frontmatter
+        .iter()
+        .find_map(|l| l.strip_prefix("kind:"))
+        .map(str::trim)
+        .context("the frontmatter has no kind")?;
+    let (kind, header) = match kind {
+        "file" => ("file", file_okf_frontmatter(&parse(text)?.source_path)),
+        "rollup" => (
+            "rollup",
+            rollup_okf_frontmatter(&parse_rollup(text)?.dir_path),
+        ),
+        "feature" => ("feature", feature_okf_frontmatter(&parse_feature(text)?)),
+        "system" => ("system", system_okf_frontmatter(root, &parse_system(text)?)),
+        other => bail!("a spec of kind `{other}` is not one CodeOwl writes"),
+    };
+    let mut out = String::with_capacity(text.len() + header.len());
+    out.push_str(lines[0]);
+    out.push_str(&header);
+    for line in frontmatter.iter().filter(|l| !l.starts_with("kind:")) {
+        out.push_str(line);
+    }
+    for line in &lines[close..] {
+        out.push_str(line);
+    }
+    Ok(Some((kind, out)))
+}
+
+/// Every `.md` file under `dir`, in path order. Symbolic links are not followed.
+fn markdown_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            found.extend(markdown_files(&path));
+        } else if file_type.is_file() && path.extension().is_some_and(|e| e == "md") {
+            found.push(path);
+        }
+    }
+    found.sort();
+    found
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::feature_slug;
     use crate::fixtures::build_graph_from_sources;
+    use crate::spec::feature::{FeatureSpec, feature_okf_frontmatter, render_feature};
     use crate::spec::file_task::submit;
-    use crate::spec::format::{parse, read_file_spec};
+    use crate::spec::format::{FileSpec, file_okf_frontmatter, parse, read_file_spec, render};
     use crate::spec::layout::spec_path;
+    use crate::spec::rollup::{RollupSpec, render_rollup, rollup_okf_frontmatter};
     use crate::spec::staleness::file_changes;
+    use crate::spec::system::{SystemSpec, render_system, system_okf_frontmatter};
     use crate::spec::test_support::{greeter_people_graph, temp_dir_for};
 
     use std::path::Path;
@@ -663,6 +792,180 @@ mod tests {
             std::fs::read_to_string(spec_path(&dir, "a.ts")).unwrap(),
             "not a spec at all"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// One document of each kind as a fresh render writes it, with the same
+    /// document as it was written before the OKF keys (`kind:` instead of
+    /// the header). Returns `(path under docs/specs, fresh, legacy)`.
+    fn okf_documents(dir: &Path) -> Vec<(&'static str, String, String)> {
+        let graph = build_graph_from_sources(&[("lib/a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("lib/a.ts").unwrap();
+        let file_spec = FileSpec {
+            source_path: "lib/a.ts".to_string(),
+            file_summary: "One thing.".to_string(),
+            ..FileSpec::blank("lib/a.ts")
+        };
+        let rollup = RollupSpec {
+            dir_path: "lib".to_string(),
+            files: vec![("lib/a.ts".to_string(), "onehash".to_string())],
+            spec_hash: "rolluphash".to_string(),
+            body: "Small shared helpers.".to_string(),
+        };
+        let feature = FeatureSpec {
+            slug: feature_slug("app/page.tsx"),
+            entry_point: "app/page.tsx".to_string(),
+            participants: vec![("lib/a.ts".to_string(), "h1".to_string())],
+            spec_hash: "spechash".to_string(),
+            body: "# Artwork submission\n## Summary\nLets an artist submit.".to_string(),
+        };
+        let system = SystemSpec {
+            modules: vec![("lib".to_string(), "rolluphash".to_string())],
+            features: vec![("home".to_string(), "featurehash".to_string())],
+            spec_hash: "systemhash".to_string(),
+            body: "# Acme\n## Summary\nA platform.".to_string(),
+        };
+        let file_doc = render(&graph, dir, file_id, &file_spec);
+        let rollup_doc = render_rollup(&graph, dir, &rollup);
+        let feature_doc = render_feature(&feature);
+        let system_doc = render_system(dir, &system);
+        let legacy = |fresh: &str, header: String, kind: &str| {
+            assert!(fresh.contains(&header), "{fresh}");
+            fresh.replacen(&header, &format!("kind: {kind}\n"), 1)
+        };
+        vec![
+            (
+                "lib/a.ts.md",
+                legacy(&file_doc, file_okf_frontmatter("lib/a.ts"), "file"),
+                file_doc.clone(),
+            ),
+            (
+                "lib/_index.md",
+                legacy(&rollup_doc, rollup_okf_frontmatter("lib"), "rollup"),
+                rollup_doc.clone(),
+            ),
+            (
+                "_features/home.md",
+                legacy(&feature_doc, feature_okf_frontmatter(&feature), "feature"),
+                feature_doc.clone(),
+            ),
+            (
+                "_index.md",
+                legacy(&system_doc, system_okf_frontmatter(dir, &system), "system"),
+                system_doc.clone(),
+            ),
+        ]
+        .into_iter()
+        .map(|(path, legacy, fresh)| (path, fresh, legacy))
+        .collect()
+    }
+
+    fn put_spec(dir: &Path, rel: &str, text: &str) -> std::path::PathBuf {
+        let path = dir.join("docs").join("specs").join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn every_kind_of_legacy_document_becomes_what_a_fresh_render_writes() {
+        let dir = temp_dir_for("okf-all-kinds");
+        let documents = okf_documents(&dir);
+        let paths: Vec<_> = documents
+            .iter()
+            .map(|(rel, _, legacy)| put_spec(&dir, rel, legacy))
+            .collect();
+
+        // A dry run reports and writes nothing.
+        let report = migrate_to_okf(&dir, false).unwrap();
+        assert_eq!(report.migrated, 4);
+        assert_eq!(
+            (
+                report.files,
+                report.rollups,
+                report.features,
+                report.systems
+            ),
+            (1, 1, 1, 1)
+        );
+        for (path, (_, _, legacy)) in paths.iter().zip(&documents) {
+            assert_eq!(&std::fs::read_to_string(path).unwrap(), legacy);
+        }
+
+        // Writing changes only the header: each document is now exactly what
+        // a fresh render of it writes.
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!(report.migrated, 4);
+        for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
+            assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
+        }
+
+        // A second run finds them all converted and changes nothing.
+        let again = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!((again.migrated, again.already_okf), (0, 4));
+        for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
+            assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn migrating_to_okf_moves_no_hash_and_no_prose() {
+        let dir = temp_dir_for("okf-hash-neutral");
+        let documents = okf_documents(&dir);
+        let (rel, fresh, legacy) = &documents[0];
+        put_spec(&dir, rel, legacy);
+        let before = parse(legacy).unwrap();
+        migrate_to_okf(&dir, true).unwrap();
+        let after = read_file_spec(&dir, "lib/a.ts").unwrap().unwrap();
+        assert_eq!(
+            after, before,
+            "the parsed spec, hashes and prose, is the same"
+        );
+        // Everything below the frontmatter is byte for byte the same.
+        let body = |t: &str| t.split_once("\n---\n").unwrap().1.to_string();
+        assert_eq!(body(fresh), body(legacy));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_document_without_frontmatter_or_of_an_unknown_kind_is_left_as_it_is() {
+        let dir = temp_dir_for("okf-skips");
+        let style = put_spec(&dir, "STYLE.md", "# Style\nPlain notes, no frontmatter.\n");
+        let odd = put_spec(&dir, "lib/odd.md", "---\nkind: custom\n---\n# odd\n");
+        let broken = put_spec(
+            &dir,
+            "lib/b.ts.md",
+            "---\nkind: file\nno colon here\n---\n# b\n",
+        );
+
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!(report.migrated, 0);
+        assert_eq!(report.no_frontmatter, 1);
+        assert_eq!(report.unreadable_files, 2);
+        assert!(
+            std::fs::read_to_string(&style)
+                .unwrap()
+                .starts_with("# Style")
+        );
+        assert!(
+            std::fs::read_to_string(&odd)
+                .unwrap()
+                .contains("kind: custom")
+        );
+        assert!(
+            std::fs::read_to_string(&broken)
+                .unwrap()
+                .contains("no colon here")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_repo_with_no_specs_reports_nothing() {
+        let dir = temp_dir_for("okf-empty");
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!(report, OkfReport::default());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

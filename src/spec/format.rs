@@ -233,6 +233,19 @@ pub(super) fn okf_frontmatter(
     out
 }
 
+/// The OKF keys of a file spec: the same text a fresh render writes and the
+/// migration adds to a spec written before them.
+pub(super) fn file_okf_frontmatter(source_path: &str) -> String {
+    let doc_dir = source_path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    okf_frontmatter(
+        "file",
+        source_path,
+        &format!("Specification for `{source_path}`."),
+        Some(&path_from_doc(doc_dir, source_path)),
+        &[],
+    )
+}
+
 /// Render a `FileSpec` to the markdown+frontmatter document
 /// `ARCHITECTURE.md`'s "File spec shape" describes. `graph`/`file_id` are
 /// needed to pull each symbol's current signature and the file's
@@ -246,14 +259,7 @@ pub(super) fn okf_frontmatter(
 pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    let doc_dir = spec.source_path.rsplit_once('/').map_or("", |(dir, _)| dir);
-    out.push_str(&okf_frontmatter(
-        "file",
-        &spec.source_path,
-        &format!("Specification for `{}`.", spec.source_path),
-        Some(&path_from_doc(doc_dir, &spec.source_path)),
-        &[],
-    ));
+    out.push_str(&file_okf_frontmatter(&spec.source_path));
     out.push_str(&format!(
         "source_paths: [{}]\n",
         yaml_flow_item(&spec.source_path)

@@ -34,9 +34,10 @@ pub fn system_spec_path(root: &Path) -> PathBuf {
     root.join("docs").join("specs").join("_index.md")
 }
 
-pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
-    let mut out = String::new();
-    out.push_str("---\n");
+/// The OKF keys of the system spec: the same text a fresh render writes and
+/// the migration adds to one written before them. Its `sources` are the
+/// module directories; the title falls back to the repo's folder name.
+pub(super) fn system_okf_frontmatter(root: &Path, spec: &SystemSpec) -> String {
     let repo = root.file_name().map_or_else(
         || "system".to_string(),
         |n| n.to_string_lossy().into_owned(),
@@ -47,13 +48,19 @@ pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
         .iter()
         .map(|(dir, _)| path_from_doc("", dir))
         .collect();
-    out.push_str(&okf_frontmatter(
+    okf_frontmatter(
         "system",
         title,
         &format!("Overview of the {title} codebase."),
         None,
         &sources,
-    ));
+    )
+}
+
+pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&system_okf_frontmatter(root, spec));
     out.push_str("modules:\n");
     for (dir, hash) in &spec.modules {
         out.push_str(&format!("  {dir}: {hash}\n"));

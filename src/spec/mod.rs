@@ -68,7 +68,7 @@ pub(crate) use self::layout::spec_bearing_children;
 pub use self::layout::{
     GeneratedSourcesSummary, directory_is_spec_bearing, generated_sources_summary, spec_path,
 };
-pub use self::migrate::{backfill_dep_targets, migrate_file_fingerprints};
+pub use self::migrate::{backfill_dep_targets, migrate_file_fingerprints, migrate_to_okf};
 pub use self::orphans::{OrphanedSpec, find_orphaned_specs};
 pub use self::priority::{prioritize, top_stale_by_impact};
 pub use self::rollup::{

@@ -46,19 +46,25 @@ pub fn rollup_spec_path(root: &Path, dir_path: &str) -> PathBuf {
         .join("_index.md")
 }
 
+/// The OKF keys of a rollup: the same text a fresh render writes and the
+/// migration adds to a rollup written before them.
+pub(super) fn rollup_okf_frontmatter(dir_path: &str) -> String {
+    okf_frontmatter(
+        "rollup",
+        dir_path,
+        &format!("Overview of the `{dir_path}` directory."),
+        Some(&path_from_doc(dir_path, dir_path)),
+        &[],
+    )
+}
+
 /// Render a `RollupSpec` to markdown+frontmatter. `root` is needed to pull
 /// each file's own current summary fresh for the `## Contents` list, the
 /// same "recompute, don't store" pattern `render`'s dependency lines use.
 pub fn render_rollup(graph: &Graph, root: &Path, spec: &RollupSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    out.push_str(&okf_frontmatter(
-        "rollup",
-        &spec.dir_path,
-        &format!("Overview of the `{}` directory.", spec.dir_path),
-        Some(&path_from_doc(&spec.dir_path, &spec.dir_path)),
-        &[],
-    ));
+    out.push_str(&rollup_okf_frontmatter(&spec.dir_path));
     out.push_str(&format!("dir: {}\n", spec.dir_path));
     out.push_str("files:\n");
     for (path, hash) in &spec.files {

@@ -43,9 +43,10 @@ pub fn feature_spec_path(root: &Path, slug: &str) -> PathBuf {
         .join(format!("{slug}.md"))
 }
 
-pub fn render_feature(spec: &FeatureSpec) -> String {
-    let mut out = String::new();
-    out.push_str("---\n");
+/// The OKF keys of a feature spec: the same text a fresh render writes and
+/// the migration adds to a feature written before them. Its `sources` are the
+/// files of its participants, each once, in the order they are listed.
+pub(super) fn feature_okf_frontmatter(spec: &FeatureSpec) -> String {
     let title = heading_title(&spec.body).unwrap_or(&spec.entry_point);
     let mut files: Vec<String> = Vec::new();
     for (id, _) in &spec.participants {
@@ -55,13 +56,19 @@ pub fn render_feature(spec: &FeatureSpec) -> String {
             files.push(source);
         }
     }
-    out.push_str(&okf_frontmatter(
+    okf_frontmatter(
         "feature",
         title,
         &format!("Specification for the {title} feature."),
         None,
         &files,
-    ));
+    )
+}
+
+pub fn render_feature(spec: &FeatureSpec) -> String {
+    let mut out = String::new();
+    out.push_str("---\n");
+    out.push_str(&feature_okf_frontmatter(spec));
     out.push_str(&format!("entry_point: {}\n", spec.entry_point));
     out.push_str("participants:\n");
     for (id, hash) in &spec.participants {
