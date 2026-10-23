@@ -68,7 +68,7 @@ as distinct specs, and a merged doc would leave the others permanently
 "missing" in `get_spec_coverage`. If `${input:target}` is empty, ask the
 user what to generate rather than guessing.
 
-**Repo-specific spec style.** If the repo has a `docs/specs/STYLE.md`,
+**Repo-specific spec style.** If the repo has a `docs/STYLE.md`,
 read it before writing anything. It sets the intended *audience and tone*
 for this repo's specs — how much domain vocabulary to assume, what to
 explain inline, any house conventions. Follow it. It governs wording and
@@ -169,7 +169,7 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
      these two, cover EVERY major part of the file, not only the first
      ones; state concrete specifics (named rules, limits, thresholds,
      flags, ordering) instead of general descriptions; and mention
-     behaviours that would surprise a reader. (`docs/specs/STYLE.md` still
+     behaviours that would surprise a reader. (`docs/STYLE.md` still
      governs wording and reading level.) Describe the file, not the
      input: never describe the input as cut off, partial, or a list of
      summaries. When `previous` comes with one of these two, the pages
