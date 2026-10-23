@@ -352,11 +352,20 @@ single-target loop above:
    collapsed rollup, a removed feature entry point), not something
    another generate run will ever pick up. Do not delete them yet: if
    the code was moved, split or renamed rather than removed, the prose
-   may still apply. Tell the user to run `codeowl adopt-moved-specs
-   <path>` in a terminal (a dry run that reports what it would carry
-   over), then again with `--write`, and to delete only what it leaves.
-   That is a CLI command, not a tool you can call; never run `--write`
-   yourself unasked. If the
+   may still apply. Tell the user to run these in a terminal, with
+   `<repo>` the repo root (the folder that holds `docs/specs/`):
+
+   ```
+   codeowl adopt-moved-specs <repo>           # dry run: counts only, writes nothing
+   codeowl adopt-moved-specs <repo> --list    # dry run, one line per symbol and why
+   codeowl adopt-moved-specs <repo> --write   # carry the prose over, then prune
+   ```
+
+   and to delete by hand only what it leaves (it reports why each
+   one stayed). Run `--write` before the next generation, which would
+   otherwise rewrite the same prose from nothing. This is a CLI
+   command, not a tool you can call; never run `--write` yourself
+   unasked. If the
    system spec is the only thing left, say so and suggest running this
    prompt with `system`.
 
