@@ -289,6 +289,19 @@ why CodeOwl cares.
   a unit of code + its context) → you write the prose → `submit_spec`
   (CodeOwl stores it).
 
+**OKF** (Open Knowledge Format)
+: A Google Cloud specification (June 2026) for giving agents knowledge as a
+  directory of markdown files, each a *concept* with YAML frontmatter. A
+  directory conforms if every non-reserved `.md` file has parseable
+  frontmatter with a non-empty `type`; every other key is optional and
+  unknown keys must be tolerated. A concept's id is its file path without
+  `.md`; concepts link to each other with ordinary markdown links. OKF fixes
+  no registry of types, no storage backend and no retrieval method.
+  CodeOwl's `docs/specs/` conforms: each spec's frontmatter starts with
+  `type`, `title`, `description`, `generated` and `resource` or `sources`,
+  which the parsers skip, and `codeowl migrate-to-okf` converts older specs.
+  See `DECISIONS.md` q27 and `docs/okf-plan.md`.
+
 **Page** and **page cursor**
 : A file task is handed to the writer one **page** at a time, each at most
   `max_spec_task_bytes` long and cut at a line boundary, so a large file is

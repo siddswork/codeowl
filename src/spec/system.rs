@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::feature::{current_feature_hashes, read_feature_spec};
-use super::format::{extract_section, with_provenance, without_provenance, write_replacing};
+use super::format::{
+    extract_section, heading_title, okf_frontmatter, path_from_doc, with_provenance,
+    without_provenance, write_replacing,
+};
 use super::rollup::{current_module_hashes, read_rollup_spec};
 use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
@@ -31,10 +34,28 @@ pub fn system_spec_path(root: &Path) -> PathBuf {
     root.join("docs").join("specs").join("_index.md")
 }
 
+/// The OKF keys of the system spec: the same text a fresh render writes and
+/// the migration adds to one written before them. Its `sources` are the
+/// module directories. A body with no heading is titled "System": the folder
+/// the repo happens to be checked out in would change the committed file from
+/// one clone to the next.
+pub(super) fn system_okf_frontmatter(spec: &SystemSpec) -> String {
+    let (title, description) = match heading_title(&spec.body) {
+        Some(title) => (title, format!("Overview of the {title} codebase.")),
+        None => ("System", "Overview of the codebase.".to_string()),
+    };
+    let sources: Vec<String> = spec
+        .modules
+        .iter()
+        .map(|(dir, _)| path_from_doc("", dir))
+        .collect();
+    okf_frontmatter("system", title, &description, None, &sources)
+}
+
 pub fn render_system(root: &Path, spec: &SystemSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    out.push_str("kind: system\n");
+    out.push_str(&system_okf_frontmatter(spec));
     out.push_str("modules:\n");
     for (dir, hash) in &spec.modules {
         out.push_str(&format!("  {dir}: {hash}\n"));
@@ -300,6 +321,57 @@ mod tests {
         assert_eq!(parse_system(&rendered).unwrap(), spec);
         let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
         assert_eq!(parse_system(&legacy).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_system_spec_leads_with_the_okf_keys_and_lists_each_module_as_a_source() {
+        let spec = SystemSpec {
+            modules: vec![
+                ("lib/email".to_string(), "rolluphash".to_string()),
+                ("app".to_string(), "rolluphash2".to_string()),
+            ],
+            features: vec![("submit".to_string(), "featurehash".to_string())],
+            spec_hash: "systemhash".to_string(),
+            body: "# Acme\n## Summary\nA competition platform.".to_string(),
+        };
+        let rendered = render_system(Path::new("/nonexistent"), &spec);
+        let head: Vec<&str> = rendered.lines().take(9).collect();
+        assert_eq!(
+            head,
+            vec![
+                "---",
+                "type: system",
+                "title: \"Acme\"",
+                "description: \"Overview of the Acme codebase.\"",
+                "generated: { by: CodeOwl }",
+                "sources:",
+                "  - { resource: \"../../lib/email\" }",
+                "  - { resource: \"../../app\" }",
+                "modules:",
+            ]
+        );
+        assert!(!rendered.contains("kind:"), "{rendered}");
+        assert_eq!(parse_system(&rendered).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_system_spec_without_a_heading_is_titled_the_same_wherever_it_is_checked_out() {
+        let spec = SystemSpec {
+            modules: vec![],
+            features: vec![],
+            spec_hash: "systemhash".to_string(),
+            body: "## Summary\nA competition platform.".to_string(),
+        };
+        let here = render_system(Path::new("/work/acme"), &spec);
+        let there = render_system(Path::new("/elsewhere/clone-2"), &spec);
+        let bare = render_system(Path::new("."), &spec);
+        assert_eq!(here, there);
+        assert_eq!(here, bare);
+        assert!(here.contains("title: \"System\"\n"), "{here}");
+        assert!(
+            here.contains("description: \"Overview of the codebase.\"\n"),
+            "{here}"
+        );
     }
 
     #[test]

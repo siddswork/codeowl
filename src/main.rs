@@ -86,6 +86,18 @@ enum Command {
         #[arg(long)]
         write: bool,
     },
+    /// Give every spec under `docs/specs/` the frontmatter keys Open
+    /// Knowledge Format asks of it: `kind:` becomes `type:`, and a title,
+    /// description, `generated` and resource or sources are added, exactly as
+    /// a fresh render writes them. Only the frontmatter changes, so no hash
+    /// or prose moves and no spec turns stale; running it twice changes
+    /// nothing. Prints what it would do unless `--write` is given.
+    MigrateToOkf {
+        path: PathBuf,
+        /// Apply the changes; without it nothing is written.
+        #[arg(long)]
+        write: bool,
+    },
     /// After code was moved, split or renamed, report which of the specs it
     /// orphaned still apply: for each orphaned symbol that has written prose,
     /// the symbol with the same text now, and whether what it depends on has
@@ -154,6 +166,40 @@ async fn main() -> Result<()> {
                 println!(
                     "{} spec file(s) could not be read and were left alone",
                     r.unreadable_files
+                );
+            }
+            if !write && r.migrated > 0 {
+                println!("dry run: nothing written; pass --write to apply");
+            }
+            Ok(())
+        }
+        Command::MigrateToOkf { path, write } => {
+            let root = canonical_root(&path)?;
+            let r = codeowl::spec::migrate_to_okf(&root, write)?;
+            let verb = if write { "migrated" } else { "would migrate" };
+            println!(
+                "{verb} {} spec(s): {} file, {} rollup, {} feature, {} system",
+                r.migrated, r.files, r.rollups, r.features, r.systems
+            );
+            println!(
+                "skipped: {} already in the new format, {} with no frontmatter",
+                r.already_okf, r.no_frontmatter
+            );
+            if !r.unreadable.is_empty() {
+                println!(
+                    "{} spec file(s) could not be read, did not parse, or are not a kind \
+                     CodeOwl writes, and were left alone:",
+                    r.unreadable.len()
+                );
+                for line in &r.unreadable {
+                    println!("  docs/specs/{line}");
+                }
+            }
+            if r.style_guide_in_bundle {
+                println!(
+                    "note: docs/specs/STYLE.md is inside the spec folder. Move it to \
+                     docs/STYLE.md: /codeowl-generate no longer reads it from there, and a \
+                     file with no frontmatter keeps the folder from conforming"
                 );
             }
             if !write && r.migrated > 0 {

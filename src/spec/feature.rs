@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::format::{read_file_spec, with_provenance, without_provenance, write_replacing};
+use super::format::{
+    heading_title, okf_frontmatter, path_from_doc, read_file_spec, with_provenance,
+    without_provenance, write_replacing,
+};
 use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
 use crate::features::{
@@ -40,10 +43,32 @@ pub fn feature_spec_path(root: &Path, slug: &str) -> PathBuf {
         .join(format!("{slug}.md"))
 }
 
+/// The OKF keys of a feature spec: the same text a fresh render writes and
+/// the migration adds to a feature written before them. Its `sources` are the
+/// files of its participants, each once, in the order they are listed.
+pub(super) fn feature_okf_frontmatter(spec: &FeatureSpec) -> String {
+    let title = heading_title(&spec.body).unwrap_or(&spec.entry_point);
+    let mut seen = std::collections::HashSet::new();
+    let mut files: Vec<String> = Vec::new();
+    for (id, _) in &spec.participants {
+        let file = id.split("::").next().unwrap_or(id);
+        if seen.insert(file) {
+            files.push(path_from_doc("_features", file));
+        }
+    }
+    okf_frontmatter(
+        "feature",
+        title,
+        &format!("Specification for the {title} feature."),
+        None,
+        &files,
+    )
+}
+
 pub fn render_feature(spec: &FeatureSpec) -> String {
     let mut out = String::new();
     out.push_str("---\n");
-    out.push_str("kind: feature\n");
+    out.push_str(&feature_okf_frontmatter(spec));
     out.push_str(&format!("entry_point: {}\n", spec.entry_point));
     out.push_str("participants:\n");
     for (id, hash) in &spec.participants {
@@ -422,6 +447,60 @@ mod tests {
         assert_eq!(parse_feature(&rendered).unwrap().body, spec.body);
         let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
         assert_eq!(parse_feature(&legacy).unwrap().body, spec.body);
+    }
+
+    #[test]
+    fn a_feature_leads_with_the_okf_keys_and_lists_each_participant_file_once() {
+        let spec = FeatureSpec {
+            // The slug is derived from the entry point when a feature is read.
+            slug: feature_slug("app/page.tsx"),
+            entry_point: "app/page.tsx".to_string(),
+            participants: vec![
+                ("app/page.tsx".to_string(), "h1".to_string()),
+                ("lib/a.ts::save".to_string(), "h2".to_string()),
+                ("lib/a.ts".to_string(), "h3".to_string()),
+                ("lib/b.ts".to_string(), "h4".to_string()),
+            ],
+            spec_hash: "spechash".to_string(),
+            body: "# Artwork submission\n## Summary\nLets an artist submit artwork.".to_string(),
+        };
+        let rendered = render_feature(&spec);
+        let head: Vec<&str> = rendered.lines().take(11).collect();
+        assert_eq!(
+            head,
+            vec![
+                "---",
+                "type: feature",
+                "title: \"Artwork submission\"",
+                "description: \"Specification for the Artwork submission feature.\"",
+                "generated: { by: CodeOwl }",
+                "sources:",
+                "  - { resource: \"../../../app/page.tsx\" }",
+                "  - { resource: \"../../../lib/a.ts\" }",
+                "  - { resource: \"../../../lib/b.ts\" }",
+                "entry_point: app/page.tsx",
+                "participants:",
+            ]
+        );
+        assert!(!rendered.contains("kind:"), "{rendered}");
+        assert_eq!(parse_feature(&rendered).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_feature_whose_body_has_no_heading_is_titled_by_its_entry_point() {
+        let spec = FeatureSpec {
+            slug: "submit".to_string(),
+            entry_point: "app/page.tsx".to_string(),
+            participants: vec![],
+            spec_hash: "spechash".to_string(),
+            body: "Lets an artist submit artwork.".to_string(),
+        };
+        let rendered = render_feature(&spec);
+        assert!(rendered.contains("title: \"app/page.tsx\"\n"), "{rendered}");
+        assert!(
+            !rendered.contains("sources:"),
+            "no participants, no sources"
+        );
     }
 
     #[test]

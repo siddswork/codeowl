@@ -488,7 +488,7 @@ regeneration. `get_spec` stays a pure read; specs change only with `--write`.
 ## The command line: what each command is for
 
 `codeowl` is one binary with two faces. Your agent talks to `codeowl serve`
-over MCP and never types a command. The other four commands are for you, in
+over MCP and never types a command. The other five commands are for you, in
 a terminal, for the jobs that rewrite or inspect files on disk. They are
 deliberately not MCP tools: a command that changes `docs/specs/` should run
 because you ran it, not because an agent decided to.
@@ -499,6 +499,7 @@ because you ran it, not because an agent decided to.
 | `codeowl extract <repo>` | Print every symbol CodeOwl found, as JSON. A debugging and scripting aid. | No. |
 | `codeowl adopt-moved-specs <repo>` | Keep the specs of code you moved, split or renamed. | Only with `--write`. |
 | `codeowl migrate-file-fingerprint <repo>` | After upgrading, keep file specs that were current. | Only with `--write`. |
+| `codeowl migrate-to-okf <repo>` | After upgrading, give older specs the Open Knowledge Format keys. | Only with `--write`. |
 | `codeowl backfill-dep-targets <repo>` | Let `explain_stale` name the dependency behind an old spec. | Only with `--write`. |
 
 What every command has in common:
@@ -597,6 +598,48 @@ else in the file and leaves stale specs stale. The dry run prints three
 counts: how many it would migrate, and how many it skipped as already
 migrated, already stale, or having no file summary yet. See
 [After upgrading: migrate old file specs](#after-upgrading-migrate-old-file-specs).
+
+### `codeowl migrate-to-okf <repo> [--write]`
+
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog)
+(OKF) is a Google Cloud specification for a directory of markdown files with
+YAML frontmatter that agents and tools can read without custom code. A
+directory conforms if every markdown file has frontmatter with a `type`.
+CodeOwl's specs now start their frontmatter with the keys OKF asks of them,
+so `docs/specs/` conforms:
+
+| Key | What it holds |
+|---|---|
+| `type` | `file`, `rollup`, `feature` or `system` (this replaces the old `kind`). |
+| `title` | The document's own heading: the file path, directory, feature or repo name. |
+| `description` | A fixed sentence, never taken from the summary, such as "Specification for `src/hash.rs`." |
+| `generated` | `{ by: CodeOwl }`, with no timestamp. |
+| `resource` | For a file or rollup, the path it describes, relative to the spec. |
+| `sources` | For a feature or the system spec, the files or modules it covers. |
+
+Every spec written from now on has them. Specs written earlier keep working
+(a spec that still says `kind:` is read as before), but they only gain the
+keys when regenerated, unless you run:
+
+```
+codeowl migrate-to-okf <repo>             # dry run: reports only
+codeowl migrate-to-okf <repo> --write     # convert the stored specs
+```
+
+It changes the frontmatter and nothing else: the text of every spec, every
+hash and the provenance line stay byte for byte, so no spec turns stale. It
+writes the same keys a fresh render would, and a second run changes nothing.
+The dry run prints how many it would convert, by kind, and how many it
+skipped: already converted, or a markdown file with no frontmatter (a style
+guide, say). A file that cannot be read, does not parse, or is not a kind
+CodeOwl writes is left alone and listed with the reason, so you can fix it
+and run the command again. If `docs/specs/STYLE.md` exists it says so, because
+the file belongs at `docs/STYLE.md`.
+
+A repo's own style guide (`docs/STYLE.md`, read by `/codeowl-generate`) now
+lives beside `docs/specs/`, not inside it, because a file with no frontmatter
+in the folder would make it non-conformant. If yours is still at
+`docs/specs/STYLE.md`, move it; the generate command no longer looks there.
 
 ### `codeowl backfill-dep-targets <repo> [--write]`
 

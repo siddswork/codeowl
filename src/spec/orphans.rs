@@ -575,8 +575,10 @@ mod tests {
 
     #[test]
     fn find_orphaned_specs_ignores_a_hand_authored_doc_living_under_docs_specs() {
-        // Real bug found running this against CodeOwl's own repo:
-        // docs/specs/STYLE.md is a hand-written style guide, not a
+        // Real bug found running this against CodeOwl's own repo, when its
+        // style guide still lived at docs/specs/STYLE.md (it is docs/STYLE.md
+        // now, but a repo that has not moved its own can still have one
+        // there): a hand-written style guide, not a
         // generated file spec -- it has no frontmatter at all, and there
         // is no source file literally named "STYLE". The old
         // implementation treated *any* .md file under docs/specs/ (other
