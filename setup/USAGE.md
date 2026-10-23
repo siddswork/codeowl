@@ -485,6 +485,145 @@ regeneration. `get_spec` stays a pure read; specs change only with `--write`.
 
 ---
 
+## The command line: what each command is for
+
+`codeowl` is one binary with two faces. Your agent talks to `codeowl serve`
+over MCP and never types a command. The other four commands are for you, in
+a terminal, for the jobs that rewrite or inspect files on disk. They are
+deliberately not MCP tools: a command that changes `docs/specs/` should run
+because you ran it, not because an agent decided to.
+
+| Command | Use it to | Writes? |
+|---|---|---|
+| `codeowl serve <repo>` | Serve the MCP tools to your agent. Your MCP config runs this; you rarely type it. | Nothing on its own. Specs are written only when your agent calls `submit_spec`. |
+| `codeowl extract <repo>` | Print every symbol CodeOwl found, as JSON. A debugging and scripting aid. | No spec files. |
+| `codeowl adopt-moved-specs <repo>` | Keep the specs of code you moved, split or renamed. | Only with `--write`. |
+| `codeowl migrate-file-fingerprint <repo>` | After upgrading, keep file specs that were current. | Only with `--write`. |
+| `codeowl backfill-dep-targets <repo>` | Let `explain_stale` name the dependency behind an old spec. | Only with `--write`. |
+
+What every command has in common:
+
+- **One argument, the repo root.** It is the folder that holds `docs/specs/`.
+  `.` works from inside the repo. A path that does not exist stops with
+  `resolving <path> to an absolute path`.
+- **A dry run is the default** for the three that change specs. Without
+  `--write` they print what they would do and change nothing; with it they
+  do it. Read the dry run first. Git is the undo: commit before you pass
+  `--write`, and `git diff docs/specs` shows what changed.
+- **The repo's stack is detected first**, the same way as for `serve`. In a
+  folder CodeOwl does not recognise they stop with an error and touch
+  nothing.
+- **Each run reads the whole repo again** and refreshes a local cache folder,
+  `.codeowl/`, in it. Keep that folder out of git. It holds nothing you
+  cannot rebuild; deleting it only makes the next `serve` start slower.
+- **Run them with the same `codeowl` binary your MCP config points at.** A
+  run from an older build can apply an older rule.
+
+### `codeowl serve <repo>`
+
+Builds the index, keeps it in step with your working tree as you edit, and
+answers MCP requests over stdio until the client disconnects. This is the
+command in the `args` of `.mcp.json` (Claude Code) and `.vscode/mcp.json`
+(VS Code); see [`README.md`](README.md). Running it by hand in a terminal
+only waits for MCP input, which is not useful.
+
+The flags below cap how much text one response carries. All six are optional;
+`["serve", "."]` alone runs with the defaults. After changing one, reconnect
+the server (`/mcp` in Claude Code), because a running server keeps the values
+it was started with.
+
+| Flag | Default | What it limits |
+|---|---|---|
+| `--max-spec-task-bytes` | 8,000 | The hard ceiling on one `get_next_spec_task` response, and the size of one page of a big file. Set it below the size at which your client moves a response out of the conversation into a temp file (VS Code Copilot Chat does this above its own undocumented limit). |
+| `--large-class-bytes` | 4,000 | A class (or struct, interface, enum with members) bigger than this is shown to the writer as its member signatures and docstrings, not every method body. |
+| `--max-source-bytes` | 32,000 | The ceiling on one `get_source` response. Larger than the task cap on purpose: a verification read should get real code, not a prompt-sized fragment. |
+| `--max-file-pages` | 12 | How many pages of raw text a file summary is written from before the stand-in takes over. |
+| `--summaries-min-symbols` | 8 | The fewest top-level functions and classes a too-big file needs for the stand-in to be their written summaries. |
+| `--outline-container-percent` | 70 | The share of a too-big file one class must cover for the stand-in to be an outline of that class. |
+
+The last three are explained, with an example config, in
+[Big files: pages, and the three numbers you can change](#big-files-pages-and-the-three-numbers-you-can-change).
+Lower the first two if your client still spills responses to a temp file.
+
+### `codeowl extract <repo>`
+
+Walks the repo, parses every file, resolves the imports, and prints one JSON
+array to stdout: one entry per symbol (function, class, constant, SQL
+table). On CodeOwl's own repo that is about 1,260 entries and 0.9 MB. Each
+entry has:
+
+| Field | Meaning |
+|---|---|
+| `id` | The symbol's id, `<file>::<name>`, the same id the MCP tools take. |
+| `kind`, `raw` | The general kind (`callable`, `container`, `value`) and the language's own word for it (`fn`, `class`, ...). |
+| `file`, `lines` | Where it is: the repo-relative file and `[first, last]` line. |
+| `signature`, `docstring` | The declaration line and its doc comment, if any. |
+| `is_exported` | Whether code outside the file can import it. |
+| `source_hash`, `interface_hash` | What spec staleness is judged by: the hash of its text, and the hash of its public shape. The second is `null` for anything that is not exported. |
+| `markers` | The attributes or annotations written on it, as source text (`#[test]`, `@Override`, `@Order(DEFAULT_ORDER + 1)`). |
+| `parent`, `children` | The symbol or file it sits in, and what sits inside it. |
+
+It prints symbols, not import edges. Use it to check what CodeOwl sees in a
+file, to feed a script, or to compare two runs:
+
+```
+codeowl extract . > symbols.json
+codeowl extract . | jq -r '.[] | select(.is_exported) | .id' | head
+```
+
+It never touches `docs/specs/`. Do not pipe it into a command that stops
+early (`head`): `codeowl` reports "Broken pipe" and exits, which is harmless
+but noisy; write it to a file first.
+
+### `codeowl adopt-moved-specs <repo> [--list] [--write]`
+
+Run it after you move, split or rename code and before you regenerate. A
+spec belongs to the id of the code it describes, so moved code leaves its
+spec behind (listed as `orphaned`) and the new place reads as missing. This
+command finds, for each orphaned symbol, the symbol with the same text now,
+and carries the prose over. Without `--write` it only reports; `--list` adds
+one line per symbol and the reason a document stays. How it decides, what it
+skips, and what it leaves for you are in
+[After moving or splitting code: carry the specs over](#after-moving-or-splitting-code-carry-the-specs-over).
+
+### `codeowl migrate-file-fingerprint <repo> [--write]`
+
+Run it once after upgrading from a build that judged a file summary by its
+whole text. It adds the new `fingerprint` key to file specs that were
+current, so they stay current instead of reading stale. It changes nothing
+else in the file and leaves stale specs stale. The dry run prints three
+counts: how many it would migrate, and how many it skipped as already
+migrated, already stale, or having no file summary yet. See
+[After upgrading: migrate old file specs](#after-upgrading-migrate-old-file-specs).
+
+### `codeowl backfill-dep-targets <repo> [--write]`
+
+`explain_stale` answers "why is this spec stale" and, when a dependency is
+the cause, names it. It can only do that for a spec that stored a record of
+each dependency's hash at the time of writing (the `dep_targets:` block in
+its frontmatter). Specs written before CodeOwl kept that record say
+`unknown` for the dependency cause.
+
+This command fills the record in for those old specs. It can only do so
+honestly when the dependencies have not changed since the spec was written,
+because the stored combined hash (`deps_hash`) must come out the same as
+today's. So it:
+
+- writes a record only where it reproduces the stored `deps_hash` exactly;
+- skips a spec whose dependencies moved since, and says how many (those read
+  `unknown` until regenerated);
+- changes only the `dep_targets:` block, never prose or other keys.
+
+The dry run prints how many owners (symbols and files) it would fill, in how
+many spec files, and how many it skipped: moved, not checkable (the symbol
+is gone or the source unreadable), already recorded, or having no
+dependencies at all. The skipped specs are not lost: regenerating one writes
+the record as part of the new spec. This is the least important of the
+maintenance commands; skip it unless `explain_stale` keeps answering
+`unknown` for specs you would rather not regenerate.
+
+---
+
 ## When to (re)generate — you run `/codeowl-generate`
 
 CodeOwl never calls an LLM; the command is the client-side half of the
