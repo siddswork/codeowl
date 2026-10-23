@@ -5,7 +5,9 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use super::feature::{feature_okf_frontmatter, parse_feature};
-use super::format::{file_okf_frontmatter, parse, write_replacing, yaml_flow_item};
+use super::format::{
+    PROVENANCE, file_okf_frontmatter, parse, with_provenance, write_replacing, yaml_flow_item,
+};
 use super::layout::spec_path;
 use super::rollup::{parse_rollup, rollup_okf_frontmatter};
 use super::staleness::{
@@ -272,7 +274,12 @@ pub struct OkfReport {
     pub rollups: usize,
     pub features: usize,
     pub systems: usize,
-    /// Documents that already have a `type:` key.
+    /// Documents that got the provenance line under their title (or would):
+    /// a spec written before the line existed has none until it is rewritten.
+    /// Counted apart from `migrated`; a document can be in both.
+    pub provenance_added: usize,
+    /// Documents that needed neither change: they have a `type:` key and the
+    /// provenance line (or no title to put it under).
     pub already_okf: usize,
     /// Markdown files under `docs/specs/` with no frontmatter (a style guide,
     /// say); left as they are.
@@ -319,16 +326,21 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
         }
         match with_okf_keys(&text) {
             Ok(None) => report.already_okf += 1,
-            Ok(Some((kind, updated))) => {
-                report.migrated += 1;
-                match kind {
-                    "file" => report.files += 1,
-                    "rollup" => report.rollups += 1,
-                    "feature" => report.features += 1,
-                    _ => report.systems += 1,
+            Ok(Some(change)) => {
+                if let Some(kind) = change.keys_added_to {
+                    report.migrated += 1;
+                    match kind {
+                        "file" => report.files += 1,
+                        "rollup" => report.rollups += 1,
+                        "feature" => report.features += 1,
+                        _ => report.systems += 1,
+                    }
+                }
+                if change.line_added {
+                    report.provenance_added += 1;
                 }
                 if write {
-                    write_replacing(&path, &updated)
+                    write_replacing(&path, &change.text)
                         .with_context(|| format!("updating {}", path.display()))?;
                 }
             }
@@ -338,12 +350,34 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
     Ok(report)
 }
 
-/// `text` with its frontmatter converted, and the kind of document it was;
-/// `None` when it already carries a `type:` key. The `kind:` line is dropped
-/// and the OKF keys go first. A file spec's `source_paths:` line is written
-/// as a fresh render writes it, so a path with brackets becomes valid YAML;
-/// every other byte stays as it was.
-fn with_okf_keys(text: &str) -> Result<Option<(&'static str, String)>> {
+/// What `with_okf_keys` did to a document.
+struct Change {
+    /// The kind of document, when its frontmatter got the OKF keys.
+    keys_added_to: Option<&'static str>,
+    /// Whether the provenance line was put under its title.
+    line_added: bool,
+    text: String,
+}
+
+/// `body` with the provenance line under its title, and whether it was added.
+/// A body that already has the line, or that does not open with a `# ` title,
+/// is returned as it is.
+fn with_missing_provenance(body: &str) -> (String, bool) {
+    if body.lines().nth(1) == Some(PROVENANCE) {
+        return (body.to_string(), false);
+    }
+    let with = with_provenance(body);
+    let added = with != body;
+    (with, added)
+}
+
+/// `text` with its frontmatter converted and the provenance line added where
+/// they are missing; `None` when it needs neither. In the frontmatter the
+/// `kind:` line is dropped and the OKF keys go first, and a file spec's
+/// `source_paths:` line is written as a fresh render writes it, so a path with
+/// brackets becomes valid YAML. The line is inserted under the title (the
+/// parsers skip it and it is in no hash). Every other byte stays as it was.
+fn with_okf_keys(text: &str) -> Result<Option<Change>> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let close = lines
         .iter()
@@ -352,8 +386,17 @@ fn with_okf_keys(text: &str) -> Result<Option<(&'static str, String)>> {
         .map(|i| i + 1)
         .context("the frontmatter is never closed")?;
     let frontmatter = &lines[1..close];
+    let (body, line_added) = with_missing_provenance(&lines[close + 1..].concat());
     if frontmatter.iter().any(|l| l.starts_with("type:")) {
-        return Ok(None);
+        if !line_added {
+            return Ok(None);
+        }
+        let text = format!("{}{}{body}", lines[..close].concat(), lines[close]);
+        return Ok(Some(Change {
+            keys_added_to: None,
+            line_added,
+            text,
+        }));
     }
     let kind = frontmatter
         .iter()
@@ -387,10 +430,13 @@ fn with_okf_keys(text: &str) -> Result<Option<(&'static str, String)>> {
             _ => out.push_str(line),
         }
     }
-    for line in &lines[close..] {
-        out.push_str(line);
-    }
-    Ok(Some((kind, out)))
+    out.push_str(lines[close]);
+    out.push_str(&body);
+    Ok(Some(Change {
+        keys_added_to: Some(kind),
+        line_added,
+        text: out,
+    }))
 }
 
 /// Every `.md` file under `dir`, in path order. Symbolic links are not followed.
@@ -1044,10 +1090,97 @@ mod tests {
         let style = dir.join("docs").join("STYLE.md");
         std::fs::create_dir_all(style.parent().unwrap()).unwrap();
         std::fs::write(&style, "# Style\n").unwrap();
-        put_spec(&dir, "lib/a.ts.md", "---\ntype: file\n---\n# a\n");
+        put_spec(
+            &dir,
+            "lib/a.ts.md",
+            &format!("---\ntype: file\n---\n# a\n{PROVENANCE}\n"),
+        );
         let report = migrate_to_okf(&dir, true).unwrap();
         assert!(!report.style_guide_in_bundle);
         assert_eq!(report.already_okf, 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// `text` without the provenance line, as a spec written before it existed.
+    fn without_the_line(text: &str) -> String {
+        let stripped = text.replacen(&format!("{PROVENANCE}\n"), "", 1);
+        assert_ne!(stripped, text, "the document had no line to remove");
+        stripped
+    }
+
+    #[test]
+    fn a_spec_that_already_has_the_okf_keys_still_gets_a_missing_provenance_line() {
+        let dir = temp_dir_for("okf-line-only");
+        let documents = okf_documents(&dir);
+        let paths: Vec<_> = documents
+            .iter()
+            .map(|(rel, fresh, _)| put_spec(&dir, rel, &without_the_line(fresh)))
+            .collect();
+
+        let dry = migrate_to_okf(&dir, false).unwrap();
+        assert_eq!((dry.migrated, dry.provenance_added), (0, 4));
+        for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
+            assert_eq!(
+                std::fs::read_to_string(path).unwrap(),
+                without_the_line(fresh),
+                "a dry run writes nothing"
+            );
+        }
+
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!(
+            (report.migrated, report.provenance_added, report.already_okf),
+            (0, 4, 0)
+        );
+        for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
+            assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
+        }
+        let again = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!(
+            (again.migrated, again.provenance_added, again.already_okf),
+            (0, 0, 4)
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_legacy_spec_with_no_provenance_line_gets_both_in_one_pass() {
+        let dir = temp_dir_for("okf-keys-and-line");
+        let documents = okf_documents(&dir);
+        let paths: Vec<_> = documents
+            .iter()
+            .map(|(rel, _, legacy)| put_spec(&dir, rel, &without_the_line(legacy)))
+            .collect();
+
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!((report.migrated, report.provenance_added), (4, 4));
+        for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
+            assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn adding_the_provenance_line_moves_no_hash_and_no_prose() {
+        let dir = temp_dir_for("okf-line-hash-neutral");
+        let documents = okf_documents(&dir);
+        let (rel, fresh, _) = &documents[0];
+        let without = without_the_line(fresh);
+        put_spec(&dir, rel, &without);
+        let before = parse(&without).unwrap();
+        migrate_to_okf(&dir, true).unwrap();
+        assert_eq!(read_file_spec(&dir, "lib/a.ts").unwrap().unwrap(), before);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_body_that_does_not_open_with_a_title_gets_no_line() {
+        let dir = temp_dir_for("okf-line-no-title");
+        let text = "---\ntype: system\ntitle: \"X\"\n---\n## Summary\nNo title line.\n";
+        let path = put_spec(&dir, "_index.md", text);
+        let report = migrate_to_okf(&dir, true).unwrap();
+        assert_eq!((report.provenance_added, report.already_okf), (0, 1));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
         std::fs::remove_dir_all(&dir).ok();
     }
 
