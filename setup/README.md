@@ -140,8 +140,9 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
   version**, follow [Upgrading from an earlier version](USAGE.md#upgrading-from-an-earlier-version)
   in `USAGE.md`: two one-time commands, `codeowl migrate-file-fingerprint`
   and `codeowl migrate-to-okf` (each a dry run until you add `--write`),
-  neither of which changes the text of a spec or turns one stale. Dependency
-  links appear in a spec the next time it is regenerated.
+  neither of which changes the text of a spec or turns one stale.
+  `migrate-to-okf` also turns the existing `Depends on` entries into links, so
+  a spec that is already current gets them too.
 - **Optional: a `docs/STYLE.md`.** `/codeowl-generate` reads it (if
   present) before writing, and follows it for *audience and tone* — how
   much domain vocabulary to assume, what to explain inline. Useful when

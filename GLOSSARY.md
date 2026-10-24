@@ -299,7 +299,8 @@ why CodeOwl cares.
   no registry of types, no storage backend and no retrieval method.
   CodeOwl's `docs/specs/` conforms: each spec's frontmatter starts with
   `type`, `title`, `description`, `generated` and `resource` or `sources`,
-  which the parsers skip, and `codeowl migrate-to-okf` converts older specs.
+  which the parsers skip, and `codeowl migrate-to-okf` converts older specs
+  (the keys, the provenance line, and the `Depends on` entries as links).
   See `DECISIONS.md` q27 and `docs/okf-plan.md`.
 
 **Page** and **page cursor**

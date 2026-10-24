@@ -41,7 +41,7 @@ A test helper that writes a small project with a SQL schema, an API route that q
 ### Behavior
 Creates three subfolders in the given folder: `supabase`, `app/api/pay` and `lib`. It writes the schema text to `supabase/schema.sql`, the route text to `app/api/pay/route.ts`, and a one-line helper exporting `getSupabase` to `lib/supabase.ts`. The schema and route contents come from constants defined elsewhere in the test file. It then builds the index for the folder and rebuilds the graph from it, which parses the tables, resolves imports and resolves the links from queries to tables as in normal use, and returns the graph. It panics on any failure, since a broken fixture should stop the test.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `schema_nodes_are_created_for_every_create_table`
 `fn schema_nodes_are_created_for_every_create_table()`
@@ -50,7 +50,7 @@ A test that checks every `CREATE TABLE` in the sample schema file becomes a tabl
 ### Behavior
 Builds the sample project in a fresh temporary folder. For each of the two expected tables, `payments` and `registrations`, it looks up the node `supabase/schema.sql::<table>`, failing with "no schema node for <table>" if it is absent. It then asserts the node's kind is `Schema`, its raw kind is `table`, and its signature contains the column name `status`, failing with the actual signature if not, which shows the column list was captured. The fixture is a database dump that includes a constraint the SQL grammar cannot handle, so the test also confirms the plain-text fallback keeps the table set complete.
 ### Depends on
-- `src/symbol.rs::SymbolKind` — codeowl::symbol
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl::symbol
 
 ## `a_from_call_resolves_to_its_table_node`
 `fn a_from_call_resolves_to_its_table_node()`
@@ -59,7 +59,7 @@ A test that checks a `.from("payments")` query in an API route is linked to the 
 ### Behavior
 Builds the sample project and looks up the `payments` table node. It collects the targets of every table-reference link that starts in `app/api/pay/route.ts`, keeping only the ones that resolved to a node and taking each node's id. It asserts that the list contains `supabase/schema.sql::payments`, failing with the actual list if not, and that the node's kind is `Schema`. This shows the full chain: a query string in application code is recognised, matched by name to a table parsed from the schema file, and recorded as a link, which is what lets a feature description name the table and its real columns.
 ### Depends on
-- `src/symbol.rs::SymbolKind` — codeowl::symbol
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl::symbol
 
 ## `get_callers_on_a_table_lists_the_app_code_that_touches_it`
 `fn get_callers_on_a_table_lists_the_app_code_that_touches_it()`

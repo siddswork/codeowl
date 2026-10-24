@@ -105,8 +105,8 @@ A test helper that builds the full graph for a project folder from scratch, so a
 ### Behavior
 Builds a fresh index of the whole folder, which walks and parses every source file, and rebuilds the graph from it, resolving imports and links as in normal use, then returns the graph. It always starts from nothing and does not use or update a saved index, so each call reflects exactly what is on disk at that moment. It panics on any failure, which is acceptable in test code.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 - externals: std
 
 ## `drain`
@@ -116,8 +116,8 @@ A test helper that runs the spec-writing loop to completion for one file, answer
 ### Behavior
 Repeatedly asks for the next task for the file and stops when there is none, the same bottom-up loop the real generate command runs. For a symbol task it submits a two-part summary and behavior text, and for a file task it submits a one-line summary. The text is deliberately real prose long enough to pass the quality check that rejects text that is too short, and not a placeholder short enough to trigger it, so no task is offered again and the loop ends. It panics if a submission is rejected, which would signal a bug in the test text. It writes the spec documents to the given folder and returns nothing.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 - `src/spec.rs::SpecTask` — codeowl::spec
 - externals: std
 
@@ -128,8 +128,8 @@ A test helper that answers "is everything about this file up to date?", meaning 
 ### Behavior
 Asks for the next writing task for the file and returns true if there is none, and false if there is one. Since the task finder offers work for every symbol that is missing, stale or has poor text, and then for the file itself, having nothing to offer means all of it is current. Because the task finder can also quietly record a hand edit as a side effect, calling this is not strictly read-only, though it does not change anything in these scenarios. It panics if the task finder returns an error. The scenarios use it to assert both that a file went stale after a relevant edit and that a bystander file stayed current.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 - externals: std
 
 ## `next_symbol_task_id`
@@ -139,8 +139,8 @@ A test helper that returns the id of the next symbol the writing loop wants desc
 ### Behavior
 Asks the task finder for the file's next task. If it is a symbol task it returns that symbol's id. For anything else, either no task at all or the file-level summary, it returns `None`. The scenarios that use it never need to tell those two apart: they only ask which symbol went stale, and a `None` means no symbol did. It panics if the task finder returns an error. It reads from disk and may quietly record a hand edit as a side effect of the task finder, but this does not change anything in these scenarios.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 - `src/spec.rs::SpecTask` — codeowl::spec
 - externals: std
 
@@ -153,8 +153,8 @@ Repeatedly gets the next symbol task id for the file, using `next_symbol_task_id
 
 The scenarios deliberately check membership, not order. A Java consumer wraps its function in a class, so the containing class can legitimately be offered before the method, because it depends on the owner too through that method's body, whereas the Rust, TypeScript and Python consumers have a bare top-level function with no wrapper. So the assertion is "did the cascade reach this exact symbol anywhere in the list", not "was it the very next thing offered". It panics if a submission is rejected.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 - externals: std
 
 ## `owner_file_id`
@@ -164,8 +164,8 @@ A test helper that finds the owner file's node in a graph for a given language's
 ### Behavior
 Looks up the fixture's owner path in the graph and returns its id. If the file is not in the graph, it panics with a message naming the language and saying "owner file not indexed", which points at a broken fixture, such as a missing scaffold file or a path the language's file rules do not recognise, and not at a staleness problem. The scenarios use the id to run the writing loop and the currency checks on the owner file.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 
 ## `consumer_file_id`
 `fn consumer_file_id(graph: &Graph, fx: &Fixture) -> SymbolId`
@@ -174,8 +174,8 @@ A test helper that finds the consumer file's node, the file that uses the owner 
 ### Behavior
 Looks up the fixture's consumer path in the graph and returns its id. If the file is not in the graph, it panics with a message naming the language and saying "consumer file not indexed", which points at a broken fixture and not at a staleness problem. The scenarios use the id to check whether the consumer's descriptions went stale or stayed current after an edit to the owner.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 
 ## `unrelated_file_id`
 `fn unrelated_file_id(graph: &Graph, fx: &Fixture) -> SymbolId`
@@ -184,8 +184,8 @@ A test helper that finds the bystander file's node, a file that refers to neithe
 ### Behavior
 Looks up the fixture's unrelated path in the graph and returns its id. If the file is not in the graph, it panics with a message naming the language and saying "unrelated file not indexed", which points at a broken fixture. The scenarios use the id to assert that this file stays fully current through every edit to the owner, because nothing in it resolves to the owner, so no change, cascade or re-read has any path to reach it.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 
 ## `run_lifecycle`
 `fn run_lifecycle(fx: &Fixture)`

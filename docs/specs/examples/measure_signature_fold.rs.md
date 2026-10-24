@@ -47,7 +47,7 @@ Returns false at once if the symbol's kind is not `SIGNAL`, a constant set to `S
 
 These are approximations written for a measurement script and are not guaranteed to match the real extractors' own visibility checks. They only need to be right often enough to give an honest table. It cannot fail.
 ### Depends on
-- `src/symbol.rs::Symbol` — codeowl::symbol
+- [`src/symbol.rs::Symbol`](../src/symbol.rs.md) — codeowl::symbol
 
 ## `qualifying_member_names`
 `fn qualifying_member_names(graph: &Graph, pack: &str, container_id: SymbolId) -> Vec<String>`
@@ -56,8 +56,8 @@ Lists the names of a container's public members of the measured kind, leaving ou
 ### Behavior
 Goes through every symbol in the graph and keeps those whose parent is the given container and that pass `is_qualifying_member` for the pack. For each it takes the member's bare name, the part of the id after the last `::`. It then drops a name that is in the `GENERIC_NAMES` list (words that appear in prose about almost anything) or that is two characters or fewer. The result is the remaining names in graph order, possibly with duplicates if two members share a name. It scans the whole symbol list for each call, which is acceptable for a one-off measurement. It cannot fail, and returns an empty list for a container with no qualifying members.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolId` — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolId`](../src/symbol.rs.md) — codeowl::graph
 
 ## `mentions_word`
 `fn mentions_word(text: &str, word: &str) -> bool`
@@ -75,8 +75,8 @@ Prints every class or type that has two or more methods sharing one name, such a
 ### Behavior
 Only runs when the measured kind (`SIGNAL`) is `Callable` and does nothing otherwise, since fields almost never collide this way. For each container in the graph it finds the container's id, then counts its direct children of kind `Callable` by their bare name (the part of the id after the last `::`). Any name counted more than once is a collision. If a container has any, it prints a line naming the container and the list of colliding names with their counts, for example `Foo has overloaded/colliding names: [("bar", 2)]`. Containers with none print nothing. The order of containers follows the graph and the order of names inside a line follows the hash map, so it is not sorted. It prints only and returns nothing.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolKind` — codeowl::symbol
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl::symbol
 
 ## `correctness_check`
 `fn correctness_check(
@@ -102,8 +102,8 @@ Opens the repo with `RepoIndex::open`; on failure it prints `== <label>: failed 
 
 It then prints: the number of qualifying containers, how many of them have importers today, the importer counts of the top five (the number of files newly invalidated per edit under the folded rule, computed from the real resolved-import graph and not simulated), the sum across all, the average (0 when there are none), and the single worst container with its importer count. After that it calls `report_name_collisions` and `correctness_check`. Importers are counted by exact container target, so imports resolved to a different symbol in the same file do not count. It prints only and returns nothing; opening the repo may refresh its local cache.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
-- `src/symbol.rs::SymbolKind` — codeowl::symbol
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl::symbol
 - externals: std
 
 ## `main`

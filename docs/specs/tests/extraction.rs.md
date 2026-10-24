@@ -28,7 +28,7 @@ A test that checks the TypeScript extractor handles a realistic React component 
 ### Behavior
 Reads the fixture `fixtures/component.tsx` into the extractor as the file `component.tsx`. It asserts the symbol ids, in order, are exactly `UserBadge`, `findFirst` and `fetchUser`, so nothing nested inside `UserBadge`, such as the callback passed to the effect hook or its inner arrow functions, appears as a symbol of its own. It asserts that every symbol is a callable with raw kind `function`. It then checks that `UserBadge` has the doc comment "Fetches and displays a user's display name." and a signature containing its name, and that `findFirst`'s signature contains the generic type parameter `<T>`, failing with the actual signature in the message if not. The test fails on any mismatch in count, order, kind, docstring or signature.
 ### Depends on
-- `src/symbol.rs::SymbolKind` — codeowl
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl
 - `src/extract.rs::extract_file` — codeowl
 
 ## `barrel_file_has_no_declarations`

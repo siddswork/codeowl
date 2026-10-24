@@ -533,7 +533,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [16](DECISIONS.md#q16) | Zero-field marker type and its trait impl as unlinked nodes | Degenerate case folded; general case gets an impl → type edge |
 | [19](DECISIONS.md#q19) | A folded impl's header invisible to dependency scoping | Fixed for cross-file traits; same-file trait gap measured, not built |
 | [20](DECISIONS.md#q20) | Rust resolution assumed one crate root per repo (wrong and non-deterministic in workspaces; crate-name `use` never resolved) | `crate::` is per-file; library crate names resolved from `Cargo.toml`. Test-crate roots and nested-brace re-exports not covered |
-| [27](DECISIONS.md#q27) | Should the specs conform to Open Knowledge Format (OKF)? | Yes: `type` (replacing `kind`), `generated: { by: CodeOwl }`, `title`, a fixed `description`, `resource` / `sources`; `STYLE.md` moved out of `docs/specs/`; `codeowl migrate-to-okf` converts stored specs. `tags`, `verified`, `status` and the rest declined; `Depends on` as links not yet built |
+| [27](DECISIONS.md#q27) | Should the specs conform to Open Knowledge Format (OKF)? | Yes: `type` (replacing `kind`), `generated: { by: CodeOwl }`, `title`, a fixed `description`, `resource` / `sources`; `STYLE.md` moved out of `docs/specs/`; `Depends on` entries are links to the dependency's file spec; `codeowl migrate-to-okf` converts stored specs, links included. `tags`, `verified`, `status` and the rest declined |
 
 ## Non-goals (for now)
 

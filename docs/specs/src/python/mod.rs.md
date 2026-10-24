@@ -65,7 +65,7 @@ Reads one Python file and returns the declarations in it: its classes, functions
 ### Behavior
 Creates a tree-sitter parser (a library that turns source text into a syntax tree) with the bundled Python grammar, and if the text cannot be parsed at all it returns an empty list. Otherwise it goes through the module's top-level statements in order and hands each to `visit_item` with no parent and no decorators, which appends symbols to the output, so results are in source order. Nothing from the syntax tree escapes the function; it returns only plain owned symbols. Imports are not turned into symbols here, since `extract_imports` reads those separately.
 ### Depends on
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](../symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `visit_item`
@@ -87,7 +87,7 @@ Looks at one Python statement and records the right kind of symbol for it: a cla
 
 Any other statement kind is skipped silently, which includes imports, conditionals and loops. It appends to `out` and returns nothing.
 ### Depends on
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](../symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `push_callable`
@@ -104,9 +104,9 @@ Records a Python `def`, either a module-level function or a method, as a callabl
 ### Behavior
 Returns without adding anything if the definition has no readable name. The id is `<parent id>::<name>` for a method or `<file>::<name>` for a module-level function, the raw kind is `def`, and the signature is the header text before the body. A function is exported only if it is at module level and its name is public by convention (it does not start with an underscore); a method is never exported on its own, because it is reached through its class. `source_hash` hashes the whole definition including the body, and `interface_hash`, present only when exported, hashes the signature alone, so body edits leave it unchanged. It also records the line range, the docstring, the decorators as markers (so a framework route decorator can be read back later), the parent id, and no children. It appends to `out` and returns nothing. If a method shares its name with a class attribute, the id collision is resolved later by the enclosing container, not here.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](../symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `visit_assignment`
@@ -126,9 +126,9 @@ The value is kept in the stored signature on purpose, because other code reads i
 
 It is exported only if it is at module level with a public-by-convention name (no leading underscore); a class attribute never is. `source_hash` hashes the assignment, and `interface_hash`, present only when exported, hashes the signature. It appends to `out`; no docstring or markers are recorded.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](../symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `collect_decorators`
@@ -201,8 +201,8 @@ Parses a Python file's `import` and `from ... import` statements into CodeOwl's 
 ### Behavior
 Handles two statement shapes. A plain `import a.b.c` splits into a module specifier (`"a.b"`) and the imported name (`"c"`). A `from a.b import x` keeps `"a.b"` as the specifier and `"x"` as the imported name directly; a relative import (`from ..pkg import x`) keeps its leading dots in the specifier as-is, left for later resolution against the importing file's own location. A `from x import *` records a single entry with `"*"` as the imported name, since it names no single declaration.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
-- `src/imports.rs::ImportRef` — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
+- [`src/imports.rs::ImportRef`](../imports.rs.md) — crate::imports
 - externals: tree_sitter
 
 ## `dotted_of`
@@ -234,9 +234,9 @@ Turns every Python import in the repo into a link to the declaration, or the mod
 ### Behavior
 Visits files in sorted path order, so the saved edge list is stable between runs, the same reason as in the other languages' resolvers. For each file's imports, in source order, it creates a `ResolvedImport` carrying the importing file, the specifier and the imported name, with the target worked out by `resolve_one`. The target is a declaration inside the imported module, or, for `import a.b.c` or a submodule import, the module's own file node. The final argument to `resolve_one` is a starting hop count of 0, and the cap is one (`MAX_REEXPORT_HOPS`): a name can be followed through at most one package `__init__.py` that re-exports it, and a re-export of a re-export is not followed. The repo root parameter is accepted but not used, since resolution works entirely from the indexed files and the graph. Returns the list of edges; it cannot fail, and unresolved imports show as edges with no target.
 ### Depends on
-- `src/graph.rs::ResolvedImport` — crate::graph
-- `src/graph.rs::Graph` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::ResolvedImport`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: std
 
 ## `resolve_one`
@@ -258,9 +258,9 @@ A star import (`*`) returns `None`. Otherwise it first turns the specifier into 
 
 If none succeeds it returns `None`, which covers the standard library, third-party packages and broken imports. Only the first matching re-export is followed: if resolving through it fails, other imports of the same name in that `__init__.py` are not tried.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: std
 
 ## `module_path`
@@ -282,7 +282,7 @@ Finds the first candidate file path that's actually part of this repo, trying ea
 ### Behavior
 For each candidate, first checks for an exact match among the walked files. If none, tries a path-suffix match instead — this covers the case where CodeOwl was pointed at a directory above the actual project root, so the candidate's full path doesn't match exactly but still ends with it. On a suffix match with more than one hit, the alphabetically first is returned, for a stable result.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: std
 
 ## `extract_flow_edges`
@@ -292,7 +292,7 @@ Finds every route-decorated function in a FastAPI file and records what each one
 ### Behavior
 Walks the whole parse tree looking for a decorated function whose decorator marks it as a route. For each one found, collects its dependencies (via `collect_route_deps`) into the output list. The results are sorted and deduplicated before being returned, so the same dependency reported by more than one route doesn't appear twice.
 ### Depends on
-- `src/graph.rs::UnresolvedFlowEdge` — crate::graph
+- [`src/graph.rs::UnresolvedFlowEdge`](../graph.rs.md) — crate::graph
 - externals: tree_sitter
 
 ## `is_route_decorated`
@@ -311,7 +311,7 @@ Walks a route function's body looking for its FastAPI dependencies: an explicit 
 ### Behavior
 Finds every `Depends(<name>)` call anywhere in the function and records the name inside it as a `"depends"` edge. Also finds every parameter whose type annotation is a single bare identifier — like `session: SessionDep` — and, if that name isn't one of the recognized primitive types (`int`, `str`, and similar), records it as a `"dep-type"` edge. Either shape can point at a dependency that's declared elsewhere and needs to be resolved against the graph afterward.
 ### Depends on
-- `src/graph.rs::UnresolvedFlowEdge` — crate::graph
+- [`src/graph.rs::UnresolvedFlowEdge`](../graph.rs.md) — crate::graph
 - externals: tree_sitter
 
 ## `resolve_flow_edge`
@@ -326,7 +326,7 @@ Only edges of kind `depends` or `dep-type` are handled; any other kind is `Unres
 
 If nothing matches, such as a standard-library type, a `Depends()` call with no name, or a typo, it returns `Unresolved`. The result is always a file node, never a symbol.
 ### Depends on
-- `src/graph.rs::FlowTarget` — crate::graph
-- `src/graph.rs::Graph` — crate::graph
-- `src/graph.rs::UnresolvedFlowEdge` — crate::graph
+- [`src/graph.rs::FlowTarget`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::UnresolvedFlowEdge`](../graph.rs.md) — crate::graph
 - externals: tree_sitter
