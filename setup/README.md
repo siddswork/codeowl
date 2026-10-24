@@ -131,6 +131,17 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
 - **Commit `docs/specs/` to git.** The hashes in each file's frontmatter
   are the staleness signal; they only work if the specs are versioned
   alongside the code.
+- **The specs follow [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog)**
+  (OKF), a plain markdown-plus-YAML format other tools can read: each
+  spec's frontmatter starts with `type`, `title`, `description`,
+  `generated` and `resource` or `sources`, and each dependency in a
+  `### Depends on` list links to the spec of the file it comes from. New
+  specs are written that way. **If you already have specs from an earlier
+  version**, follow [Upgrading from an earlier version](USAGE.md#upgrading-from-an-earlier-version)
+  in `USAGE.md`: two one-time commands, `codeowl migrate-file-fingerprint`
+  and `codeowl migrate-to-okf` (each a dry run until you add `--write`),
+  neither of which changes the text of a spec or turns one stale. Dependency
+  links appear in a spec the next time it is regenerated.
 - **Optional: a `docs/STYLE.md`.** `/codeowl-generate` reads it (if
   present) before writing, and follows it for *audience and tone* — how
   much domain vocabulary to assume, what to explain inline. Useful when
