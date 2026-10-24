@@ -258,9 +258,13 @@ Repeat the following until `get_next_spec_task` returns `{"kind": "done"}`:
    behavior.
 4. Call `submit_spec` with `id` set to the task's `id` and `content` set
    to what you just wrote. **`submit_spec` rejects content that fails the
-   same quality check** (Summary/Behavior under four words, or a "see the
-   source" phrase) — the error names what tripped it; expand that section
-   and submit again rather than moving on.
+   same quality check** (Summary/Behavior under four words, a "see the
+   source" phrase, or a backtick code span that never closes) — the error
+   names what tripped it; fix that section and submit again rather than
+   moving on. To show backticks inside a code span, wrap it in a
+   double-backtick span (``a `b` c``). A backslash does not escape anything
+   inside a span, so putting one before a backtick there leaves the span
+   unclosed.
 5. Go back to step 1.
 
 ## Batch mode (`--all` / `--all --budget=N` / `--all --stale`)

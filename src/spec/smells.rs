@@ -42,7 +42,98 @@ pub fn prose_smells(text: &str) -> Vec<String> {
     if text.contains("</content>") {
         smells.push("stray_markup".to_string());
     }
+    // A code span opened and never closed: markdown shows the text after it
+    // wrongly, and in practice it means the prose is broken (a fragment that
+    // began mid-sentence with a stray backtick sat in a spec marked current).
+    if has_unclosed_code_span(text) {
+        smells.push("unbalanced_code_span".to_string());
+    }
     smells
+}
+
+/// Whether `text` has a run of backticks that opens a code span and never gets
+/// the matching closer. CommonMark's rule: a run of N backticks opens a span
+/// only if a later run of exactly N backticks in the same block closes it;
+/// a run with no partner is left as literal text. A backslash outside a span
+/// escapes the next character (so `\`` is a literal backtick), but inside a span
+/// it is plain text, which is why a span written as `` `\`name\`` `` comes out
+/// broken. A block ends at a blank line or where a list item, quote, table row
+/// or heading starts, and fenced code blocks are not prose, so both are cut out.
+fn has_unclosed_code_span(text: &str) -> bool {
+    let mut in_fence = false;
+    let mut block = String::new();
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            if span_is_unclosed(&block) {
+                return true;
+            }
+            block.clear();
+            in_fence = !in_fence;
+            continue;
+        }
+        if in_fence {
+            continue;
+        }
+        if trimmed.is_empty() || starts_a_block(trimmed) {
+            if span_is_unclosed(&block) {
+                return true;
+            }
+            block.clear();
+        }
+        block.push_str(line);
+        block.push('\n');
+    }
+    span_is_unclosed(&block)
+}
+
+/// Whether a line begins a new markdown block: a list item, a quote, a table
+/// row or a heading. A code span cannot run from one such block into the next.
+fn starts_a_block(line: &str) -> bool {
+    if ["- ", "* ", "+ ", "> ", "|", "#"]
+        .iter()
+        .any(|marker| line.starts_with(marker))
+    {
+        return true;
+    }
+    let digits = line.chars().take_while(char::is_ascii_digit).count();
+    digits > 0 && (line[digits..].starts_with(". ") || line[digits..].starts_with(") "))
+}
+
+/// The span rule on one block of prose; see [`has_unclosed_code_span`].
+fn span_is_unclosed(block: &str) -> bool {
+    let chars: Vec<char> = block.chars().collect();
+    let run_at = |start: usize| chars[start..].iter().take_while(|&&c| c == '`').count();
+    let mut i = 0;
+    while i < chars.len() {
+        match chars[i] {
+            // Outside a span a backslash escapes whatever follows it.
+            '\\' => i += 2,
+            '`' => {
+                let open = run_at(i);
+                let mut j = i + open;
+                let mut closed = false;
+                while j < chars.len() {
+                    if chars[j] == '`' {
+                        let run = run_at(j);
+                        j += run;
+                        if run == open {
+                            i = j;
+                            closed = true;
+                            break;
+                        }
+                    } else {
+                        j += 1;
+                    }
+                }
+                if !closed {
+                    return true;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    false
 }
 
 /// The union of every quality smell anywhere in a file spec — the file's
@@ -128,8 +219,17 @@ pub(super) fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()> {
     if smells.is_empty() {
         return Ok(());
     }
+    // "Expand it" is the right advice for thin prose and the wrong advice for a
+    // broken code span, which needs fixing, not lengthening.
+    let advice = if smells.iter().all(|s| s.ends_with("unbalanced_code_span")) {
+        "close the code span (to show backticks inside one, wrap it in a \
+         double-backtick span: ``a `b` c``; a backslash does not escape \
+         inside a span)"
+    } else {
+        "expand it"
+    };
     bail!(
-        "{what} fails a quality check ({}) — expand it; `get_next_spec_task` \
+        "{what} fails a quality check ({}) — {advice}; `get_next_spec_task` \
          re-offers a spec until its prose clears the check",
         smells.join(", ")
     );
@@ -155,6 +255,71 @@ mod tests {
             prose_smells("Formats a date into a readable form and returns it.").is_empty(),
             "prose without the tag is untouched"
         );
+    }
+
+    #[test]
+    fn prose_smells_flags_a_code_span_that_never_closes() {
+        // The slip that went through unchecked: a code span whose own text
+        // holds backticks, written with backslashes. Markdown does not honour a
+        // backslash inside a code span, so the first span closes early and a
+        // double-backtick run is left with no partner.
+        let slip = "Then, for each symbol, a `## \\`name\\`` heading (from `short_name`), \
+                    the symbol's current signature.";
+        assert_eq!(prose_smells(slip), vec!["unbalanced_code_span"]);
+        // A stored fragment that began mid-sentence with a stray backtick (it sat in
+        // a spec marked current, because nothing could see it).
+        assert_eq!(
+            prose_smells("` and so on) back out of rendered markdown."),
+            vec!["unbalanced_code_span"]
+        );
+        assert_eq!(
+            prose_smells("Returns the `value without ever closing it, as callers expect."),
+            vec!["unbalanced_code_span"]
+        );
+    }
+
+    #[test]
+    fn prose_smells_accepts_every_well_formed_code_span() {
+        let fine = |text: &str| {
+            assert!(prose_smells(text).is_empty(), "wrongly flagged: {text}");
+        };
+        fine("Uses `a` and `b` to build the result for each caller.");
+        // A double-backtick span may hold single backticks.
+        fine("Writes ``[`src/hash.rs`](../x.rs)`` as the title line of the page.");
+        fine("The delimiter is `` ` `` in the header block of every spec.");
+        // A backslash-escaped backtick outside any span is a literal character.
+        fine("Prints a literal \\` character whenever the caller asks for one.");
+        // A span may run across a line break inside one paragraph.
+        fine("Reads `the value\nthat spans two lines` and returns the result to callers.");
+        // Whatever sits in a fenced block is not prose.
+        fine("An example follows.\n```\nlet x = `;\n```\nThe example above is only a sketch.");
+        fine("Plain prose with no backticks at all, in several words of text.");
+    }
+
+    #[test]
+    fn a_code_span_cannot_run_across_blocks() {
+        // CommonMark: a span ends at the end of its paragraph, so an opener in
+        // one paragraph and a closer in the next are both left unmatched.
+        assert_eq!(
+            prose_smells(
+                "Opens `a span here and goes on.\n\nCloses it here` in another paragraph."
+            ),
+            vec!["unbalanced_code_span"]
+        );
+        // The same for two list items that each hold one lone backtick.
+        assert_eq!(
+            prose_smells(
+                "- the first item has a lone ` backtick in it\n- the second one has a lone ` too"
+            ),
+            vec!["unbalanced_code_span"]
+        );
+    }
+
+    #[test]
+    fn body_smells_sees_it_in_the_summary_section_of_a_feature() {
+        let body = "# Title\n## Summary\nThe page lets a user `submit something and nothing more.\n\
+                    ## How it works\nA fine `paired` span.\n";
+        assert_eq!(body_smells(body), vec!["unbalanced_code_span"]);
     }
 
     #[test]
