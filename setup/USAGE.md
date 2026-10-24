@@ -496,7 +496,7 @@ once, in a terminal, from the repo you serve. Each is a dry run until you add
 | Step | Command | What it fixes |
 |---|---|---|
 | 1 | `codeowl migrate-file-fingerprint <repo> --write` | A file summary used to go stale on any edit to the file. It now goes stale only when something a summary could quote changed, and a spec records that in a `fingerprint` key. Specs written before it have no key, so they read as stale. This adds the key to the ones that were current. A spec that was already stale stays stale. See [After upgrading: migrate old file specs](#after-upgrading-migrate-old-file-specs), including when to wait. |
-| 2 | `codeowl migrate-to-okf <repo> --write` | Gives every spec the keys Open Knowledge Format asks of it (`type` in place of `kind`, `title`, `description`, `generated`, `resource` or `sources`) and the `> Generated using [CodeOwl](…)` line under the title, and turns each dependency in a `### Depends on` list into a link to the spec of the file it comes from. It changes nothing else. A spec is regenerated only when it is stale, so this is the only way a spec that is already current gets the links. See [`codeowl migrate-to-okf`](#codeowl-migrate-to-okf-repo---write). |
+| 2 | `codeowl migrate-to-okf <repo> --write` | Gives every spec the keys Open Knowledge Format asks of it (`type` in place of `kind`, `title`, `description`, `generated`, `resource` or `sources`) and the `> Generated using [CodeOwl](…)` line under the title, links a file or rollup spec's title to its source, and turns each dependency in a `### Depends on` list into a link to the dependency's section in the spec of the file it comes from. It changes nothing else. A spec is regenerated only when it is stale, so this is the only way a spec that is already current gets the links. See [`codeowl migrate-to-okf`](#codeowl-migrate-to-okf-repo---write). |
 | 3 | By hand, if you have a style guide: `git mv docs/specs/STYLE.md docs/STYLE.md` | No command does this for you. Step 2 only notices the file and says so. A file with no frontmatter inside `docs/specs/` keeps the folder from conforming, and `/codeowl-generate` reads the style guide from `docs/STYLE.md` only. |
 
 The two commands do not depend on each other, so either order gives the same
@@ -660,10 +660,14 @@ so `docs/specs/` conforms:
 | `resource` | For a file or rollup, the path it describes, relative to the spec. |
 | `sources` | For a feature or the system spec, the files or modules it covers. |
 
-In the body, each dependency in a symbol's `### Depends on` list is a link to
-the spec of the file it comes from (``[`src/graph.rs::Graph`](../graph.rs.md)``),
-so you can follow the specs from one to the next on GitHub or in any markdown
-viewer. A link to a file that has no spec yet simply does not open. A
+In the body, the title of a file spec is its path, linked to the source file
+(``# [`src/hash.rs`](../../../src/hash.rs)``), and a rollup's title is linked to
+its directory. Each dependency in a symbol's `### Depends on` list is a link to
+the dependency's own section in the spec of the file it comes from
+(``[`src/graph.rs::Graph`](../graph.rs.md#graph)``), so you can follow the specs
+from one to the next, and from a spec to its code, on GitHub or in any markdown
+viewer. If a spec does not have that section yet, the link opens the spec at
+the top; a link to a file that has no spec yet simply does not open. A
 dependency on a file that never gets a spec (a constants-only or schema file,
 generated code), on a file in the same spec, or on a file that no longer
 exists stays plain text.

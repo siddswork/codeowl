@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail};
 
 use super::file_task::{SpecTask, next_task};
 use super::format::{
-    PROVENANCE, extract_section, okf_frontmatter, path_from_doc, read_file_spec, write_replacing,
+    PROVENANCE, extract_section, linked_title, okf_frontmatter, path_from_doc, read_file_spec,
+    write_replacing,
 };
 use super::layout::{
     directory_is_spec_bearing, file_is_spec_bearing, files_in, is_test_path, spec_bearing_files_in,
@@ -46,6 +47,12 @@ pub fn rollup_spec_path(root: &Path, dir_path: &str) -> PathBuf {
         .join("_index.md")
 }
 
+/// The title line of a rollup: its directory, linked to that directory (the
+/// path `resource:` holds).
+pub(super) fn rollup_title_line(dir_path: &str) -> String {
+    linked_title(dir_path, &path_from_doc(dir_path, dir_path))
+}
+
 /// The OKF keys of a rollup: the same text a fresh render writes and the
 /// migration adds to a rollup written before them.
 pub(super) fn rollup_okf_frontmatter(dir_path: &str) -> String {
@@ -72,7 +79,10 @@ pub fn render_rollup(graph: &Graph, root: &Path, spec: &RollupSpec) -> String {
     }
     out.push_str(&format!("spec_hash: {}\n", spec.spec_hash));
     out.push_str("---\n");
-    out.push_str(&format!("# {}\n{PROVENANCE}\n", spec.dir_path));
+    out.push_str(&format!(
+        "{}\n{PROVENANCE}\n",
+        rollup_title_line(&spec.dir_path)
+    ));
     out.push_str("## Summary\n");
     out.push_str(spec.body.trim());
     out.push('\n');
@@ -459,7 +469,10 @@ mod tests {
         };
         let rendered = render_rollup(&graph, Path::new("/nonexistent"), &spec);
         let lines: Vec<&str> = rendered.lines().collect();
-        let title = lines.iter().position(|l| *l == "# lib").unwrap();
+        let title = lines
+            .iter()
+            .position(|l| *l == "# [`lib`](../../../lib)")
+            .unwrap();
         assert_eq!(lines[title + 1], PROVENANCE);
         let legacy = rendered.replace(&format!("{PROVENANCE}\n"), "");
         assert_eq!(parse_rollup(&legacy).unwrap(), spec);

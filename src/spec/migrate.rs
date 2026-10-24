@@ -6,11 +6,11 @@ use anyhow::{Context, Result, bail};
 
 use super::feature::{feature_okf_frontmatter, parse_feature};
 use super::format::{
-    file_okf_frontmatter, has_provenance, linked_dependency_line, parse, with_provenance,
-    write_replacing, yaml_flow_item,
+    file_okf_frontmatter, file_title_line, has_provenance, linked_dependency_line, parse,
+    with_provenance, write_replacing, yaml_flow_item,
 };
 use super::layout::spec_path;
-use super::rollup::{parse_rollup, rollup_okf_frontmatter};
+use super::rollup::{parse_rollup, rollup_okf_frontmatter, rollup_title_line};
 use super::staleness::{
     file_dependency_hash, hash_dependency_pairs, shorten_dep_targets, try_dependency_pairs,
     try_file_dependency_pairs,
@@ -285,6 +285,9 @@ pub struct OkfReport {
     /// without this a current spec would keep plain text indefinitely.
     pub links_added: usize,
     pub linked_documents: usize,
+    /// File and rollup specs whose plain title line became a link to the
+    /// source file or directory (or would).
+    pub titles_linked: usize,
     /// Documents that needed no change: the OKF keys, the provenance line and
     /// the links are there (or there is nothing to put them on), or the page
     /// has a `type:` key that CodeOwl did not write.
@@ -356,6 +359,9 @@ pub fn migrate_to_okf(graph: &Graph, root: &Path, write: bool) -> Result<OkfRepo
                     report.links_added += change.links_added;
                     report.linked_documents += 1;
                 }
+                if change.title_linked {
+                    report.titles_linked += 1;
+                }
                 if write {
                     write_replacing(&path, &change.text)
                         .with_context(|| format!("updating {}", path.display()))?;
@@ -373,17 +379,48 @@ struct Change {
     keys_added_to: Option<String>,
     /// Whether the provenance line was put under its title.
     line_added: bool,
-    /// How many plain dependency lines became links.
+    /// How many dependency entries were rewritten as the link a fresh render
+    /// writes (a plain entry, or a link without its section anchor).
     links_added: usize,
+    /// Whether the title line became the link a fresh render writes.
+    title_linked: bool,
     text: String,
 }
 
-/// `body` with each plain entry of a `### Depends on` list rewritten as the
-/// link a fresh render writes, and how many were. An entry is a line of the
-/// form ``- `target` — specifier``; one that is already a link, the
-/// `externals:` line, `- (none)`, an entry with nothing to link to (the same
-/// file, a file that never gets a spec, a file that is gone), and any such
-/// text outside a `Depends on` list are left exactly as they are.
+/// `body` with its first line, the title, replaced by `expected` when it is
+/// the plain `# {text}` or an earlier form of the link to `text`; any other
+/// title (one someone wrote) is left alone. Returns whether it changed.
+fn with_title_link(body: &str, text: &str, expected: &str) -> (String, bool) {
+    let (first, rest) = body.split_once('\n').unwrap_or((body, ""));
+    let plain = format!("# {text}");
+    let earlier_link = format!("# [`{text}`](");
+    if first == expected || !(first == plain || first.starts_with(&earlier_link)) {
+        return (body.to_string(), false);
+    }
+    let separator = if body.contains('\n') { "\n" } else { "" };
+    (format!("{expected}{separator}{rest}"), true)
+}
+
+/// The target and specifier of a dependency entry, plain (``- `target` —
+/// specifier``) or linked (``- [`target`](destination) — specifier``).
+fn dependency_entry(line: &str) -> Option<(&str, &str)> {
+    if let Some(entry) = line.strip_prefix("- `") {
+        let (target, rest) = entry.split_once('`')?;
+        return Some((target, rest.strip_prefix(" — ")?));
+    }
+    let entry = line.strip_prefix("- [`")?;
+    let (target, rest) = entry.split_once("`](")?;
+    let (_, specifier) = rest.split_once(") — ")?;
+    Some((target, specifier))
+}
+
+/// `body` with each entry of a `### Depends on` list rewritten as the line a
+/// fresh render writes, and how many were changed: a plain entry becomes a
+/// link, and a link without the anchor of its section (or with a wrong one) is
+/// put right. The `externals:` line, `- (none)`, an entry with nothing to link
+/// to (the same file, a file that never gets a spec, a file that is gone) that
+/// is already plain, and any such text outside a `Depends on` list are left
+/// exactly as they are.
 fn with_dependency_links(graph: &Graph, from_file: &str, body: &str) -> (String, usize) {
     let mut out = String::with_capacity(body.len());
     let mut in_list = false;
@@ -399,11 +436,7 @@ fn with_dependency_links(graph: &Graph, from_file: &str, body: &str) -> (String,
             // keep the line as it is
         } else if bare.starts_with('#') {
             in_list = bare == "### Depends on";
-        } else if in_list
-            && let Some(entry) = bare.strip_prefix("- `")
-            && let Some((target, rest)) = entry.split_once('`')
-            && let Some(specifier) = rest.strip_prefix(" — ")
-        {
+        } else if in_list && let Some((target, specifier)) = dependency_entry(bare) {
             let new = format!(
                 "- {}",
                 linked_dependency_line(graph, from_file, target, specifier)
@@ -496,12 +529,41 @@ fn with_okf_keys(graph: &Graph, text: &str) -> Result<Option<Change>> {
             other => bail!("a spec of kind `{other}` is not one CodeOwl writes"),
         })
     };
+    // The title line of a file or rollup spec, as a fresh render writes it.
+    // A render only ever writes a spec for code that exists, so it always
+    // links; an orphaned spec (its code moved or was deleted) has nothing to
+    // link to, and its title stays plain.
+    let title = match kind {
+        "file" => source_path.as_deref().map(|path| {
+            let line = if graph.find(path).is_some() {
+                file_title_line(path)
+            } else {
+                format!("# {path}")
+            };
+            (path.to_string(), line)
+        }),
+        "rollup" => {
+            let dir = parse_rollup(text)?.dir_path;
+            let prefix = format!("{dir}/");
+            let line = if graph.files().any(|file| file.id.starts_with(&prefix)) {
+                rollup_title_line(&dir)
+            } else {
+                format!("# {dir}")
+            };
+            Some((dir, line))
+        }
+        _ => None,
+    };
     let (body, line_added) = with_missing_provenance(&lines[close + 1..].concat());
+    let (body, title_linked) = match &title {
+        Some((text, expected)) => with_title_link(&body, text, expected),
+        None => (body, false),
+    };
     let (body, links_added) = match &source_path {
         Some(path) => with_dependency_links(graph, path, &body),
         None => (body, 0),
     };
-    if converted.is_none() && !line_added && links_added == 0 {
+    if converted.is_none() && !line_added && !title_linked && links_added == 0 {
         return Ok(None);
     }
     let mut out = String::with_capacity(text.len());
@@ -526,6 +588,7 @@ fn with_okf_keys(graph: &Graph, text: &str) -> Result<Option<Change>> {
         keys_added_to: converted.map(|_| kind.to_string()),
         line_added,
         links_added,
+        title_linked,
         text: out,
     }))
 }
@@ -559,7 +622,7 @@ mod tests {
     use crate::spec::feature::{FeatureSpec, feature_okf_frontmatter, render_feature};
     use crate::spec::file_task::submit;
     use crate::spec::format::{
-        FileSpec, PROVENANCE, file_okf_frontmatter, parse, read_file_spec, render,
+        FileSpec, PROVENANCE, file_okf_frontmatter, file_title_line, parse, read_file_spec, render,
     };
     use crate::spec::layout::spec_path;
     use crate::spec::rollup::{RollupSpec, render_rollup, rollup_okf_frontmatter};
@@ -857,7 +920,7 @@ mod tests {
         // so they must not move a hash or trip the quality check.
         let (graph, dir) = greeter_people_graph("linked-current");
         let text = generate_people(&graph, &dir);
-        assert!(text.contains("](greeter.rs.md)"), "{text}");
+        assert!(text.contains("](greeter.rs.md#greeter)"), "{text}");
         let spec = read_file_spec(&dir, "src/people.rs").unwrap().unwrap();
         let file_id = graph.find("src/people.rs").unwrap();
         assert!(file_changes(&graph, file_id, &spec.file).is_empty());
@@ -1041,11 +1104,12 @@ mod tests {
         ]
     }
 
-    /// `migrate_to_okf` with an empty graph, for the tests that have no
-    /// dependency list to link: which files will have a spec does not matter
-    /// to them. The ones that link pass `greeter_people_graph`'s graph.
+    /// `migrate_to_okf` with a graph of the one file (`lib/a.ts`) that
+    /// `okf_documents` describes, for the tests that have no dependency list
+    /// to link. The ones that link pass `greeter_people_graph`'s graph.
     fn migrate_without_graph(dir: &Path, write: bool) -> Result<OkfReport> {
-        migrate_to_okf(&Graph::build(Vec::new()), dir, write)
+        let graph = build_graph_from_sources(&[("lib/a.ts", "export function one() {}\n")]);
+        migrate_to_okf(&graph, dir, write)
     }
 
     fn put_spec(dir: &Path, rel: &str, text: &str) -> std::path::PathBuf {
@@ -1317,7 +1381,8 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    const LINKED_DEP: &str = "- [`src/greeter.rs::Greeter`](greeter.rs.md) — crate::greeter";
+    const LINKED_DEP: &str =
+        "- [`src/greeter.rs::Greeter`](greeter.rs.md#greeter) — crate::greeter";
     const PLAIN_DEP: &str = "- `src/greeter.rs::Greeter` — crate::greeter";
 
     #[test]
@@ -1365,8 +1430,9 @@ mod tests {
     fn only_a_dependency_with_a_spec_to_point_at_is_linked_and_only_in_the_list() {
         let (graph, dir) = greeter_people_graph("okf-links-plain");
         let header = file_okf_frontmatter("src/people.rs");
+        let title = file_title_line("src/people.rs");
         let doc = format!(
-            "---\n{header}source_paths: [src/people.rs]\n---\n# src/people.rs\n{PROVENANCE}\n\
+            "---\n{header}source_paths: [src/people.rs]\n---\n{title}\n{PROVENANCE}\n\
              ## Summary\nS.\n\n## `Polite`\n`pub struct Polite;`\n### Summary\nA.\n\
              ### Behavior\n{PLAIN_DEP}\n\
              ### Depends on\n{PLAIN_DEP}\n\
@@ -1391,14 +1457,126 @@ mod tests {
     }
 
     #[test]
+    fn an_older_spec_gets_the_linked_title_and_links_that_reach_the_section() {
+        // Specs written before the title was a link, and before a dependency
+        // link named a section, are brought to what a fresh render writes.
+        let (graph, dir) = greeter_people_graph("okf-title-anchor");
+        let fresh = generate_people(&graph, &dir);
+        assert!(
+            fresh.contains("\n# [`src/people.rs`](../../../src/people.rs)\n"),
+            "{fresh}"
+        );
+        assert!(fresh.contains("(greeter.rs.md#greeter)"), "{fresh}");
+        let older = fresh
+            .replace(
+                "# [`src/people.rs`](../../../src/people.rs)",
+                "# src/people.rs",
+            )
+            .replace("(greeter.rs.md#greeter)", "(greeter.rs.md)");
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &older).unwrap();
+        let before = parse(&older).unwrap();
+
+        let dry = migrate_to_okf(&graph, &dir, false).unwrap();
+        assert_eq!((dry.titles_linked, dry.links_added), (1, 1));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), older);
+
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!((report.titles_linked, report.links_added), (1, 1));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
+        // Nothing but a title and a link moved: same spec, still current.
+        let spec = read_file_spec(&dir, "src/people.rs").unwrap().unwrap();
+        assert_eq!(spec, before);
+        let file_id = graph.find("src/people.rs").unwrap();
+        assert!(file_changes(&graph, file_id, &spec.file).is_empty());
+
+        let again = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(
+            (again.titles_linked, again.links_added, again.unchanged),
+            (0, 0, 1)
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_spec_whose_source_file_is_gone_keeps_a_plain_title() {
+        // An orphaned spec (its code moved or was deleted) has nothing for its
+        // title to link to: a link to a file that is not there would not open.
+        let (graph, dir) = greeter_people_graph("okf-title-gone");
+        let header = file_okf_frontmatter("src/gone.rs");
+        let doc = |title: &str| {
+            format!(
+                "---\n{header}source_paths: [src/gone.rs]\n---\n{title}\n{PROVENANCE}\n\
+                 ## Summary\nS.\n"
+            )
+        };
+        let path = put_spec(&dir, "src/gone.rs.md", &doc("# src/gone.rs"));
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.titles_linked, 0);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            doc("# src/gone.rs")
+        );
+
+        // One that was already linked (by the earlier run) is made plain.
+        let linked = doc(&file_title_line("src/gone.rs"));
+        std::fs::write(&path, &linked).unwrap();
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.titles_linked, 1);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            doc("# src/gone.rs")
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_dependency_link_with_the_wrong_anchor_is_put_right() {
+        let (graph, dir) = greeter_people_graph("okf-anchor-wrong");
+        let fresh = generate_people(&graph, &dir);
+        let wrong = fresh.replace("(greeter.rs.md#greeter)", "(greeter.rs.md#nothing-here)");
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &wrong).unwrap();
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.links_added, 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_rollups_plain_title_is_linked_and_a_title_someone_wrote_is_left_alone() {
+        let dir = temp_dir_for("okf-rollup-title");
+        let documents = okf_documents(&dir);
+        let (rel, fresh, _) = &documents[1];
+        assert!(fresh.contains("\n# [`lib`](../../../lib)\n"), "{fresh}");
+        let path = put_spec(
+            &dir,
+            rel,
+            &fresh.replace("# [`lib`](../../../lib)", "# lib"),
+        );
+        let report = migrate_without_graph(&dir, true).unwrap();
+        assert_eq!(report.titles_linked, 1);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), *fresh);
+
+        // A title that is neither the plain path nor ours is not touched.
+        let custom = fresh.replace("# [`lib`](../../../lib)", "# Our shared helpers");
+        std::fs::write(&path, &custom).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
+        assert_eq!(report.titles_linked, 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), custom);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_file_spec_with_no_source_path_is_reported_and_not_linked_from_nowhere() {
         // Links are relative to the spec's own place, so a spec that does not
         // say which file it is for cannot be linked: it is listed, untouched,
         // not given links that point nowhere.
         let (graph, dir) = greeter_people_graph("okf-no-source-path");
         let header = file_okf_frontmatter("src/people.rs");
+        let title = file_title_line("src/people.rs");
         let doc = format!(
-            "---\n{header}---\n# src/people.rs\n{PROVENANCE}\n## Summary\nS.\n\n## `Polite`\n\
+            "---\n{header}---\n{title}\n{PROVENANCE}\n## Summary\nS.\n\n## `Polite`\n\
              ### Summary\nA.\n### Behavior\nB.\n### Depends on\n{PLAIN_DEP}\n"
         );
         let path = put_spec(&dir, "src/people.rs.md", &doc);
@@ -1414,8 +1592,9 @@ mod tests {
     fn text_inside_a_fenced_block_is_never_taken_for_a_dependency_list() {
         let (graph, dir) = greeter_people_graph("okf-links-fence");
         let header = file_okf_frontmatter("src/people.rs");
+        let title = file_title_line("src/people.rs");
         let doc = format!(
-            "---\n{header}source_paths: [src/people.rs]\n---\n# src/people.rs\n{PROVENANCE}\n\
+            "---\n{header}source_paths: [src/people.rs]\n---\n{title}\n{PROVENANCE}\n\
              ## Summary\nS.\n\n## `Polite`\n### Summary\nA.\n### Behavior\n\
              An example of the layout:\n```\n### Depends on\n{PLAIN_DEP}\n```\n\
              ### Depends on\n- (none)\n"

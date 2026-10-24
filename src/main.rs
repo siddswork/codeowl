@@ -207,6 +207,11 @@ async fn main() -> Result<()> {
                 "{verb} {} dependency link(s) in {} spec(s)",
                 r.links_added, r.linked_documents
             );
+            let linked = if write { "updated" } else { "would update" };
+            println!(
+                "{linked} the title line (a link to its source) of {} spec(s)",
+                r.titles_linked
+            );
             println!(
                 "skipped: {} needing no change, {} with no frontmatter",
                 r.unchanged, r.no_frontmatter
@@ -228,7 +233,12 @@ async fn main() -> Result<()> {
                      file with no frontmatter keeps the folder from conforming"
                 );
             }
-            if !write && (r.migrated > 0 || r.provenance_added > 0 || r.links_added > 0) {
+            if !write
+                && (r.migrated > 0
+                    || r.provenance_added > 0
+                    || r.links_added > 0
+                    || r.titles_linked > 0)
+            {
                 println!("dry run: nothing written; pass --write to apply");
             }
             Ok(())

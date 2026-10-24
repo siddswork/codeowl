@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::layout::{file_is_spec_bearing, short_name, spec_link, spec_path, symbol_file};
+use super::layout::{
+    file_is_spec_bearing, link_destination, section_anchor, short_name, spec_link, spec_path,
+    symbol_file,
+};
 use super::source_text::{scoped_symbol_deps, symbol_span_text};
 use crate::graph::{Graph, Node, SymbolId};
 use crate::symbol::Symbol;
@@ -258,6 +261,24 @@ pub(super) fn okf_frontmatter(
     out
 }
 
+/// A document's title line: `text` as the link text, in a code span so a
+/// path with brackets or underscores cannot be read as markdown, linked to
+/// `target` (a repo-relative path as seen from the document). Text with a
+/// backtick in it cannot sit in a code span, so it stays plain.
+pub(super) fn linked_title(text: &str, target: &str) -> String {
+    if text.contains('`') {
+        return format!("# {text}");
+    }
+    format!("# [`{text}`]({})", link_destination(target))
+}
+
+/// The title line of a file spec: its path, linked to the source file it
+/// describes (the path `resource:` holds).
+pub(super) fn file_title_line(source_path: &str) -> String {
+    let doc_dir = source_path.rsplit_once('/').map_or("", |(dir, _)| dir);
+    linked_title(source_path, &path_from_doc(doc_dir, source_path))
+}
+
 /// The OKF keys of a file spec: the same text a fresh render writes and the
 /// migration adds to a spec written before them.
 pub(super) fn file_okf_frontmatter(source_path: &str) -> String {
@@ -309,7 +330,10 @@ pub fn render(graph: &Graph, root: &Path, file_id: SymbolId, spec: &FileSpec) ->
     }
     out.push_str(&dep_target_block(spec));
     out.push_str("---\n");
-    out.push_str(&format!("# {}\n{PROVENANCE}\n", spec.source_path));
+    out.push_str(&format!(
+        "{}\n{PROVENANCE}\n",
+        file_title_line(&spec.source_path)
+    ));
     out.push_str("## Summary\n");
     out.push_str(spec.file_summary.trim());
     out.push('\n');
@@ -447,7 +471,16 @@ fn link_to_spec(graph: &Graph, from_file: &str, target: &str) -> Option<String> 
         return None;
     }
     let target_id = graph.find(target_file)?;
-    file_is_spec_bearing(graph, target_id).then(|| spec_link(from_file, target_file))
+    if !file_is_spec_bearing(graph, target_id) {
+        return None;
+    }
+    let link = spec_link(from_file, target_file);
+    // Straight to the symbol's section where it has one, else the top of the
+    // file's spec; a viewer that cannot find the anchor does the same.
+    Some(match section_anchor(graph, target) {
+        Some(anchor) => format!("{link}#{anchor}"),
+        None => link,
+    })
 }
 
 /// Parse a spec file's own rendered output back into a `FileSpec`. Only
@@ -756,7 +789,10 @@ mod tests {
         };
         let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
         let lines: Vec<&str> = rendered.lines().collect();
-        let title = lines.iter().position(|l| *l == "# a.ts").unwrap();
+        let title = lines
+            .iter()
+            .position(|l| *l == "# [`a.ts`](../../a.ts)")
+            .unwrap();
         assert_eq!(lines[title + 1], PROVENANCE);
         assert_eq!(parse(&rendered).unwrap(), spec);
         // A document written before the line existed still parses the same.
@@ -1072,7 +1108,8 @@ mystery:\n  file -> src/b.rs::Beta: a1b2c3d4e5f6\n\
         let linked = linked_dependency_lines(&graph, &dir, file_id, widget);
         assert_eq!(linked.len(), 2, "{linked:?}");
         assert!(
-            linked[0].starts_with("[`") && linked[0].contains("helper.ts::helper`](helper.ts.md)"),
+            linked[0].starts_with("[`")
+                && linked[0].contains("helper.ts::helper`](helper.ts.md#helper)"),
             "{linked:?}"
         );
         assert_eq!(linked[1], "externals: next, react");
@@ -1380,7 +1417,9 @@ impl<T: Render> Panel<T> {\n\
         };
         let rendered = render(&graph, &dir, file_id, &spec);
         assert!(
-            rendered.contains("- [`src/greeter.rs::Greeter`](greeter.rs.md) — crate::greeter\n"),
+            rendered.contains(
+                "- [`src/greeter.rs::Greeter`](greeter.rs.md#greeter) — crate::greeter\n"
+            ),
             "{rendered}"
         );
         // The links do not disturb reading the document back.
@@ -1398,6 +1437,66 @@ impl<T: Render> Panel<T> {\n\
     }
 
     #[test]
+    fn a_file_specs_title_is_its_path_linked_to_the_source_file() {
+        // The path is the title; the link is the path from the spec to the
+        // file, the same one `resource:` holds. Code-span text, so a path with
+        // brackets or underscores cannot be read as markdown.
+        assert_eq!(
+            file_title_line("lib/a.ts"),
+            "# [`lib/a.ts`](../../../lib/a.ts)"
+        );
+        assert_eq!(file_title_line("a.ts"), "# [`a.ts`](../../a.ts)");
+        assert_eq!(
+            file_title_line("app/api/[id]/route.ts"),
+            "# [`app/api/[id]/route.ts`](../../../../../app/api/[id]/route.ts)"
+        );
+        assert_eq!(
+            file_title_line("my dir/x (1).ts"),
+            "# [`my dir/x (1).ts`](../../../my%20dir/x%20%281%29.ts)"
+        );
+        // A backtick cannot sit in a code span: the title stays plain text.
+        assert_eq!(file_title_line("odd`name.ts"), "# odd`name.ts");
+    }
+
+    #[test]
+    fn a_rendered_file_spec_has_the_linked_title_and_still_parses() {
+        let graph = build_graph_from_sources(&[("lib/a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("lib/a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "lib/a.ts".to_string(),
+            file_summary: "One thing.".to_string(),
+            ..FileSpec::blank("lib/a.ts")
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        let body = rendered.split_once("\n---\n").unwrap().1;
+        assert_eq!(
+            body.lines().next(),
+            Some("# [`lib/a.ts`](../../../lib/a.ts)")
+        );
+        assert_eq!(parse(&rendered).unwrap(), spec);
+    }
+
+    #[test]
+    fn a_rendered_dependency_links_to_the_symbols_own_section() {
+        let (graph, dir) = crate::spec::test_support::greeter_people_graph("link-anchor");
+        let file_id = graph.find("src/people.rs").unwrap();
+        let spec = FileSpec {
+            source_path: "src/people.rs".to_string(),
+            symbols: vec![("src/people.rs::Polite".to_string(), HashPair::default())],
+            file_summary: "People.".to_string(),
+            ..FileSpec::blank("src/people.rs")
+        };
+        let rendered = render(&graph, &dir, file_id, &spec);
+        assert!(
+            rendered.contains(
+                "- [`src/greeter.rs::Greeter`](greeter.rs.md#greeter) — crate::greeter\n"
+            ),
+            "{rendered}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_dependency_is_linked_only_to_a_spec_that_can_exist_and_is_not_its_own() {
         let graph = build_graph_from_sources(&[
             ("a.ts", "export function f() {}\n"),
@@ -1407,7 +1506,7 @@ impl<T: Render> Panel<T> {\n\
         ]);
         assert_eq!(
             link_to_spec(&graph, "a.ts", "b.ts::g"),
-            Some("b.ts.md".to_string())
+            Some("b.ts.md#g".to_string())
         );
         // A link from a document to itself leads nowhere new.
         assert_eq!(link_to_spec(&graph, "a.ts", "a.ts::f"), None);

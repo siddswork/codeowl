@@ -55,8 +55,14 @@ pub fn spec_link(from_file: &str, target_file: &str) -> String {
         .count();
     let mut parts: Vec<&str> = vec![".."; from.len() - common];
     parts.extend(&target[common..]);
-    let mut link = String::new();
-    for c in parts.join("/").chars() {
+    link_destination(&parts.join("/"))
+}
+
+/// `path` as the destination of a markdown link: the characters that would
+/// end the destination, or start a fragment or query, are percent-escaped.
+pub fn link_destination(path: &str) -> String {
+    let mut link = String::with_capacity(path.len());
+    for c in path.chars() {
         match c {
             '%' => link.push_str("%25"),
             ' ' => link.push_str("%20"),
@@ -71,6 +77,60 @@ pub fn spec_link(from_file: &str, target_file: &str) -> String {
         }
     }
     link
+}
+
+/// The anchor GitHub gives each of `headings`, in document order: lowercase,
+/// everything but letters, digits, `_`, `-` and spaces dropped, spaces turned
+/// into hyphens, and a heading that repeats an earlier one gets `-1`, `-2`, …
+/// So the anchor of a heading depends on the headings before it.
+pub fn heading_anchors(headings: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    headings
+        .iter()
+        .map(|heading| {
+            let slug: String = heading
+                .trim()
+                .to_lowercase()
+                .chars()
+                .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | ' '))
+                .map(|c| if c == ' ' { '-' } else { c })
+                .collect();
+            let count = seen.entry(slug.clone()).or_insert(0);
+            let anchor = if *count == 0 {
+                slug
+            } else {
+                format!("{slug}-{count}")
+            };
+            *count += 1;
+            anchor
+        })
+        .collect()
+}
+
+/// The anchor of `symbol_id`'s section in its file's spec, when it has one.
+/// A file spec is `## Summary`, then for each spec-bearing symbol in source
+/// order `## name` with `### Summary`, `### Behavior` and `### Depends on`
+/// under it (the order [`spec_bearing_children`] gives and the renderer
+/// writes), so the anchor is found by numbering that heading sequence as
+/// GitHub does. `None` for a symbol with no section of its own (a method, a
+/// constant, an unknown id): the link then opens the file's spec at the top.
+/// Worked out from the graph, so it assumes every symbol is documented, which
+/// only matters when two headings share a name.
+pub fn section_anchor(graph: &Graph, symbol_id: &str) -> Option<String> {
+    let file_id = graph.find(symbol_file(symbol_id))?;
+    let sections = spec_bearing_children(graph, file_id);
+    let index = sections
+        .iter()
+        .position(|&id| graph.string_id(id) == symbol_id)?;
+    let mut headings = vec!["Summary".to_string()];
+    let mut heading_of_section = Vec::with_capacity(sections.len());
+    for &id in &sections {
+        heading_of_section.push(headings.len());
+        headings.push(short_name(graph.string_id(id)).to_string());
+        headings.extend(["Summary", "Behavior", "Depends on"].map(String::from));
+    }
+    let anchors = heading_anchors(&headings);
+    Some(anchors[heading_of_section[index]].clone())
 }
 
 /// Whether a repo-relative path is test code — an `e2e/` tree, a
@@ -280,6 +340,56 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn a_heading_becomes_the_anchor_github_gives_it() {
+        let anchors = |headings: &[&str]| {
+            heading_anchors(&headings.iter().map(|h| h.to_string()).collect::<Vec<_>>())
+        };
+        // Lowercase, punctuation dropped, spaces to hyphens; `_` and `-` stay.
+        assert_eq!(anchors(&["SymbolId"]), ["symbolid"]);
+        assert_eq!(
+            anchors(&["impl ServerHandler for CodeOwlServer"]),
+            ["impl-serverhandler-for-codeowlserver"]
+        );
+        assert_eq!(
+            anchors(&["OrphanedSpec> for OrphanedSpecResponse"]),
+            ["orphanedspec-for-orphanedspecresponse"]
+        );
+        assert_eq!(anchors(&["__init__", "a-b"]), ["__init__", "a-b"]);
+        // The same heading again gets -1, -2, ... in document order.
+        assert_eq!(
+            anchors(&["Summary", "Foo", "Summary", "Foo", "Summary"]),
+            ["summary", "foo", "summary-1", "foo-1", "summary-2"]
+        );
+    }
+
+    #[test]
+    fn a_symbols_section_anchor_counts_the_headings_that_come_before_it() {
+        // A file spec has `## Summary`, then for each symbol `## name` with
+        // `### Summary`, `### Behavior` and `### Depends on` under it. A symbol
+        // that happens to be called Summary is the second heading of that name.
+        let graph = build_graph_from_sources(&[(
+            "a.ts",
+            "export function alpha() {}\nexport function Summary() {}\nexport function beta() {}\n",
+        )]);
+        assert_eq!(
+            section_anchor(&graph, "a.ts::alpha"),
+            Some("alpha".to_string())
+        );
+        assert_eq!(
+            section_anchor(&graph, "a.ts::Summary"),
+            Some("summary-2".to_string()),
+            "after the file's own Summary and alpha's"
+        );
+        assert_eq!(
+            section_anchor(&graph, "a.ts::beta"),
+            Some("beta".to_string())
+        );
+        // No section for a symbol the graph does not know, or for a file.
+        assert_eq!(section_anchor(&graph, "a.ts::gone"), None);
+        assert_eq!(section_anchor(&graph, "a.ts"), None);
     }
 
     #[test]

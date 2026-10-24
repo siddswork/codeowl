@@ -46,7 +46,7 @@ generated: { by: CodeOwl }
 resource: "../../../src/hash.rs"
 # … source_paths and the source, dependency and spec hashes, trimmed …
 ---
-# src/hash.rs
+# [`src/hash.rs`](../../../src/hash.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 Stable content hashing for every hash CodeOwl persists — `source_hash`,
@@ -125,10 +125,11 @@ scoped, and checkable, not the other way around.
 - **An open format.** The specs follow
   [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog):
   Markdown with YAML frontmatter (`type`, `title`, `description`, …), and each
-  dependency in a `Depends on` list is a link to the spec of the file it comes
-  from. Other tools can read or walk them without CodeOwl, and on GitHub you
-  can click from one spec to the next. Specs written by an earlier version are
-  brought up to date by one command, `codeowl migrate-to-okf`.
+  dependency in a `Depends on` list is a link to its section in the spec of the
+  file it comes from, and each spec's title is a link to the source file.
+  Other tools can read or walk them without CodeOwl, and on GitHub you can
+  click from one spec to the next, or to the code. Specs written by an earlier
+  version are brought up to date by one command, `codeowl migrate-to-okf`.
 - **No LLM in the loop, ever.** CodeOwl holds no API keys and makes no
   model calls, and it never hashes prose — only the deterministic graph. The
   calling agent writes spec text through `get_next_spec_task` →
