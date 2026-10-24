@@ -19,7 +19,58 @@ fn classify_in(graph: &Graph, path: &str) -> FileRole {
 pub fn spec_path(root: &Path, source_path: &str) -> PathBuf {
     root.join("docs")
         .join("specs")
-        .join(format!("{source_path}.md"))
+        .join(spec_relative_path(source_path))
+}
+
+/// A source file's spec, relative to `docs/specs/`: its path plus `.md`. The
+/// one place that says how a spec is named; [`spec_path`] and [`spec_link`]
+/// both follow it.
+fn spec_relative_path(source_path: &str) -> String {
+    format!("{source_path}.md")
+}
+
+/// The file part of a symbol id: everything before `::`, or the whole id when
+/// it already names a file.
+pub fn symbol_file(id: &str) -> &str {
+    id.split("::").next().unwrap_or(id)
+}
+
+/// A link, relative to the spec of `from_file`, to the spec of `target_file`.
+/// Both are repo-relative source paths, and their specs sit under
+/// `docs/specs/` as [`spec_relative_path`] says, so the link is the path
+/// between those two places. Relative, not rooted at `/`: on GitHub a leading
+/// `/` means the repository root, not `docs/specs/`. Characters that would
+/// end a markdown link destination (or start a fragment or query) are
+/// percent-escaped.
+pub fn spec_link(from_file: &str, target_file: &str) -> String {
+    let mut from: Vec<&str> = from_file.split('/').collect();
+    from.pop();
+    let target_path = spec_relative_path(target_file);
+    let target: Vec<&str> = target_path.split('/').collect();
+    let target_dirs = &target[..target.len() - 1];
+    let common = from
+        .iter()
+        .zip(target_dirs)
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut parts: Vec<&str> = vec![".."; from.len() - common];
+    parts.extend(&target[common..]);
+    let mut link = String::new();
+    for c in parts.join("/").chars() {
+        match c {
+            '%' => link.push_str("%25"),
+            ' ' => link.push_str("%20"),
+            '(' => link.push_str("%28"),
+            ')' => link.push_str("%29"),
+            '#' => link.push_str("%23"),
+            '?' => link.push_str("%3F"),
+            '<' => link.push_str("%3C"),
+            '>' => link.push_str("%3E"),
+            '\\' => link.push_str("%5C"),
+            c => link.push(c),
+        }
+    }
+    link
 }
 
 /// Whether a repo-relative path is test code — an `e2e/` tree, a
@@ -178,6 +229,76 @@ pub(super) fn short_name(id: &str) -> &str {
 mod tests {
     use super::*;
     use crate::fixtures::build_graph_from_sources;
+
+    #[test]
+    fn the_file_part_of_a_symbol_id_is_everything_before_the_double_colon() {
+        assert_eq!(symbol_file("src/graph.rs::Graph"), "src/graph.rs");
+        assert_eq!(symbol_file("src/graph.rs"), "src/graph.rs");
+        assert_eq!(symbol_file("a.ts::f"), "a.ts");
+    }
+
+    #[test]
+    fn a_link_to_a_spec_is_relative_to_the_spec_that_holds_it() {
+        // Relative, not `/`-rooted: on GitHub a leading `/` means the repo
+        // root, not `docs/specs/`, so a rooted link would not open.
+        assert_eq!(
+            spec_link("src/spec/format.rs", "src/graph.rs"),
+            "../graph.rs.md"
+        );
+        assert_eq!(
+            spec_link("src/hash.rs", "src/spec/format.rs"),
+            "spec/format.rs.md"
+        );
+        assert_eq!(
+            spec_link("src/people.rs", "src/greeter.rs"),
+            "greeter.rs.md"
+        );
+        assert_eq!(spec_link("a.ts", "lib/b.ts"), "lib/b.ts.md");
+        assert_eq!(spec_link("lib/a.ts", "b.ts"), "../b.ts.md");
+        assert_eq!(spec_link("src/a/b/c.rs", "src/x/y.rs"), "../../x/y.rs.md");
+        // The link is the path between the two places `spec_path` gives.
+        let root = Path::new("/r");
+        let from = spec_path(root, "src/spec/format.rs");
+        let linked = from
+            .parent()
+            .unwrap()
+            .join(spec_link("src/spec/format.rs", "src/graph.rs"));
+        assert_eq!(
+            normalise(&linked),
+            normalise(&spec_path(root, "src/graph.rs"))
+        );
+    }
+
+    /// `path` with its `..` components folded in, without touching the disk.
+    fn normalise(path: &Path) -> PathBuf {
+        let mut out = PathBuf::new();
+        for part in path.components() {
+            if part.as_os_str() == ".." {
+                out.pop();
+            } else {
+                out.push(part);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn characters_that_would_end_a_link_destination_are_escaped() {
+        assert_eq!(
+            spec_link("a.ts", "my dir/x (1).ts"),
+            "my%20dir/x%20%281%29.ts.md"
+        );
+        assert_eq!(spec_link("a.ts", "lib/c#/util.ts"), "lib/c%23/util.ts.md");
+        assert_eq!(spec_link("a.ts", "what?/x.ts"), "what%3F/x.ts.md");
+        assert_eq!(spec_link("a.ts", "<a>/x.ts"), "%3Ca%3E/x.ts.md");
+        assert_eq!(spec_link("a.ts", "back\\slash.ts"), "back%5Cslash.ts.md");
+        assert_eq!(spec_link("a.ts", "100%/x.ts"), "100%25/x.ts.md");
+        // Square brackets are fine in a destination and are kept.
+        assert_eq!(
+            spec_link("a.ts", "app/api/[id]/route.ts"),
+            "app/api/[id]/route.ts.md"
+        );
+    }
 
     #[test]
     fn barrel_file_is_not_spec_bearing() {

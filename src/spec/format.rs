@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 
-use super::layout::{short_name, spec_path};
-use super::source_text::{ScopedDeps, scoped_symbol_deps, symbol_span_text};
+use super::layout::{file_is_spec_bearing, short_name, spec_link, spec_path, symbol_file};
+use super::source_text::{scoped_symbol_deps, symbol_span_text};
 use crate::graph::{Graph, Node, SymbolId};
 use crate::symbol::Symbol;
 
@@ -370,38 +370,50 @@ pub(super) fn dependency_lines(
     file_id: SymbolId,
     sym: &Symbol,
 ) -> Vec<String> {
-    let Some((_, scoped)) = scoped_dependencies(graph, root, file_id, sym) else {
-        return Vec::new();
-    };
-    let mut lines: Vec<String> = scoped
-        .resolved
-        .iter()
-        .map(|(target, specifier)| format!("`{target}` — {specifier}"))
-        .collect();
-    if !scoped.externals.is_empty() {
-        lines.push(format!("externals: {}", scoped.externals.join(", ")));
-    }
-    lines
+    dependency_lines_with(graph, root, file_id, sym, |_, target, specifier| {
+        format!("`{target}` — {specifier}")
+    })
 }
 
 /// The same lines as [`dependency_lines`], each resolved dependency written
-/// as a markdown link to the spec of the file it comes from. This is what the
-/// rendered spec shows; `dependency_lines` stays plain text because the
-/// quality check and the generation task read it. The `externals:` line has
-/// no spec to point at and stays as it is.
+/// as a markdown link to the spec of the file it comes from where such a spec
+/// can exist. This is what the rendered spec shows; `dependency_lines` stays
+/// plain text because the quality check and the generation task read it. The
+/// `externals:` line has no spec to point at and stays as it is.
 pub(super) fn linked_dependency_lines(
     graph: &Graph,
     root: &Path,
     file_id: SymbolId,
     sym: &Symbol,
 ) -> Vec<String> {
-    let Some((from_file, scoped)) = scoped_dependencies(graph, root, file_id, sym) else {
+    dependency_lines_with(graph, root, file_id, sym, |from_file, target, specifier| {
+        match link_to_spec(graph, from_file, target) {
+            Some(link) => format!("[`{target}`]({link}) — {specifier}"),
+            None => format!("`{target}` — {specifier}"),
+        }
+    })
+}
+
+/// The lines both versions share: one per resolved dependency, written by
+/// `line(from_file, target, specifier)`, then one `externals:` line.
+fn dependency_lines_with(
+    graph: &Graph,
+    root: &Path,
+    file_id: SymbolId,
+    sym: &Symbol,
+    line: impl Fn(&str, &str, &str) -> String,
+) -> Vec<String> {
+    let Node::File(file) = graph.get(file_id) else {
         return Vec::new();
     };
+    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
+        return Vec::new();
+    };
+    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text, graph.find(&sym.id));
     let mut lines: Vec<String> = scoped
         .resolved
         .iter()
-        .map(|(target, specifier)| linked_line(&from_file, target, specifier))
+        .map(|(target, specifier)| line(&file.id, target, specifier))
         .collect();
     if !scoped.externals.is_empty() {
         lines.push(format!("externals: {}", scoped.externals.join(", ")));
@@ -409,61 +421,20 @@ pub(super) fn linked_dependency_lines(
     lines
 }
 
-/// One resolved dependency as a line of the rendered list: a link to the spec
-/// of `target`'s file, or plain text when that file is the one the line is
-/// in (a link from a document to itself leads nowhere new).
-fn linked_line(from_file: &str, target: &str, specifier: &str) -> String {
-    let target_file = target.split("::").next().unwrap_or(target);
+/// A link to the spec of `target`'s file, if there will be one: not when the
+/// target is in the file the line is in (a link from a document to itself
+/// leads nowhere new), and not when the file is never given a spec (a
+/// constants-only or schema file, a barrel, generated code), which would be a
+/// permanently dead link. Decided from the graph alone, so the rendered text
+/// does not depend on what is on disk. A file that is spec-bearing but has not
+/// been documented yet still links: OKF tolerates a broken link.
+fn link_to_spec(graph: &Graph, from_file: &str, target: &str) -> Option<String> {
+    let target_file = symbol_file(target);
     if target_file == from_file {
-        return format!("`{target}` — {specifier}");
-    }
-    format!(
-        "[`{target}`]({}) — {specifier}",
-        spec_link(from_file, target)
-    )
-}
-
-/// What `sym` depends on, scoped to its own text, with the id of the file it
-/// is in. `None` when the file or the symbol's source cannot be read.
-fn scoped_dependencies(
-    graph: &Graph,
-    root: &Path,
-    file_id: SymbolId,
-    sym: &Symbol,
-) -> Option<(String, ScopedDeps)> {
-    let Node::File(file) = graph.get(file_id) else {
         return None;
-    };
-    let symbol_text = symbol_span_text(root, graph, &file.id, sym).ok()?;
-    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text, graph.find(&sym.id));
-    Some((file.id.clone(), scoped))
-}
-
-/// A link, relative to the spec of `from_file`, to the spec of the file that
-/// `target_id` (a file, or a symbol in one) belongs to. Both specs live under
-/// `docs/specs/` at their source path plus `.md`, so the link is the path
-/// between those two places. Relative, not rooted at `/`: on GitHub a
-/// leading `/` means the repository root, not `docs/specs/`. Characters that
-/// would end a markdown link destination are percent-escaped. The target may
-/// have no spec yet; OKF tolerates a broken link.
-pub(super) fn spec_link(from_file: &str, target_id: &str) -> String {
-    let target_file = target_id.split("::").next().unwrap_or(target_id);
-    let mut from: Vec<&str> = from_file.split('/').collect();
-    from.pop();
-    let target: Vec<&str> = target_file.split('/').collect();
-    let target_dirs = &target[..target.len() - 1];
-    let common = from
-        .iter()
-        .zip(target_dirs)
-        .take_while(|(a, b)| a == b)
-        .count();
-    let mut parts: Vec<String> = vec!["..".to_string(); from.len() - common];
-    parts.extend(target[common..].iter().map(|part| part.to_string()));
-    let path = format!("{}.md", parts.join("/"));
-    path.replace('%', "%25")
-        .replace(' ', "%20")
-        .replace('(', "%28")
-        .replace(')', "%29")
+    }
+    let target_id = graph.find(target_file)?;
+    file_is_spec_bearing(graph, target_id).then(|| spec_link(from_file, target_file))
 }
 
 /// Parse a spec file's own rendered output back into a `FileSpec`. Only
@@ -1364,41 +1335,6 @@ impl<T: Render> Panel<T> {\n\
     }
 
     #[test]
-    fn a_link_to_a_spec_is_relative_to_the_spec_that_holds_it() {
-        // Relative, not `/`-rooted: on GitHub a leading `/` means the repo
-        // root, not `docs/specs/`, so a rooted link would not open.
-        assert_eq!(
-            spec_link("src/spec/format.rs", "src/graph.rs::Graph"),
-            "../graph.rs.md"
-        );
-        assert_eq!(
-            spec_link("src/hash.rs", "src/spec/format.rs::parse"),
-            "spec/format.rs.md"
-        );
-        assert_eq!(
-            spec_link("src/people.rs", "src/greeter.rs::Greeter"),
-            "greeter.rs.md"
-        );
-        assert_eq!(spec_link("a.ts", "lib/b.ts::f"), "lib/b.ts.md");
-        assert_eq!(spec_link("lib/a.ts", "b.ts::f"), "../b.ts.md");
-        assert_eq!(
-            spec_link("src/a/b/c.rs", "src/x/y.rs::z"),
-            "../../x/y.rs.md"
-        );
-        // A target that is a whole file, not a symbol in it.
-        assert_eq!(spec_link("src/a.rs", "src/b.rs"), "b.rs.md");
-        // Characters that would end a markdown link destination are escaped.
-        assert_eq!(
-            spec_link("a.ts", "my dir/x (1).ts::f"),
-            "my%20dir/x%20%281%29.ts.md"
-        );
-        assert_eq!(
-            spec_link("a.ts", "app/api/[id]/route.ts::GET"),
-            "app/api/[id]/route.ts.md"
-        );
-    }
-
-    #[test]
     fn a_rendered_dependency_is_a_link_to_the_spec_of_the_file_it_comes_from() {
         let (graph, dir) = crate::spec::test_support::greeter_people_graph("link-deps");
         let file_id = graph.find("src/people.rs").unwrap();
@@ -1428,31 +1364,84 @@ impl<T: Render> Panel<T> {\n\
     }
 
     #[test]
-    fn a_dependency_in_the_same_file_is_not_a_link_to_the_document_itself() {
+    fn a_dependency_is_linked_only_to_a_spec_that_can_exist_and_is_not_its_own() {
+        let graph = build_graph_from_sources(&[
+            ("a.ts", "export function f() {}\n"),
+            ("b.ts", "export function g() {}\n"),
+            // Only constants: such a file is never given a spec.
+            ("consts.ts", "export const LIMIT = 3;\n"),
+        ]);
         assert_eq!(
-            linked_line("src/a.rs", "src/b.rs::B", "crate::b"),
-            "[`src/b.rs::B`](b.rs.md) — crate::b"
+            link_to_spec(&graph, "a.ts", "b.ts::g"),
+            Some("b.ts.md".to_string())
         );
         // A link from a document to itself leads nowhere new.
-        assert_eq!(
-            linked_line("src/a.rs", "src/a.rs::A", "same file"),
-            "`src/a.rs::A` — same file"
+        assert_eq!(link_to_spec(&graph, "a.ts", "a.ts::f"), None);
+        // A file that is never given a spec would be a permanently dead link.
+        assert_eq!(link_to_spec(&graph, "a.ts", "consts.ts::LIMIT"), None);
+        // A target the graph does not know.
+        assert_eq!(link_to_spec(&graph, "a.ts", "ghost.ts::x"), None);
+    }
+
+    #[test]
+    fn a_rendered_dependency_on_a_file_that_gets_no_spec_stays_plain_text() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-nospec", std::process::id()));
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        let consts = "pub const LIMIT: u32 = 3;\n";
+        let user = "use crate::consts::LIMIT;\n\npub fn cap() -> u32 {\n    LIMIT\n}\n";
+        std::fs::write(dir.join("src/consts.rs"), consts).unwrap();
+        std::fs::write(dir.join("src/user.rs"), user).unwrap();
+        let mut graph = Graph::build(vec![
+            crate::graph::FileExtraction {
+                rel_path: "src/consts.rs".to_string(),
+                source_hash: hash_text(consts),
+                symbols: crate::rust::extract_file(consts, "src/consts.rs"),
+            },
+            crate::graph::FileExtraction {
+                rel_path: "src/user.rs".to_string(),
+                source_hash: hash_text(user),
+                symbols: crate::rust::extract_file(user, "src/user.rs"),
+            },
+        ]);
+        graph.set_resolved_imports(vec![crate::graph::ResolvedImport {
+            from_file: "src/user.rs".to_string(),
+            specifier: "crate::consts".to_string(),
+            imported_name: "LIMIT".to_string(),
+            target: graph.find("src/consts.rs::LIMIT"),
+        }]);
+        let file_id = graph.find("src/user.rs").unwrap();
+        let spec = FileSpec {
+            source_path: "src/user.rs".to_string(),
+            symbols: vec![("src/user.rs::cap".to_string(), HashPair::default())],
+            ..FileSpec::blank("src/user.rs")
+        };
+        let rendered = render(&graph, &dir, file_id, &spec);
+        assert!(
+            rendered.contains("- `src/consts.rs::LIMIT` — crate::consts\n"),
+            "{rendered}"
         );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_symbol_with_no_dependency_keeps_the_plain_none_line() {
-        let graph = build_graph_from_sources(&[(
-            "a.ts",
-            "import React from 'react';\nexport function widget() { return React; }\n",
-        )]);
+        // The source is on disk, so this reaches the real "no resolved
+        // dependency" path and not the fallback for an unreadable file.
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-nodeps", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = "export function widget() { return 1; }\n";
+        std::fs::write(dir.join("a.ts"), src).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", src)]);
         let file_id = graph.find("a.ts").unwrap();
         let spec = FileSpec {
             source_path: "a.ts".to_string(),
             symbols: vec![("a.ts::widget".to_string(), HashPair::default())],
             ..FileSpec::blank("a.ts")
         };
-        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        let rendered = render(&graph, &dir, file_id, &spec);
+        std::fs::remove_dir_all(&dir).ok();
         let depends_on = rendered.split("### Depends on").nth(1).unwrap();
         assert!(depends_on.starts_with("\n- (none)\n"), "{depends_on}");
         assert!(!depends_on.contains("]("), "no link to write: {depends_on}");

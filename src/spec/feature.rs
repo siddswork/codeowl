@@ -8,6 +8,7 @@ use super::format::{
     heading_title, okf_frontmatter, path_from_doc, read_file_spec, with_provenance,
     without_provenance, write_replacing,
 };
+use super::layout::symbol_file;
 use super::smells::{body_smells, reject_if_smelly};
 use super::staleness::diff_hash_lists;
 use crate::features::{
@@ -51,7 +52,7 @@ pub(super) fn feature_okf_frontmatter(spec: &FeatureSpec) -> String {
     let mut seen = std::collections::HashSet::new();
     let mut files: Vec<String> = Vec::new();
     for (id, _) in &spec.participants {
-        let file = id.split("::").next().unwrap_or(id);
+        let file = symbol_file(id);
         if seen.insert(file) {
             files.push(path_from_doc("_features", file));
         }
