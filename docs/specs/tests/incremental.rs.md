@@ -21,7 +21,7 @@ dep_targets:
   tests/incremental.rs::watcher_picks_up_a_newly_created_file -> src/mcp.rs::CodeOwlServer: 874e569c4376
   tests/incremental.rs::a_fresh_spawn_reuses_the_persisted_index -> src/index.rs::RepoIndex: 481419547059
 ---
-# tests/incremental.rs
+# [`tests/incremental.rs`](../../../tests/incremental.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 End-to-end tests for keeping the index current without restarting, covering both moments that matter. Two tests check the live file watcher while a server runs: one edits an existing file and waits for the published graph to show a changed fingerprint, and the other creates a new file that imports an existing function and waits for that import to resolve in the graph. Both poll with a five-second deadline, because they depend on real file-system events. A third test covers starting up again: it opens the index once so it is saved to disk, edits one of two files while nothing is running, and opens again, asserting the catch-up report lists only the edited file as modified, with nothing added or removed, and that the graph still contains both files' declarations. Together they show that only changed files are re-read, that new files are noticed, and that the saved index is reused. Helpers create collision-proof temporary folders and read a symbol's fingerprint.
@@ -53,8 +53,8 @@ Creates a temporary folder with a one-function TypeScript file, `f` returning 1,
 
 It polls the shared cell every 50 milliseconds for up to five seconds, loading the current graph each time. The test passes as soon as the graph contains `a.ts::f` with a fingerprint different from the recorded one, which shows the watcher re-read the file and swapped in a new graph. If the deadline passes it fails with "watcher never republished the edited graph". The test depends on real file-system events and timing, so the generous deadline allows for debounce and slow machines.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
-- [`src/mcp.rs::CodeOwlServer`](../src/mcp.rs.md) — codeowl::mcp
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
+- [`src/mcp.rs::CodeOwlServer`](../src/mcp.rs.md#codeowlserver) — codeowl::mcp
 - externals: std
 
 ## `watcher_picks_up_a_newly_created_file`
@@ -64,8 +64,8 @@ An end-to-end test that checks the live file watcher notices a brand-new file cr
 ### Behavior
 Creates a temporary folder with one file, `lib.ts`, exporting a function `helper`, opens the index, wraps the graph in a server and starts the file watcher. It then writes a new file `app.ts` that imports `helper` from `./lib`. It polls the shared graph every 50 milliseconds for up to five seconds. The test passes as soon as the graph contains `lib.ts::helper` and at least one resolved import points to it, which shows the new file was picked up and its import resolved to the existing declaration. If the deadline passes it fails with "watcher never resolved the new importer's edge". It depends on real file-system events, so the deadline is generous.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
-- [`src/mcp.rs::CodeOwlServer`](../src/mcp.rs.md) — codeowl::mcp
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
+- [`src/mcp.rs::CodeOwlServer`](../src/mcp.rs.md#codeowlserver) — codeowl::mcp
 - externals: std
 
 ## `a_fresh_spawn_reuses_the_persisted_index`
@@ -75,4 +75,4 @@ A test that checks starting CodeOwl a second time reuses the saved index and re-
 ### Behavior
 Creates a temporary folder with two files, `a.ts` and `b.ts`, each exporting one constant. A first `RepoIndex::open` stands in for the first run of the program, and the test asserts it created the saved `.codeowl/index` file. While nothing is running it then rewrites `b.ts` with a different value. A second `open` stands in for a fresh start. The test asserts the catch-up report lists exactly `b.ts` as modified, with nothing added and nothing removed, which shows the unchanged file was not re-read and the changed one was found by comparing fingerprints with the saved copy. It also asserts that the graph still contains both `a.ts::a` and `b.ts::b`, so reusing the saved index lost nothing.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index

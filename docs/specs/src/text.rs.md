@@ -11,7 +11,7 @@ symbols:
   src/text.rs::within_scope: { source_hash: 115118d8ff0fd7a3fd0f74e616b2e4fdfcfc3f9ab09abff139c2345e1b52c3fb, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 185995f6230182a04b7f1a032b80801f79b7dd0c320ac0c97bcc33d31a65ab0a }
   src/text.rs::strip_value_for_fold: { source_hash: dc96e3f0335b34de327e8f6086ecaf55d0a3233df141b1b851a48c8711186c4e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: dad5170662677c8ea8b5fd8730c8ea3898c3d755994e9bd8bb9260840743bace }
 ---
-# src/text.rs
+# [`src/text.rs`](../../../src/text.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file holds small string-manipulation helpers shared verbatim across every stack pack. Unlike `lang.rs` (mostly TypeScript-specific logic) or `hash.rs` (hashing), it exists purely so identical text-processing logic isn't hand-copied into each pack's own extractor separately — currently just `strip_value_for_fold`, the bracket-depth-aware helper that cuts a field's initializer value off its signature before that signature gets folded into a container's `interface_hash`.

@@ -9,7 +9,7 @@ file: { source_hash: cc20920f6b3ad8a75b6f2a992f5def7182810a96edcd6818a7995014485
 symbols:
   src/hash.rs::hash_text: { source_hash: b68417d95d8759027bd745de13209e192545b78e88b031c08f4d4533a4ed0d16, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 23e2bd7c5f69f0ce1dbc23f9bf846094141e2f5653bbe7acbb07c0f90ab04811 }
 ---
-# src/hash.rs
+# [`src/hash.rs`](../../../src/hash.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 Stable content hashing for every hash CodeOwl persists — `source_hash`, `interface_hash`, `deps_hash`, `spec_hash`. One function, `hash_text`, wrapping BLAKE3. Deliberately not `std::hash` / `DefaultHasher`, whose output is only guaranteed stable within a single build of a single Rust version — CodeOwl compares hashes across runs and toolchain upgrades, so it needs a fixed algorithm that gives the same digest on any machine.

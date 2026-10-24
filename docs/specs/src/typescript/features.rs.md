@@ -46,7 +46,7 @@ dep_targets:
   src/typescript/features.rs::TypeScriptNextFeatureModel -> src/graph.rs::Graph: a0fadcfbc2bc
   src/typescript/features.rs::default_feature_model -> src/features.rs::FeatureModel: d0f879980b40
 ---
-# src/typescript/features.rs
+# [`src/typescript/features.rs`](../../../../src/typescript/features.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -103,8 +103,8 @@ Turns an API path written in code, such as `/api/users/42`, into the route file 
 ### Behavior
 Strips a leading `/api/` from the path and splits the rest on `/`, dropping empty pieces. It then looks through the repo's files for one whose own route path (from `api_route_segments`, which only recognises `app/api/.../route.ts`-style files) has the same number of pieces and where each piece either is a dynamic segment (`[id]`, `[...slug]`, which matches any single piece) or equals the corresponding piece exactly. The first such file in graph order is returned as its arena id, so if two route files could both match, only one is reported. There is no prefix or fuzzy matching: the counts must be equal, so an incomplete path never matches, and a guard elsewhere (`static_path_from_literal`) keeps incomplete paths from reaching here. A catch-all segment is compared as one piece, so it does not absorb several path pieces. If no file matches it returns `None`. Pure read.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `api_route_segments`
 `fn api_route_segments(file_id: &str) -> Option<Vec<&str>>`
@@ -140,7 +140,7 @@ The per-file pass that finds every `.from("<table>")` member call in a TypeScrip
 ### Behavior
 Parses with `ts_parser` (empty vec on parse failure), then `walk_for_from` descends the whole tree. Deliberately narrow: the argument must be a single plain string literal shaped like a table name (`[a-z_][a-z0-9_]*`), which is what rules out `Array.from(...)` / `Buffer.from(...)` and any `.from(tableVar)`. An ORM-aware matcher (`db.payments`, `Payment.findMany`) is out of scope for Phase 1.
 ### Depends on
-- [`src/typescript/conventions.rs::ts_parser`](conventions.rs.md) — super::conventions
+- [`src/typescript/conventions.rs::ts_parser`](conventions.rs.md#ts_parser) — super::conventions
 
 ## `walk_for_from`
 `fn walk_for_from(node: Node, source: &str, rel_path: &str, out: &mut Vec<TableRef>)`
@@ -176,8 +176,8 @@ Finds the database table definition that a table name written in code refers to,
 ### Behavior
 Searches every symbol in the graph for one of kind `Schema` (a table produced by schema extraction, including an in-language model retagged as a table) whose table name, taken from the end of its id with `table_name_of`, equals the given name exactly, and returns its arena id. The match is case-sensitive and the first match in graph order wins. If nothing matches it returns `None`, which happens for a database view, a typo, or a table created outside the indexed schema files. The match is by name only, so a name that happens to be defined in two schema files resolves to whichever comes first. It only reports a plausible candidate, not a guarantee that the query really targets it. Pure read.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `table_name_of`
 `fn table_name_of(symbol_id: &str) -> &str`
@@ -204,7 +204,7 @@ The per-file pass listing every distinct `<Component/>` a TypeScript/TSX file re
 ### Behavior
 Parses with `ts_parser` (empty vec on failure), collects tag names into a `BTreeSet` via `walk_for_jsx` (so the result is deduplicated and in sorted order — deterministic for hashing), then wraps each name in a `RenderedComponent` tagged with this file. Only uppercase-initial JSX tags are collected — lowercase are DOM elements. `<Foo.Bar/>` namespaced tags are skipped for now.
 ### Depends on
-- [`src/typescript/conventions.rs::ts_parser`](conventions.rs.md) — super::conventions
+- [`src/typescript/conventions.rs::ts_parser`](conventions.rs.md#ts_parser) — super::conventions
 - externals: std
 
 ## `walk_for_jsx`
@@ -223,7 +223,7 @@ Finds the file that defines a component a page shows with a tag like `<Header/>`
 ### Behavior
 It first checks the file's resolved default imports for one whose local name equals the tag name (`import Header from './header'`), the way React components are almost always imported, and returns that import's resolved target file. If none, it falls back to a named import in the same file whose imported name equals the tag name, and returns the path of the file that contains the resolved symbol (the target's parent, as text). If the import points outside the repo, such as an external UI library, or did not resolve at all, it returns `None`. The default-import check uses the local name, but the named fallback compares the original exported name, so a renamed named import (`import { Header as H }` rendered as `<H/>`) is not found. Namespace-qualified tags such as `<UI.Button/>` are not handled here. Pure read.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
 
 ## `file_does_data_work`
 `fn file_does_data_work(graph: &Graph, file: &str) -> bool`
@@ -232,7 +232,7 @@ Says whether a file does real data work, meaning it calls an API route or querie
 ### Behavior
 Returns true if any flow edge in the graph starts in the given file and has the kind `route-literal` (a `fetch("/api/...")` call) or `table-ref` (a `.from("table")` query). The edge counts whether or not its target resolved, because an unresolved one still shows the file does data work. Other edge kinds, such as a rendered-component edge, do not count, so a component that only renders other components is not data work by itself. It decides whether a rendered component joins a feature's core set. It scans all flow edges in the repo on every call, so it is linear in their number. It looks only at the file's own edges, not those of files it imports. Pure read.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
 
 ## `is_colocated`
 `fn is_colocated(component_file: &str, entry_file: &str) -> bool`
@@ -252,11 +252,11 @@ Defines what counts as a "feature" in a Next.js project using the App Router: ea
 
 `admits_to_core` is asked about each file reached from an entry through a resolved edge. It returns true if the file is an API route, or sits next to the entry file (`is_colocated`), or does data work (`file_does_data_work`: it calls an API route or queries a table). Otherwise the file is only a one-hop dependency. An API route is always admitted, which reproduces the older rule that route-literal targets join the feature unconditionally. Rendered components, which are `.tsx` files, fall through to the co-location and data-work tests, so a shared presentational component from elsewhere stays a dependency. The struct has no fields.
 ### Depends on
-- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
-- [`src/features.rs::FeatureModel`](../features.rs.md) — crate::features
-- [`src/features.rs::feature_slug`](../features.rs.md) — crate::features
-- [`src/graph.rs::FlowTarget`](../graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/features.rs::EntryPoint`](../features.rs.md#entrypoint) — crate::features
+- [`src/features.rs::FeatureModel`](../features.rs.md#featuremodel) — crate::features
+- [`src/features.rs::feature_slug`](../features.rs.md#feature_slug) — crate::features
+- [`src/graph.rs::FlowTarget`](../graph.rs.md#flowtarget) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
 - externals: std, tree_sitter
 
 ## `default_feature_model`
@@ -266,7 +266,7 @@ Returns the singleton `TypeScriptNextFeatureModel` as a `&'static dyn FeatureMod
 ### Behavior
 A borrow of the unit struct with `'static` lifetime (it's a ZST, so no allocation). Named "default" for historical reasons — before M14 it was the fallback for any stack; now it's specifically the TS+Next model, and a stack without a feature layer returns `None` rather than this.
 ### Depends on
-- [`src/features.rs::FeatureModel`](../features.rs.md) — crate::features
+- [`src/features.rs::FeatureModel`](../features.rs.md#featuremodel) — crate::features
 
 ## `is_page`
 `fn is_page(file_id: &str) -> bool`

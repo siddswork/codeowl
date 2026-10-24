@@ -49,7 +49,7 @@ dep_targets:
   src/explain.rs::explain_corpus -> src/graph.rs::Graph: a0fadcfbc2bc
   src/explain.rs::coarse_dependants -> src/graph.rs::Graph: a0fadcfbc2bc
 ---
-# src/explain.rs
+# [`src/explain.rs`](../../../src/explain.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file answers "why is this spec out of date?". The rest of CodeOwl can say that a spec is stale, because a stored hash no longer matches; this file names the reason, as a short chain: the declaration's own text changed, a named dependency changed, a dependency was added or removed, or a child document the spec summarizes is itself stale (with that child's reason nested inside). `explain` takes any document id (a declaration, a file, `rollup:<dir>`, `feature:<slug>` or `system`) and returns its state, `missing`, `current` or `stale`, with a list of causes, each carrying a short kind label, the thing that moved and a plain-language sentence. For folders and the whole-repo spec the chain follows stale children down at most three levels (system, folder, file). It also tells apart a spec that predates the file fingerprint, which is reported as an unknown cause with the fix to apply, from a real edit, and says when a dependency changed but the spec has no record of which one. `explain_corpus` runs this over every spec and counts the causes by combination, lists the ten dependencies that make the most specs stale, and counts the importers that depend on something with no recorded public shape, where any edit to the target would make them stale. The file only reads the graph and the stored specs; it never writes a spec or asks for one to be written.
@@ -79,7 +79,7 @@ Answers "why is this spec stale?" for any document id: it works out what kind of
 ### Behavior
 It picks the explainer from the shape of the id. `system` goes to `explain_system`, `rollup:<dir>` to `explain_rollup`, and `feature:<slug>` to `explain_feature`. The system and rollup explainers start the nesting depth at 1, which is what limits how far a chain of stale children is followed (`MAX_DEPTH`, three levels: system, folder, file). Anything else is looked up in the graph. An id the graph does not know is an error whose message includes the id, so a typo is reported and is not turned into an answer. A known id that is a file goes to `explain_file`; any other known id is a symbol and goes to `explain_symbol`. A document with no spec comes back as `missing` and not as an error, by the explainers themselves. The function only reads the graph and the spec files and never writes. The only caller found is the server module (`mcp.rs`).
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
 - externals: anyhow, std
 
 ## `split_change`
@@ -100,8 +100,8 @@ It looks the symbol up, then finds the spec file that holds it. A class member l
 
 For a stale symbol it adds at most two kinds of cause, because `symbol_changes` compares exactly two things, the symbol's own text (`changed:source`) and its dependencies (`changed:dependencies`), and reports nothing else. If the text moved, it adds a `source` cause saying its own text changed. If the dependencies moved, it recomputes the symbol's dependency hashes now with `try_dependency_pairs` and compares them with the stored ones through `dependency_causes`, which names each dependency that moved and always returns at least one cause, falling back to an `unknown` one; if the dependencies cannot be read at all, it adds the "unreadable" cause instead of failing. So a stale symbol always comes back with at least one cause. It returns an error if the id is not a symbol, if its file is missing from the graph, or if the spec file cannot be read. It reads only and writes nothing.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::graph
 - externals: anyhow, std
 
 ## `explain_file`
@@ -115,8 +115,8 @@ Otherwise it asks `spec::file_changes` what moved. That compares the file's curr
 
 If the file itself shows no change, it still counts as stale while any of its declarations is missing or stale, so it adds `stale_symbol_causes` to name them. That mirrors how `get_spec_coverage` counts the file. No causes at all means `current`; any cause means `stale`. It reads only and writes nothing. It returns an error if the id is not a file or if the spec file cannot be read.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::graph
 - externals: anyhow, std
 
 ## `unreadable_cause`
@@ -140,8 +140,8 @@ Lists which declarations in a file are holding the file's spec back: those with 
 ### Behavior
 It walks the file's declarations that get specs (`spec_bearing_children`) and checks each against the file's stored spec. A declaration with no stored entry gives a `child` cause with the detail "its section has not been written yet". One that has an entry is compared with the current code through `spec::symbol_changes`; if nothing moved it is skipped, and otherwise it gives a `child` cause saying "its section is out of date". Each cause names the declaration's id as its target. The result is empty when every declaration is current. It does not explain why a declaration is stale; that is `explain_symbol`'s job. A node that is not a symbol is skipped.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::graph
 - externals: std
 
 ## `dependency_causes`
@@ -157,7 +157,7 @@ It first shortens the current hashes (`now` carries full ones, the record carrie
 
 With a record, it goes through the current dependencies. One whose id is stored with the same hash is unchanged and ignored. One stored with a different hash gives a `dependency` cause whose detail comes from `target_detail`. One not stored at all gives `added`. Then it goes through the stored dependencies, and any that is no longer present gives `removed`. If no cause came out of all that, it returns an `unknown` cause saying the dependencies changed but no single one explains it, so a stale answer is never left with an empty reason. Causes come out in the order: current dependencies first, then removed ones.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
 - `src/spec.rs::HashPair` — crate::spec
 
 ## `target_detail`
@@ -167,7 +167,7 @@ Writes the short sentence that says what it means that a particular dependency m
 ### Behavior
 It looks the id up in the graph and picks one of four sentences. A symbol that has an interface hash gives "its interface changed", since only its public shape is tracked for dependents. A symbol without an interface hash gives "its source text changed, and it has no interface hash", because for those the whole text counts. A node that is not a symbol, meaning a file, gives "its file text changed". An id no longer in the graph gives the plain "it changed". It only reads, and always returns some sentence, never an error.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
 
 ## `child_cause`
 `fn child_cause(
@@ -194,7 +194,7 @@ It builds the id as `rollup:<dir>` and reads the folder's stored spec; no spec m
 
 For each difference it splits the entry into an action and a target. `added` becomes an `added` cause, "a new file in this folder", and `removed` becomes a `removed` cause, "no longer in this folder". Any other action means the file's summary hash changed. For that it looks up the file's current hash and builds an explanation of the file itself with `explain_file` (or a `missing` one if the target is no longer a file in the graph), then hands both to `child_cause` along with the current depth. That function decides whether the file is `stale`/`missing` or `rewritten`, and whether to nest the file's own causes. Entries it cannot split are skipped. The result is `stale` with those causes. It reads only. It returns an error only if reading the spec or a file's explanation fails.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
 - externals: anyhow, std
 
 ## `explain_feature`
@@ -206,9 +206,9 @@ It builds the id as `feature:<slug>`. It first looks up the feature model for th
 
 Otherwise it assembles the feature's current participants from the entry point (`assemble_participants`), computes their current hashes, and compares them with the list stored in the spec (`diff_hash_lists`). An empty difference means `current`. Each difference becomes one cause, in the order listed: `added` is "a new part of this feature", `removed` is "no longer part of this feature", and anything else is a `participant` cause whose detail comes from `target_detail` (its interface changed, its text changed, or its file changed). Unlike the folder and system explainers, it does not look inside the parts for further causes, so there is no nesting. It reads only. Errors come from the two lookups above or from reading the spec and hashing the parts.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/features.rs::feature_model_for`](features.rs.md) — crate::features
-- [`src/features.rs::assemble_participants`](features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/features.rs::feature_model_for`](features.rs.md#feature_model_for) — crate::features
+- [`src/features.rs::assemble_participants`](features.rs.md#assemble_participants) — crate::features
 - externals: anyhow, std
 
 ## `explain_system`
@@ -220,7 +220,7 @@ It reads the system spec; none means `missing`. The system spec records the summ
 
 For each difference it splits the entry into an action and a target. `added` becomes "a new folder or feature" and `removed` becomes "this folder or feature is gone". Any other action means that child's summary hash changed. It then builds an explanation of the child: if the target is one of the repo's modules, with `explain_rollup` at one level deeper, and otherwise with `explain_feature`, falling back to a `missing` feature explanation if that fails (the error is dropped, not returned). That explanation, the child's current hash and the current depth go to `child_cause`, which labels the child stale, missing or rewritten and nests the child's own causes while the depth is below `MAX_DEPTH`. Entries it cannot split are skipped. The result is `stale` with these causes. It reads only. Errors come from reading the spec, computing the hashes, or explaining a folder.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
 - externals: anyhow, std
 
 ## `CorpusSummary`
@@ -241,7 +241,7 @@ It first collects the ids to look at. It asks the coverage report for every docu
 
 For each remaining document it increments `documents`, and if it is stale it increments `stale` and the count for its cause label (`cause_label`, such as `source + dependency`). For stale symbol and file documents only, it also counts each `dependency` cause by its target, which feeds `top_targets`; folder, feature and system causes do not count there. `by_cause` and `top_targets` are both sorted by count, highest first, with ties broken by name so the order is the same every run, and `top_targets` is cut to the top 10 (`TOP_TARGETS`). `coarse_dependants` comes from a separate count over the whole graph, whether or not anything is stale. It reads only and returns an error only if the coverage report cannot be built or a spec file cannot be read.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
 - externals: anyhow, std
 
 ## `cause_label`
@@ -260,4 +260,4 @@ Counts how many importing files depend on something in another file that has no 
 ### Behavior
 It walks every resolved import in the graph and skips those with no target. A target counts as coarse in two cases. If it is a symbol, it counts when it has no interface hash and sits in a different file from the importer; an import of something in the same file is never counted. If it is not a symbol (an import that resolved to a whole file), it always counts. For each coarse import it records the pair of importing file and target id in a set, so the same file importing the same target through several import lines counts once. The result is the size of that set. It reads the graph only and cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph

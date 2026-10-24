@@ -50,7 +50,7 @@ dep_targets:
   src/index.rs::ingest_build_entry -> src/stack.rs::StackPack: 436012c73562
   src/index.rs::generated_source_entries -> src/stack.rs::StackPack: 436012c73562
 ---
-# src/index.rs
+# [`src/index.rs`](../../../src/index.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file keeps the repo's index up to date without re-reading everything. It saves, for every source file, exactly what was extracted from it (its declarations, its imports and re-exports, any cross-file links beyond imports, and a fingerprint of its text), so after an edit only the files that really changed are parsed again and the graph is rebuilt from the saved results. `RepoIndex` is that saved copy, stored next to the graph in `.codeowl/index`. It serves two moments: starting up, where `open` hash-checks every file against the saved copy and re-parses only those that moved while nothing was running, and the live session, where `apply_changes`, driven by the file watcher, updates only the paths reported as touched and does nothing when an editor re-saves identical text. A saved copy is thrown away and rebuilt when its format stamp does not match or when the repo's language pack has changed, so stale logic is never trusted. Files that cannot be read are skipped instead of aborting the build. It also reads build-generated source folders (such as Maven's `target/generated-sources`) in a walk of their own, because a project's ignore file hides them from everything else, and it supplies the list of folders the file watcher should watch. `CatchUp` reports which files were added, modified or removed by a refresh, which is how tests show that exactly the changed files were re-read.
@@ -64,13 +64,13 @@ Holds `source_hash` (a fingerprint of the file's text, used to detect change), `
 
 `FileInputs::extract(pack, rel_path, source)` recomputes all of it from the text. It hashes the source and asks the language pack for the symbols. It then offers each symbol to the pack's table check, and any symbol the pack says is a table, such as an ORM model class or an `@Entity`, is retagged as a schema symbol, which is the symbol-level replacement for treating a whole `.sql` file as schema. Finally it branches on the file's source kind: a dedicated schema file gets only the table pass, with empty imports and flow edges, and an ordinary code file (or one the pack has no kind for) also gets the pack's imports and flow edges. It cannot fail; a file that parses badly gives empty lists.
 ### Depends on
-- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md) — crate::graph
-- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/stack.rs::StackPack`](stack.rs.md) — crate::stack
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
+- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md#unresolvedflowedge) — crate::graph
+- [`src/hash.rs::hash_text`](hash.rs.md#hash_text) — crate::hash
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/stack.rs::StackPack`](stack.rs.md#stackpack) — crate::stack
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
 - externals: std
 
 ## `CatchUp`
@@ -93,12 +93,12 @@ Starting: `build(root)` is the cold start. It chooses the pack (failing fast if 
 
 Updating: `apply_changes(paths)` is the watcher's entry point. It takes the paths reported touched and returns a new graph only if at least one really changed an input, so an editor re-saving identical text or a touched non-source file does nothing. `rebuild` constructs the whole graph again from the cached inputs, resolving imports, default imports and flow edges, and saves both the graph and the index. It is cheap because no parsing happens. `watchable_dirs` lists the directories for the file watcher to watch, using the same ignore rules as everything else, so a `node_modules` folder is never watched. Errors from reading, writing or walking are returned.
 ### Depends on
-- [`src/graph.rs::FileExtraction`](graph.rs.md) — crate::graph
-- [`src/graph.rs::FlowEdge`](graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/stack.rs::StackPack`](stack.rs.md) — crate::stack
+- [`src/graph.rs::FileExtraction`](graph.rs.md#fileextraction) — crate::graph
+- [`src/graph.rs::FlowEdge`](graph.rs.md#flowedge) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/hash.rs::hash_text`](hash.rs.md#hash_text) — crate::hash
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/stack.rs::StackPack`](stack.rs.md#stackpack) — crate::stack
 - [`src/lang.rs::detect`](lang.rs.md) — crate::lang
 - [`src/graph.rs::FORMAT_VERSION`](graph.rs.md) — crate::graph
 - `src/resolve.rs::resolve_default_imports` — crate::resolve
@@ -148,7 +148,7 @@ Handles one file found during a full index build: if it is a source file the lan
 ### Behavior
 Returns without doing anything unless the entry is a regular file and the pack recognises its type (`source_kind` is not `None`). It then reads the file as text. A file that cannot be read, for example a non-UTF-8 test fixture, which was seen in a real repo, prints a short "skipping" notice to standard error and returns success, so one bad file does not abort the whole build and lose every other file's symbols. For a readable file it computes the repo-relative path and inserts the result of `FileInputs::extract` into the map under that path, replacing any earlier entry for the same path. Unlike the watcher path, a cold build has no earlier state to record a skip in. It returns an error only in the rare case the underlying helpers do.
 ### Depends on
-- [`src/stack.rs::StackPack`](stack.rs.md) — crate::stack
+- [`src/stack.rs::StackPack`](stack.rs.md#stackpack) — crate::stack
 - externals: anyhow, std
 
 ## `generated_source_entries`
@@ -163,5 +163,5 @@ Takes the folders to look under (`candidate_roots`) and the language pack. For e
 
 `candidate_roots` are the directories the caller's own main walk already visited, not rediscovered here. A real multi-module Maven project keeps its build output per module (`rest-heroes/target/generated-sources` and so on), never only at the repo root, so an early version that checked just the root found nothing in such repos. Reusing the main walk's directories avoids a second full-tree walk, and since each directory is visited once, no folder's output is read twice. It is used by both the full build and the incremental rescan, so generated interfaces appear on a cold start and on later updates alike.
 ### Depends on
-- [`src/stack.rs::StackPack`](stack.rs.md) — crate::stack
+- [`src/stack.rs::StackPack`](stack.rs.md#stackpack) — crate::stack
 - externals: anyhow, std

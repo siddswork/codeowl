@@ -21,7 +21,7 @@ dep_targets:
   src/search.rs::truncate_match_text -> src/spec.rs::cap_source_text: fb0d9470a29c
   src/search.rs::search_code -> src/spec.rs::within_scope: 4dcc40036692
 ---
-# src/search.rs
+# [`src/search.rs`](../../../src/search.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file implements the code search tool: a plain regular-expression search over every file in the repo, using an embedded copy of ripgrep's search library instead of a real search index, since a repo this size does not need one to be fast enough. Because an unbounded search could return an enormous response, four separate limits each guard a different way a result can balloon: the number of matches (200 at most, which a caller can only lower), the width of one matched line (500 bytes, keeping the start of the line, where the match is most likely to be), the number of context lines around a match (5 at most), and a whole-response ceiling of about 100,000 bytes that covers all of those combined. When any limit cuts a search short, the result says so with a `truncated` flag instead of quietly returning something that looks complete, and a single match whose line was shortened carries its own flag. A search can be limited to a file or folder by whole path pieces, can ignore case, and can include surrounding lines, which are read lazily so a file with no matches is never read a second time. A match whose context could not be read is marked unavailable, which is different from a match near the start or end of a file that simply has little context. An invalid pattern is the only error; unreadable or binary files are skipped, and results come back in the order files are visited, not ranked.

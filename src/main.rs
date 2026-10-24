@@ -203,9 +203,19 @@ async fn main() -> Result<()> {
                 "{verb} the provenance line to {} spec(s) that lacked it",
                 r.provenance_added
             );
+            let wrote = if write {
+                "wrote or corrected"
+            } else {
+                "would write or correct"
+            };
             println!(
-                "{verb} {} dependency link(s) in {} spec(s)",
+                "{wrote} {} dependency link(s) in {} spec(s)",
                 r.links_added, r.linked_documents
+            );
+            let linked = if write { "linked" } else { "would link" };
+            println!(
+                "{linked} the title of {} spec(s) to its source",
+                r.titles_linked
             );
             println!(
                 "skipped: {} needing no change, {} with no frontmatter",
@@ -228,7 +238,12 @@ async fn main() -> Result<()> {
                      file with no frontmatter keeps the folder from conforming"
                 );
             }
-            if !write && (r.migrated > 0 || r.provenance_added > 0 || r.links_added > 0) {
+            if !write
+                && (r.migrated > 0
+                    || r.provenance_added > 0
+                    || r.links_added > 0
+                    || r.titles_linked > 0)
+            {
                 println!("dry run: nothing written; pass --write to apply");
             }
             Ok(())

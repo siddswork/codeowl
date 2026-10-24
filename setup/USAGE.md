@@ -496,7 +496,7 @@ once, in a terminal, from the repo you serve. Each is a dry run until you add
 | Step | Command | What it fixes |
 |---|---|---|
 | 1 | `codeowl migrate-file-fingerprint <repo> --write` | A file summary used to go stale on any edit to the file. It now goes stale only when something a summary could quote changed, and a spec records that in a `fingerprint` key. Specs written before it have no key, so they read as stale. This adds the key to the ones that were current. A spec that was already stale stays stale. See [After upgrading: migrate old file specs](#after-upgrading-migrate-old-file-specs), including when to wait. |
-| 2 | `codeowl migrate-to-okf <repo> --write` | Gives every spec the keys Open Knowledge Format asks of it (`type` in place of `kind`, `title`, `description`, `generated`, `resource` or `sources`) and the `> Generated using [CodeOwl](…)` line under the title, and turns each dependency in a `### Depends on` list into a link to the spec of the file it comes from. It changes nothing else. A spec is regenerated only when it is stale, so this is the only way a spec that is already current gets the links. See [`codeowl migrate-to-okf`](#codeowl-migrate-to-okf-repo---write). |
+| 2 | `codeowl migrate-to-okf <repo> --write` | Gives every spec the keys Open Knowledge Format asks of it (`type` in place of `kind`, `title`, `description`, `generated`, `resource` or `sources`) and the `> Generated using [CodeOwl](…)` line under the title, links a file or rollup spec's title to its source, and turns each dependency in a `### Depends on` list into a link to the dependency's section in the spec of the file it comes from. It changes nothing else. A spec is regenerated only when it is stale, so this is the only way a spec that is already current gets the links. See [`codeowl migrate-to-okf`](#codeowl-migrate-to-okf-repo---write). |
 | 3 | By hand, if you have a style guide: `git mv docs/specs/STYLE.md docs/STYLE.md` | No command does this for you. Step 2 only notices the file and says so. A file with no frontmatter inside `docs/specs/` keeps the folder from conforming, and `/codeowl-generate` reads the style guide from `docs/STYLE.md` only. |
 
 The two commands do not depend on each other, so either order gives the same
@@ -660,10 +660,17 @@ so `docs/specs/` conforms:
 | `resource` | For a file or rollup, the path it describes, relative to the spec. |
 | `sources` | For a feature or the system spec, the files or modules it covers. |
 
-In the body, each dependency in a symbol's `### Depends on` list is a link to
-the spec of the file it comes from (``[`src/graph.rs::Graph`](../graph.rs.md)``),
-so you can follow the specs from one to the next on GitHub or in any markdown
-viewer. A link to a file that has no spec yet simply does not open. A
+In the body, the title of a file spec is its path, linked to the source file
+(``# [`src/hash.rs`](../../../src/hash.rs)``), and a rollup's title is linked to
+its directory. Each dependency in a symbol's `### Depends on` list is a link to
+the dependency's own section in the spec of the file it comes from
+(``[`src/graph.rs::Graph`](../graph.rs.md#graph)``), so you can follow the specs
+from one to the next, and from a spec to its code, on GitHub or in any markdown
+viewer. The anchor is worked out from the code, not from the target spec on
+disk, so it is exact once the target spec is fully generated; while a spec is
+missing the section (a stale or partly generated spec), the link opens the
+spec at the top and starts landing on the section when it is written. A link
+to a file that has no spec yet simply does not open. A
 dependency on a file that never gets a spec (a constants-only or schema file,
 generated code), on a file in the same spec, or on a file that no longer
 exists stays plain text.
@@ -680,13 +687,16 @@ codeowl migrate-to-okf <repo> --write     # convert the stored specs
 
 It changes the frontmatter, adds the `> Generated using [CodeOwl](…)` line under
 the title of a spec written before that line existed, and rewrites each plain
-`Depends on` entry as a link. It builds the repo's graph first, to know which
-files will have a spec to link to, so the links reflect the repo as it is now
-(run it on a clean checkout, not in the middle of a refactor). If the graph
-cannot be built, it says so, still converts the keys and the provenance line,
-and skips the links; run it again once the graph builds. Nothing else changes: the text of every spec
-and every hash stay byte for byte, and neither the line nor the dependency
-lists are in any hash or read back by anything, so no spec turns stale. It
+`Depends on` entry as a link to the dependency's section, and links a plain
+title to its source. It builds the repo's graph first, to know which files will
+have a spec to link to, so the links reflect the repo as it is now (run it on a
+clean checkout, not in the middle of a refactor). If the graph cannot be built,
+it says so, still converts the keys and the provenance line, and skips the
+links; run it again once the graph builds. It only adds or corrects a link and
+never removes one, and it leaves alone a title someone wrote. Nothing else
+changes: the text of every spec and every hash stay byte for byte, and neither
+the line, the titles nor the dependency lists are in any hash or read back by
+anything, so no spec turns stale. It
 writes what a fresh render would, and a second run changes nothing. The dry run
 prints how many it would convert, by kind, how many would gain the line, how
 many dependency links it would write and in how many specs, and how many it

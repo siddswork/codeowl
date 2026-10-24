@@ -35,7 +35,7 @@ dep_targets:
   src/graph.rs::Graph -> src/symbol.rs::SymbolId: 6733b5c62e75
   src/graph.rs::Graph -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
-# src/graph.rs
+# [`src/graph.rs`](../../../src/graph.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file defines CodeOwl's graph: the arena (one flat list holding every node, referenced by position rather than by pointer) that turns per-file extraction output into something indexable and cross-referenceable. Extraction only ever sees one file at a time and produces declarations whose links are plain text. `Graph::build` is the one place that turns a whole repo's worth of those into the arena, in two passes: reserve a slot for every file and every declaration, then build the nodes and resolve each parent and child link to a position. A top-level declaration's parent becomes its file, and a link naming an unknown id is silently dropped from a child list or left without a parent. A new file node starts with its fingerprint equal to its raw-text hash; the index rebuild later overwrites it with the pack's real fingerprint through `set_file_fingerprint`, which returns false for a path that is not a file. The records that attach to the graph afterwards are defined here too, because every language pack produces them: `ResolvedImport` (a file-to-file edge whose target is empty for an external package, a broken import, or a name with no declaration behind it), `ResolvedDefaultImport` (which file a default import lands on), and the flow-edge types `UnresolvedFlowEdge`, `FlowEdge` and `FlowTarget` for the extra links a pack finds beyond plain imports (a `fetch("/api/...")` call, a `.from("table")` query, a rendered component). An unresolved flow edge still counts as the file doing that work; it just has no destination. Resolving all of these needs the built graph, so they are set afterwards through the `set_` methods. `SymbolView` is the copy of a declaration safe to hand outside the process (an MCP reply, `codeowl extract` output), with parent and children translated back to text ids, because an arena position only means something inside the graph that produced it. The graph never names a pack: it only stores the pack's name. It saves itself as pretty-printed JSON to `.codeowl/graph`, stamped with `FORMAT_VERSION`; `load` rejects a cache with any other version, so one from older logic is rebuilt, never partly reused. The version is currently 23, and its doc comment is a long history of every bump. It must also be bumped for a pure logic change in a language pack, not only a shape change. The id map is a sorted `BTreeMap` so the saved cache is byte-for-byte identical between identical runs. Nearly every other module reads its data through the lookup functions here rather than walking the arena directly.
@@ -47,7 +47,7 @@ One link between files: this file imports that name from that module, and, if it
 ### Behavior
 Fields: `from_file` is the importing file's path, `specifier` is the module text as written (`./foo`, `@/lib/foo`, `react`), `imported_name` is the name asked for, and `target` is the arena id of the declaration it resolved to. `target` is `None` in three cases: the specifier points outside the indexed repo (an external package), it did not resolve at all (a broken import), or it resolved to a file that neither declares the name nor forwards it through a re-export chain. These edges are what drives staleness, since a dependent is judged by the target's `interface_hash`, so an unresolved one means a change cannot reach that importer. Plain data, no logic.
 ### Depends on
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::symbol
 
 ## `ResolvedDefaultImport`
 `pub struct ResolvedDefaultImport`
@@ -65,8 +65,8 @@ A copy of a symbol that is safe to hand outside the program, such as in an MCP r
 ### Behavior
 Carries the same fields as `Symbol` (id, kind, raw kind, file, lines, signature, docstring, export flag, both hashes, markers) but with `parent` and `children` as string ids. The internal `SymbolId` is only valid for the graph that produced it, so it must never appear in output someone might keep past this process. It leaves out `extra_spans`, which is internal to dependency scanning. `SymbolView::from_graph(graph, id)` builds one: it returns `None` if the id is not a symbol (a file node, say), otherwise clones the fields and translates the parent and each child through `graph.string_id`. Any place a symbol crosses the process boundary should build one of these and never serialise a `Symbol` directly.
 ### Depends on
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::symbol
 
 ## `FileNode`
 `pub struct FileNode`
@@ -75,8 +75,8 @@ A source file's own entry in the graph, holding its path, two hashes of its text
 ### Behavior
 `id` is the repo-relative path, the same naming `Symbol::file` uses. `source_hash` hashes the file's raw text as a whole, not a roll-up of its declarations' hashes the way a class's hash folds in its methods, because imports, comments and type-only lines are not captured by the declared symbols. `fingerprint` is what decides whether the file's own spec is current: the pack's fingerprint (shape, doc comments and body literals where a pack has a rule, the whole-text hash otherwise). It starts equal to `source_hash` and the index rebuild sets the real value; it carries `#[serde(default)]` only so the field could be added, and an older cache without it is discarded by the format version. `children` lists the top-level symbols in declaration order, as arena ids. Plain data, no logic.
 ### Depends on
-- [`src/symbol.rs::Symbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::Symbol`](symbol.rs.md#symbol) — crate::symbol
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::symbol
 
 ## `Node`
 `pub enum Node`
@@ -85,7 +85,7 @@ One entry in the graph's arena, which is either a declaration (`Symbol`) or a wh
 ### Behavior
 Two variants: `Node::Symbol(Symbol)` and `Node::File(FileNode)`. Only `Graph::build` creates them; everything else reads them back through `get_symbol` or `get_file`, which return an `Option` for the expected kind, or through `get` when the kind does not matter, for example when hashing. A private helper `string_id` returns the text id of either variant (the symbol's id or the file's path), so the graph can keep one lookup table from text id to arena position over both kinds. It has no failure mode.
 ### Depends on
-- [`src/symbol.rs::Symbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::Symbol`](symbol.rs.md#symbol) — crate::symbol
 
 ## `FileExtraction`
 `pub struct FileExtraction`
@@ -94,7 +94,7 @@ The result of parsing one file: its path, a fingerprint of its text, and the dec
 ### Behavior
 Holds `rel_path` (the repo-relative path), `source_hash` (a hash of the file's raw text) and `symbols` (a list of `ExtractedSymbol`, whose links are still plain text). `Graph::build` takes a list of these for the whole repo and turns each into a file node and symbol nodes in the arena. Nothing here depends on other files, which is what lets extraction run per file and be cached per file. Plain data, no logic.
 ### Depends on
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
 
 ## `FlowEdge`
 `pub struct FlowEdge`
@@ -114,7 +114,7 @@ Says where a flow edge ends up: at a real node in the graph, or nowhere, when th
 ### Behavior
 Two variants. `Node(SymbolId)` means the edge resolved to a file or a schema (table) symbol. `Unresolved` means the raw string matched nothing, for example an external URL, a database view, a path built at runtime, or a typo. An unresolved edge is still kept, because it records that this file does data or network work; it just has no destination to follow. Plain data, no logic.
 ### Depends on
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::symbol
 
 ## `UnresolvedFlowEdge`
 `pub struct UnresolvedFlowEdge`
@@ -138,7 +138,7 @@ Lookups: `get`, `get_symbol` and `get_file` return a node (the last two return `
 
 Persistence: `save` creates the parent directory if needed and writes the arena as plain JSON (readable with `cat` or `jq`, which was judged worth more than a smaller binary format at this scale). `load` opens and parses the file, then rejects it with an error telling the caller to rebuild when the stored format version differs from the current one. A cache written without a version stamp reads as version 0, so it is always rejected. Both return errors with the path attached on file or parse failures. There is no partial migration: a mismatched cache is never read.
 ### Depends on
-- [`src/symbol.rs::Symbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::Symbol`](symbol.rs.md#symbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::symbol
 - externals: anyhow, std

@@ -23,7 +23,7 @@ dep_targets:
   src/spec/system.rs::submit_system -> src/graph.rs::Graph: 13dbdfa88b0e
   src/spec/system.rs::submit_system -> src/hash.rs::hash_text: 70c099c1622c
 ---
-# src/spec/system.rs
+# [`src/spec/system.rs`](../../../../src/spec/system.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -53,9 +53,9 @@ Renders a `SystemSpec` into its markdown-plus-frontmatter document form — the 
 ### Behavior
 Writes a YAML frontmatter block: `kind: system`, a `modules:` list and a `features:` list (each id paired with its recorded hash), and the overall `spec_hash`. After the closing `---`, writes the stored body (title plus summary, trimmed) as-is. It then builds `## Modules` fresh: for each module, it reads that module's own rollup spec off disk right now and shows the first line of its body as a one-line blurb — so the listing always reflects the module's real current summary, never a stale snapshot. `## Features` is built the same way: for each feature, it reads the feature's own spec, extracts a human title from the spec body's first line (stripping the leading `#` markdown heading marker, falling back to the raw slug if no spec is found), a one-line blurb from its `## Summary` section, and renders it as a markdown link pointing at the feature's own document under `_features/<slug>.md`.
 ### Depends on
-- [`src/spec/feature.rs::read_feature_spec`](feature.rs.md) — super::feature
-- [`src/spec/format.rs::extract_section`](format.rs.md) — super::format
-- [`src/spec/rollup.rs::read_rollup_spec`](rollup.rs.md) — super::rollup
+- [`src/spec/feature.rs::read_feature_spec`](feature.rs.md#read_feature_spec) — super::feature
+- [`src/spec/format.rs::extract_section`](format.rs.md#extract_section) — super::format
+- [`src/spec/rollup.rs::read_rollup_spec`](rollup.rs.md#read_rollup_spec) — super::rollup
 - externals: std
 
 ## `parse_system`
@@ -94,14 +94,14 @@ Decides whether the top-level repo summary needs writing and, if so, collects th
 ### Behavior
 Computes `current_module_hashes` and `current_feature_hashes`; if any hash is empty (a module or feature whose spec is missing or out of date) it returns `Ok(None)`. Otherwise it reads the stored system spec, which counts as current only if its body passes `body_smells` and the combined stored module and feature hash lists equal the current combined list, so adding, removing or rewriting any of them triggers a rewrite. When a task is needed it builds the module list from each stored folder summary body (an error "has no current rollup yet" if one is missing). For each feature it takes the title from the first line of its body with the leading `#` characters stripped (falling back to the slug), takes the text under `## Summary` (blank if absent), and formats "title -- summary". The result is a `SystemTask`. Read failures are returned as errors.
 ### Depends on
-- [`src/spec/feature.rs::current_feature_hashes`](feature.rs.md) — super::feature
-- [`src/spec/feature.rs::read_feature_spec`](feature.rs.md) — super::feature
-- [`src/spec/format.rs::extract_section`](format.rs.md) — super::format
-- [`src/spec/rollup.rs::current_module_hashes`](rollup.rs.md) — super::rollup
-- [`src/spec/rollup.rs::read_rollup_spec`](rollup.rs.md) — super::rollup
-- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
-- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md) — super::staleness
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/spec/feature.rs::current_feature_hashes`](feature.rs.md#current_feature_hashes) — super::feature
+- [`src/spec/feature.rs::read_feature_spec`](feature.rs.md#read_feature_spec) — super::feature
+- [`src/spec/format.rs::extract_section`](format.rs.md#extract_section) — super::format
+- [`src/spec/rollup.rs::current_module_hashes`](rollup.rs.md#current_module_hashes) — super::rollup
+- [`src/spec/rollup.rs::read_rollup_spec`](rollup.rs.md#read_rollup_spec) — super::rollup
+- [`src/spec/smells.rs::body_smells`](smells.rs.md#body_smells) — super::smells
+- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md#diff_hash_lists) — super::staleness
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
 - externals: anyhow, std
 
 ## `submit_system`
@@ -111,11 +111,11 @@ Saves the agent's top-level repo description as `docs/specs/_index.md`, recordin
 ### Behavior
 Validation first: the trimmed content must be non-empty, must start with `# ` (a title line), and must pass `body_smells`; any failure is an error and nothing is written. It then builds a `SystemSpec` with the current module hashes, the current feature hashes, and the body hashed with `hash_text`. Both hash functions can fail on unreadable spec files, which is returned as an error. The target directory is created if needed, the output of `render_system` is written, and the `SystemSpec` is returned. The recorded hashes are what make the system spec stale when any module or feature summary changes. File errors carry "creating ..." or "writing ..." context.
 ### Depends on
-- [`src/spec/feature.rs::current_feature_hashes`](feature.rs.md) — super::feature
-- [`src/spec/format.rs::write_replacing`](format.rs.md) — super::format
-- [`src/spec/rollup.rs::current_module_hashes`](rollup.rs.md) — super::rollup
-- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
-- [`src/spec/smells.rs::reject_if_smelly`](smells.rs.md) — super::smells
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
+- [`src/spec/feature.rs::current_feature_hashes`](feature.rs.md#current_feature_hashes) — super::feature
+- [`src/spec/format.rs::write_replacing`](format.rs.md#write_replacing) — super::format
+- [`src/spec/rollup.rs::current_module_hashes`](rollup.rs.md#current_module_hashes) — super::rollup
+- [`src/spec/smells.rs::body_smells`](smells.rs.md#body_smells) — super::smells
+- [`src/spec/smells.rs::reject_if_smelly`](smells.rs.md#reject_if_smelly) — super::smells
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/hash.rs::hash_text`](../hash.rs.md#hash_text) — crate::hash
 - externals: anyhow, std

@@ -33,7 +33,7 @@ dep_targets:
   src/spec/source_text.rs::container_outline -> src/graph.rs::Graph: 8d4d56d40124
   src/spec/source_text.rs::container_outline -> src/symbol.rs::Symbol: 2bab71782e46
 ---
-# src/spec/source_text.rs
+# [`src/spec/source_text.rs`](../../../../src/spec/source_text.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file provides the source text a generation task shows an agent, and the size limits that keep that text usable. Everything here is a pure function of the graph or of text already in hand; nothing reads or writes a spec. A symbol's true span is computed from its own lines, any direct child that lies outside them, and the extra ranges of impl blocks folded into a Rust type, then merged when ranges are at most one line apart, so a struct and its impl read as one block; the same computation serves the generation task and the source-reading tool. `render_spans` slices those ranges out of the file text and joins separate blocks with a blank line, and `symbol_span_text` reads the file from disk so the text reflects the current file. `scoped_symbol_deps` narrows a file's imports to those a symbol actually names (a whole-identifier text search, so a name in a comment or string also counts), splitting them into in-repo targets and a sorted list of outside package names, and leaves out an import that points back at the symbol itself. Three byte limits are defined with their defaults: a container larger than 4,000 bytes is shown as an outline of signatures and doc comments instead of bodies (`maybe_reduce_container_source`, `container_outline`); no single generation-task text field may exceed 8,000 bytes, enforced by `cap_generation_text`, which cuts at a character boundary and counts its visible truncation notice inside the limit so the cap is never exceeded; and the source-reading tool allows 32,000 bytes, deliberately larger because it serves verification rather than prompting. These numbers came from a real client failing at about 11,500 bytes, and each can be overridden by a server flag. The reduced text is only for display: dependency scanning must always use the full source, or a dependency used only inside an omitted body would be missed.
@@ -59,8 +59,8 @@ Given one symbol's source text, finds which of its file's imports it actually me
 ### Behavior
 Goes through every import in the graph and keeps those that come from `from_file`, whose imported name appears as a whole word in `symbol_text` (`contains_identifier`), and whose target is not `self_id`. The last check matters for the synthetic edge CodeOwl adds from a trait impl to its type in the same file: that edge's imported name is the type's own name, which the type's own text always contains, so without the exclusion a type would appear to depend on itself. No real import can target the symbol being scanned, so the check is always safe. A kept import with a resolved target adds the target's id and specifier to `resolved`. An unresolved one adds a package name to `externals`: a specifier starting with `.` is kept whole, anything else is cut at the first `/` or `:` (`std::fs` gives `std`, `next/navigation` gives `next`). Duplicates are skipped and `externals` is sorted at the end; `resolved` keeps graph order and is not de-duplicated. The text match is a heuristic: a name inside a comment or string would count too.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `merged_symbol_spans`
 `pub(crate) fn merged_symbol_spans(graph: &Graph, sym: &Symbol) -> Vec<[usize; 2]>`
@@ -69,8 +69,8 @@ Finds all the line ranges of a file that together make up one symbol. Usually th
 ### Behavior
 Starts with the symbol's own line range. It then adds the range of every direct child that falls outside it (a folded-in method living in another `impl` block), and every entry in `extra_spans` (the full ranges of folded `impl` blocks, so the `impl Trait for Type {` header is included). A TypeScript class needs nothing extra because its methods are already inside its braces. The ranges are sorted by start line and merged when one starts at most two lines after the previous end, which leaves at most one line between them, so a `struct` followed by a blank line and its `impl` reads as one block while blocks further apart stay separate. Callers can therefore rely on the first and last entries as the outer envelope. `symbol_span_text` and `get_source` share this function so their ranges cannot drift apart. It cannot fail; a child id that does not resolve is skipped.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 
 ## `render_spans`
 `pub(crate) fn render_spans(content: &str, spans: &[[usize; 2]]) -> String`
@@ -93,8 +93,8 @@ Reads the actual source code of one symbol from disk and returns it as a string.
 ### Behavior
 Computes the symbol's line ranges with `merged_symbol_spans`, reads the whole file at `root` joined with `rel_path`, and passes both to `render_spans`. If the file cannot be read (deleted, permissions, not UTF-8) it returns an error with the context "reading <path>", and callers decide how to react; `dependency_lines` turns it into an empty list and `try_dependency_pairs` into `None`. The text always comes from disk, not the index, so it reflects the current file even if the graph is a moment behind. The whole file is read for every call, even when the symbol is small.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 - externals: anyhow, std
 
 ## `cap_generation_text`
@@ -118,9 +118,9 @@ For a very large class or similar type, replaces its full code with just an outl
 ### Behavior
 Returns `full_source` unchanged unless the symbol is a `Container`, has at least one child, and its source is longer than `threshold` bytes. When all three hold, it returns `container_outline`: the container's own signature, then its docstring on the next line if there is one, then for each child (separated by a blank line) the child's signature and docstring. A child id that does not resolve is skipped. There is deliberately no exception for private members, because the case that motivated this, a class with 240 public methods and 15 private ones, would gain little from it, and visibility rules differ per language. The reduced text is only for the task shown to the agent. Dependency scanning must keep using the full source, because a dependency used only inside an omitted body still has to be found.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md#symbolkind) — crate::symbol
 
 ## `container_outline`
 `pub(crate) fn container_outline(sym: &Symbol, graph: &Graph) -> String`
@@ -129,8 +129,8 @@ Builds a bodiless outline of a class or similar type: its own signature and doc 
 ### Behavior
 Starts with the container's signature, adds its docstring on the next line when there is one, then walks the children in declaration order. Each child that resolves to a symbol is appended after a blank line as its signature, followed by its docstring on the next line if present. A child id that does not resolve is skipped silently. No source bodies are included, so the result can be far smaller than the code, and anything a member does that is not stated in its signature or doc comment is invisible in it. Members are only the container's direct children, so nested members of a member are not listed.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 
 ## `contains_identifier`
 `pub(super) fn contains_identifier(text: &str, name: &str) -> bool`

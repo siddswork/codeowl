@@ -16,7 +16,7 @@ dep_targets:
   tests/feature_components.rs::build -> src/index.rs::RepoIndex: 481419547059
   tests/feature_components.rs::core_follows_the_rendered_component_subtree_into_its_fetches -> src/features.rs::assemble_participants: a6e5500838a2
 ---
-# tests/feature_components.rs
+# [`tests/feature_components.rs`](../../../tests/feature_components.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 A test that checks a page's feature follows the components it renders, not only the web calls it makes directly. Without that, a page that is a thin server wrapper around a client component would produce a feature description written from the wrapper alone, with the real flow, including state, the calls and validation, invisible. It builds a small Next.js-style project in a temporary folder: a page that renders a client component placed beside it and also a shared button, the client component renders a form from another folder, and the form calls an API route. It then asserts the feature's core files include the page, the neighbouring client component, the form (included because it does data work even though it is not beside the page), and the API route reached through the form's call, while the presentational button, which does no data work and is not beside the page, stays out. The helper functions create a collision-proof temporary folder and build the graph from the sample files.
@@ -37,7 +37,7 @@ A test helper that writes a small Next.js-style project into a folder and builds
 ### Behavior
 Writes five files into the given folder, creating any missing subfolders: a page at `app/judge/evaluate/page.tsx`, a client component next to it, a form component under `components/judge`, a UI button under `components/ui`, and an API route at `app/api/judge/evaluations/submit/route.ts`. The contents come from constants defined elsewhere in the test file. It then builds the index for the folder and rebuilds the graph from it, which resolves imports and flow edges as in normal use, and returns that graph. It panics on any failure, since a broken fixture should stop the test. The layout reproduces a real shape: a page renders a client component, which renders a form that calls the API route, and everything also uses the shared button.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `core_follows_the_rendered_component_subtree_into_its_fetches`
 `fn core_follows_the_rendered_component_subtree_into_its_fetches()`
@@ -46,4 +46,4 @@ A test that checks a page's feature includes the components it shows and the API
 ### Behavior
 Builds the sample project in a fresh temporary folder, finds the feature entry point whose file is the evaluation page, and assembles that feature's participants, taking the core file list. It asserts the core contains all four expected files, with a failure message showing the actual core if any is missing: the page itself, the client component next to it (included because it sits beside the entry file), the form component in a different folder (included even though it is not beside the page, because it makes a `fetch` call), and the API route (reached through that call). It then asserts the shared UI button is not in the core, because a presentational component that does no data work must stay out. Together this checks both admission rules: nearness, and doing data work.
 ### Depends on
-- [`src/features.rs::assemble_participants`](../src/features.rs.md) — codeowl::features
+- [`src/features.rs::assemble_participants`](../src/features.rs.md#assemble_participants) — codeowl::features

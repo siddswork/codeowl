@@ -29,7 +29,7 @@ dep_targets:
   src/python/fastapi.rs::file_touches_schema -> src/graph.rs::Graph: 13dbdfa88b0e
   src/python/fastapi.rs::file_touches_schema -> src/symbol.rs::SymbolKind: 264efecb34de
 ---
-# src/python/fastapi.rs
+# [`src/python/fastapi.rs`](../../../../src/python/fastapi.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -45,10 +45,10 @@ The two methods are the two halves of the `FeatureModel` contract.
 
 `admits_to_core` decides whether a given file belongs in a feature's supporting file set: yes if it is a CRUD module (recognized by `is_crud_module`) or if it touches the database schema (`file_touches_schema`), no otherwise. It ignores which route is asking, so the same files qualify for every feature.
 ### Depends on
-- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
-- [`src/features.rs::FeatureModel`](../features.rs.md) — crate::features
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
+- [`src/features.rs::EntryPoint`](../features.rs.md#entrypoint) — crate::features
+- [`src/features.rs::FeatureModel`](../features.rs.md#featuremodel) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md#symbolkind) — crate::symbol
 - externals: std
 
 ## `parse_route_decorator`
@@ -76,8 +76,8 @@ Finds a file's `APIRouter(prefix="...")` declaration and returns its prefix path
 ### Behavior
 Searches the graph for a `Value`-kind symbol in the given file whose signature contains the text `APIRouter(`, then extracts its `prefix` keyword argument as a string literal (via `kwarg_string_literal`). Returns `None` if the file has no such declaration, or if it does but the `prefix` argument isn't a plain string literal — for example `prefix=settings.API_PREFIX`, a value that can't be known just by reading the source text. In that case, the route ends up reported without any prefix rather than with a wrong one, which is the safer failure mode.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md#symbolkind) — crate::symbol
 
 ## `kwarg_string_literal`
 `fn kwarg_string_literal(sig: &str, key: &str) -> Option<String>`
@@ -122,7 +122,7 @@ Guarantees every feature entry point gets a unique id, by appending `-2`, `-3`, 
 ### Behavior
 Expects `entries` already sorted by `(id, file)`, so any entries sharing the same `id` are adjacent. Walks through in one pass: for each run of consecutive entries with an identical `id`, the first keeps its id unchanged, and each entry after it in the run gets `-2`, `-3`, etc. appended. This fixes a real bug the previous approach had: deduplicating on `id` alone (via `dedup_by`) would have dropped every colliding route after the first entirely, rather than keeping all of them under distinguishable ids. Because only entries *beyond the first* in a collision are renamed, the common case — no collision at all — never changes an existing spec's id, so this doesn't churn ids that were already stable.
 ### Depends on
-- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
+- [`src/features.rs::EntryPoint`](../features.rs.md#entrypoint) — crate::features
 
 ## `is_crud_module`
 `fn is_crud_module(file: &str) -> bool`
@@ -140,5 +140,5 @@ Checks whether a file "does data work" — either declaring a database table its
 ### Behavior
 Returns `true` if either: the file itself declares a symbol of kind `Schema` (a database table — already tagged that way earlier in extraction by `is_schema_symbol`, so this is a plain lookup, no re-analysis); or the file imports something that resolves to a `Schema`-kind symbol elsewhere. Both checks are simple graph lookups off already-computed symbol kinds and import edges — no call-graph analysis is involved, since CodeOwl doesn't trace actual query execution.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md#symbolkind) — crate::symbol

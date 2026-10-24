@@ -14,7 +14,7 @@ dep_targets:
   src/spec/priority.rs::prioritize -> src/graph.rs::Graph: 13dbdfa88b0e
   src/spec/priority.rs::prioritize -> src/lang.rs::FileRole: 2e8bc021ccde
 ---
-# src/spec/priority.rs
+# [`src/spec/priority.rs`](../../../../src/spec/priority.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -26,7 +26,7 @@ Picks the files whose out-of-date specs would do the most harm, ranked by how ma
 ### Behavior
 Keeps only file items that need attention, meaning the status is not `current` or the spec is current but has quality problems. Folder summaries, features and the system spec are left out since only files have a real fan-in. The candidates are sorted by `fan_in`, highest first, and cut to the first `n`. The sort is stable, so files with equal fan-in stay in the order the coverage list gave them (path order). It returns clones and has no failure mode; `n` of 0 gives an empty list.
 ### Depends on
-- [`src/spec/coverage.rs::CoverageItem`](coverage.rs.md) — super::coverage
+- [`src/spec/coverage.rs::CoverageItem`](coverage.rs.md#coverageitem) — super::coverage
 
 ## `prioritize`
 `pub fn prioritize(items: Vec<CoverageItem>, graph: &Graph) -> Vec<CoverageItem>`
@@ -39,7 +39,7 @@ Items are kept when their status is not `current`, or when they are current but 
 
 Sorting uses a tier number, then urgency, then fan-in, then id. Tiers: 0 shared domain files at or above the cutoff, 1 feature specs, 2 other files (the long tail, including low-level helper files at any fan-in), 3 folder summaries, 5 test code (always after product code whatever its fan-in), 6 the system spec. A generated-code file is mapped to tier 2 but never reaches here, because such files are excluded earlier. Within a tier a `missing` item comes before a `stale` one, which comes before a merely smelly one; then higher fan-in first; then id for a stable, repeatable order.
 ### Depends on
-- [`src/spec/coverage.rs::CoverageItem`](coverage.rs.md) — super::coverage
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
-- [`src/stack.rs::file_role`](../stack.rs.md) — crate::stack
+- [`src/spec/coverage.rs::CoverageItem`](coverage.rs.md#coverageitem) — super::coverage
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md#filerole) — crate::lang
+- [`src/stack.rs::file_role`](../stack.rs.md#file_role) — crate::stack

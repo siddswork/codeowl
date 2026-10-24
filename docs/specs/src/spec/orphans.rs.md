@@ -19,7 +19,7 @@ dep_targets:
   src/spec/orphans.rs::find_orphaned_files_and_rollups -> src/spec/format.rs::parse: 5f76030ba2a5
   src/spec/orphans.rs::find_orphaned_files_and_rollups -> src/text.rs::within_scope: 4dcc40036692
 ---
-# src/spec/orphans.rs
+# [`src/spec/orphans.rs`](../../../../src/spec/orphans.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -49,9 +49,9 @@ Returns an empty list at once if `docs/specs/` does not exist. Otherwise it coll
 
 Targets are worked out from the mirrored folder layout and filenames alone (a file spec is its source path plus `.md`, a rollup is an `_index.md`, a feature is `_features/<slug>.md`), so no document is parsed. `scope` narrows files and folders by directory, and removes feature orphans entirely because a feature has no directory of its own. It only reports and never deletes.
 ### Depends on
-- [`src/spec/rollup.rs::enumerate_modules`](rollup.rs.md) — super::rollup
-- [`src/features.rs::enumerate_entry_points`](../features.rs.md) — crate::features
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/spec/rollup.rs::enumerate_modules`](rollup.rs.md#enumerate_modules) — super::rollup
+- [`src/features.rs::enumerate_entry_points`](../features.rs.md#enumerate_entry_points) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
 - externals: anyhow, std
 
 ## `find_orphaned_symbol_sections`
@@ -66,11 +66,11 @@ Finds sections inside a still-existing file's spec that describe a function or t
 ### Behavior
 Goes through every file in the graph in path order, skipping those outside `scope`, and skipping files with no stored spec. For each remaining file it collects the ids of its current spec-bearing symbols and compares them to the symbol ids stored in the spec. Each stored id missing from the current set is added to `orphans` as an `OrphanedSpec` of kind `symbol`, with the path of the containing file's spec (`docs/specs/<path>.md`). It only covers files still in the graph, because a deleted file's whole spec is already reported as a file orphan, and double-reporting would be noise. The status check cannot see these, since it only walks current symbols. The dead section is dropped automatically the next time the file's spec is written. Errors if a spec file cannot be read.
 ### Depends on
-- [`src/spec/format.rs::read_file_spec`](format.rs.md) — super::format
-- [`src/spec/layout.rs::spec_bearing_children`](layout.rs.md) — super::layout
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
-- [`src/text.rs::within_scope`](../text.rs.md) — crate::text
+- [`src/spec/format.rs::read_file_spec`](format.rs.md#read_file_spec) — super::format
+- [`src/spec/layout.rs::spec_bearing_children`](layout.rs.md#spec_bearing_children) — super::layout
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
+- [`src/text.rs::within_scope`](../text.rs.md#within_scope) — crate::text
 - externals: anyhow, std
 
 ## `find_orphaned_files_and_rollups`
@@ -92,6 +92,6 @@ Reads the directory entry by entry. It skips the `_features/` folder (features a
 
 Files with other extensions are ignored. Errors reading a directory (with a "reading <path>" message) are returned, but an unreadable individual file is silently skipped.
 ### Depends on
-- [`src/spec/format.rs::parse`](format.rs.md) — super::format
-- [`src/text.rs::within_scope`](../text.rs.md) — crate::text
+- [`src/spec/format.rs::parse`](format.rs.md#parse) — super::format
+- [`src/text.rs::within_scope`](../text.rs.md#within_scope) — crate::text
 - externals: anyhow, std
