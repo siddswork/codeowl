@@ -85,11 +85,14 @@ pub fn link_destination(path: &str) -> String {
 /// into hyphens, and a heading that repeats an earlier one gets `-1`, `-2`, …
 /// So the anchor of a heading depends on the headings before it.
 pub fn heading_anchors(headings: &[String]) -> Vec<String> {
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    // GitHub's slugger: a slug already handed out is numbered, and the number
+    // is tried again if that candidate is itself taken (a heading literally
+    // called `Summary-1` next to two `Summary`).
+    let mut taken: HashMap<String, usize> = HashMap::new();
     headings
         .iter()
         .map(|heading| {
-            let slug: String = heading
+            let original: String = heading
                 .trim()
                 .to_lowercase()
                 .chars()
@@ -101,14 +104,14 @@ pub fn heading_anchors(headings: &[String]) -> Vec<String> {
                 })
                 .map(|c| if c == ' ' { '-' } else { c })
                 .collect();
-            let count = seen.entry(slug.clone()).or_insert(0);
-            let anchor = if *count == 0 {
-                slug
-            } else {
-                format!("{slug}-{count}")
-            };
-            *count += 1;
-            anchor
+            let mut slug = original.clone();
+            while taken.contains_key(&slug) {
+                let count = taken.entry(original.clone()).or_insert(0);
+                *count += 1;
+                slug = format!("{original}-{count}");
+            }
+            taken.insert(slug.clone(), 0);
+            slug
         })
         .collect()
 }
@@ -141,7 +144,9 @@ pub fn section_anchor(graph: &Graph, symbol_id: &str) -> Option<String> {
         headings.extend(["Summary", "Behavior", "Depends on"].map(String::from));
     }
     let anchors = heading_anchors(&headings);
-    Some(anchors[heading_of_section[index]].clone())
+    // A name with no letters, digits, `_` or `-` has an empty slug: a link
+    // ending in a bare `#` would be worse than none.
+    Some(anchors[heading_of_section[index]].clone()).filter(|anchor| !anchor.is_empty())
 }
 
 /// Whether a repo-relative path is test code — an `e2e/` tree, a
@@ -412,6 +417,19 @@ mod tests {
             section_anchor(&graph, "alpha::alpha"),
             Some("alpha-1".to_string())
         );
+    }
+
+    #[test]
+    fn a_numbered_repeat_that_matches_a_real_heading_is_numbered_again() {
+        // GitHub's slugger checks each candidate against every anchor already
+        // given out: the third heading here is literally `Summary-1`, so the
+        // generated `summary-1` of the second one is taken.
+        let anchors = heading_anchors(&[
+            "Summary".to_string(),
+            "Summary".to_string(),
+            "Summary-1".to_string(),
+        ]);
+        assert_eq!(anchors, ["summary", "summary-1", "summary-1-1"]);
     }
 
     #[test]

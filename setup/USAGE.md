@@ -666,8 +666,11 @@ its directory. Each dependency in a symbol's `### Depends on` list is a link to
 the dependency's own section in the spec of the file it comes from
 (``[`src/graph.rs::Graph`](../graph.rs.md#graph)``), so you can follow the specs
 from one to the next, and from a spec to its code, on GitHub or in any markdown
-viewer. If a spec does not have that section yet, the link opens the spec at
-the top; a link to a file that has no spec yet simply does not open. A
+viewer. The anchor is worked out from the code, not from the target spec on
+disk, so it is exact once the target spec is fully generated; while a spec is
+missing the section (a stale or partly generated spec), the link opens the
+spec at the top and starts landing on the section when it is written. A link
+to a file that has no spec yet simply does not open. A
 dependency on a file that never gets a spec (a constants-only or schema file,
 generated code), on a file in the same spec, or on a file that no longer
 exists stays plain text.

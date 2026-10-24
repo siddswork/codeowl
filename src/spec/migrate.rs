@@ -394,12 +394,18 @@ struct Change {
 /// changed.
 fn with_title_link(body: &str, text: &str, expected: &str) -> (String, bool) {
     let (first, rest) = body.split_once('\n').unwrap_or((body, ""));
+    // A file saved with Windows line endings has a `\r` at the end of the line;
+    // it is kept.
+    let (first, ending) = match first.strip_suffix('\r') {
+        Some(first) => (first, "\r"),
+        None => (first, ""),
+    };
     let plain = format!("# {text}");
     if first != plain || expected == plain {
         return (body.to_string(), false);
     }
     let separator = if body.contains('\n') { "\n" } else { "" };
-    (format!("{expected}{separator}{rest}"), true)
+    (format!("{expected}{ending}{separator}{rest}"), true)
 }
 
 /// The target and specifier of a dependency entry, plain (``- `target` —
@@ -411,8 +417,11 @@ fn dependency_entry(line: &str) -> Option<(&str, &str)> {
     }
     let entry = line.strip_prefix("- [`")?;
     let (target, rest) = entry.split_once("`](")?;
-    let (_, specifier) = rest.split_once(") — ")?;
-    Some((target, specifier))
+    let (destination, specifier) = rest.split_once(") — ")?;
+    // Ours only if it points at a spec: a relative `.md` path, with or without
+    // an anchor. A link someone pointed at a web page or another file is theirs.
+    let path = destination.split('#').next().unwrap_or(destination);
+    (path.ends_with(".md") && !path.contains("://")).then_some((target, specifier))
 }
 
 /// `body` with each entry of a `### Depends on` list rewritten as the line a
@@ -1549,6 +1558,45 @@ mod tests {
         let report = migrate_to_okf(&partial, &dir, true).unwrap();
         assert_eq!(report.links_added, 0);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_dependency_link_someone_pointed_elsewhere_is_left_alone() {
+        // Only a link to a spec (a relative `.md` path, with or without an
+        // anchor) is ours to correct; a link a person pointed at a web page is
+        // not.
+        let (graph, dir) = greeter_people_graph("okf-link-edited");
+        let fresh = generate_people(&graph, &dir);
+        let path = spec_path(&dir, "src/people.rs");
+        for edited in [
+            "- [`src/greeter.rs::Greeter`](https://docs.example/greeter) — crate::greeter",
+            "- [`src/greeter.rs::Greeter`](../notes/greeter.txt) — crate::greeter",
+        ] {
+            let text = fresh.replace(LINKED_DEP, edited);
+            std::fs::write(&path, &text).unwrap();
+            let report = migrate_to_okf(&graph, &dir, true).unwrap();
+            assert_eq!(report.links_added, 0, "{edited}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{edited}");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_plain_title_with_a_windows_line_ending_is_linked_and_keeps_its_ending() {
+        let (graph, dir) = greeter_people_graph("okf-title-crlf");
+        let fresh = generate_people(&graph, &dir);
+        let ours = file_title_line("src/people.rs");
+        let crlf = fresh
+            .replace(&format!("{ours}\n"), "# src/people.rs\r\n")
+            .replace('\n', "\r\n")
+            .replace("\r\r\n", "\r\n");
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &crlf).unwrap();
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.titles_linked, 1);
+        let after = std::fs::read_to_string(&path).unwrap();
+        assert!(after.contains(&format!("{ours}\r\n")), "{after:?}");
         std::fs::remove_dir_all(&dir).ok();
     }
 
