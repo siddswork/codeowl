@@ -466,7 +466,7 @@ fn a_cross_file_fully_qualified_call_gets_a_real_dependency_edge_that_invalidate
     let rendered1 = render(&graph1, &dir, caller_file_id1, &caller_spec1);
     let read_section = section(&rendered1, "read");
     assert!(
-        read_section.contains("`src/target.rs::Target` — crate::target"),
+        read_section.contains("[`src/target.rs::Target`](target.rs.md) — crate::target"),
         "the qualified call must render as a real dependency with the real \
          module path as its specifier, not a `same file` placeholder:\n{read_section}"
     );

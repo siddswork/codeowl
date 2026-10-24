@@ -268,7 +268,7 @@ symbols:
 `function cn(...inputs: ClassValue[]): string`      ← CodeOwl-written (section 1)
 ### Summary
 ### Behavior          ← what it actually does: side effects, error cases, gotchas
-### Depends on        ← CodeOwl-written (section 2)
+### Depends on        ← CodeOwl-written (section 2): each resolved line is a markdown link to the dependency's file spec
 ```
 
 Summaries are delimited by explicit `### Summary` headings rather than hidden markers (`<!-- codeowl:summary -->`) or positional convention ("the first paragraph"). Specs are git-committed, PR-reviewed, and expected to be human-edited — keeping the file plain, ordinary markdown matters more than parser robustness, and a heading-based contract breaks *loudly* under `submit_spec` validation rather than silently mis-extracting when someone adds a leading sentence.
