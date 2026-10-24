@@ -136,12 +136,12 @@ feature, `docs/specs/<dir>/_index.md` for a directory rollup,
   spec's frontmatter starts with `type`, `title`, `description`,
   `generated` and `resource` or `sources`, and each dependency in a
   `### Depends on` list links to the spec of the file it comes from. New
-  specs are written that way. If you already have specs from an earlier
-  version, run `codeowl migrate-to-okf <your-repo>` (a dry run) and then
-  `codeowl migrate-to-okf <your-repo> --write` once: it changes only the
-  frontmatter and the provenance line, never the text or a hash, so nothing
-  turns stale. Dependency links appear in a spec the next time it is
-  regenerated. See [`USAGE.md`](USAGE.md) for the details.
+  specs are written that way. **If you already have specs from an earlier
+  version**, follow [Upgrading from an earlier version](USAGE.md#upgrading-from-an-earlier-version)
+  in `USAGE.md`: two one-time commands, `codeowl migrate-file-fingerprint`
+  and `codeowl migrate-to-okf` (each a dry run until you add `--write`),
+  neither of which changes the text of a spec or turns one stale. Dependency
+  links appear in a spec the next time it is regenerated.
 - **Optional: a `docs/STYLE.md`.** `/codeowl-generate` reads it (if
   present) before writing, and follows it for *audience and tone* — how
   much domain vocabulary to assume, what to explain inline. Useful when
