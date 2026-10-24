@@ -178,7 +178,20 @@ async fn main() -> Result<()> {
         }
         Command::MigrateToOkf { path, write } => {
             let root = canonical_root(&path)?;
-            let graph = RepoIndex::build(&root)?.rebuild()?;
+            // The graph decides which dependency entries can be linked. If it
+            // cannot be built, the keys and the provenance line are still
+            // worth migrating, so say the links were skipped and go on; a
+            // later run, once it builds, adds them.
+            let graph = match RepoIndex::build(&root).and_then(|index| index.rebuild()) {
+                Ok(graph) => graph,
+                Err(err) => {
+                    println!(
+                        "note: could not build the graph ({err:#}), so dependency links are \
+                         skipped; run the command again once it builds"
+                    );
+                    codeowl::graph::Graph::build(Vec::new())
+                }
+            };
             let r = codeowl::spec::migrate_to_okf(&graph, &root, write)?;
             let verb = if write { "migrated" } else { "would migrate" };
             println!(
