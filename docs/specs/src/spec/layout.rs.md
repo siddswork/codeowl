@@ -8,7 +8,8 @@ source_paths: [src/spec/layout.rs]
 file: { source_hash: 81a3707631c193c527e7a7c490a2d26c8625a16e435c158020b250d44583c740, fingerprint: fa92627011f6ef4a8eeedc401840b69a4d9036170090e790c681c6c6713c8f35, deps_hash: 65205747e590744ed7ea34c41df8e27ea7309f76aa40da203218e7882104e30d, spec_hash: 13a318792463a619c6f5cd57546e5b1dc25ea01e3e50af0fb88261a3dd7da370 }
 symbols:
   src/spec/layout.rs::classify_in: { source_hash: 89ddb187b8cd4d9a8903076c09a208914fe19ed1a3599c3e0017c86f2a61fff9, deps_hash: 0cd902635a3982b86f5983707665f0e043718ab791d6fc5f7f3ab6f4b93de4ca, spec_hash: 45f1d05fba56968d0ae8f54e96decde1d4312827fe3575540c2bd5709c92b4ce }
-  src/spec/layout.rs::spec_path: { source_hash: 3dfc63d758381a3ffa2736a2ed112fafd6692d2f251ea2ad7ef43a945db2146e, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 6d9529c03c897362c6af128409e9eaf9fbc6dd241bf901061946996a28505947 }
+  src/spec/layout.rs::spec_path: { source_hash: 1fa6e490788d7cf1d135f466d65e20424cc8b0501d230e651d94d286fc605b92, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 00abd4542d3845b59926e18058659cd21c3c3296b8dedb019d81404d866ac06e }
+  src/spec/layout.rs::spec_relative_path: { source_hash: 8f019f57f42cb84bc5312f0403a1c5c34cab705b4b2ce378b80a3146b02df1b0, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2c41e6469f67c9b0c12aef979e94e1ef2aeea4597ea2f03b5f100a14ff651c31 }
   src/spec/layout.rs::is_test_path: { source_hash: dc85121fe35904dfcaa30e3b868d27e4ab83974e823181c62abe6cf196188cb8, deps_hash: 612d2845e85f396e50e16e46c88b771536f63becfcd201ab321006818ad15d7e, spec_hash: b2c9b75f81e47cdf908c82fb0c1daeef1b420a8161df32921a5bd9791ac459a9 }
   src/spec/layout.rs::file_is_spec_bearing: { source_hash: 744b2eac55250d9f0e2defd885a62c13dc75111aea07fc48d5119afa5eb4c4d7, deps_hash: 28b4987b14f80b3e279eb9143771f4de4f6b5c16dedbc1fee5b29742866f09ae, spec_hash: ac758c60ea128ef92faf70c3500ebd5e44bc408537fd1978bee93bc3bbcf6e91 }
   src/spec/layout.rs::GeneratedSourcesSummary: { source_hash: 187cb5e69efde7fa4dc708aaa2037c86df5cf4558651f6821e7e56dc85964736, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2212c3c20c3c092186a701bbe1109956f855fc0678e6559ca44adb6a0b8921c4 }
@@ -66,11 +67,20 @@ Forwards straight to `stack::file_role(graph, path)`, which looks up the languag
 ## `spec_path`
 `pub fn spec_path(root: &Path, source_path: &str) -> PathBuf`
 ### Summary
-Computes where a given source file's spec document lives on disk, mirroring the source tree under `docs/specs/`.
+Works out where on disk the spec for a given source file is stored. The `docs/specs/` folder mirrors the source tree, so the spec for `lib/utils.ts` lives at `docs/specs/lib/utils.ts.md`.
 ### Behavior
-Joins the repo root with `docs/specs/` and the source path with `.md` appended — deliberately not stripping the source file's own extension, so `lib/utils.ts` maps to `docs/specs/lib/utils.ts.md` rather than `docs/specs/lib/utils.md`. Keeping the original extension avoids a collision if two same-named files with different extensions existed in the same directory, and makes the mapping trivially reversible by eye.
+Joins the repository root, `docs`, `specs`, and the source path with `.md` added on the end. The source file's own extension is kept, not replaced, so `lib/utils.ts` becomes `lib/utils.ts.md`, and two files that differ only in extension (`a.ts` and `a.js`) get two different spec files instead of one. The `.md` suffix comes from a shared private helper, `spec_relative_path`, which `spec_link` also uses, so the place a spec is written and the address links point to cannot disagree. It only builds a path: it does not check that the source file or the spec exists, and it does not clean up the input, so a path with `..` in it is used as given.
 ### Depends on
 - externals: std
+
+## `spec_relative_path`
+`fn spec_relative_path(source_path: &str) -> String`
+### Summary
+Says what a source file's spec is called inside the `docs/specs/` folder: the file's own path with `.md` added on the end.
+### Behavior
+Returns the path followed by `.md`, so `src/hash.rs` gives `src/hash.rs.md`; the original extension is kept. It is the single place that decides how a spec is named. `spec_path` uses it to find where a spec is saved on disk, and `spec_link` uses it when working out the relative address of a link, so the two cannot drift apart if the naming ever changes. It is private to the module and does no checking: the result is a name only, with no test that the source file or the spec exists, and an empty path would give just `.md`.
+### Depends on
+- (none)
 
 ## `is_test_path`
 `pub fn is_test_path(graph: &Graph, path: &str) -> bool`
