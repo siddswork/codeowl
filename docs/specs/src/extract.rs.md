@@ -71,8 +71,8 @@ Picks the tree-sitter grammar (the parser that turns text into a syntax tree) fr
 
 Two clean-up steps follow. `fold_same_id` merges declarations that share an id, such as a class and an interface of the same name, or an overload list, into one symbol, keeping the strongest kind. Then, since type declarations compute an `interface_hash` whether or not they are exported (so a private half and an exported half can be combined during the merge), any symbol that is not exported has its `interface_hash` cleared at the end, because only exported symbols keep one. No syntax-tree node escapes the function; the result is plain owned symbols. Statements inside function bodies are not extracted.
 ### Depends on
-- `src/lang.rs::ts_parser` — crate::lang
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- [`src/lang.rs::ts_parser`](lang.rs.md) — crate::lang
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `clause_exported_names`
@@ -82,8 +82,8 @@ Collects the names that a file exports with a separate `export { A, B };` line, 
 ### Behavior
 Looks at the file's top-level statements and keeps only bare export clauses, those with no `from`, because `export { a } from './x'` forwards another module's name and says nothing about a local one. From each clause it reads the listed names and keeps only the ones not renamed. `export { a as b }` publishes `b`, which is not the declaration's id, so importers could not find it by name, and that case is deliberately not handled since no repo measured had it. The names are returned as a set of strings. A name that is not declared in this file is harmless, since nothing will match it. It cannot fail.
 ### Depends on
-- `src/imports.rs::bare_export_clause` — crate::imports
-- `src/imports.rs::export_specs` — crate::imports
+- [`src/imports.rs::bare_export_clause`](imports.rs.md) — crate::imports
+- [`src/imports.rs::export_specs`](imports.rs.md) — crate::imports
 - externals: std, tree_sitter
 
 ## `is_declaration_exported`
@@ -110,7 +110,7 @@ If the statement is an `export` wrapper, it unwraps it to the declaration inside
 
 It then dispatches on the declaration's kind: a function goes to `visit_function`, a class to `visit_class`, a `const` or `let` to `visit_lexical`, and a type alias, interface or enum to `visit_type_decl` with the matching label. Type-level declarations carry no runtime behavior, but an importer depends on their shape just as on a function's signature, and without a symbol an `import { User }` resolved to nothing and a change to `User` could not mark anything stale. Each of these receives the set of clause-exported names so it can decide whether the declaration counts as exported. Any other statement is ignored. It appends to `out` and returns nothing.
 ### Depends on
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
 - externals: std, tree_sitter
 
 ## `visit_type_decl`
@@ -132,9 +132,9 @@ Whether it is exported comes from `is_declaration_exported`. The symbol is kind 
 
 Fingerprints differ from a function's. A function's contract is its signature, but a type's contract is its body: adding, renaming or retyping a member can break an importer. So `interface_hash` covers the whole declaration as a list of tokens, which ignores comments and formatting, so reformatting does not mark importers stale. It is always computed here, even for a non-exported type, because a later merge may combine a private half with an exported half, and `extract_file` clears it for any symbol that ends up not exported. `source_hash` is a hash of the declaration's raw text. It also records the line range and the doc comment before it, with no markers, parent or children. It appends to `out` and returns nothing.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: std, tree_sitter
 
 ## `declaration_tokens`
@@ -166,9 +166,9 @@ The stronger declaration wins and supplies the kind, signature and main line ran
 
 Order of first appearance is preserved and the result has one symbol per id. It cannot fail. A folded symbol's hash depends on the order the declarations were written, so reordering them counts as a change.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: std
 
 ## `visit_function`
@@ -187,9 +187,9 @@ A function with no body, such as an overload declaration or an ambient `declare 
 
 Exported status comes from `is_declaration_exported`, which counts either the `export` keyword or a name listed in a bare `export { name }` line. `source_hash` hashes the whole declaration, body included, so any edit changes it. `interface_hash`, present only when exported, hashes the signature alone, so edits inside the body leave importers current. Also recorded are the line range and the doc comment before the declaration, including one that sits before an `export` keyword. No markers, parent or children. It appends to `out` and returns nothing.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: std, tree_sitter
 
 ## `visit_class`
@@ -210,9 +210,9 @@ Whole-class fingerprint (`source_hash`): the class signature (text up to the bod
 
 Public-surface fingerprint (`interface_hash`), built only if the class is exported (the keyword or a bare export line): the signature plus each member's signature that passes the public check, meaning it is not `private` and its name does not start with `#`. This applies to fields, without values, and to methods, whose signatures already stop before the body. So renaming or retyping a public member marks importers stale, while a body edit does not. The class is recorded before its members, with its line range and the doc comment before the class or its `export`, and the members follow.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: std, tree_sitter
 
 ## `visit_lexical`
@@ -235,9 +235,9 @@ For each name it picks a kind. If the declarator's value is an arrow function or
 
 Each symbol has the id `<file>::<name>`. Whether it is exported comes from `is_declaration_exported`. `source_hash` hashes the declarator text, and `interface_hash`, present only when exported, hashes the signature. It also records the line range and the doc comment before the statement, and no markers or children. It appends to `out` and returns nothing.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: std, tree_sitter
 
 ## `bound_names`

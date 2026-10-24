@@ -26,10 +26,10 @@ A shortcut for tests: given a file's path and text, it parses the file and finge
 ### Behavior
 If the path ends in `.sql` it extracts tables with `schema::extract_tables`, otherwise it extracts declarations with the TypeScript extractor `lang::extract_symbols`. It then builds a `FileExtraction` with the path, a hash of the source text via `hash_text`, and the symbols. It is for test fixtures only: it always uses the TypeScript and SQL rules, not whichever language pack the repo was detected as, so it produces nothing useful for Rust, Java or Python text. Real extraction goes through `RepoIndex::build` and the detected pack. It cannot fail.
 ### Depends on
-- `src/graph.rs::FileExtraction` — crate::graph
-- `src/hash.rs::hash_text` — crate::hash
-- `src/typescript/schema.rs::extract_tables` — crate::typescript
-- `src/typescript/mod.rs::extract_file` — crate::typescript
+- [`src/graph.rs::FileExtraction`](graph.rs.md) — crate::graph
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/typescript/schema.rs::extract_tables`](typescript/schema.rs.md) — crate::typescript
+- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md) — crate::typescript
 
 ## `build_graph_from_sources`
 `pub(crate) fn build_graph_from_sources(files: &[(&str, &str)]) -> Graph`
@@ -38,4 +38,4 @@ Test helper: build a `Graph` straight from `(path, source)` pairs, extracting an
 ### Behavior
 Maps each pair through `extract_and_hash` and calls `Graph::build`. Because `extract_and_hash` routes through the TypeScript pack's extension dispatch, the graph it produces has TypeScript symbols and no `pack_name` stamp — `for_name("")` then resolves it as the TypeScript pack. Fine for TS-oriented tests; Rust and other packs' tests build their `FileExtraction`s directly.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph

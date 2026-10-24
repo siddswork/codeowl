@@ -59,9 +59,9 @@ Says whether a file is ordinary code, test code, or something else, using the co
 ### Behavior
 Forwards straight to `stack::file_role(graph, path)`, which looks up the language pack named on the graph and asks it to classify the path (the Rust pack treats `tests/` as a test root, the TypeScript pack uses the JS naming conventions). No state is read or changed and there is no error case: an unknown path simply gets whatever role the pack gives unrecognised files. The classification used to be a method on the graph; it now lives in `stack` so the graph never has to name a pack.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/lang.rs::FileRole` — crate::lang
-- `src/stack.rs::file_role` — crate::stack
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
+- [`src/stack.rs::file_role`](../stack.rs.md) — crate::stack
 
 ## `spec_path`
 `pub fn spec_path(root: &Path, source_path: &str) -> PathBuf`
@@ -79,8 +79,8 @@ Answers "is this file test code?" for a repo-relative path. Test files stay in t
 ### Behavior
 Calls `classify_in` and returns true only when the role is `FileRole::Test`; every other role (source, config, and so on) gives false. The language pack decides what counts as a test, so `tests/` is a test root in a Rust repo and `.test.`/`__tests__` names are in a TypeScript one. The function itself does no string handling, so a `rollup:` or `feature:` coverage id is not stripped here: the path is classified exactly as given.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/lang.rs::FileRole` — crate::lang
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
 
 ## `file_is_spec_bearing`
 `pub fn file_is_spec_bearing(graph: &Graph, file_id: SymbolId) -> bool`
@@ -89,10 +89,10 @@ Decides whether a file gets its own spec document at all. A file qualifies when 
 ### Behavior
 Returns false immediately if the file's role is `FileRole::Generated` (code produced by a build step, such as a codegen'd interface), however much it exports, because specs describe hand-written code. Otherwise it looks at the file's direct children and returns true if any has kind `Callable` or `Container`. `Value` leaves (constants, type aliases, interfaces, enums) do not count on their own. Whether a declaration is `pub`/exported is deliberately ignored: a file full of private code, such as an integration-test file, still deserves a spec. A child id that no longer resolves to a symbol is treated as not matching rather than an error.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/lang.rs::FileRole` — crate::lang
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
 
 ## `GeneratedSourcesSummary`
 `pub struct GeneratedSourcesSummary`
@@ -110,9 +110,9 @@ Builds the "generated sources" report for a repo, or returns nothing when the re
 ### Behavior
 Looks up the language pack named on the graph (`stack::for_graph`) and asks it for its generated-source directories. If the list is empty it returns `None`. Otherwise it counts the files whose role, as decided by `classify_in`, is `FileRole::Generated` and returns that count together with the directory names as strings. The count comes from the file roles rather than a fresh disk scan, so it reflects exactly what the index already holds: a count of zero means the pack knows a convention exists but nothing was found there, not that the directories were checked and are empty on disk. It cannot fail.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/lang.rs::FileRole` — crate::lang
-- `src/stack.rs::for_graph` — crate::stack
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
+- [`src/stack.rs::for_graph`](../stack.rs.md) — crate::stack
 
 ## `spec_bearing_children`
 `pub(crate) fn spec_bearing_children(graph: &Graph, file_id: SymbolId) -> Vec<SymbolId>`
@@ -121,9 +121,9 @@ Lists the top-level items in a file that get their own section in the file's spe
 ### Behavior
 Takes the file's direct children in their stored order and keeps those whose kind is `Callable` or `Container`, returning their ids. `Value` children (constants, type aliases, interfaces, enums, destructured names) are dropped, so they have no section of their own. A container's members are not listed separately, because they are described inside the container's section. A child id that does not resolve to a symbol is skipped. Export status is ignored, since the point is to describe how the file works, not only its public API. `file_is_spec_bearing` applies the same kind test on its own rather than calling this, so the two have to be kept in agreement by hand.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
 
 ## `directory_is_spec_bearing`
 `pub fn directory_is_spec_bearing(graph: &Graph, dir_path: &str) -> bool`
@@ -132,7 +132,7 @@ Decides whether a folder gets a summary page of its own (an `_index.md`). It doe
 ### Behavior
 Calls `spec_bearing_files_in` for the directory and checks that the result has two or more entries. Only immediate children count; files in subfolders are not included. The path is repo-relative with no trailing slash, and the empty string means the repo root, although the rollup task code guards that case separately. The threshold of two exists because route trees such as Next.js are full of single-file directories, and a page for each would be noise. The function has no failure mode: an unknown directory just has no files and returns false.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 
 ## `files_in`
 `pub(super) fn files_in(graph: &Graph, dir_path: &str) -> Vec<SymbolId>`
@@ -141,8 +141,8 @@ Returns every file that sits directly in one folder, in alphabetical order, whet
 ### Behavior
 Walks all files in the graph and keeps those whose parent directory equals `dir_path`. Backslashes in the parent are normalised to `/` first, so Windows-style paths compare correctly. A top-level file's parent is the empty string, which matches `dir_path == ""`. Each match is turned back into a symbol id via `graph.find`, and files that cannot be found are dropped. The result is sorted by path string so repeated runs give the same order. It is one directory level, not a recursive walk: nested subdirectories get their own rollup rather than being folded into this one. It scans every file in the graph on each call.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
 - externals: std
 
 ## `spec_bearing_files_in`
@@ -152,8 +152,8 @@ Returns the files directly inside a folder that are worth documenting, in alphab
 ### Behavior
 Takes the output of `files_in` (already path-sorted) and keeps only the ids for which `file_is_spec_bearing` is true. Because filtering preserves order, the result stays sorted, which keeps generated folder summaries stable between runs. A directory's files have no meaningful declaration order, so path order is the only one used. An empty or unknown directory gives an empty list. Generated files are excluded because `file_is_spec_bearing` rejects them.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
 
 ## `short_name`
 `pub(super) fn short_name(id: &str) -> &str`

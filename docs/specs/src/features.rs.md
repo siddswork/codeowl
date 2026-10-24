@@ -54,7 +54,7 @@ The interface a language or framework supplies to say what a "feature" is in its
 ### Behavior
 Two methods are required, and the trait must be safe to share across threads. `enumerate_entry_points(graph)` returns every feature entry point the framework's file or annotation conventions expose in the graph. `admits_to_core(graph, entry, candidate_file)` is asked about a file reached from an entry point by a resolved flow edge into a file node, and answers whether that file belongs inside the feature's core (tracked by its whole `source_hash`, so any edit to it changes the feature) or is merely a one-hop dependency (tracked by its public shape, the `interface_hash`). Those two judgments are the only ones the generic walk in `assemble_participants` cannot make itself; where a flow edge points is decided separately by the pack's flow-edge resolution. A stack without such a model returns none from its pack, and its documents are symbol, file, folder and system specs only. The trait is deliberately kept to these two methods.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
 
 ## `feature_model_for`
 `pub fn feature_model_for(graph: &Graph) -> Option<&'static dyn FeatureModel>`
@@ -63,8 +63,8 @@ Returns the feature model for the language stack a repo was indexed with, or not
 ### Behavior
 Recovers the pack from the graph through `stack::for_graph` and returns whatever that pack's `feature_model()` gives: a shared reference valid for the whole program, or `None`. Doing the lookup from the graph means read-only callers such as the spec code do not need the pack passed down to them. A graph with an empty pack name (one built by a test helper, or an old cache) gets the TypeScript pack, so it gets the Next.js feature model; a non-empty name that is not a registered pack is not tolerated, and `for_graph` panics on it rather than guessing. Only the Rust pack returns `None`; Java and Python always return a model, which for a plain Java library simply finds zero entry points, so a `Some` result does not mean any feature exists. Callers treat `None` as "this repo has no feature layer" and skip feature work entirely.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/stack.rs::for_graph` — crate::stack
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/stack.rs::for_graph`](stack.rs.md) — crate::stack
 
 ## `enumerate_entry_points`
 `pub fn enumerate_entry_points(graph: &Graph) -> Vec<EntryPoint>`
@@ -73,7 +73,7 @@ Lists every feature entry point in the repo, such as each page and each unrefere
 ### Behavior
 Gets the stack's feature model with `feature_model_for`. If there is one, it calls that model's own `enumerate_entry_points` on the graph and returns the result; if there is none, it returns an empty list. This free function is the convenient entry point for callers that do not want to handle the `Option` themselves; it is imported by `src/mcp.rs`, `src/spec/coverage.rs` and `src/spec/orphans.rs`. It does no filtering or sorting of its own, so the order is whatever the model returns. Pure read.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
 
 ## `feature_slug`
 `pub fn feature_slug(entry_file: &str) -> String`
@@ -118,11 +118,11 @@ Dependencies and data: after the walk, every import and then every flow edge fro
 
 The result is `Participants`: `core` in walk order with the entry file first, `dependencies` in discovery order, and `data` sorted. It cannot fail, and the walk terminates because each file is visited once. The limit to know: only edges that resolved are followed, so a call through an unresolved import or an unresolvable route string adds nothing to the feature.
 ### Depends on
-- `src/graph.rs::ResolvedImport` — crate::graph
-- `src/graph.rs::FlowEdge` — crate::graph
-- `src/graph.rs::FlowTarget` — crate::graph
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/graph.rs::ResolvedImport`](graph.rs.md) — crate::graph
+- [`src/graph.rs::FlowEdge`](graph.rs.md) — crate::graph
+- [`src/graph.rs::FlowTarget`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
 - externals: std
 
 ## `fixture`
@@ -132,4 +132,4 @@ A test-only helper that builds a real graph from a handful of source files writt
 ### Behavior
 It creates a fresh directory under the system temp folder named from the given tag and the process id, writes each `(relative path, content)` pair into it (creating parent folders), then indexes that directory with `RepoIndex::build` and runs `rebuild`, so imports are resolved and flow edges are set exactly as in production. It returns the graph together with the directory so the caller can read files back and remove it; nothing cleans up automatically. It is compiled only under test. Every step uses `unwrap`, so a failure to write or to index panics the test, and two tests passing the same tag in one process would share a directory.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph

@@ -292,7 +292,7 @@ What the code search tool returns: the list of matches found, and a flag saying 
 ### Behavior
 `matches` is the list of `SearchMatch` entries. `truncated` is true when either the match-count cap or the total response-size budget stopped the search before every real match in the repo was found. It is different from a single match's own `truncated` field, which only says that one match's text was cut short. To see more, narrow `path` or raise `max_results` (up to 200); the response-size budget is not adjustable by the caller. A false value means the search covered everything it was asked to. It is wrapped in a struct, not a bare list, because the MCP specification requires a tool's structured result to be a JSON object. Plain data returned as JSON.
 ### Depends on
-- `src/search.rs::SearchMatch` — crate::search
+- [`src/search.rs::SearchMatch`](search.rs.md) — crate::search
 
 ## `SpecResponse`
 `pub struct SpecResponse`
@@ -412,15 +412,15 @@ Tools: `get_symbol` returns a symbol's full record, with an error for an unknown
 
 `get_next_spec_task` hands out the next unit of work. `system` or `.` walks every module and every feature before offering the one system task, a `feature:<slug>` goes to that exact entry and never a sibling sharing its file (an earlier bug), a `rollup:` or folder path walks its files then the folder summary, and a file or symbol id walks symbols, then the file, then any features that file hosts, trying each in turn until one is not current. A symbol task carries the span text, scoped dependencies computed from the full text, and, for a very large class, an outline and the size cap. Nothing left is returned as an explicit `Done` object, because some clients reject a bare null. `submit_spec` routes the id by the same shapes to the matching save function and returns the hashes recorded, with no source hash for feature, folder and system specs. `search_code` wraps the embedded regex search. `get_spec_coverage` builds the coverage list, summary, breakdowns, five most important stale files, orphans, the prioritized pending list paged at a fixed size, and the generated-source report. `get_info` supplies the server's instructions text.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/graph.rs::Node` — crate::graph
-- `src/graph.rs::SymbolView` — crate::graph
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/graph.rs::Node`](graph.rs.md) — crate::graph
+- [`src/graph.rs::SymbolView`](graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - `src/spec.rs::LARGE_CONTAINER_BYTES_DEFAULT` — crate::spec
 - `src/spec.rs::MAX_GENERATION_TASK_TEXT_BYTES_DEFAULT` — crate::spec
 - `src/spec.rs::MAX_SOURCE_TEXT_BYTES_DEFAULT` — crate::spec
-- `src/features.rs::enumerate_entry_points` — crate::features
-- `src/features.rs::EntryPoint` — crate::features
+- [`src/features.rs::enumerate_entry_points`](features.rs.md) — crate::features
+- [`src/features.rs::EntryPoint`](features.rs.md) — crate::features
 - `src/spec.rs::next_task` — crate::spec
 - `src/spec.rs::next_feature_task` — crate::spec
 - `src/spec.rs::FeatureTask` — crate::spec
@@ -433,7 +433,7 @@ Tools: `get_symbol` returns a symbol's full record, with an error for an unknown
 - `src/spec.rs::maybe_reduce_container_source` — crate::spec
 - `src/spec.rs::cap_generation_text` — crate::spec
 - `src/spec.rs::merged_symbol_spans` — crate::spec
-- `src/hash.rs::hash_text` — crate::hash
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
 - `src/spec.rs::render_spans` — crate::spec
 - `src/spec.rs::cap_source_text` — crate::spec
 - `src/spec.rs::read_system_spec` — crate::spec
@@ -444,8 +444,8 @@ Tools: `get_symbol` returns a symbol's full record, with an error for an unknown
 - `src/spec.rs::read_rollup_spec` — crate::spec
 - `src/spec.rs::current_file_hashes` — crate::spec
 - `src/spec.rs::read_feature_spec` — crate::spec
-- `src/features.rs::feature_model_for` — crate::features
-- `src/features.rs::assemble_participants` — crate::features
+- [`src/features.rs::feature_model_for`](features.rs.md) — crate::features
+- [`src/features.rs::assemble_participants`](features.rs.md) — crate::features
 - `src/spec.rs::current_participant_hashes` — crate::spec
 - `src/spec.rs::read_file_spec` — crate::spec
 - `src/spec.rs::symbol_changes` — crate::spec
@@ -458,8 +458,8 @@ Tools: `get_symbol` returns a symbol's full record, with an error for an unknown
 - `src/spec.rs::submit_rollup` — crate::spec
 - `src/spec.rs::submit_feature` — crate::spec
 - `src/spec.rs::submit` — crate::spec
-- `src/search.rs::SearchOptions` — crate::search
-- `src/search.rs::search_code` — crate::search
+- [`src/search.rs::SearchOptions`](search.rs.md) — crate::search
+- [`src/search.rs::search_code`](search.rs.md) — crate::search
 - `src/spec.rs::coverage` — crate::spec
 - `src/spec.rs::summarize` — crate::spec
 - `src/spec.rs::weighted_freshness` — crate::spec
@@ -483,6 +483,6 @@ Tells a connecting AI client what this server is and how to use it: it announces
 ### Behavior
 `get_info` builds the server's description. Because the library's info type cannot be constructed with a plain struct literal, it starts from the default and sets fields one by one: the newest protocol version the library supports, a capabilities object with only tools enabled, and a fixed instructions string. The instructions say that CodeOwl is a read-only structural index to try before grepping on "how is this wired" questions, summarise `get_symbol`, `get_callers`, `get_callees` and the plain-regex `search_code`, explain that SQL tables appear as table nodes, that the index follows the working tree within about a second, how `get_spec` reports missing, stale and smelly specs, that `get_spec_coverage` lists what needs attention, and that writing specs goes through the `/codeowl-generate` command and its task-and-submit loop. The tool-calling itself is wired by the attribute on the impl, which routes calls to the tool router. The text is a constant and is not generated from the tool list, so it must be updated by hand when a tool is added.
 ### Depends on
-- `src/search.rs::search_code` — crate::search
+- [`src/search.rs::search_code`](search.rs.md) — crate::search
 - `src/mcp.rs::CodeOwlServer` — same file
 - externals: rmcp

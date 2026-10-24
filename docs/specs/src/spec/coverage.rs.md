@@ -51,7 +51,7 @@ One row of the spec coverage report: a document that should exist, its status, h
 ### Behavior
 Fields: `id` is exactly what the generate tools accept for that document (a file path, `rollup:<dir>`, `feature:<slug>`, or `system`). `kind` and `status` are strings such as file/rollup/feature/system and current/stale/missing. `fan_in` counts how many other files import something from this one, always 0 for non-file kinds, and is what ranks the priority order. `smells` lists quality problems found in the document's current text; it is empty for a missing document but can be non-empty for a current one, since matching hashes only prove the inputs are unchanged, not that the prose says anything meaningful. `generations` is the number of get-task and submit cycles still needed: for a file, its uncovered, stale or smelly top-level symbols plus one for the file summary if that needs writing; for a rollup, feature or the system spec, 1 while not current and otherwise 0. Summed over the report it gives the budget for a full run. Plain data, no logic.
 ### Depends on
-- `src/spec/smells.rs::prose_smells` — super::smells
+- [`src/spec/smells.rs::prose_smells`](smells.rs.md) — super::smells
 
 ## `file_fan_in`
 `fn file_fan_in(graph: &Graph, file_id: SymbolId) -> usize`
@@ -60,9 +60,9 @@ Counts how many imports from non-test code point into a file. A high number mark
 ### Behavior
 Goes through every import in the graph and keeps those whose source file is not test code (`is_test_path`) and whose resolved target belongs to this file (the target's parent is `file_id`). It returns the number of matching import entries, not the number of distinct importing files, so a file importing three names from this one counts three. Unresolved imports have no target and are never counted. Test imports are excluded so a helper used by ten end-to-end tests and two real callers ranks as depended on by two things, not twelve. Pure read, cannot fail.
 ### Depends on
-- `src/spec/layout.rs::is_test_path` — super::layout
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/spec/layout.rs::is_test_path`](layout.rs.md) — super::layout
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
 
 ## `file_pending_generations`
 `fn file_pending_generations(graph: &Graph, root: &Path, file_id: SymbolId) -> Result<usize>`
@@ -71,13 +71,13 @@ Counts how many write-and-submit cycles a file's spec still needs. The coverage 
 ### Behavior
 It mirrors the decisions in `next_task` but only counts, with no side effects. For each spec-bearing top-level symbol, one cycle is counted when the symbol has no stored entry, when its code or dependencies changed (`symbol_changes`), or when its stored prose fails the quality check. A symbol whose code is unchanged but whose prose was hand-edited counts as zero, since `next_task` handles that by quietly recording the edit. After the symbols, one more cycle is counted for the file's own summary if it was never written (a missing or empty file `spec_hash`), or if `file_changes` is non-empty, or if the summary is smelly. The total is returned. It errors if the id is not a file or the existing spec cannot be read. Unlike `next_task` it never writes to disk.
 ### Depends on
-- `src/spec/format.rs::read_existing` — super::format
-- `src/spec/layout.rs::spec_bearing_children` — super::layout
-- `src/spec/smells.rs::prose_smells` — super::smells
-- `src/spec/staleness.rs::file_changes` — super::staleness
-- `src/spec/staleness.rs::symbol_changes` — super::staleness
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/spec/format.rs::read_existing`](format.rs.md) — super::format
+- [`src/spec/layout.rs::spec_bearing_children`](layout.rs.md) — super::layout
+- [`src/spec/smells.rs::prose_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::file_changes`](staleness.rs.md) — super::staleness
+- [`src/spec/staleness.rs::symbol_changes`](staleness.rs.md) — super::staleness
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `file_status`
@@ -87,13 +87,13 @@ Works out whether a file's spec is missing, stale or current, and reports any qu
 ### Behavior
 Reads the stored spec for the file. If there is none, or it holds no content at all (an empty file hash and no symbol entries), the status is `missing` with no smells. Otherwise the spec is `current` only if every spec-bearing symbol has a stored entry whose hashes still match (`symbol_changes` is empty) and the file's own hashes match (`file_changes` is empty); any miss makes it `stale`, and the loop stops at the first one. The status is deliberately based on hashes only, not on prose quality, so a poor-prose spec can be `current` while its `smells` list (from `file_spec_smells`) says it deserves another look; the two signals are never mixed. Errors if the id is not a file or the spec file cannot be read.
 ### Depends on
-- `src/spec/format.rs::read_file_spec` — super::format
-- `src/spec/layout.rs::spec_bearing_children` — super::layout
-- `src/spec/smells.rs::file_spec_smells` — super::smells
-- `src/spec/staleness.rs::file_changes` — super::staleness
-- `src/spec/staleness.rs::symbol_changes` — super::staleness
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/spec/format.rs::read_file_spec`](format.rs.md) — super::format
+- [`src/spec/layout.rs::spec_bearing_children`](layout.rs.md) — super::layout
+- [`src/spec/smells.rs::file_spec_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::file_changes`](staleness.rs.md) — super::staleness
+- [`src/spec/staleness.rs::symbol_changes`](staleness.rs.md) — super::staleness
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `rollup_status`
@@ -103,11 +103,11 @@ Works out whether a folder's summary page is missing, stale or current, and list
 ### Behavior
 If no stored rollup exists the status is `missing` with no smells. Otherwise it computes the current file hashes for the folder (`current_file_hashes`) and compares them to the list stored in the rollup. A match means `current`, and any difference, such as a file's spec being rewritten, a file added or removed, or a file's spec going stale (its hash becomes empty), means `stale`. The smell list is `body_smells` of the stored prose, reported separately from the status. Errors if reading a spec file fails.
 ### Depends on
-- `src/spec/rollup.rs::current_file_hashes` — super::rollup
-- `src/spec/rollup.rs::read_rollup_spec` — super::rollup
-- `src/spec/smells.rs::body_smells` — super::smells
-- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
-- `src/graph.rs::Graph` — crate::graph
+- [`src/spec/rollup.rs::current_file_hashes`](rollup.rs.md) — super::rollup
+- [`src/spec/rollup.rs::read_rollup_spec`](rollup.rs.md) — super::rollup
+- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md) — super::staleness
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `feature_status`
@@ -117,14 +117,14 @@ Works out whether a feature's spec is missing, stale or current, with any qualit
 ### Behavior
 If there is no stored feature spec for the entry point, the status is `missing` with no smells. It also reports `missing` when the language pack has no feature model, which is a defensive case since such a repo has no entry points. Otherwise it assembles the feature's participants, computes their current hashes, and compares them with the list stored in the spec. An identical list means `current`; any difference, including a participant added or removed, means `stale`. The smells list is `body_smells` of the stored body. Errors if a participant cannot be found in the graph or if the spec file cannot be read.
 ### Depends on
-- `src/spec/feature.rs::current_participant_hashes` — super::feature
-- `src/spec/feature.rs::read_feature_spec` — super::feature
-- `src/spec/smells.rs::body_smells` — super::smells
-- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
-- `src/features.rs::EntryPoint` — crate::features
-- `src/features.rs::assemble_participants` — crate::features
-- `src/features.rs::feature_model_for` — crate::features
-- `src/graph.rs::Graph` — crate::graph
+- [`src/spec/feature.rs::current_participant_hashes`](feature.rs.md) — super::feature
+- [`src/spec/feature.rs::read_feature_spec`](feature.rs.md) — super::feature
+- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md) — super::staleness
+- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
+- [`src/features.rs::assemble_participants`](../features.rs.md) — crate::features
+- [`src/features.rs::feature_model_for`](../features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `system_status`
@@ -134,12 +134,12 @@ Works out whether the top-level repo summary is missing, stale or current, with 
 ### Behavior
 If there is no stored system spec the status is `missing` with no smells. Otherwise it joins the current module hashes and the current feature hashes into one list, joins the stored module and feature hashes into another, and compares them. Equal lists mean `current`, and any difference means `stale`: a module or feature spec was rewritten, went stale (its hash became empty), or was added or removed. The smells are `body_smells` of the stored body and are independent of the status. Errors if reading any of the underlying spec files fails.
 ### Depends on
-- `src/spec/feature.rs::current_feature_hashes` — super::feature
-- `src/spec/rollup.rs::current_module_hashes` — super::rollup
-- `src/spec/smells.rs::body_smells` — super::smells
-- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
-- `src/spec/system.rs::read_system_spec` — super::system
-- `src/graph.rs::Graph` — crate::graph
+- [`src/spec/feature.rs::current_feature_hashes`](feature.rs.md) — super::feature
+- [`src/spec/rollup.rs::current_module_hashes`](rollup.rs.md) — super::rollup
+- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md) — super::staleness
+- [`src/spec/system.rs::read_system_spec`](system.rs.md) — super::system
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `coverage`
@@ -149,12 +149,12 @@ Builds the full inventory of documents a repo should have and the state of each:
 ### Behavior
 Returns a list of `CoverageItem`s in this order. First, every spec-bearing file in path order, with its status and smells from `file_status`, its `fan_in`, and its remaining `generations` from `file_pending_generations`. Second, every module folder from `enumerate_modules` as a `rollup:<dir>` item, costing one generation unless current. If `scope` is given, files and folders outside that directory (by `within_scope`) are skipped. Third, only when there is no `scope`, every feature entry point as a `feature:<slug>` item and finally the single `system` item, each costing one generation unless current. Features and the system spec are repo-wide ideas, so any scope removes them entirely, even an empty one. The first error from reading any spec file or hashing a participant stops the whole call and is returned.
 ### Depends on
-- `src/spec/layout.rs::file_is_spec_bearing` — super::layout
-- `src/spec/rollup.rs::enumerate_modules` — super::rollup
-- `src/features.rs::enumerate_entry_points` — crate::features
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/text.rs::within_scope` — crate::text
+- [`src/spec/layout.rs::file_is_spec_bearing`](layout.rs.md) — super::layout
+- [`src/spec/rollup.rs::enumerate_modules`](rollup.rs.md) — super::rollup
+- [`src/features.rs::enumerate_entry_points`](../features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/text.rs::within_scope`](../text.rs.md) — crate::text
 - externals: anyhow, std
 
 ## `CoverageSummary`

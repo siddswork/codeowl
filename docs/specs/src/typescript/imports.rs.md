@@ -42,8 +42,8 @@ Reads a TypeScript or JavaScript file and lists what it imports and what it forw
 ### Behavior
 Parses the source with tree-sitter, using the grammar for the file's extension. If parsing produces no tree it returns an empty `FileImports`. Only the file's top-level statements are examined. An `import` statement goes to `visit_import`, which records named and default imports. An `export` statement goes to `visit_maybe_reexport`, which records `export { x } from './y'` forms. After that, `visit_bare_reexports` handles the other kind of re-export, a local `export { X }` clause that names something the file imported earlier. Anything nested deeper, such as a dynamic `import()` call, is not looked at. It cannot fail.
 ### Depends on
-- `src/typescript/conventions.rs::ts_parser` — super::conventions
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/typescript/conventions.rs::ts_parser`](conventions.rs.md) — super::conventions
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 
 ## `ExportSpec`
 `pub(super) struct ExportSpec<'a>`
@@ -88,9 +88,9 @@ Records what one `import` statement brings in: a default import, named imports, 
 ### Behavior
 Gets the module specifier from the statement's `source` string (quotes removed) and returns if there is none. If there is no import clause, as in a side-effect-only `import './polyfill'`, it returns without recording anything. If the clause has a plain identifier directly under it, that is the default binding: it covers `import Foo from ...` and the `Foo` in `import Foo, { Bar } from ...`, and is pushed as a `DefaultImport` with its local name and specifier. A namespace import (`import * as ns`) is a different child kind and is deliberately skipped. If there is a named-imports part, each name goes through `named_import_specs` and a `ImportRef` with the specifier and the name as it appears in the other module is pushed. The local alias is not stored, because resolution is by the original name. It cannot fail.
 ### Depends on
-- `src/imports.rs::DefaultImport` — crate::imports
-- `src/imports.rs::FileImports` — crate::imports
-- `src/imports.rs::ImportRef` — crate::imports
+- [`src/imports.rs::DefaultImport`](../imports.rs.md) — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
+- [`src/imports.rs::ImportRef`](../imports.rs.md) — crate::imports
 - externals: tree_sitter
 
 ## `visit_bare_reexports`
@@ -102,8 +102,8 @@ First it collects the file's bare export clauses (`export { ... }` with no `from
 
 Then for each name in each clause, if it matches an imported local name, a `ReExport` is recorded: the published name is the alias if there is one, otherwise the name; the specifier and source name come from the map. This is the same form as `export { original as Y } from '...'`, which resolution already follows. A name the file declares itself is not a re-export, so it is left out and handled by the symbol extractor. Names that are not imported are skipped silently.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
-- `src/imports.rs::ReExport` — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
+- [`src/imports.rs::ReExport`](../imports.rs.md) — crate::imports
 - externals: std, tree_sitter
 
 ## `visit_maybe_reexport`
@@ -113,8 +113,8 @@ Records the names a file forwards straight from another module, as in `export { 
 ### Behavior
 Called on every top-level `export` statement. It returns without recording anything when the statement has no `source` string, because that is an ordinary `export function`, `export class` or `export const`, not a forward. It also returns when there is a source but no export clause, which is the wildcard `export * from '...'`; wildcards are deliberately not followed because they name no single declaration. Otherwise it records one `ReExport` per name in the clause: the published name is the alias if the name is renamed, otherwise the name; the specifier is the module path; and the source name is the original name in that module. The names are read with `export_specs`, so a self-alias `a as a` is treated as no rename. It cannot fail.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
-- `src/imports.rs::ReExport` — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
+- [`src/imports.rs::ReExport`](../imports.rs.md) — crate::imports
 - externals: tree_sitter
 
 ## `child_of_kind`

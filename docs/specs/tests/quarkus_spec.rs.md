@@ -72,7 +72,7 @@ Writes a sample `GreetingResource` into a temporary project: the class has `@Pat
 
 It finds the entry point with the id `http-get-hello-greeting-name` and asserts its kind is `http`, its title is `GET /hello/greeting/{name}`, and its file is the resource file, so the class path and method path were joined. It then finds `http-get-hello` and asserts its title is `GET /hello`, which shows a bare `@GET` with no method-level `@Path` falls back to the class path alone. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `fully_qualified_annotations_with_no_imports_are_still_recognized`
 `fn fully_qualified_annotations_with_no_imports_are_still_recognized()`
@@ -83,7 +83,7 @@ Machine-generated interfaces, such as those produced from an API contract, have 
 
 It writes a sample `HeroesResource` interface with no imports, a fully-qualified `@jakarta.ws.rs.Path("/api/heroes")` on the interface, and a method with a fully-qualified `@jakarta.ws.rs.GET` and `@jakarta.ws.rs.Path("/random")`. It opens the repo through the normal index and gets the feature model. It asserts an entry point exists with the title `GET /api/heroes/random`, with kind `http` and the interface's file, so the pair was recognised and the class and method addresses were joined. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_generated_interfaces_own_annotations_never_produce_an_entry_point_directly`
 `fn a_generated_interfaces_own_annotations_never_produce_an_entry_point_directly()`
@@ -94,7 +94,7 @@ Once generated source folders are read into the graph, and fully-qualified annot
 
 It writes a hand-written `App` class with no routes, and a generated `HeroesResource` interface under `target/generated-sources/...` with fully-qualified route annotations, with no hand-written implementor at all. It opens the repo through the normal index, which reads the generated folder, and lists the entry points. It asserts none of them has a file path containing `generated-sources`, failing with the list if any does. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_hand_written_class_inherits_its_generated_interfaces_entry_point`
 `fn a_hand_written_class_inherits_its_generated_interfaces_entry_point()`
@@ -107,7 +107,7 @@ It writes a hand-written `HeroResource` that implements `HeroesResource`, which 
 
 It asserts an entry point exists with the title `GET /api/heroes/random` and kind `http`, and that its file is `src/main/java/org/acme/HeroResource.java`, the hand-written implementor, and never the generated interface. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `implements_clause_names_the_interface_fully_qualified_inline_with_no_import`
 `fn implements_clause_names_the_interface_fully_qualified_inline_with_no_import()`
@@ -120,7 +120,7 @@ It writes the hand-written class with `implements org.acme.api.resources.Narrati
 
 It asserts an entry point exists with the title `POST /api/narration`, which shows the fully qualified name was resolved by its path, and that its file is the hand-written class under `src/main/java/org/acme/rest/`, never the generated interface. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_generated_interface_is_found_even_when_not_the_first_implements_name`
 `fn a_generated_interface_is_found_even_when_not_the_first_implements_name()`
@@ -131,7 +131,7 @@ The first version of the lookup only looked at the first name after `implements`
 
 It writes a hand-written `HeroResource` that imports the generated `HeroesResource` and declares `implements java.io.Serializable, HeroesResource`, so the generated interface is second. It also writes the generated interface under `target/generated-sources/...` with fully-qualified route annotations for `GET /api/heroes/random`. It opens the repo through the normal index and lists the entry points. It asserts that some entry point has the title `GET /api/heroes/random`, failing with the whole list otherwise, which shows every name in the clause is tried in order. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `method_path_is_inherited_independently_of_an_own_verb_marker`
 `fn method_path_is_inherited_independently_of_an_own_verb_marker()`
@@ -142,7 +142,7 @@ The first version of the lookup chose one whole source of annotations, either th
 
 It writes a hand-written `HeroResource` whose method has `@Override` and a fully-qualified `@GET` but no `@Path`, and a generated `HeroesResource` with a class-level `@Path("/api/heroes")` and a matching method with `@GET` and `@Path("/random")`. It opens the repo through the normal index and lists the entry points. It finds the one in the hand-written file, which must exist because its own `@GET` still produces an entry point, and asserts its title is `GET /api/heroes/random`. That shows the path was inherited from the interface's method even though the method's own annotation had already supplied the verb. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve`
 `fn a_class_path_with_no_leading_slash_and_mixed_verb_annotations_all_resolve()`
@@ -153,7 +153,7 @@ The sample mirrors a real resource. The class has `@Path("entity/fruits")` with 
 
 It opens the repo through the normal index and collects the entry point ids. It asserts the list contains `http-get-entity-fruits`, `http-get-entity-fruits-id`, `http-post-entity-fruits`, `http-put-entity-fruits-id` and `http-delete-entity-fruits-id`, with a message noting that annotation order must not matter for the PUT. It asserts there are exactly five entry points, so the class itself produces no false positive. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_nested_provider_class_with_an_override_is_not_an_entry_point`
 `fn a_nested_provider_class_with_an_override_is_not_an_entry_point()`
@@ -164,7 +164,7 @@ The real shape is a nested `@Provider` class, `ErrorMapper`, that implements an 
 
 It writes a sample resource with `@Path("entity/fruits")`, one real `@GET` method, and the nested provider class with its overridden method. It opens the repo through the normal index and lists the entry points. It asserts there is exactly one entry point, with a message saying only the real `@GET` route counts and not `toResponse`, and that its id is `http-get-entity-fruits`. The test shows routes are recognised by a web verb annotation on a method, not by being inside an annotated class. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `an_injected_application_scoped_panache_repository_joins_core`
 `fn an_injected_application_scoped_panache_repository_joins_core()`
@@ -175,7 +175,7 @@ The sample mirrors a real quickstart. A web resource, `FruitRepositoryResource`,
 
 It writes the three files, opens the repo through the normal index, finds the entry point `http-get-repository-fruits`, and assembles the feature's participants. It asserts the core list contains `src/main/java/org/acme/FruitRepository.java`, which shows a bean marked `@ApplicationScoped` that is also a Panache repository was admitted into the feature's core. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_cross_package_fully_qualified_call_with_no_import_still_joins_dependencies`
 `fn a_cross_package_fully_qualified_call_with_no_import_still_joins_dependencies()`
@@ -186,7 +186,7 @@ The sample mirrors a real project. A web resource's `GET /hello` method calls `o
 
 It writes the helper class `Labeler` in `org.acme.util` and a `GreetingResource` with `@Path("/hello")` and a `@GET` method that calls it by its full name. It opens the repo through the normal index, finds the entry point `http-get-hello`, and assembles the feature's participants. It asserts the dependencies list contains `src/main/java/org/acme/util/Labeler.java::Labeler`, with a message that the call must surface the same as an explicit import would. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_plain_unannotated_helper_class_stays_a_one_hop_dependency`
 `fn a_plain_unannotated_helper_class_stays_a_one_hop_dependency()`
@@ -197,7 +197,7 @@ Only classes the framework manages, or data-access repositories, should join a f
 
 It writes a plain `SlugFormatter` with a static method and no annotations, and a `GreetingResource` with `@Path("/hello")` whose `@GET` method calls `SlugFormatter.slugify`. It opens the repo through the normal index, finds the entry point `http-get-hello`, and assembles the feature's participants. It asserts the core list does not contain `SlugFormatter.java`, with a message that a plain class must stay a one-hop dependency, and that the dependencies list does contain `src/main/java/org/acme/SlugFormatter.java::SlugFormatter`, so it is still visible and only tracked by its public shape. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_panache_entity_is_schema_and_a_repository_using_it_stays_core`
 `fn a_panache_entity_is_schema_and_a_repository_using_it_stays_core()`
@@ -208,7 +208,7 @@ The sample combines two real persistence styles. `Fruit` is a plain `@Entity` cl
 
 It opens the repo through the normal index. It asserts `Fruit` has the table kind, and that `FruitRepository` does not, since a repository has no columns of its own and is not a table. It finds the entry point `http-get-repository-fruits` and assembles the feature's participants. It asserts the data list contains `Fruit.java::Fruit`, the core contains `FruitRepository.java`, and the core does not contain `Fruit.java`, so the entity appears as data only and never also as core. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_register_rest_client_interface_is_not_an_entry_point`
 `fn a_register_rest_client_interface_is_not_an_entry_point()`
@@ -221,7 +221,7 @@ It writes that client interface and, in the same repo, a real server resource `G
 
 It asserts that none of them is in `HeroRestClient.java`, that there is exactly one entry point, and that its id is `http-get-hello`, so only the real server resource remains. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `an_incoming_only_consumer_method_is_a_kafka_entry_point`
 `fn an_incoming_only_consumer_method_is_a_kafka_entry_point()`
@@ -230,7 +230,7 @@ A test that checks a method that only receives messages from a Kafka channel, ma
 ### Behavior
 The sample mirrors a real quickstart: a `PriceStorage` bean with a method `store` annotated `@Incoming("prices")`, with the channel name as a plain inline string and no matching `@Outgoing`. It opens the repo through the normal index and lists the entry points. It asserts there is exactly one, its kind is `kafka`, its id is `kafka-prices`, and its title contains `prices`. The id comes from the channel name, not from the method name or the schedule. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `an_outgoing_only_producer_method_is_a_kafka_entry_point`
 `fn an_outgoing_only_producer_method_is_a_kafka_entry_point()`
@@ -239,7 +239,7 @@ A test that checks a method that only produces messages for a Kafka channel, mar
 ### Behavior
 The sample mirrors a real quickstart: a `PriceGenerator` bean with a method `generate` annotated `@Outgoing("generated-price")`. It is a purely declarative producer, invoked by the messaging framework's own timer, with no injected emitter anywhere, so it is a genuine entry point just like a scheduled job. It opens the repo through the normal index and lists the entry points. It asserts there is exactly one, its kind is `kafka`, and its id is `kafka-generated-price`, taken from the channel name. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_combined_incoming_and_outgoing_method_resolves_same_class_constants_into_one_entry_point`
 `fn a_combined_incoming_and_outgoing_method_resolves_same_class_constants_into_one_entry_point()`
@@ -250,7 +250,7 @@ The sample mirrors a real project: a `SuperStats` bean with two `static final St
 
 It opens the repo through the normal index and lists the entry points. It asserts there is exactly one, with a message that both annotations on one method are one entry point and not two; that its kind is `kafka`; and that its id is `kafka-fights`, keyed on the incoming, triggering channel with the constant resolved to the string, not left as the identifier. It asserts that the title contains both `fights` and `winner-stats`, so both resolved names are visible. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_channel_annotated_constructor_param_is_not_its_own_entry_point`
 `fn a_channel_annotated_constructor_param_is_not_its_own_entry_point()`
@@ -261,7 +261,7 @@ The real shape is a `FightService` bean whose constructor takes `@Channel("fight
 
 It writes the sample class, opens the repo through the normal index, and lists the entry points. It asserts the list is empty, failing with the list if anything appears. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `http_and_kafka_slugs_never_collide_on_the_same_bare_word`
 `fn http_and_kafka_slugs_never_collide_on_the_same_bare_word()`
@@ -270,7 +270,7 @@ A test that checks a web route and a Kafka handler that share the same bare word
 ### Behavior
 It guards a risk flagged in the project plan: without a prefix saying what kind of entry point it is, `GET /fights` and a message consumer on the channel `fights` would both be named just `fights` and collide on the same file under `docs/specs/_features/`. It writes a `FightResource` with `@Path("/fights")` and a `@GET` method, and a `FightConsumer` bean with a method annotated `@Incoming("fights")`. It opens the repo through the normal index, lists the entry points and sorts them by id. It asserts the ids are exactly `http-get-fights` and `kafka-fights`, in that order, with a message that the kind prefix must keep them apart. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `scheduled_jobs_are_entry_points_keyed_on_method_name_with_distinct_details`
 `fn scheduled_jobs_are_entry_points_keyed_on_method_name_with_distinct_details()`
@@ -281,7 +281,7 @@ The sample mirrors a real quickstart: a `CounterBean` with three `@Scheduled` me
 
 It opens the repo through the normal index, lists the entry points and sorts them by id. It asserts there are exactly three, all of kind `scheduled`, and that their ids are `scheduled-cronjob`, `scheduled-cronjobwithexpressioninconfig` and `scheduled-increment`, lower-cased from the method names. It then asserts that the title of the interval job contains `10s` and that the title of the cron job contains `0 15 10 * * ?`, so the schedule detail is visible. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_scheduled_fixed_rate_bare_numeric_attribute_parses_without_quotes`
 `fn a_scheduled_fixed_rate_bare_numeric_attribute_parses_without_quotes()`
@@ -292,7 +292,7 @@ The sample mirrors a real quickstart that demonstrates Quarkus's compatibility w
 
 It opens the repo through the normal index and lists the entry points. It asserts there is exactly one, of kind `scheduled`, with the id `scheduled-jobatfixedrate`, and that its title contains `1000`, so the bare number surfaces. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_grpc_services_public_method_is_a_grpc_entry_point`
 `fn a_grpc_services_public_method_is_a_grpc_entry_point()`
@@ -303,7 +303,7 @@ The sample mirrors a real quickstart: a `HelloWorldService` class with a class-l
 
 It opens the repo through the normal index and lists the entry points. It asserts there is exactly one, of kind `grpc`, with the id `grpc-sayhello`, and that its title contains `sayHello`. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_grpc_services_private_helper_method_is_not_an_entry_point`
 `fn a_grpc_services_private_helper_method_is_not_an_entry_point()`
@@ -312,7 +312,7 @@ A test that checks a private helper method on a `@GrpcService` class is not trea
 ### Behavior
 A gRPC service class can have ordinary helper methods next to its public remote-call methods, and the gRPC runtime never calls a private one directly. It writes a `HelloWorldService` with a public `sayHello` method, which calls a private `format` helper. It opens the repo through the normal index and lists the entry points. It asserts there is exactly one, with a message that the private helper must not also become an entry point, and that its id is `grpc-sayhello`. The test shows the rule is "public method on a gRPC service class", not "any method". It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 
 ## `a_non_grpc_classs_public_methods_are_not_grpc_entry_points`
 `fn a_non_grpc_classs_public_methods_are_not_grpc_entry_points()`
@@ -321,4 +321,4 @@ A test that checks a plain class with public methods, and no `@GrpcService` mark
 ### Behavior
 It writes a `PlainHelper` class with one public method, `greet`, and no framework annotations. It opens the repo through the normal index and lists the entry points. It asserts the list is empty, failing with the list if anything appears. Together with the test of a private helper, this pins both halves of the gRPC rule: a method counts only when it is public and its class is marked `@GrpcService`. It deletes the temporary folder at the end.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index

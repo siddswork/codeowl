@@ -50,7 +50,7 @@ The stored form of a feature spec, a document describing one end-to-end capabili
 ### Behavior
 Fields: `slug` (the feature's short name, used in the filename), `entry_point` (the file where the feature starts), `participants` (a list of id plus hash pairs recorded at generation time: a core file's `source_hash`, or a dependency symbol's `interface_hash`), `spec_hash` (a fingerprint of the whole written body) and `body` (everything from the `# Title` line onward). The title is written by the agent and lives inside the body, not synthesized by CodeOwl as a file spec's heading is. There are no per-section hashes because nothing reads part of a feature spec by itself. Staleness is decided by comparing the stored participant hashes with current ones. It is plain data with no logic.
 ### Depends on
-- `src/features.rs::Participants` — crate::features
+- [`src/features.rs::Participants`](../features.rs.md) — crate::features
 
 ## `feature_spec_path`
 `pub fn feature_spec_path(root: &Path, slug: &str) -> PathBuf`
@@ -79,7 +79,7 @@ Requires the document to open with `---`, erroring otherwise. Walks the frontmat
 
 The remaining text becomes the `body` (trimmed) — unlike a file spec, there's no further section-by-section extraction, since a feature spec's whole body is treated as one unit. The `slug` is derived from the parsed `entry_point` via `feature_slug`, computed rather than stored separately in the frontmatter, so it's always consistent with the entry point even if the file was manually renamed.
 ### Depends on
-- `src/features.rs::feature_slug` — crate::features
+- [`src/features.rs::feature_slug`](../features.rs.md) — crate::features
 - externals: anyhow
 
 ## `read_feature_spec`
@@ -101,8 +101,8 @@ Looks up the current fingerprint of every file, dependency and database table a 
 ### Behavior
 Returns a list of id plus hash pairs in three groups, in this order. Core participants are files, and each contributes its `source_hash`, so any edit to the file counts. Dependencies are symbols, and each contributes its `interface_hash`, falling back to its `source_hash` when it has none, so only a change in public shape matters. Data participants are SQL tables, each contributing its `source_hash` (the table definition), because a table has no separate public shape and adding, dropping or renaming a column the feature uses should make the spec stale. A participant missing from the graph, or of the wrong kind (a core entry that is not a file, a dependency or table that is not a symbol), returns an error naming it, and the whole call fails rather than returning a partial list.
 ### Depends on
-- `src/features.rs::Participants` — crate::features
-- `src/graph.rs::Graph` — crate::graph
+- [`src/features.rs::Participants`](../features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow
 
 ## `dependency_context`
@@ -112,8 +112,8 @@ Gives the agent a short description of one dependency of a feature, so it can un
 ### Behavior
 If the id is not in the graph it returns "<id> (unresolved)", and if it is not a symbol "<id> (not a symbol)"; neither is an error. If the symbol's file has a stored spec containing this symbol, whose stored `source_hash` still equals the symbol's current one, and which has a prose section, it returns that section's summary. Otherwise it returns the signature, followed by " -- " and the docstring when there is one. Only the source hash is compared, so a summary written before a dependency's own imports changed is still used. It only reads existing specs and never triggers generation of the dependency. A failure reading the spec file is returned as an error.
 ### Depends on
-- `src/spec/format.rs::read_file_spec` — super::format
-- `src/graph.rs::Graph` — crate::graph
+- [`src/spec/format.rs::read_file_spec`](format.rs.md) — super::format
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `FeatureTask`
@@ -138,12 +138,12 @@ Returns `Ok(None)` if the repo's language pack has no feature model (a CLI or li
 
 When a task is needed, it reads each core file in full from disk (failing with a "reading <path>" error if one cannot be read), builds the dependency list with `dependency_context`, and for each data table takes the signature, which renders as `table(col, ...)`; a table missing from the graph gets an empty string. The returned `FeatureTask` uses the entry's id as the slug.
 ### Depends on
-- `src/spec/smells.rs::body_smells` — super::smells
-- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
-- `src/features.rs::EntryPoint` — crate::features
-- `src/features.rs::assemble_participants` — crate::features
-- `src/features.rs::feature_model_for` — crate::features
-- `src/graph.rs::Graph` — crate::graph
+- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md) — super::staleness
+- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
+- [`src/features.rs::assemble_participants`](../features.rs.md) — crate::features
+- [`src/features.rs::feature_model_for`](../features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `submit_feature`
@@ -160,13 +160,13 @@ Validation comes first: the trimmed body must be non-empty, must begin with `# `
 
 With the entry found, it assembles the participants, computes their current hashes, and builds a `FeatureSpec` with the body hashed with `hash_text`. It creates the target directory, writes the rendered document, and returns the `FeatureSpec`. Nothing is written if validation or lookup fails. File errors carry "creating ..." or "writing ..." context.
 ### Depends on
-- `src/spec/format.rs::write_replacing` — super::format
-- `src/spec/smells.rs::body_smells` — super::smells
-- `src/spec/smells.rs::reject_if_smelly` — super::smells
-- `src/features.rs::assemble_participants` — crate::features
-- `src/features.rs::feature_model_for` — crate::features
-- `src/graph.rs::Graph` — crate::graph
-- `src/hash.rs::hash_text` — crate::hash
+- [`src/spec/format.rs::write_replacing`](format.rs.md) — super::format
+- [`src/spec/smells.rs::body_smells`](smells.rs.md) — super::smells
+- [`src/spec/smells.rs::reject_if_smelly`](smells.rs.md) — super::smells
+- [`src/features.rs::assemble_participants`](../features.rs.md) — crate::features
+- [`src/features.rs::feature_model_for`](../features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
 - externals: anyhow, std
 
 ## `current_feature_hashes`
@@ -176,8 +176,8 @@ Lists every feature in the repo with the fingerprint of its current feature spec
 ### Behavior
 Returns an empty list at once when the language pack has no feature model, such as a CLI or library. Otherwise, for each feature entry point it assembles the participants and computes their current hashes. It reads the stored feature spec and uses its `spec_hash` only if the recorded participants equal the current ones; if the spec is missing or its participants differ, the value is an empty string. Each entry is keyed by the feature's id (slug). An error reading a feature spec file is returned.
 ### Depends on
-- `src/spec/staleness.rs::diff_hash_lists` — super::staleness
-- `src/features.rs::assemble_participants` — crate::features
-- `src/features.rs::feature_model_for` — crate::features
-- `src/graph.rs::Graph` — crate::graph
+- [`src/spec/staleness.rs::diff_hash_lists`](staleness.rs.md) — super::staleness
+- [`src/features.rs::assemble_participants`](../features.rs.md) — crate::features
+- [`src/features.rs::feature_model_for`](../features.rs.md) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
 - externals: anyhow, std

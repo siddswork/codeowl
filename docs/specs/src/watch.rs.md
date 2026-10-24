@@ -42,8 +42,8 @@ Makes the root path absolute and symlink-free first, so the folders it registers
 
 It then starts a thread named `codeowl-watch` that runs the watch loop, handing it the receiving end of the channel, the watcher itself so the watch stays alive, the shared graph cell, and the index, which the thread takes ownership of and updates in place on every change. It returns a handle holding that thread. Errors creating the watcher, registering a watch, or starting the thread are returned with context. The watch loop is what debounces bursts of saves and swaps in the rebuilt graph.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/index.rs::RepoIndex` — crate::index
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/index.rs::RepoIndex`](index.rs.md) — crate::index
 - externals: anyhow, arc_swap, notify, std
 
 ## `watch_loop`
@@ -62,8 +62,8 @@ With the batch of paths it calls `index.apply_changes`. If at least one change r
 
 The watcher is passed in and kept alive for the whole loop, since event delivery would stop if it were dropped. The end of the function, which drops it explicitly, is not reachable in practice, because the callback holds the only sender and lives inside the watcher, but it makes that ownership visible. Nothing is returned.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/index.rs::RepoIndex` — crate::index
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/index.rs::RepoIndex`](index.rs.md) — crate::index
 - externals: anyhow, arc_swap, notify, std
 
 ## `collect`
