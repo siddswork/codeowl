@@ -203,13 +203,18 @@ async fn main() -> Result<()> {
                 "{verb} the provenance line to {} spec(s) that lacked it",
                 r.provenance_added
             );
+            let wrote = if write {
+                "wrote or corrected"
+            } else {
+                "would write or correct"
+            };
             println!(
-                "{verb} {} dependency link(s) in {} spec(s)",
+                "{wrote} {} dependency link(s) in {} spec(s)",
                 r.links_added, r.linked_documents
             );
-            let linked = if write { "updated" } else { "would update" };
+            let linked = if write { "linked" } else { "would link" };
             println!(
-                "{linked} the title line (a link to its source) of {} spec(s)",
+                "{linked} the title of {} spec(s) to its source",
                 r.titles_linked
             );
             println!(

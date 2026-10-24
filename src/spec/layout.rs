@@ -1,5 +1,6 @@
 //! Which documents the granularity rules say should exist, and where each lives: the mirrored `docs/specs/` paths, which files and directories are spec-bearing, and the generated-source summary.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::graph::{Graph, SymbolId};
@@ -84,7 +85,7 @@ pub fn link_destination(path: &str) -> String {
 /// into hyphens, and a heading that repeats an earlier one gets `-1`, `-2`, …
 /// So the anchor of a heading depends on the headings before it.
 pub fn heading_anchors(headings: &[String]) -> Vec<String> {
-    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut seen: HashMap<String, usize> = HashMap::new();
     headings
         .iter()
         .map(|heading| {
@@ -92,7 +93,12 @@ pub fn heading_anchors(headings: &[String]) -> Vec<String> {
                 .trim()
                 .to_lowercase()
                 .chars()
-                .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | ' '))
+                .filter(|c| {
+                    // GitHub also keeps combining marks (a decomposed accent).
+                    c.is_alphanumeric()
+                        || matches!(c, '_' | '-' | ' ')
+                        || ('\u{300}'..='\u{36f}').contains(c)
+                })
                 .map(|c| if c == ' ' { '-' } else { c })
                 .collect();
             let count = seen.entry(slug.clone()).or_insert(0);
@@ -114,15 +120,20 @@ pub fn heading_anchors(headings: &[String]) -> Vec<String> {
 /// writes), so the anchor is found by numbering that heading sequence as
 /// GitHub does. `None` for a symbol with no section of its own (a method, a
 /// constant, an unknown id): the link then opens the file's spec at the top.
-/// Worked out from the graph, so it assumes every symbol is documented, which
-/// only matters when two headings share a name.
+/// Worked out from the graph, so it assumes every symbol is documented and the
+/// spec is current, which only matters when two headings share a name (a
+/// partly documented file, or a stale spec that still lists a deleted symbol,
+/// can then number a repeat differently; the link opens the top). The slug rule
+/// is GitHub's for ASCII names and decomposed accents; other non-ASCII
+/// punctuation may differ, with the same soft result.
 pub fn section_anchor(graph: &Graph, symbol_id: &str) -> Option<String> {
     let file_id = graph.find(symbol_file(symbol_id))?;
     let sections = spec_bearing_children(graph, file_id);
     let index = sections
         .iter()
         .position(|&id| graph.string_id(id) == symbol_id)?;
-    let mut headings = vec!["Summary".to_string()];
+    // The page's own title is the first heading, and its text is the path.
+    let mut headings = vec![graph.string_id(file_id).to_string(), "Summary".to_string()];
     let mut heading_of_section = Vec::with_capacity(sections.len());
     for &id in &sections {
         heading_of_section.push(headings.len());
@@ -390,6 +401,23 @@ mod tests {
         // No section for a symbol the graph does not know, or for a file.
         assert_eq!(section_anchor(&graph, "a.ts::gone"), None);
         assert_eq!(section_anchor(&graph, "a.ts"), None);
+    }
+
+    #[test]
+    fn the_title_heading_counts_when_a_symbol_has_the_same_name_as_the_file() {
+        // The page's own `# …` title is a heading too, and its text is the
+        // file's path; a file called `alpha` with a function `alpha` has two.
+        let graph = build_graph_from_sources(&[("alpha", "export function alpha() {}\n")]);
+        assert_eq!(
+            section_anchor(&graph, "alpha::alpha"),
+            Some("alpha-1".to_string())
+        );
+    }
+
+    #[test]
+    fn a_combining_accent_is_kept_in_an_anchor_as_github_keeps_it() {
+        let anchors = heading_anchors(&["cafe\u{301}".to_string(), "naïve".to_string()]);
+        assert_eq!(anchors, ["cafe\u{301}", "naïve"]);
     }
 
     #[test]

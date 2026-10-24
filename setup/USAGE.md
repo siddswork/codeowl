@@ -684,13 +684,16 @@ codeowl migrate-to-okf <repo> --write     # convert the stored specs
 
 It changes the frontmatter, adds the `> Generated using [CodeOwl](…)` line under
 the title of a spec written before that line existed, and rewrites each plain
-`Depends on` entry as a link. It builds the repo's graph first, to know which
-files will have a spec to link to, so the links reflect the repo as it is now
-(run it on a clean checkout, not in the middle of a refactor). If the graph
-cannot be built, it says so, still converts the keys and the provenance line,
-and skips the links; run it again once the graph builds. Nothing else changes: the text of every spec
-and every hash stay byte for byte, and neither the line nor the dependency
-lists are in any hash or read back by anything, so no spec turns stale. It
+`Depends on` entry as a link to the dependency's section, and links a plain
+title to its source. It builds the repo's graph first, to know which files will
+have a spec to link to, so the links reflect the repo as it is now (run it on a
+clean checkout, not in the middle of a refactor). If the graph cannot be built,
+it says so, still converts the keys and the provenance line, and skips the
+links; run it again once the graph builds. It only adds or corrects a link and
+never removes one, and it leaves alone a title someone wrote. Nothing else
+changes: the text of every spec and every hash stay byte for byte, and neither
+the line, the titles nor the dependency lists are in any hash or read back by
+anything, so no spec turns stale. It
 writes what a fresh render would, and a second run changes nothing. The dry run
 prints how many it would convert, by kind, how many would gain the line, how
 many dependency links it would write and in how many specs, and how many it

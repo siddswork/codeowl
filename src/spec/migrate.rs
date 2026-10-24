@@ -387,14 +387,15 @@ struct Change {
     text: String,
 }
 
-/// `body` with its first line, the title, replaced by `expected` when it is
-/// the plain `# {text}` or an earlier form of the link to `text`; any other
-/// title (one someone wrote) is left alone. Returns whether it changed.
+/// `body` with its first line, the title, replaced by the link `expected`
+/// when it is the plain `# {text}`. Any other title is left alone: one already
+/// linked (it is never removed, or a graph that lacks a file would strip it),
+/// and one someone wrote, even if it starts like ours. Returns whether it
+/// changed.
 fn with_title_link(body: &str, text: &str, expected: &str) -> (String, bool) {
     let (first, rest) = body.split_once('\n').unwrap_or((body, ""));
     let plain = format!("# {text}");
-    let earlier_link = format!("# [`{text}`](");
-    if first == expected || !(first == plain || first.starts_with(&earlier_link)) {
+    if first != plain || expected == plain {
         return (body.to_string(), false);
     }
     let separator = if body.contains('\n') { "\n" } else { "" };
@@ -417,9 +418,10 @@ fn dependency_entry(line: &str) -> Option<(&str, &str)> {
 /// `body` with each entry of a `### Depends on` list rewritten as the line a
 /// fresh render writes, and how many were changed: a plain entry becomes a
 /// link, and a link without the anchor of its section (or with a wrong one) is
-/// put right. The `externals:` line, `- (none)`, an entry with nothing to link
-/// to (the same file, a file that never gets a spec, a file that is gone) that
-/// is already plain, and any such text outside a `Depends on` list are left
+/// put right. It adds or corrects a link and never removes one. The
+/// `externals:` line, `- (none)`, an entry with nothing to link to (the same
+/// file, a file that never gets a spec, a file the graph does not know) that is
+/// already plain, and any such text outside a `Depends on` list are left
 /// exactly as they are.
 fn with_dependency_links(graph: &Graph, from_file: &str, body: &str) -> (String, usize) {
     let mut out = String::with_capacity(body.len());
@@ -441,7 +443,11 @@ fn with_dependency_links(graph: &Graph, from_file: &str, body: &str) -> (String,
                 "- {}",
                 linked_dependency_line(graph, from_file, target, specifier)
             );
-            if new != bare {
+            // Add a link, or correct one; never take one away. A graph that is
+            // missing a file (it failed to parse, an ignore rule changed) would
+            // otherwise un-link every dependency on it.
+            let would_unlink = bare.starts_with("- [`") && !new.starts_with("- [`");
+            if new != bare && !would_unlink {
                 out.push_str(&new);
                 out.push_str(&line[bare.len()..]);
                 linked += 1;
@@ -532,7 +538,7 @@ fn with_okf_keys(graph: &Graph, text: &str) -> Result<Option<Change>> {
     // The title line of a file or rollup spec, as a fresh render writes it.
     // A render only ever writes a spec for code that exists, so it always
     // links; an orphaned spec (its code moved or was deleted) has nothing to
-    // link to, and its title stays plain.
+    // link to, so `expected` is the plain title and nothing changes.
     let title = match kind {
         "file" => source_path.as_deref().map(|path| {
             let line = if graph.find(path).is_some() {
@@ -1499,9 +1505,12 @@ mod tests {
     }
 
     #[test]
-    fn a_spec_whose_source_file_is_gone_keeps_a_plain_title() {
+    fn a_title_is_left_alone_when_the_graph_does_not_know_the_source_file() {
         // An orphaned spec (its code moved or was deleted) has nothing for its
-        // title to link to: a link to a file that is not there would not open.
+        // title to link to, so a plain title is not given a link that would not
+        // open. And a link already there is never removed: a graph that is
+        // missing a file it should have (it failed to parse, say) must not
+        // strip the links of every spec that file has.
         let (graph, dir) = greeter_people_graph("okf-title-gone");
         let header = file_okf_frontmatter("src/gone.rs");
         let doc = |title: &str| {
@@ -1518,15 +1527,48 @@ mod tests {
             doc("# src/gone.rs")
         );
 
-        // One that was already linked (by the earlier run) is made plain.
+        // One that is already linked stays linked.
         let linked = doc(&file_title_line("src/gone.rs"));
         std::fs::write(&path, &linked).unwrap();
         let report = migrate_to_okf(&graph, &dir, true).unwrap();
-        assert_eq!(report.titles_linked, 1);
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            doc("# src/gone.rs")
-        );
+        assert_eq!(report.titles_linked, 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), linked);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_existing_dependency_link_is_never_turned_back_into_plain_text() {
+        // The graph here does not contain greeter.rs, as if it had failed to
+        // parse. The migration may add or correct a link; it must not remove
+        // one, or a partial graph would un-link every dependency on that file.
+        let (full, dir) = greeter_people_graph("okf-link-kept");
+        let fresh = generate_people(&full, &dir);
+        assert!(fresh.contains(LINKED_DEP), "{fresh}");
+        let partial = build_graph_from_sources(&[("src/people.rs", "pub struct Polite;\n")]);
+        let path = spec_path(&dir, "src/people.rs");
+        let report = migrate_to_okf(&partial, &dir, true).unwrap();
+        assert_eq!(report.links_added, 0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_title_someone_edited_is_left_alone_even_if_it_starts_like_ours() {
+        let (graph, dir) = greeter_people_graph("okf-title-edited");
+        let fresh = generate_people(&graph, &dir);
+        let ours = file_title_line("src/people.rs");
+        let path = spec_path(&dir, "src/people.rs");
+        for edited in [
+            "# [`src/people.rs`](https://example.com/design) overview",
+            "# [`src/people.rs`](https://example.com/design)",
+            "# [`src/people.rs`](../../../src/people.rs) (people)",
+        ] {
+            let text = fresh.replace(&ours, edited);
+            std::fs::write(&path, &text).unwrap();
+            let report = migrate_to_okf(&graph, &dir, true).unwrap();
+            assert_eq!(report.titles_linked, 0, "{edited}");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text, "{edited}");
+        }
         std::fs::remove_dir_all(&dir).ok();
     }
 
