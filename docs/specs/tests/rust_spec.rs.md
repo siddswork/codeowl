@@ -66,10 +66,10 @@ A test helper that builds a graph from several Rust source files at once, with t
 ### Behavior
 Takes a list of path and source text pairs. For each it extracts the declarations with the Rust extractor and records them with a fingerprint of the text, then builds the graph from all of them. Separately it reads each file's imports with the Rust import reader and puts them in a map by path. It then resolves all those imports against the built graph, using a placeholder repo root since this resolver reads the root only for Cargo manifests and none exist in these in-memory fixtures, and stores the resolved links on the graph before returning it. It is the multi-file version of the single-file helper in the same test file. It cannot fail itself, though a bad fixture simply yields fewer links.
 ### Depends on
-- `src/graph.rs::FileExtraction` — codeowl::graph
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/hash.rs::hash_text` — codeowl::hash
-- `src/imports.rs::FileImports` — codeowl::imports
+- [`src/graph.rs::FileExtraction`](../src/graph.rs.md) — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/hash.rs::hash_text`](../src/hash.rs.md) — codeowl::hash
+- [`src/imports.rs::FileImports`](../src/imports.rs.md) — codeowl::imports
 
 ## `rust_graph`
 `fn rust_graph(rel_path: &str, src: &str) -> Graph`
@@ -78,9 +78,9 @@ A test helper that builds a graph from one Rust source file, including the links
 ### Behavior
 Extracts the file's declarations with the Rust extractor and builds a graph from that one file with a fingerprint of the text. It then reads the file's imports and resolves them against the built graph, using a placeholder repo root since none is needed, and stores the resolved links on the graph. This second step mirrors what the real index does and is essential: links are only resolved once the graph exists, never at extraction time, and the staleness checks read the graph's links, so skipping it would leave every dependency invisible. The resolver also adds the links between a trait implementation and its type when both sit in the same file. It returns the graph and cannot fail itself.
 ### Depends on
-- `src/graph.rs::FileExtraction` — codeowl::graph
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/hash.rs::hash_text` — codeowl::hash
+- [`src/graph.rs::FileExtraction`](../src/graph.rs.md) — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/hash.rs::hash_text`](../src/hash.rs.md) — codeowl::hash
 
 ## `section`
 `fn section<'a>(rendered: &'a str, name: &str) -> &'a str`

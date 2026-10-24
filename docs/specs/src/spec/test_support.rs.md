@@ -30,8 +30,8 @@ A test helper that puts a spec on disk whose hashes are up to date but whose pro
 ### Behavior
 First it submits clean placeholder text for the symbol through `submit`, which creates a valid spec file with correct hashes. It then finds the symbol's parent file, locates the spec path, reads the written document, and replaces three things: the placeholder summary with the given `summary`, the placeholder behavior with the given `behavior`, and the placeholder's `spec_hash` with a hash of the new text. The document is written back, so the hashes match the weak prose and nothing looks stale by hash alone. Every step uses `expect`, so a missing symbol, parent or file panics, which is acceptable in a test helper. It returns nothing.
 ### Depends on
-- `src/spec/file_task.rs::submit` — super::file_task
-- `src/spec/layout.rs::spec_path` — super::layout
-- `src/graph.rs::Graph` — crate::graph
-- `src/hash.rs::hash_text` — crate::hash
+- [`src/spec/file_task.rs::submit`](file_task.rs.md) — super::file_task
+- [`src/spec/layout.rs::spec_path`](layout.rs.md) — super::layout
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
 - externals: std

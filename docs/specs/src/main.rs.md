@@ -58,8 +58,8 @@ Parses the command line and branches on the command.
 
 `serve <path>`: makes the path absolute, then opens the index, which loads the saved copy and re-reads only files that changed since the last run. It prints to standard error how many named imports resolved out of the total, and, if any files changed while nothing was running, how many were re-indexed. It then creates the server with the three size limits taken from the command-line flags: the large-class threshold, the maximum task size, and the maximum source size. It starts the file watcher, which keeps the server's graph in step with edits, and keeps the returned handle bound for the whole session. Dropping the handle would only detach the watcher thread, which runs until the process exits, so it is a keep-alive and not a stop switch. Finally it serves over standard input and output and waits until the connection closes. Failures starting the watcher or the server are reported with context, and any error is returned as the program's exit error. Standard output carries only protocol traffic in `serve` mode, so all human-readable notices go to standard error.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
-- `src/mcp.rs::CodeOwlServer` — codeowl::mcp
+- [`src/index.rs::RepoIndex`](index.rs.md) — codeowl::index
+- [`src/mcp.rs::CodeOwlServer`](mcp.rs.md) — codeowl::mcp
 - externals: anyhow
 
 ## `canonical_root`

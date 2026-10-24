@@ -52,9 +52,9 @@ Resolves every named import across the whole repo to the declaration it points a
 
 It then goes through the files in sorted order, not hash map order, because the result is saved to `.codeowl/graph` and a stable order lets the cache be compared run to run. For each file's entries in its `imports` list, in source order, it calls `resolve_named` with a cap on how many re-export hops it may follow, and records a `ResolvedImport` with the importing file, specifier, imported name and the target or `None`. One output entry is produced per import entry, with no deduplication. It only walks each file's `imports` list, not the `re_exports` list. It cannot fail; unresolvable specifiers, external packages and over-long re-export chains all show up as `None` targets, with no distinction between them.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/graph.rs::ResolvedImport` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::ResolvedImport`](../graph.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: oxc_resolver, std
 
 ## `sorted_by_key`
@@ -64,7 +64,7 @@ Puts a map of per-file import data into a fixed order, sorted by file path, so t
 ### Behavior
 Collects the map's entries as pairs of path and imports, sorts them ascending by path (a plain string comparison), and returns them as a vector of borrowed pairs, so nothing is copied. A hash map has no stable iteration order, and both the named-import and default-import resolvers write results into the saved graph cache, so a fixed order keeps that file identical between runs. An empty map gives an empty vector. It cannot fail.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: std
 
 ## `resolve_default_imports`
@@ -78,8 +78,8 @@ Works out which file each default import points at, such as `import Header from 
 ### Behavior
 Canonicalises the repo root first, for the same symlink reason as `resolve_imports`. Then for each file in sorted path order and each of its default imports, it asks `specifier_to_rel_path` for the repo-relative file the specifier resolves to. An import that resolves outside the repo or not at all is dropped, so, unlike named imports, unresolved default imports leave no record. Each kept one becomes a `ResolvedDefaultImport` with the importing file, the local name, and the target file. The result is file-level only: it names no particular declaration, and it does not follow re-export chains, since a default import has no name to chase. It cannot fail.
 ### Depends on
-- `src/graph.rs::ResolvedDefaultImport` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::ResolvedDefaultImport`](../graph.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: oxc_resolver, std
 
 ## `specifier_to_rel_path`
@@ -103,7 +103,7 @@ Bundles the read-only things import resolution needs, and holds the logic that f
 ### Behavior
 The struct holds four references: the repo root, the resolver, every file's parsed imports, and the graph. It exists so those four are not passed separately through each recursive call. Its one method, `resolve_named(from_file, specifier, name, hops_left)`, works in steps. It turns the specifier into a repo-relative target file (`specifier_to_rel_path`) and returns `None` if that fails or points outside the repo. It then looks in the graph for a symbol with the id `<target file>::<name>` and returns it if found, so a direct declaration always wins. If not, the file may be a barrel that forwards the name, so it decrements `hops_left` (returning `None` if it is already zero, which is what stops a circular chain from recursing forever), finds a named re-export in the target file whose published name matches, and resolves again from there with the re-export's own specifier and original name. The hop budget is only spent on a re-export step, not on the first lookup. A name that is neither declared nor re-exported, or a target file with no recorded imports, gives `None`. It matches by name only: it does not follow default or namespace imports, wildcard re-exports, or any aliasing beyond a re-export's published name, and when two re-exports publish the same name only the first is used.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
 - externals: oxc_resolver, std

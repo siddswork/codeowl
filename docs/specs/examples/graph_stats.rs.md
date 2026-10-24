@@ -68,7 +68,7 @@ Opens one repo with CodeOwl and prints its statistics under a heading: first the
 ### Behavior
 Calls `RepoIndex::open(root)` to build or load the index. If that fails for any reason it prints `== <label>: failed to open ==` and returns, so one broken repo does not stop a run over several. Otherwise it prints a header with the label and the name of the language pack that handled it, then calls `nodes_and_containment` on the graph. Next it builds the list of file ids in the graph's order, plus a map from each file id to its position in that list, and hands both to `file_graph`, which does the import statistics. The function prints only; it returns nothing and does not modify the repo, though opening an index may create or refresh the repo's `.codeowl/` cache.
 ### Depends on
-- `src/index.rs::RepoIndex` — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
 - externals: std
 
 ## `nodes_and_containment`
@@ -78,8 +78,8 @@ Prints how big the graph is and how its declarations are nested: counts of files
 ### Behavior
 Counts the files and, for every symbol, tallies two breakdowns: by the generic kind (container, callable, value, schema) and by the pack's own raw kind (`fn`, `struct`, `class`, and so on). It prints the totals, the kind breakdown, and the eight most common raw kinds, highest first. For nesting, it collects the number of children for every container, and the number of top-level symbols for every file, sorts each list, and uses `pct` to print median, 90th percentile and maximum for both (with the container count shown too). Finally it prints how many symbols are exported out of the total. The output is plain text on standard output and nothing is returned. An empty graph prints zeros without panicking, because `pct` handles an empty list and `max` falls back to 0. Ties in the raw-kind ranking keep the alphabetical order of the underlying sorted map.
 ### Depends on
-- `src/graph.rs::Graph` — codeowl::graph
-- `src/symbol.rs::SymbolKind` — codeowl::symbol
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl::symbol
 - externals: std
 
 ## `file_graph`
@@ -97,8 +97,8 @@ Components: a breadth-first search over the undirected graph finds weakly connec
 
 Cycles: `sccs` finds strongly connected groups, and those with more than one file are import cycles. It prints their count, how many files they involve, the five largest sizes, and the first eight paths, sorted, of the largest group. A blank line ends the report. An empty graph gives zeros without a crash, with the percentage lines skipped when there are no edges.
 ### Depends on
-- `src/graph.rs::FlowTarget` — codeowl::graph
-- `src/graph.rs::Graph` — codeowl::graph
+- [`src/graph.rs::FlowTarget`](../src/graph.rs.md) — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
 - externals: std
 
 ## `main`

@@ -99,7 +99,7 @@ Reads one Rust file and returns the declarations in it: its top-level items, plu
 ### Behavior
 Creates a tree-sitter parser (a library that turns source text into a syntax tree) with the bundled Rust grammar, and if the text cannot be parsed at all it returns an empty list. It walks the file's top-level items in order, calling `visit_item` for each with no parent. It then finds the top-level types whose fields were not extracted, which the folding step needs to know about, and passes the collected symbols through `merge_inherent_impls`. That step moves the methods from each plain `impl Foo { ... }` block into the symbol for `Foo`, while a trait implementation such as `impl Trait for Foo` stays as its own symbol. The merged list is what it returns. Nothing from the syntax tree escapes the function. Function bodies, and a struct's fields beyond what is recorded as members, are not extracted as separate declarations.
 ### Depends on
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `top_level_types_with_unextracted_fields`
@@ -142,10 +142,10 @@ The block symbols are then dropped and each type is rebuilt: its whole-content h
 
 Known limitation: whether a trait impl is the only one is judged within this file only, so a second trait impl for the type in another file is invisible and the type still folds. Closing that would need a whole-repo second pass, which was deliberately not built ahead of a real repo hitting it.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/text.rs::strip_value_for_fold` — crate::text
-- `src/graph.rs::Graph` — crate::graph
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/text.rs::strip_value_for_fold`](text.rs.md) — crate::text
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
 - externals: std
 
 ## `visit_item`
@@ -169,8 +169,8 @@ Looks at one Rust item and records the right kind of symbol for it: functions an
 
 Every other item kind is silently ignored. It appends to `out` and returns nothing.
 ### Depends on
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `is_cfg_test`
@@ -205,10 +205,10 @@ Public-surface fingerprint (`interface_hash`), built only if the container is `p
 
 Finally the container is inserted before its members, keeping parent-then-children order, with its line range, preceding doc comment, attributes as markers, parent id and member ids. It appends to `out` and returns nothing.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
-- `src/text.rs::strip_value_for_fold` — crate::text
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
+- [`src/text.rs::strip_value_for_fold`](text.rs.md) — crate::text
 - externals: tree_sitter
 
 ## `push_leaf`
@@ -226,9 +226,9 @@ Records a simple Rust declaration with no members of its own, such as a function
 ### Behavior
 Reads the item's `name` field and returns without adding anything if it has none. The id is `<parent id>::<name>` or `<file>::<name>`. The signature is the item's text before its body. The symbol is exported only when it has no parent and is marked `pub`; anything inside an `impl` or trait is never exported on its own, because it is reached through its type, as with a class method elsewhere. `source_hash` hashes the whole item text, body included. `interface_hash`, present only when exported, hashes the signature alone, so body edits leave it unchanged. It also records the line range, the doc comment before the item, its attributes (such as `#[derive(...)]` or `#[tool]`) as markers, the parent id, and no children. It appends to `out` and returns nothing. Members that are `pub` inside a container reach the container's public-surface fingerprint through the container code, not through this symbol.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 - externals: tree_sitter
 
 ## `impl_header`
@@ -384,9 +384,9 @@ Parses the file with the Rust grammar and returns an empty result if it cannot b
 
 Skipped forms: a glob (`use x::*`), which names no single item; the `self` in `use x::{self, ...}`; and nested lists such as `use a::{b::C}`, which are rare enough to defer. After the `use` lines, `extract_qualified_refs` fills the separate list of references written with a full `crate::a::b::Item` path and no `use`, which Rust allows. The file's own path is not used. It cannot fail.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
-- `src/imports.rs::ImportRef` — crate::imports
-- `src/imports.rs::ReExport` — crate::imports
+- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
+- [`src/imports.rs::ImportRef`](imports.rs.md) — crate::imports
+- [`src/imports.rs::ReExport`](imports.rs.md) — crate::imports
 - externals: tree_sitter
 
 ## `extract_qualified_refs`
@@ -396,7 +396,7 @@ Finds places where Rust code names an item in its own crate by writing out the f
 ### Behavior
 Walks the whole syntax tree, in every expression and type position and not only at the top level. It skips `use` declarations entirely, since the main loop already handles those. When it reaches a scoped identifier or scoped type name, it asks `crate_qualified_target` whether the path starts at `crate` and, if so, takes the module path and the item name and pushes an `ImportRef`; a path not rooted at `crate` is ignored. It does not go into the children of a matched node, since the node's whole path is already consumed as one reference. Comments and string literals are leaf tokens, not expression nodes, so they are never visited, which avoids the false positives a plain text scan once produced on documentation. It appends to `out` and returns nothing.
 ### Depends on
-- `src/imports.rs::ImportRef` — crate::imports
+- [`src/imports.rs::ImportRef`](imports.rs.md) — crate::imports
 - externals: tree_sitter
 
 ## `crate_qualified_target`
@@ -452,9 +452,9 @@ Qualified references: each `crate::a::b::Item` written with no `use` is resolved
 
 Finally it adds the same-file trait-impl links from `same_file_trait_impl_edges`, which connect a trait implemented in the same file as its type when no import exists to do it. Returns the full list; it cannot fail, and problems show up as entries with no target.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
 - `src/resolve.rs::ResolvedImport` — crate::resolve
 - `src/rust_crates.rs::CrateMap` — crate::rust_crates
 - externals: std
@@ -468,7 +468,7 @@ Looks up the file's node and returns an empty list if there is none. Then for ea
 
 It creates exactly the edge a real `use` would have, one edge per trait impl running from the implementation to its type, and none between two sibling impls of the same type, since neither's description says anything about the other's behavior. The cross-file case is already handled once a real `use` names the type, so this fills only the gap a `use` cannot reach. The dependency scan later excludes a symbol's own self-edge, so a type does not appear to depend on itself. It cannot fail.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
 - `src/resolve.rs::ResolvedImport` — crate::resolve
 
 ## `resolve_one`
@@ -485,9 +485,9 @@ Resolves one Rust import, a module path and an item name, to the declaration it 
 ### Behavior
 Turns the module path into a file with `module_path_to_file`, which handles `crate::`, `self::`, `super::` and library crate names, and returns `None` if it points outside the repo or no file matches. It then looks for a symbol `<file>::<name>` in the graph and returns it if found. If not, the module may be a barrel that forwards the name, so it looks in that file for a `pub use` published under that name. The hop is resolved from the target file's own crate, which may differ from the importing file's crate, and the symbol is looked up as the re-export's original name in the file it names. If there is no matching re-export, the hop does not resolve, or the symbol is missing, it returns `None`. Only a single hop is followed, so a chain of re-exports through several modules is not resolved, and nested-brace re-exports are not handled. It cannot fail.
 ### Depends on
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
 - `src/rust_crates.rs::CrateMap` — crate::rust_crates
 - externals: std
 
@@ -518,6 +518,6 @@ Splits the path on `::` and decides the starting folder from the first word:
 
 The remaining words are joined onto that folder with `/`, taking care not to add a leading slash when the folder is empty. It then tries, in order, `<path>.rs`, `<path>/mod.rs`, `<path>/lib.rs` and `<path>/main.rs`, and returns the first that exists among the indexed files. The lib and main fallbacks let a path to a crate root resolve to its root file. It is purely a file-name convention: `mod` declarations are not read, so it can be wrong for modules renamed with `#[path]`. It returns `None` for an empty path and cannot fail.
 ### Depends on
-- `src/imports.rs::FileImports` — crate::imports
+- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
 - `src/rust_crates.rs::CrateMap` — crate::rust_crates
 - externals: std

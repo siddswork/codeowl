@@ -52,8 +52,8 @@ Describes the next piece of writing work for a single file: either one function 
 ### Behavior
 Two variants. `Symbol` carries the symbol's `id`, its `signature`, its `docstring` if any, and `prior`. `File` carries the file's `id` and a `prior`. In both, `prior` is `Some` only when the code moved and a human had also edited that prose since it was last machine-written, so the agent can keep what is still accurate. It is `None` for a first generation or a plain regeneration with no human edit on record. Generation walks containment (a file's own symbols) and never follows reference edges, which is why only these two shapes exist at file level. The enum is plain data produced by the task-selection code.
 ### Depends on
-- `src/spec/format.rs::SymbolProse` — super::format
-- `src/symbol.rs::Symbol` — crate::symbol
+- [`src/spec/format.rs::SymbolProse`](format.rs.md) — super::format
+- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
 
 ## `symbol_prose_is_human_edited`
 `pub(super) fn symbol_prose_is_human_edited(hash: &HashPair, prose: &SymbolProse) -> bool`
@@ -62,8 +62,8 @@ Detects whether a symbol's spec prose was hand-edited directly in the `.md` file
 ### Behavior
 Recomputes a hash of the currently-parsed summary and behavior text and compares it against the `spec_hash` recorded in the stored `HashPair`. Since `spec_hash` is always set to exactly `hash_text` of the prose at the moment it was written via `submit`, the only way the two can disagree is if someone edited the markdown file's prose directly without going through that path — a normal machine round-trip (write via `submit`, later read back and re-parsed) always keeps them in sync, so a mismatch reliably signals a manual edit rather than any other kind of drift.
 ### Depends on
-- `src/spec/format.rs::HashPair` — super::format
-- `src/spec/format.rs::SymbolProse` — super::format
+- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
+- [`src/spec/format.rs::SymbolProse`](format.rs.md) — super::format
 
 ## `file_prose_is_human_edited`
 `pub(super) fn file_prose_is_human_edited(hash: &HashPair, file_summary: &str) -> bool`
@@ -72,8 +72,8 @@ The file-level equivalent of `symbol_prose_is_human_edited` — detects whether 
 ### Behavior
 Recomputes the hash of the currently-parsed file summary and compares it against the stored `spec_hash`; a mismatch signals a direct manual edit to the markdown, the same reasoning `symbol_prose_is_human_edited` uses.
 ### Depends on
-- `src/spec/format.rs::HashPair` — super::format
-- `src/hash.rs::hash_text` — crate::hash
+- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
 
 ## `reconcile_symbol_hash`
 `fn reconcile_symbol_hash(
@@ -89,15 +89,15 @@ Handles the case where a person edited a symbol's spec text by hand but the code
 ### Behavior
 Clones the stored `HashPair` and replaces its `spec_hash` with a hash of the current prose (summary and behavior joined by a newline). The code and dependency hashes are left alone. It then loads the file's existing spec from disk (or a blank one if none), inserts or updates this symbol's entry with `upsert`, puts the symbols back in declaration order with `reorder_symbols`, and writes the file with `write`. Returns `Ok(())` without doing anything if the id is not a file node. Errors from reading or writing the spec file are returned. The prose itself is never rewritten here.
 ### Depends on
-- `src/spec/format.rs::FileSpec` — super::format
-- `src/spec/format.rs::HashPair` — super::format
-- `src/spec/format.rs::SymbolProse` — super::format
-- `src/spec/format.rs::read_existing` — super::format
-- `src/spec/format.rs::write` — super::format
-- `src/graph.rs::Graph` — crate::graph
-- `src/graph.rs::Node` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/hash.rs::hash_text` — crate::hash
+- [`src/spec/format.rs::FileSpec`](format.rs.md) — super::format
+- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
+- [`src/spec/format.rs::SymbolProse`](format.rs.md) — super::format
+- [`src/spec/format.rs::read_existing`](format.rs.md) — super::format
+- [`src/spec/format.rs::write`](format.rs.md) — super::format
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::Node`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
 - externals: anyhow, std
 
 ## `reconcile_file_hash`
@@ -112,11 +112,11 @@ The file-level version of accepting a hand edit: when a person rewrote a file's 
 ### Behavior
 Copies the given `FileSpec`, sets the file's `spec_hash` to a hash of its current `file_summary` text, and writes the document back with `write`. Only that one hash changes, and the prose and the other hashes are saved as they are. Unlike the symbol version it does not reload the spec from disk, because the caller already holds the full parsed spec. Errors from writing the file are returned.
 ### Depends on
-- `src/spec/format.rs::FileSpec` — super::format
-- `src/spec/format.rs::write` — super::format
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/hash.rs::hash_text` — crate::hash
+- [`src/spec/format.rs::FileSpec`](format.rs.md) — super::format
+- [`src/spec/format.rs::write`](format.rs.md) — super::format
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
 - externals: anyhow, std
 
 ## `next_task`
@@ -133,17 +133,17 @@ Returns `Ok(None)` at once if the file is not spec-bearing. Otherwise it loads t
 
 Once all symbols are done, the file's own summary is judged the same way. An empty file `spec_hash` means the file entry was never written, which can happen even when symbols were stored first, so it gets a `File` task. Otherwise the same four cases apply, with smelly prose also triggering a rewrite and the unchanged-but-edited case reconciled with `reconcile_file_hash`. Despite being safe to call repeatedly, it may write a small fix to disk in those reconcile cases. It errors if the id is not a file or if disk reads and writes fail.
 ### Depends on
-- `src/spec/format.rs::FileSpec` — super::format
-- `src/spec/format.rs::HashPair` — super::format
-- `src/spec/format.rs::read_existing` — super::format
-- `src/spec/layout.rs::file_is_spec_bearing` — super::layout
-- `src/spec/layout.rs::spec_bearing_children` — super::layout
-- `src/spec/smells.rs::prose_smells` — super::smells
-- `src/spec/staleness.rs::file_changes` — super::staleness
-- `src/spec/staleness.rs::symbol_changes` — super::staleness
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
-- `src/symbol.rs::Symbol` — crate::symbol
+- [`src/spec/format.rs::FileSpec`](format.rs.md) — super::format
+- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
+- [`src/spec/format.rs::read_existing`](format.rs.md) — super::format
+- [`src/spec/layout.rs::file_is_spec_bearing`](layout.rs.md) — super::layout
+- [`src/spec/layout.rs::spec_bearing_children`](layout.rs.md) — super::layout
+- [`src/spec/smells.rs::prose_smells`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::file_changes`](staleness.rs.md) — super::staleness
+- [`src/spec/staleness.rs::symbol_changes`](staleness.rs.md) — super::staleness
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
 - externals: anyhow, std
 
 ## `submit`
@@ -159,20 +159,20 @@ Symbol id: the symbol must have a parent file. The content must contain non-empt
 
 Nothing is written when validation fails, so a rejected submission leaves the existing spec intact. The returned `HashPair` is what staleness checks later compare against.
 ### Depends on
-- `src/spec/format.rs::FileSpec` — super::format
-- `src/spec/format.rs::HashPair` — super::format
-- `src/spec/format.rs::SymbolProse` — super::format
-- `src/spec/format.rs::extract_section` — super::format
-- `src/spec/format.rs::read_existing` — super::format
-- `src/spec/format.rs::write` — super::format
-- `src/spec/smells.rs::prose_smells` — super::smells
-- `src/spec/smells.rs::reject_if_smelly` — super::smells
-- `src/spec/staleness.rs::dependency_record` — super::staleness
-- `src/spec/staleness.rs::file_dependency_record` — super::staleness
-- `src/graph.rs::Graph` — crate::graph
-- `src/graph.rs::Node` — crate::graph
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::Symbol` — crate::symbol
+- [`src/spec/format.rs::FileSpec`](format.rs.md) — super::format
+- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
+- [`src/spec/format.rs::SymbolProse`](format.rs.md) — super::format
+- [`src/spec/format.rs::extract_section`](format.rs.md) — super::format
+- [`src/spec/format.rs::read_existing`](format.rs.md) — super::format
+- [`src/spec/format.rs::write`](format.rs.md) — super::format
+- [`src/spec/smells.rs::prose_smells`](smells.rs.md) — super::smells
+- [`src/spec/smells.rs::reject_if_smelly`](smells.rs.md) — super::smells
+- [`src/spec/staleness.rs::dependency_record`](staleness.rs.md) — super::staleness
+- [`src/spec/staleness.rs::file_dependency_record`](staleness.rs.md) — super::staleness
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/graph.rs::Node`](../graph.rs.md) — crate::graph
+- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
+- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
 - externals: anyhow, std
 
 ## `upsert`
@@ -182,7 +182,7 @@ Updates an existing entry by id in a list of `(id, HashPair)` pairs, or appends 
 ### Behavior
 Searches the list for an entry whose id matches; if found, replaces its value in place, preserving its position in the list. If not found, appends a new `(id, value)` entry to the end — its final position gets corrected afterward by `reorder_symbols`, which every caller of `upsert` runs immediately after.
 ### Depends on
-- `src/spec/format.rs::HashPair` — super::format
+- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
 
 ## `upsert_section`
 `fn upsert_section(entries: &mut Vec<(String, SymbolProse)>, id: String, value: SymbolProse)`
@@ -191,7 +191,7 @@ The same insert-or-update operation as `upsert`, but for a list of `(id, SymbolP
 ### Behavior
 Identical logic to `upsert`: replaces an existing entry's value in place if the id is found, otherwise appends a new entry at the end.
 ### Depends on
-- `src/spec/format.rs::SymbolProse` — super::format
+- [`src/spec/format.rs::SymbolProse`](format.rs.md) — super::format
 
 ## `reorder_symbols`
 `fn reorder_symbols(graph: &Graph, file_id: SymbolId, spec: &mut FileSpec)`
@@ -200,7 +200,7 @@ Keeps a file's spec in the same order as the code and removes entries for items 
 ### Behavior
 Takes the file's current spec-bearing top-level symbols in declaration order. For each one it copies the stored hash pair and the stored prose into fresh lists, if they exist. The spec's `symbols` and `sections` are then replaced by these lists, which drops anything whose symbol is gone and orders the rest to match the source. Symbols that have no stored entry yet are simply not added; they appear when first submitted. It does not touch the file-level summary or hashes. It uses `expect` on ids it just filtered to symbols, so it cannot fail unless the graph is inconsistent.
 ### Depends on
-- `src/spec/format.rs::FileSpec` — super::format
-- `src/spec/layout.rs::spec_bearing_children` — super::layout
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/spec/format.rs::FileSpec`](format.rs.md) — super::format
+- [`src/spec/layout.rs::spec_bearing_children`](layout.rs.md) — super::layout
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph

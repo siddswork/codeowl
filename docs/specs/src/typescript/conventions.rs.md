@@ -25,7 +25,7 @@ Maps a repo-relative path to its `FileRole` — the JS/Next-convention implement
 ### Behavior
 First strips a leading `rollup:` or `feature:` coverage-id prefix, so a directory-rollup id (`rollup:lib/email`) classifies by its bare directory path. Then a fixed precedence: `Test` wins over `Primitive` wins over `Domain` (the default). Precedence matters for a file that matches two rules — a test file under a `ui/` path is `Test`, not `Primitive`. Never returns `Generated` — no Phase 1 path convention produces it.
 ### Depends on
-- `src/lang.rs::FileRole` — crate::lang
+- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
 
 ## `is_test_path`
 `fn is_test_path(path: &str) -> bool`

@@ -387,11 +387,24 @@ pub(super) fn linked_dependency_lines(
     sym: &Symbol,
 ) -> Vec<String> {
     dependency_lines_with(graph, root, file_id, sym, |from_file, target, specifier| {
-        match link_to_spec(graph, from_file, target) {
-            Some(link) => format!("[`{target}`]({link}) — {specifier}"),
-            None => format!("`{target}` — {specifier}"),
-        }
+        linked_dependency_line(graph, from_file, target, specifier)
     })
+}
+
+/// One resolved dependency as the text of a list entry: a link to the spec of
+/// `target`'s file where there will be one, plain text otherwise. The render
+/// and the migration that links older specs both write it, so they cannot
+/// disagree.
+pub(super) fn linked_dependency_line(
+    graph: &Graph,
+    from_file: &str,
+    target: &str,
+    specifier: &str,
+) -> String {
+    match link_to_spec(graph, from_file, target) {
+        Some(link) => format!("[`{target}`]({link}) — {specifier}"),
+        None => format!("`{target}` — {specifier}"),
+    }
 }
 
 /// The lines both versions share: one per resolved dependency, written by

@@ -47,9 +47,9 @@ First it parses the file's table statements with `parse_tables`, a real SQL gram
 
 Each table becomes a symbol of kind `Schema` with raw kind `table`, the id `<path>::<table name>`, and a signature that is the table name followed by its column list, such as `payments(id, amount, user_id)`. The line range comes from the parse, or only the header line for a table found by the fallback. `source_hash` hashes the table's own lines, so adding, dropping or renaming a column marks anything that depends on it stale. The table is not exported and has no public-surface hash, since there is no separate public shape to track and the source hash is the staleness key. It has no docstring, markers, parent or children. Only column names are recorded, not types or constraints. It cannot fail, and a file with no tables gives an empty list.
 ### Depends on
-- `src/hash.rs::hash_text` — crate::hash
-- `src/symbol.rs::ExtractedSymbol` — crate::symbol
-- `src/symbol.rs::SymbolKind` — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
 
 ## `parse_tables`
 `fn parse_tables(source: &str) -> Vec<Table>`

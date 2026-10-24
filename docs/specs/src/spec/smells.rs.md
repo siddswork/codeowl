@@ -42,10 +42,10 @@ Scans a whole file spec for signs of poor quality and returns a list of problem 
 ### Behavior
 Collects problems from three places, then sorts and de-duplicates them. The file summary is checked with `prose_smells` only once it has actually been written; an empty `spec_hash` means the file entry was never generated, and a blank summary in that state is a mid-generation gap rather than a cop-out. Each symbol's summary and behavior are checked the same way. Finally, when the spec has at least two symbols, it computes each symbol's resolved in-repo dependency lines (leaving out the `externals:` line, because many symbols sharing a standard-library dependency is normal) and, if every symbol has the same non-empty list, adds the label `identical_dependencies_across_symbols`. That pattern is the signature of an older bug that attributed all of a file's imports to every symbol, so it flags specs written before the fix that were never regenerated. If a symbol id cannot be resolved the lists are not all comparable and the identical-dependencies check is skipped. It never fails.
 ### Depends on
-- `src/spec/format.rs::FileSpec` — super::format
-- `src/spec/format.rs::dependency_lines` — super::format
-- `src/graph.rs::Graph` — crate::graph
-- `src/symbol.rs::SymbolId` — crate::graph
+- [`src/spec/format.rs::FileSpec`](format.rs.md) — super::format
+- [`src/spec/format.rs::dependency_lines`](format.rs.md) — super::format
+- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
 - externals: anyhow, std
 
 ## `body_smells`
@@ -55,7 +55,7 @@ The same coarse quality signal as `file_spec_smells`, but for the single-blob bo
 ### Behavior
 Attempts to extract a `## Summary` section out of the body; if none is found (as is already the case for a rollup or system spec's `body`, which stores only the summary text to begin with, unlike a feature spec's `body`, which is the whole document including its title), the whole `body` text is used as a fallback. Either way, the resulting text is checked via `prose_smells`.
 ### Depends on
-- `src/spec/format.rs::extract_section` — super::format
+- [`src/spec/format.rs::extract_section`](format.rs.md) — super::format
 
 ## `reject_if_smelly`
 `pub(super) fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()>`

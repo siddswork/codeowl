@@ -90,10 +90,11 @@ enum Command {
     /// Knowledge Format asks of it: `kind:` becomes `type:`, and a title,
     /// description, `generated` and resource or sources are added, exactly as
     /// a fresh render writes them. It also puts the provenance line under the
-    /// title of a spec written before that line existed. Nothing else
-    /// changes, so no hash or prose moves and no spec turns stale; running it
-    /// twice changes nothing. Prints what it would do unless `--write` is
-    /// given.
+    /// title of a spec written before that line existed, and turns each
+    /// plain-text entry in a file spec's `Depends on` list into a link to the
+    /// spec of the file it names. Nothing else changes, so no hash or prose
+    /// moves and no spec turns stale; running it twice changes nothing.
+    /// Prints what it would do unless `--write` is given.
     MigrateToOkf {
         path: PathBuf,
         /// Apply the changes; without it nothing is written.
@@ -177,7 +178,21 @@ async fn main() -> Result<()> {
         }
         Command::MigrateToOkf { path, write } => {
             let root = canonical_root(&path)?;
-            let r = codeowl::spec::migrate_to_okf(&root, write)?;
+            // The graph decides which dependency entries can be linked. If it
+            // cannot be built, the keys and the provenance line are still
+            // worth migrating, so say the links were skipped and go on; a
+            // later run, once it builds, adds them.
+            let graph = match RepoIndex::build(&root).and_then(|index| index.rebuild()) {
+                Ok(graph) => graph,
+                Err(err) => {
+                    println!(
+                        "note: could not build the graph ({err:#}), so dependency links are \
+                         skipped; run the command again once it builds"
+                    );
+                    codeowl::graph::Graph::build(Vec::new())
+                }
+            };
+            let r = codeowl::spec::migrate_to_okf(&graph, &root, write)?;
             let verb = if write { "migrated" } else { "would migrate" };
             println!(
                 "{verb} {} spec(s): {} file, {} rollup, {} feature, {} system",
@@ -189,7 +204,11 @@ async fn main() -> Result<()> {
                 r.provenance_added
             );
             println!(
-                "skipped: {} needing neither change, {} with no frontmatter",
+                "{verb} {} dependency link(s) in {} spec(s)",
+                r.links_added, r.linked_documents
+            );
+            println!(
+                "skipped: {} needing no change, {} with no frontmatter",
                 r.unchanged, r.no_frontmatter
             );
             if !r.unreadable.is_empty() {
@@ -209,7 +228,7 @@ async fn main() -> Result<()> {
                      file with no frontmatter keeps the folder from conforming"
                 );
             }
-            if !write && (r.migrated > 0 || r.provenance_added > 0) {
+            if !write && (r.migrated > 0 || r.provenance_added > 0 || r.links_added > 0) {
                 println!("dry run: nothing written; pass --write to apply");
             }
             Ok(())

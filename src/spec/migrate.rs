@@ -6,7 +6,8 @@ use anyhow::{Context, Result, bail};
 
 use super::feature::{feature_okf_frontmatter, parse_feature};
 use super::format::{
-    file_okf_frontmatter, has_provenance, parse, with_provenance, write_replacing, yaml_flow_item,
+    file_okf_frontmatter, has_provenance, linked_dependency_line, parse, with_provenance,
+    write_replacing, yaml_flow_item,
 };
 use super::layout::spec_path;
 use super::rollup::{parse_rollup, rollup_okf_frontmatter};
@@ -278,9 +279,15 @@ pub struct OkfReport {
     /// a spec written before the line existed has none until it is rewritten.
     /// Counted apart from `migrated`; a document can be in both.
     pub provenance_added: usize,
-    /// Documents that needed neither change: the OKF keys and the provenance
-    /// line are there (or there is no title to put it under), or the page has
-    /// a `type:` key that CodeOwl did not write.
+    /// Dependency lines in file specs that were plain text and are now links
+    /// (or would be): `links_added` counts the lines, `linked_documents` the
+    /// specs they were in. A spec is regenerated only when it is stale, so
+    /// without this a current spec would keep plain text indefinitely.
+    pub links_added: usize,
+    pub linked_documents: usize,
+    /// Documents that needed no change: the OKF keys, the provenance line and
+    /// the links are there (or there is nothing to put them on), or the page
+    /// has a `type:` key that CodeOwl did not write.
     pub unchanged: usize,
     /// Markdown files under `docs/specs/` with no frontmatter (a style guide,
     /// say); left as they are.
@@ -298,14 +305,16 @@ pub struct OkfReport {
 /// Give every spec document under `docs/specs/` the keys Open Knowledge
 /// Format asks of it: `kind:` becomes `type:` and the title, description,
 /// `generated`, and resource or sources are added, exactly as a fresh render
-/// writes them, and the provenance line goes under the title of a spec that
-/// lacks it. Nothing else changes: the line is in no hash and every parser
-/// skips it, so no hash and no prose moves and no spec turns stale. A
-/// document that already has both is skipped, which makes a second run
-/// change nothing, and so is a page with a `type:` key that CodeOwl did not
-/// write. With `write` false nothing is written and the report says what
-/// would be.
-pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
+/// writes them, the provenance line goes under the title of a spec that lacks
+/// it, and each plain-text line in a file spec's `### Depends on` list becomes
+/// a link to the spec of the file it names where such a spec can exist (the
+/// graph says which; see `format::linked_dependency_line`). Nothing else
+/// changes: the line and the dependency lists are in no hash and no parser
+/// reads them back, so no hash and no prose moves and no spec turns stale. A
+/// document that needs none of it is skipped, which makes a second run change
+/// nothing, and so is a page with a `type:` key that CodeOwl did not write.
+/// With `write` false nothing is written and the report says what would be.
+pub fn migrate_to_okf(graph: &Graph, root: &Path, write: bool) -> Result<OkfReport> {
     let specs = root.join("docs").join("specs");
     let mut report = OkfReport {
         style_guide_in_bundle: specs.join("STYLE.md").exists(),
@@ -328,12 +337,12 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
             report.no_frontmatter += 1;
             continue;
         }
-        match with_okf_keys(&text) {
+        match with_okf_keys(graph, &text) {
             Ok(None) => report.unchanged += 1,
             Ok(Some(change)) => {
-                if let Some(kind) = change.keys_added_to {
+                if let Some(kind) = &change.keys_added_to {
                     report.migrated += 1;
-                    match kind {
+                    match kind.as_str() {
                         "file" => report.files += 1,
                         "rollup" => report.rollups += 1,
                         "feature" => report.features += 1,
@@ -342,6 +351,10 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
                 }
                 if change.line_added {
                     report.provenance_added += 1;
+                }
+                if change.links_added > 0 {
+                    report.links_added += change.links_added;
+                    report.linked_documents += 1;
                 }
                 if write {
                     write_replacing(&path, &change.text)
@@ -357,10 +370,54 @@ pub fn migrate_to_okf(root: &Path, write: bool) -> Result<OkfReport> {
 /// What `with_okf_keys` did to a document.
 struct Change {
     /// The kind of document, when its frontmatter got the OKF keys.
-    keys_added_to: Option<&'static str>,
+    keys_added_to: Option<String>,
     /// Whether the provenance line was put under its title.
     line_added: bool,
+    /// How many plain dependency lines became links.
+    links_added: usize,
     text: String,
+}
+
+/// `body` with each plain entry of a `### Depends on` list rewritten as the
+/// link a fresh render writes, and how many were. An entry is a line of the
+/// form ``- `target` — specifier``; one that is already a link, the
+/// `externals:` line, `- (none)`, an entry with nothing to link to (the same
+/// file, a file that never gets a spec, a file that is gone), and any such
+/// text outside a `Depends on` list are left exactly as they are.
+fn with_dependency_links(graph: &Graph, from_file: &str, body: &str) -> (String, usize) {
+    let mut out = String::with_capacity(body.len());
+    let mut in_list = false;
+    let mut in_fence = false;
+    let mut linked = 0;
+    for line in body.split_inclusive('\n') {
+        let bare = line.trim_end();
+        // A fenced block is example text: a heading or a bullet inside one is
+        // not part of the list.
+        if bare.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+        } else if in_fence {
+            // keep the line as it is
+        } else if bare.starts_with('#') {
+            in_list = bare == "### Depends on";
+        } else if in_list
+            && let Some(entry) = bare.strip_prefix("- `")
+            && let Some((target, rest)) = entry.split_once('`')
+            && let Some(specifier) = rest.strip_prefix(" — ")
+        {
+            let new = format!(
+                "- {}",
+                linked_dependency_line(graph, from_file, target, specifier)
+            );
+            if new != bare {
+                out.push_str(&new);
+                out.push_str(&line[bare.len()..]);
+                linked += 1;
+                continue;
+            }
+        }
+        out.push_str(line);
+    }
+    (out, linked)
 }
 
 /// `body` with the provenance line under its title, and whether it was added.
@@ -375,13 +432,14 @@ fn with_missing_provenance(body: &str) -> (String, bool) {
     (with, added)
 }
 
-/// `text` with its frontmatter converted and the provenance line added where
-/// they are missing; `None` when it needs neither. In the frontmatter the
-/// `kind:` line is dropped and the OKF keys go first, and a file spec's
-/// `source_paths:` line is written as a fresh render writes it, so a path with
-/// brackets becomes valid YAML. The line is inserted under the title (the
-/// parsers skip it and it is in no hash). Every other byte stays as it was.
-fn with_okf_keys(text: &str) -> Result<Option<Change>> {
+/// `text` brought up to date: its frontmatter converted, the provenance line
+/// under its title, and the dependency lines of a file spec as links; `None`
+/// when it needs none of that. In the frontmatter the `kind:` line is dropped
+/// and the OKF keys go first, and a file spec's `source_paths:` line is
+/// written as a fresh render writes it, so a path with brackets becomes valid
+/// YAML. The line and the links are in no hash and no parser reads them back.
+/// Every other byte stays as it was.
+fn with_okf_keys(graph: &Graph, text: &str) -> Result<Option<Change>> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let close = lines
         .iter()
@@ -390,52 +448,73 @@ fn with_okf_keys(text: &str) -> Result<Option<Change>> {
         .map(|i| i + 1)
         .context("the frontmatter is never closed")?;
     let frontmatter = &lines[1..close];
-    let (body, line_added) = with_missing_provenance(&lines[close + 1..].concat());
-    if let Some(doc_type) = frontmatter.iter().find_map(|l| l.strip_prefix("type:")) {
-        // Already has the keys. Give it the line only if CodeOwl wrote it: a
+    let doc_type = frontmatter
+        .iter()
+        .find_map(|l| l.strip_prefix("type:"))
+        .map(str::trim);
+    if let Some(doc_type) = doc_type {
+        // Already has the keys. Touch it further only if CodeOwl wrote it: a
         // hand-written or foreign page with a `type:` key is not "Generated
-        // by CodeOwl".
-        let ours = matches!(doc_type.trim(), "file" | "rollup" | "feature" | "system")
+        // by CodeOwl", and has no dependency list of ours to link.
+        let ours = matches!(doc_type, "file" | "rollup" | "feature" | "system")
             && frontmatter
                 .iter()
                 .any(|l| l.trim_end() == "generated: { by: CodeOwl }");
-        if !ours || !line_added {
+        if !ours {
             return Ok(None);
         }
-        let text = format!("{}{}{body}", lines[..close].concat(), lines[close]);
-        return Ok(Some(Change {
-            keys_added_to: None,
-            line_added,
-            text,
-        }));
     }
-    let kind = frontmatter
-        .iter()
-        .find_map(|l| l.strip_prefix("kind:"))
-        .map(str::trim)
+    let kind = doc_type
+        .or_else(|| {
+            frontmatter
+                .iter()
+                .find_map(|l| l.strip_prefix("kind:"))
+                .map(str::trim)
+        })
         .context("the frontmatter has no kind")?;
-    let mut source_path = None;
-    let (kind, header) = match kind {
-        "file" => {
-            let path = parse(text)?.source_path;
-            let header = file_okf_frontmatter(&path);
-            source_path = Some(path);
-            ("file", header)
+    // A file spec knows which file it is the spec of; its dependency list is
+    // linked from there. Links are relative to the spec's own place, so one
+    // that does not say which file it is for cannot be linked and is reported.
+    let source_path = if kind == "file" {
+        let path = parse(text)?.source_path;
+        if path.is_empty() {
+            bail!("the file spec has no `source_paths`, so its links cannot be worked out");
         }
-        "rollup" => (
-            "rollup",
-            rollup_okf_frontmatter(&parse_rollup(text)?.dir_path),
-        ),
-        "feature" => ("feature", feature_okf_frontmatter(&parse_feature(text)?)),
-        "system" => ("system", system_okf_frontmatter(&parse_system(text)?)),
-        other => bail!("a spec of kind `{other}` is not one CodeOwl writes"),
+        Some(path)
+    } else {
+        None
     };
-    let mut out = String::with_capacity(text.len() + header.len());
+    // The OKF keys, for a spec that has not got them yet.
+    let converted: Option<String> = if doc_type.is_some() {
+        None
+    } else {
+        Some(match kind {
+            "file" => file_okf_frontmatter(source_path.as_deref().unwrap_or_default()),
+            "rollup" => rollup_okf_frontmatter(&parse_rollup(text)?.dir_path),
+            "feature" => feature_okf_frontmatter(&parse_feature(text)?),
+            "system" => system_okf_frontmatter(&parse_system(text)?),
+            other => bail!("a spec of kind `{other}` is not one CodeOwl writes"),
+        })
+    };
+    let (body, line_added) = with_missing_provenance(&lines[close + 1..].concat());
+    let (body, links_added) = match &source_path {
+        Some(path) => with_dependency_links(graph, path, &body),
+        None => (body, 0),
+    };
+    if converted.is_none() && !line_added && links_added == 0 {
+        return Ok(None);
+    }
+    let mut out = String::with_capacity(text.len());
     out.push_str(lines[0]);
-    out.push_str(&header);
-    for line in frontmatter.iter().filter(|l| !l.starts_with("kind:")) {
+    if let Some(header) = &converted {
+        out.push_str(header);
+    }
+    for line in frontmatter
+        .iter()
+        .filter(|l| converted.is_none() || !l.starts_with("kind:"))
+    {
         match &source_path {
-            Some(path) if line.starts_with("source_paths:") => {
+            Some(path) if converted.is_some() && line.starts_with("source_paths:") => {
                 out.push_str(&format!("source_paths: [{}]\n", yaml_flow_item(path)));
             }
             _ => out.push_str(line),
@@ -444,8 +523,9 @@ fn with_okf_keys(text: &str) -> Result<Option<Change>> {
     out.push_str(lines[close]);
     out.push_str(&body);
     Ok(Some(Change {
-        keys_added_to: Some(kind),
+        keys_added_to: converted.map(|_| kind.to_string()),
         line_added,
+        links_added,
         text: out,
     }))
 }
@@ -961,6 +1041,13 @@ mod tests {
         ]
     }
 
+    /// `migrate_to_okf` with an empty graph, for the tests that have no
+    /// dependency list to link: which files will have a spec does not matter
+    /// to them. The ones that link pass `greeter_people_graph`'s graph.
+    fn migrate_without_graph(dir: &Path, write: bool) -> Result<OkfReport> {
+        migrate_to_okf(&Graph::build(Vec::new()), dir, write)
+    }
+
     fn put_spec(dir: &Path, rel: &str, text: &str) -> std::path::PathBuf {
         let path = dir.join("docs").join("specs").join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -978,7 +1065,7 @@ mod tests {
             .collect();
 
         // A dry run reports and writes nothing.
-        let report = migrate_to_okf(&dir, false).unwrap();
+        let report = migrate_without_graph(&dir, false).unwrap();
         assert_eq!(report.migrated, 4);
         assert_eq!(
             (
@@ -995,14 +1082,14 @@ mod tests {
 
         // Writing changes only the header: each document is now exactly what
         // a fresh render of it writes.
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!(report.migrated, 4);
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
             assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
         }
 
         // A second run finds them all converted and changes nothing.
-        let again = migrate_to_okf(&dir, true).unwrap();
+        let again = migrate_without_graph(&dir, true).unwrap();
         assert_eq!((again.migrated, again.unchanged), (0, 4));
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
             assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
@@ -1017,7 +1104,7 @@ mod tests {
         let (rel, fresh, legacy) = &documents[0];
         put_spec(&dir, rel, legacy);
         let before = parse(legacy).unwrap();
-        migrate_to_okf(&dir, true).unwrap();
+        migrate_without_graph(&dir, true).unwrap();
         let after = read_file_spec(&dir, "lib/a.ts").unwrap().unwrap();
         assert_eq!(
             after, before,
@@ -1040,7 +1127,7 @@ mod tests {
             "---\nkind: file\nno colon here\n---\n# b\n",
         );
 
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!(report.migrated, 0);
         assert_eq!(report.no_frontmatter, 1);
         // Each file that was left alone is named, with the reason.
@@ -1088,7 +1175,7 @@ mod tests {
         let doc = put_spec(&dir, &format!("{path}.md"), &legacy);
         let before = parse(&legacy).unwrap();
 
-        migrate_to_okf(&dir, true).unwrap();
+        migrate_without_graph(&dir, true).unwrap();
         let migrated = std::fs::read_to_string(&doc).unwrap();
         assert!(
             migrated.contains("source_paths: [\"app/api/[id]/route.ts\"]\n"),
@@ -1102,7 +1189,7 @@ mod tests {
             "lib/a.ts.md",
             "---\nkind: file\nsource_paths: [lib/a.ts]\nfile: { source_hash: s, deps_hash: d, spec_hash: p }\n---\n# lib/a.ts\n## Summary\nA.\n",
         );
-        migrate_to_okf(&dir, true).unwrap();
+        migrate_without_graph(&dir, true).unwrap();
         assert!(
             std::fs::read_to_string(&plain)
                 .unwrap()
@@ -1122,7 +1209,7 @@ mod tests {
             "lib/a.ts.md",
             &format!("---\ntype: file\n---\n# a\n{PROVENANCE}\n"),
         );
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert!(!report.style_guide_in_bundle);
         assert_eq!(report.unchanged, 1);
         std::fs::remove_dir_all(&dir).ok();
@@ -1144,7 +1231,7 @@ mod tests {
             .map(|(rel, fresh, _)| put_spec(&dir, rel, &without_the_line(fresh)))
             .collect();
 
-        let dry = migrate_to_okf(&dir, false).unwrap();
+        let dry = migrate_without_graph(&dir, false).unwrap();
         assert_eq!((dry.migrated, dry.provenance_added), (0, 4));
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
             assert_eq!(
@@ -1154,7 +1241,7 @@ mod tests {
             );
         }
 
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!(
             (report.migrated, report.provenance_added, report.unchanged),
             (0, 4, 0)
@@ -1162,7 +1249,7 @@ mod tests {
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
             assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
         }
-        let again = migrate_to_okf(&dir, true).unwrap();
+        let again = migrate_without_graph(&dir, true).unwrap();
         assert_eq!(
             (again.migrated, again.provenance_added, again.unchanged),
             (0, 0, 4)
@@ -1179,7 +1266,7 @@ mod tests {
             .map(|(rel, _, legacy)| put_spec(&dir, rel, &without_the_line(legacy)))
             .collect();
 
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!((report.migrated, report.provenance_added), (4, 4));
         for (path, (_, fresh, _)) in paths.iter().zip(&documents) {
             assert_eq!(&std::fs::read_to_string(path).unwrap(), fresh);
@@ -1195,7 +1282,7 @@ mod tests {
         let without = without_the_line(fresh);
         put_spec(&dir, rel, &without);
         let before = parse(&without).unwrap();
-        migrate_to_okf(&dir, true).unwrap();
+        migrate_without_graph(&dir, true).unwrap();
         assert_eq!(read_file_spec(&dir, "lib/a.ts").unwrap().unwrap(), before);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1210,7 +1297,7 @@ mod tests {
         let a = put_spec(&dir, "notes.md", article);
         let b = put_spec(&dir, "lib/x.ts.md", unattributed);
 
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!((report.migrated, report.provenance_added), (0, 0));
         assert_eq!(report.unchanged, 2);
         assert_eq!(std::fs::read_to_string(&a).unwrap(), article);
@@ -1223,16 +1310,147 @@ mod tests {
         let dir = temp_dir_for("okf-line-no-title");
         let text = "---\ntype: system\ntitle: \"X\"\n---\n## Summary\nNo title line.\n";
         let path = put_spec(&dir, "_index.md", text);
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!((report.provenance_added, report.unchanged), (0, 1));
         assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    const LINKED_DEP: &str = "- [`src/greeter.rs::Greeter`](greeter.rs.md) — crate::greeter";
+    const PLAIN_DEP: &str = "- `src/greeter.rs::Greeter` — crate::greeter";
+
+    #[test]
+    fn existing_dependency_lines_become_the_links_a_fresh_render_writes() {
+        let (graph, dir) = greeter_people_graph("okf-links");
+        let fresh = generate_people(&graph, &dir);
+        assert!(fresh.contains(LINKED_DEP), "{fresh}");
+        let path = spec_path(&dir, "src/people.rs");
+        let legacy = fresh.replace(LINKED_DEP, PLAIN_DEP);
+        std::fs::write(&path, &legacy).unwrap();
+        let before = parse(&legacy).unwrap();
+
+        // A dry run reports and writes nothing.
+        let dry = migrate_to_okf(&graph, &dir, false).unwrap();
+        assert_eq!(
+            (
+                dry.links_added,
+                dry.linked_documents,
+                dry.migrated,
+                dry.provenance_added
+            ),
+            (1, 1, 0, 0)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!((report.links_added, report.linked_documents), (1, 1));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
+
+        // No hash moves, the spec still reads as current, and nothing smells.
+        let spec = read_file_spec(&dir, "src/people.rs").unwrap().unwrap();
+        assert_eq!(spec, before);
+        let file_id = graph.find("src/people.rs").unwrap();
+        assert!(file_changes(&graph, file_id, &spec.file).is_empty());
+        assert!(crate::spec::smells::file_spec_smells(&graph, &dir, file_id, &spec).is_empty());
+
+        // A second run finds nothing left to link.
+        let again = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!((again.links_added, again.unchanged), (0, 1));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn only_a_dependency_with_a_spec_to_point_at_is_linked_and_only_in_the_list() {
+        let (graph, dir) = greeter_people_graph("okf-links-plain");
+        let header = file_okf_frontmatter("src/people.rs");
+        let doc = format!(
+            "---\n{header}source_paths: [src/people.rs]\n---\n# src/people.rs\n{PROVENANCE}\n\
+             ## Summary\nS.\n\n## `Polite`\n`pub struct Polite;`\n### Summary\nA.\n\
+             ### Behavior\n{PLAIN_DEP}\n\
+             ### Depends on\n{PLAIN_DEP}\n\
+             - `src/people.rs::Polite` — same file\n\
+             - `src/gone.rs::Old` — crate::gone\n\
+             externals: anyhow\n"
+        );
+        let path = put_spec(&dir, "src/people.rs.md", &doc);
+
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.links_added, 1, "{report:?}");
+        // Only the one line in the Depends on list changes: the same text in
+        // the prose, a same-file line, a file that is gone, and the externals
+        // line all stay as they were.
+        let (before_list, list) = doc.split_once("### Depends on").unwrap();
+        let expected = format!(
+            "{before_list}### Depends on{}",
+            list.replacen(PLAIN_DEP, LINKED_DEP, 1)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), expected);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_spec_with_no_source_path_is_reported_and_not_linked_from_nowhere() {
+        // Links are relative to the spec's own place, so a spec that does not
+        // say which file it is for cannot be linked: it is listed, untouched,
+        // not given links that point nowhere.
+        let (graph, dir) = greeter_people_graph("okf-no-source-path");
+        let header = file_okf_frontmatter("src/people.rs");
+        let doc = format!(
+            "---\n{header}---\n# src/people.rs\n{PROVENANCE}\n## Summary\nS.\n\n## `Polite`\n\
+             ### Summary\nA.\n### Behavior\nB.\n### Depends on\n{PLAIN_DEP}\n"
+        );
+        let path = put_spec(&dir, "src/people.rs.md", &doc);
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.links_added, 0);
+        assert_eq!(report.unreadable.len(), 1, "{:?}", report.unreadable);
+        assert!(report.unreadable[0].starts_with("src/people.rs.md: "));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), doc);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn text_inside_a_fenced_block_is_never_taken_for_a_dependency_list() {
+        let (graph, dir) = greeter_people_graph("okf-links-fence");
+        let header = file_okf_frontmatter("src/people.rs");
+        let doc = format!(
+            "---\n{header}source_paths: [src/people.rs]\n---\n# src/people.rs\n{PROVENANCE}\n\
+             ## Summary\nS.\n\n## `Polite`\n### Summary\nA.\n### Behavior\n\
+             An example of the layout:\n```\n### Depends on\n{PLAIN_DEP}\n```\n\
+             ### Depends on\n- (none)\n"
+        );
+        let path = put_spec(&dir, "src/people.rs.md", &doc);
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(report.links_added, 0, "{report:?}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), doc);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn one_run_gives_an_old_spec_the_keys_the_line_and_the_links() {
+        let (graph, dir) = greeter_people_graph("okf-links-all");
+        let fresh = generate_people(&graph, &dir);
+        let old = fresh
+            .replacen(&file_okf_frontmatter("src/people.rs"), "kind: file\n", 1)
+            .replacen(&format!("{PROVENANCE}\n"), "", 1)
+            .replace(LINKED_DEP, PLAIN_DEP);
+        assert_ne!(old, fresh);
+        let path = spec_path(&dir, "src/people.rs");
+        std::fs::write(&path, &old).unwrap();
+
+        let report = migrate_to_okf(&graph, &dir, true).unwrap();
+        assert_eq!(
+            (report.migrated, report.provenance_added, report.links_added),
+            (1, 1, 1)
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), fresh);
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn a_repo_with_no_specs_reports_nothing() {
         let dir = temp_dir_for("okf-empty");
-        let report = migrate_to_okf(&dir, true).unwrap();
+        let report = migrate_without_graph(&dir, true).unwrap();
         assert_eq!(report, OkfReport::default());
         std::fs::remove_dir_all(&dir).ok();
     }
