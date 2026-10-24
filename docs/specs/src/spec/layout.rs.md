@@ -5,11 +5,16 @@ description: "Specification for `src/spec/layout.rs`."
 generated: { by: CodeOwl }
 resource: "../../../../src/spec/layout.rs"
 source_paths: [src/spec/layout.rs]
-file: { source_hash: 81a3707631c193c527e7a7c490a2d26c8625a16e435c158020b250d44583c740, fingerprint: fa92627011f6ef4a8eeedc401840b69a4d9036170090e790c681c6c6713c8f35, deps_hash: 65205747e590744ed7ea34c41df8e27ea7309f76aa40da203218e7882104e30d, spec_hash: 13a318792463a619c6f5cd57546e5b1dc25ea01e3e50af0fb88261a3dd7da370 }
+file: { source_hash: 78b3d7fe63de5f5d1adc2ebdde8cc8d0fdb1e634a00034f2045cd4439c8d8c10, fingerprint: 6dbbf6773d71e950be1f2e64bc3fa2911b21775cc97c7814660aea3770192af1, deps_hash: 65205747e590744ed7ea34c41df8e27ea7309f76aa40da203218e7882104e30d, spec_hash: a100b7bee6ed4205c64929c3a4a89f1efbf22d11395174b633d6d532e8b79dcf }
 symbols:
   src/spec/layout.rs::classify_in: { source_hash: 89ddb187b8cd4d9a8903076c09a208914fe19ed1a3599c3e0017c86f2a61fff9, deps_hash: 0cd902635a3982b86f5983707665f0e043718ab791d6fc5f7f3ab6f4b93de4ca, spec_hash: 45f1d05fba56968d0ae8f54e96decde1d4312827fe3575540c2bd5709c92b4ce }
   src/spec/layout.rs::spec_path: { source_hash: 1fa6e490788d7cf1d135f466d65e20424cc8b0501d230e651d94d286fc605b92, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 00abd4542d3845b59926e18058659cd21c3c3296b8dedb019d81404d866ac06e }
   src/spec/layout.rs::spec_relative_path: { source_hash: 8f019f57f42cb84bc5312f0403a1c5c34cab705b4b2ce378b80a3146b02df1b0, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2c41e6469f67c9b0c12aef979e94e1ef2aeea4597ea2f03b5f100a14ff651c31 }
+  src/spec/layout.rs::symbol_file: { source_hash: 80d179748932935284cccc68fe27c643c50b502a20bf3491b3b0647135e0d815, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 3ce4b1dc5a7cfab94f1cfd0d98fb9f66e43fdb153f9be228cb5468e0f3ede0f0 }
+  src/spec/layout.rs::spec_link: { source_hash: afd8e815e3c8fd052028bc31eaf70eb0ca59f1f2ec05b36931000f08d2561fc1, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 5343a39c694cf6dceab7f30d873faa958270cab0ab8c40b7331b0c68be943a79 }
+  src/spec/layout.rs::link_destination: { source_hash: 17bf36a01dc66d733e203aa9019e3483042030fbf64172178cb8f9643d3fd35d, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 7044cce45fc7baa5bb79cee09174f3c47a4da4f08b7b3bc0dd807e7e4dba9124 }
+  src/spec/layout.rs::heading_anchors: { source_hash: b79655001eb1fea0bf44f367d55d63b86fb1a9fe43819cdf9d72ca2ae2a09a29, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: dd9ee40447bf87cb6b3806e1240a64bee87271a732914507d69c840931e78618 }
+  src/spec/layout.rs::section_anchor: { source_hash: ecbdd80e40be1e91c6f501eb19d5e296e27f797858573fc104fa4900cc1d7a71, deps_hash: 01f4295ee1ac66ab83805a3dc337a64a4cd6562aaeb1018442a21ad6ad27f8da, spec_hash: 69db43e48d619344bc8c3945d59c0ecc6d370392463aa37f4c11f1bbbe4f62b8 }
   src/spec/layout.rs::is_test_path: { source_hash: dc85121fe35904dfcaa30e3b868d27e4ab83974e823181c62abe6cf196188cb8, deps_hash: 612d2845e85f396e50e16e46c88b771536f63becfcd201ab321006818ad15d7e, spec_hash: b2c9b75f81e47cdf908c82fb0c1daeef1b420a8161df32921a5bd9791ac459a9 }
   src/spec/layout.rs::file_is_spec_bearing: { source_hash: 744b2eac55250d9f0e2defd885a62c13dc75111aea07fc48d5119afa5eb4c4d7, deps_hash: 28b4987b14f80b3e279eb9143771f4de4f6b5c16dedbc1fee5b29742866f09ae, spec_hash: ac758c60ea128ef92faf70c3500ebd5e44bc408537fd1978bee93bc3bbcf6e91 }
   src/spec/layout.rs::GeneratedSourcesSummary: { source_hash: 187cb5e69efde7fa4dc708aaa2037c86df5cf4558651f6821e7e56dc85964736, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 2212c3c20c3c092186a701bbe1109956f855fc0678e6559ca44adb6a0b8921c4 }
@@ -30,6 +35,7 @@ dep_targets:
   src/spec/layout.rs::classify_in -> src/graph.rs::Graph: 8d4d56d40124
   src/spec/layout.rs::classify_in -> src/lang.rs::FileRole: 2e8bc021ccde
   src/spec/layout.rs::classify_in -> src/stack.rs::file_role: 1223601f93fb
+  src/spec/layout.rs::section_anchor -> src/graph.rs::Graph: 8d4d56d40124
   src/spec/layout.rs::is_test_path -> src/graph.rs::Graph: 8d4d56d40124
   src/spec/layout.rs::is_test_path -> src/lang.rs::FileRole: 2e8bc021ccde
   src/spec/layout.rs::file_is_spec_bearing -> src/graph.rs::Graph: 8d4d56d40124
@@ -51,7 +57,11 @@ dep_targets:
 # [`src/spec/layout.rs`](../../../../src/spec/layout.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
-This file answers which spec documents the granularity rules say should exist, and where each one lives. A file spec lives at the file's own path under `docs/specs/` with `.md` appended (the source extension is never stripped, so `lib/utils.ts` becomes `docs/specs/lib/utils.ts.md`). A file is spec-bearing when at least one of its top-level symbols is a function-like or type-like declaration; that holds whether or not the declaration is exported, so a file of entirely private code such as an integration-test file still gets a spec, while a barrel file or a file of constants does not. A file whose role is generated (build output such as a codegen'd interface) is never spec-bearing, however much it exports. Which of a file's top-level symbols get their own section is the same kind test, and constants get none. A directory gets a rollup only when at least two of its immediate files are spec-bearing, which keeps single-file route directories from producing noise; the directory helpers are one level deep, not recursive, and return files in path order so generated pages are stable between runs. Whether a path is test code, and whether it is generated, is not decided here: it goes through the language pack named on the graph, so the layout rules are not tied to one language's conventions. The file also builds the generated-sources report that coverage surfaces: nothing for a language with no such concept, otherwise a count of files with the generated role and the directories the pack knows about, where a count of zero is the actionable case. `short_name` takes the part of a symbol id after the last `::` for a section heading.
+This file answers two questions about the spec documents: which ones the granularity rules say should exist, and where each lives and how other specs link to it. A file's spec sits at the file's own path under `docs/specs/` with `.md` appended, and the source extension is never stripped, so `lib/utils.ts` becomes `docs/specs/lib/utils.ts.md`. The naming rule is in one private function that both the path builder and the link builder follow. The link side is the other half of the layout: `spec_link` builds the relative path from one spec to another (relative, because a leading slash means the repository root on GitHub), `link_destination` percent-escapes the characters that would break a markdown destination, and `heading_anchors` and `section_anchor` work out the GitHub anchor of a symbol's section from the graph alone, so a dependency link can land on the section instead of the top. When the anchor cannot be known, the link simply opens the top of the page.
+
+A file is spec-bearing when at least one of its top-level symbols is function-like or type-like. That holds whether or not the declaration is exported, so a file of entirely private code such as an integration-test file still gets a spec, while a barrel file or a file of constants does not. A file whose role is generated (build output such as a codegen'd interface) is never spec-bearing, however much it exports. The symbols that get their own section are chosen by the same kind test, in source order, and constants get none; a container's members are covered inside the container's own section. A directory gets a rollup only when at least two of its immediate files are spec-bearing, which keeps single-file route directories from producing noise. The directory helpers look one level deep, not recursively, and return files in path order so generated pages are stable between runs. Test code is recognised by `is_test_path`.
+
+Whether a path is test code or generated is not decided here: both questions go through the language pack named on the graph, so the layout rules are not tied to one language's conventions. The file also builds the generated-sources report that coverage surfaces: nothing for a language with no such concept, otherwise a count of files with the generated role and the directories the pack knows about, where a count of zero is the actionable case. `symbol_file` takes the file part of a symbol id and `short_name` the part after the last `::`, which is what a section heading uses.
 
 ## `classify_in`
 `fn classify_in(graph: &Graph, path: &str) -> FileRole`
@@ -81,6 +91,63 @@ Says what a source file's spec is called inside the `docs/specs/` folder: the fi
 Returns the path followed by `.md`, so `src/hash.rs` gives `src/hash.rs.md`; the original extension is kept. It is the single place that decides how a spec is named. `spec_path` uses it to find where a spec is saved on disk, and `spec_link` uses it when working out the relative address of a link, so the two cannot drift apart if the naming ever changes. It is private to the module and does no checking: the result is a name only, with no test that the source file or the spec exists, and an empty path would give just `.md`.
 ### Depends on
 - (none)
+
+## `symbol_file`
+`pub fn symbol_file(id: &str) -> &str`
+### Summary
+Returns the file part of a symbol id, so code that holds either a symbol id or a bare file path can get the file path out of both the same way.
+### Behavior
+Splits the id on the first `::` and returns what comes before it. An id with no `::` is returned whole, which is why a file path passes through unchanged. Only the first separator matters, so an id whose symbol name itself contains `::` still yields just the file part. It borrows from the input and allocates nothing, and it never fails: an empty id returns an empty string. It does not check that the file exists in the graph.
+### Depends on
+- (none)
+
+## `spec_link`
+`pub fn spec_link(from_file: &str, target_file: &str) -> String`
+### Summary
+Builds the relative markdown link destination from one file's spec to another file's spec, so a dependency entry in a spec opens the dependency's spec in the same docs tree.
+### Behavior
+Both arguments are repo-relative source paths. The spec of a file sits at the same path with `.md` appended, so the starting folder is the directory part of `from_file` and the target is `target_file` plus `.md`. The two folder lists are compared segment by segment; the shared leading segments are dropped, one `..` is added for each remaining folder of the starting file, and the rest of the target path follows. The result goes through `link_destination`, which percent-escapes characters that would end a markdown destination or start a fragment or query (space, parentheses, `#`, `?`, `<`, `>`, `%` and a backslash).
+
+The link is relative on purpose: on GitHub a leading `/` means the repository root, not `docs/specs/`. A file at the repo root has no folder, so its link has no `..`. The function does not check that the target has a spec, and it adds no anchor; callers add one when they know the section. Comparison is exact and case-sensitive on segment text.
+### Depends on
+- (none)
+
+## `link_destination`
+`pub fn link_destination(path: &str) -> String`
+### Summary
+Makes a path safe to use as the destination of a markdown link, by percent-escaping the characters that would end the destination early or turn the rest into a fragment or query.
+### Behavior
+Walks the path one character at a time and replaces nine characters with their percent codes: `%` becomes `%25`, space `%20`, `(` `%28`, `)` `%29`, `#` `%23`, `?` `%3F`, `<` `%3C`, `>` `%3E` and a backslash `%5C`. Every other character, including `/` and `.`, is copied as it is. Because `%` is escaped too, a path that already holds a percent code is escaped again rather than left alone, so the function must be applied once, to a raw path.
+
+It escapes only what breaks a markdown destination; it does not encode non-ASCII text, does not normalise the path and does not add an anchor. The callers are `spec_link` and the title link of a spec.
+### Depends on
+- (none)
+
+## `heading_anchors`
+`pub fn heading_anchors(headings: &[String]) -> Vec<String>`
+### Summary
+Works out the anchor GitHub gives each heading of a document, so a link into a spec can end in the right `#fragment`. The result is in document order and lines up with the input list.
+### Behavior
+Each heading is trimmed and lowercased, then every character is dropped except letters and digits (any script), `_`, `-`, spaces and the combining marks U+0300 to U+036F (which GitHub keeps, so a decomposed accent survives). Spaces become hyphens. Punctuation is removed, not replaced, so `a.b` becomes `ab`.
+
+The anchor of a heading depends on the headings before it. A table of slugs already handed out is kept for the whole call. If a slug is taken, the function appends `-1`, then `-2` and so on, and keeps counting if that numbered candidate is itself taken (a heading literally named `Summary-1` after two `Summary` headings). The count is kept per original slug, so each repeated name counts up on its own.
+
+The rule is GitHub's for ASCII names and decomposed accents. A heading with other characters GitHub treats differently could get a different anchor, and a link then opens the top of the page instead of the section; nothing else breaks. The caller must pass every heading of the page, the title included, because the title takes a slug too.
+### Depends on
+- externals: std
+
+## `section_anchor`
+`pub fn section_anchor(graph: &Graph, symbol_id: &str) -> Option<String>`
+### Summary
+Finds the anchor of a symbol's own section inside its file's spec, so a dependency link can open the spec at that section instead of at the top.
+### Behavior
+Looks up the symbol's file in the graph and takes its spec-bearing children in the order the renderer writes them. If the symbol is not among them (a method, a constant, an unknown id, or a file the graph does not know) the result is `None` and the link opens the file's spec at the top.
+
+Otherwise it rebuilds the heading sequence of the rendered page without reading the file: the page title (the file path), then `Summary`, then for each section the symbol's short name followed by `Summary`, `Behavior` and `Depends on`. That list goes to `heading_anchors`, which numbers repeats the way GitHub does, and the anchor at the symbol's own heading is returned. Because the title is in the list, a symbol named like the file path would be numbered after it.
+
+It is worked out from the graph alone, so it assumes every symbol is documented and the spec is current. That only matters when two headings share a name: a partly documented file or a stale spec that still lists a deleted symbol can number a repeat differently, and the link then opens the top. A name with no letters, digits, `_` or `-` has an empty slug, and the function returns `None` for it rather than a link ending in a bare `#`.
+### Depends on
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
 
 ## `is_test_path`
 `pub fn is_test_path(graph: &Graph, path: &str) -> bool`
