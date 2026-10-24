@@ -402,8 +402,10 @@ pub(super) fn dependency_lines(
 /// The same lines as [`dependency_lines`], each resolved dependency written
 /// as a markdown link to the spec of the file it comes from where such a spec
 /// can exist. This is what the rendered spec shows; `dependency_lines` stays
-/// plain text because the quality check and the generation task read it. The
-/// `externals:` line has no spec to point at and stays as it is.
+/// plain text because the quality check (`file_spec_smells`) reads it. (The
+/// generation task builds its own dependency list from `scoped_symbol_deps`
+/// directly, not from either of these.) The `externals:` line has no spec to
+/// point at and stays as it is.
 pub(super) fn linked_dependency_lines(
     graph: &Graph,
     root: &Path,
