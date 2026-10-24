@@ -186,7 +186,8 @@ pub struct CoverageItemResponse {
     /// one. Always 0 for non-file kinds.
     pub fan_in: usize,
     /// Deterministic quality smells found in this document's current
-    /// content (e.g. `"cop_out_phrase"`, `"suspiciously_short"`, `"unbalanced_code_span"`,
+    /// content (e.g. `"cop_out_phrase"`, `"suspiciously_short"`,
+    /// `"stray_markup"`, `"unbalanced_code_span"`,
     /// `"identical_dependencies_across_symbols"`) — independent of
     /// `status`, since hash-based staleness only verifies inputs haven't
     /// moved, never that the prose was ever meaningful. Empty for a
@@ -565,7 +566,8 @@ pub struct SpecResponse {
     /// moved (deterministic, off the graph)").
     pub changed: Vec<String>,
     /// Deterministic quality smells found in `content` itself (e.g.
-    /// `"cop_out_phrase"`, `"suspiciously_short"`, `"unbalanced_code_span"`) — can be non-empty even
+    /// `"cop_out_phrase"`, `"suspiciously_short"`, `"stray_markup"`,
+    /// `"unbalanced_code_span"`) — can be non-empty even
     /// when `status` is `"current"`, since hash-based staleness only
     /// verifies inputs haven't moved, never that the prose was ever
     /// meaningful. Always empty when `status` is `"missing"`. See

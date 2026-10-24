@@ -57,25 +57,47 @@ pub fn prose_smells(text: &str) -> Vec<String> {
 /// a run with no partner is left as literal text. A backslash outside a span
 /// escapes the next character (so `\`` is a literal backtick), but inside a span
 /// it is plain text, which is why a span written as `` `\`name\`` `` comes out
-/// broken. A block ends at a blank line or where a list item, quote, table row
-/// or heading starts, and fenced code blocks are not prose, so both are cut out.
+/// broken. A block ends at a blank line or where something that can interrupt
+/// a paragraph starts (see [`interrupts_a_paragraph`]); fenced and indented
+/// code blocks are not prose and are cut out.
+///
+/// The rule is deliberately stricter than the renderer: markdown shows a lone
+/// backtick as plain text, but in a spec it is almost always a mistake (a
+/// fragment cut mid-sentence, a span that lost its closer), and the cost of
+/// being refused is one rewording (a literal backtick can be written inside a
+/// double-backtick span). Where the check has to guess about markdown structure
+/// it leans toward not flagging, because refusing good prose is the worse error.
 fn has_unclosed_code_span(text: &str) -> bool {
-    let mut in_fence = false;
+    let mut fence: Option<(char, usize)> = None;
     let mut block = String::new();
     for line in text.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+        if let Some(open) = fence {
+            if closes_fence(line, open) {
+                fence = None;
+            }
+            continue;
+        }
+        if let Some(open) = opens_fence(line) {
             if span_is_unclosed(&block) {
                 return true;
             }
             block.clear();
-            in_fence = !in_fence;
+            fence = Some(open);
             continue;
         }
-        if in_fence {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() {
+            if span_is_unclosed(&block) {
+                return true;
+            }
+            block.clear();
             continue;
         }
-        if trimmed.is_empty() || starts_a_block(trimmed) {
+        // Four spaces of indent at the start of a block make it code.
+        if block.is_empty() && line.len() - trimmed.len() >= 4 {
+            continue;
+        }
+        if !block.is_empty() && interrupts_a_paragraph(trimmed) {
             if span_is_unclosed(&block) {
                 return true;
             }
@@ -87,17 +109,53 @@ fn has_unclosed_code_span(text: &str) -> bool {
     span_is_unclosed(&block)
 }
 
-/// Whether a line begins a new markdown block: a list item, a quote, a table
-/// row or a heading. A code span cannot run from one such block into the next.
-fn starts_a_block(line: &str) -> bool {
-    if ["- ", "* ", "+ ", "> ", "|", "#"]
+/// The fence a line opens, as (character, length): at least three backticks or
+/// tildes after at most three spaces of indent. A backtick fence cannot have a
+/// backtick in its info string, which is what keeps a line that starts with an
+/// inline triple-backtick span from being taken for one.
+fn opens_fence(line: &str) -> Option<(char, usize)> {
+    let trimmed = line.trim_start();
+    if line.len() - trimmed.len() > 3 {
+        return None;
+    }
+    let marker = trimmed.chars().next().filter(|c| matches!(c, '`' | '~'))?;
+    let length = trimmed.chars().take_while(|&c| c == marker).count();
+    if length < 3 || (marker == '`' && trimmed[length..].contains('`')) {
+        return None;
+    }
+    Some((marker, length))
+}
+
+/// Whether `line` closes the fence `(marker, length)`: the same character, at
+/// least as many of them, and nothing but whitespace after.
+fn closes_fence(line: &str, (marker, length): (char, usize)) -> bool {
+    let trimmed = line.trim_start();
+    if line.len() - trimmed.len() > 3 {
+        return false;
+    }
+    let run = trimmed.chars().take_while(|&c| c == marker).count();
+    run >= length && trimmed[run..].trim().is_empty()
+}
+
+/// Whether a line can interrupt a paragraph and start a new block: a bullet, a
+/// quote, a heading (`#` to `######` then a space), or an ordered item that
+/// starts at 1. Anything else, such as a wrapped line that begins `2. ` or
+/// `#[derive(...)]`, is only a continuation of the sentence.
+fn interrupts_a_paragraph(line: &str) -> bool {
+    if ["- ", "* ", "+ ", ">"]
         .iter()
         .any(|marker| line.starts_with(marker))
     {
         return true;
     }
+    let hashes = line.chars().take_while(|&c| c == '#').count();
+    if (1..=6).contains(&hashes) && (line.len() == hashes || line[hashes..].starts_with(' ')) {
+        return true;
+    }
     let digits = line.chars().take_while(char::is_ascii_digit).count();
-    digits > 0 && (line[digits..].starts_with(". ") || line[digits..].starts_with(") "))
+    digits > 0
+        && line[..digits].parse::<u32>() == Ok(1)
+        && (line[digits..].starts_with(". ") || line[digits..].starts_with(") "))
 }
 
 /// The span rule on one block of prose; see [`has_unclosed_code_span`].
@@ -220,14 +278,20 @@ pub(super) fn reject_if_smelly(what: &str, smells: Vec<String>) -> Result<()> {
         return Ok(());
     }
     // "Expand it" is the right advice for thin prose and the wrong advice for a
-    // broken code span, which needs fixing, not lengthening.
-    let advice = if smells.iter().all(|s| s.ends_with("unbalanced_code_span")) {
-        "close the code span (to show backticks inside one, wrap it in a \
-         double-backtick span: ``a `b` c``; a backslash does not escape \
-         inside a span)"
-    } else {
-        "expand it"
-    };
+    // broken code span, which needs fixing, not lengthening. Say what each
+    // smell asks for, so a text with both is told both.
+    let mut advice = Vec::new();
+    if smells.iter().any(|s| !s.ends_with("unbalanced_code_span")) {
+        advice.push("expand it");
+    }
+    if smells.iter().any(|s| s.ends_with("unbalanced_code_span")) {
+        advice.push(
+            "close the code span (to show backticks inside one, wrap it in a \
+             double-backtick span: ``a `b` c``; a backslash does not escape \
+             inside a span)",
+        );
+    }
+    let advice = advice.join(", and ");
     bail!(
         "{what} fails a quality check ({}) — {advice}; `get_next_spec_task` \
          re-offers a spec until its prose clears the check",
@@ -313,6 +377,80 @@ mod tests {
             ),
             vec!["unbalanced_code_span"]
         );
+    }
+
+    #[test]
+    fn a_wrapped_line_that_only_looks_like_a_block_start_does_not_cut_a_span() {
+        // Inside a paragraph only a bullet, a quote, a heading or "1." starts a
+        // new block. These wrapped lines do not, so the span below stays whole.
+        let fine = |text: &str| {
+            assert!(prose_smells(text).is_empty(), "wrongly flagged: {text}");
+        };
+        fine("Reads `foo bar\n2. baz` and returns the result to callers.");
+        fine("Uses `the attribute\n#[derive(Debug)] shown` in the example for readers.");
+        fine("Fills `the row\n| with cells` the way the example for readers shows.");
+        // "1." does interrupt a paragraph, so a span cannot cross it.
+        assert_eq!(
+            prose_smells("Reads `foo bar\n1. baz` and returns the result to callers."),
+            vec!["unbalanced_code_span"]
+        );
+        // A heading is `#` then a space; `#!` is not one.
+        fine("Reads `foo\n#!bar` and returns the result to callers of it.");
+    }
+
+    #[test]
+    fn a_fence_is_found_by_its_character_and_length() {
+        let fine = |text: &str| {
+            assert!(prose_smells(text).is_empty(), "wrongly flagged: {text}");
+        };
+        // A line that starts with an inline triple-backtick span is not a fence...
+        assert_eq!(
+            prose_smells(
+                "```code``` is used here for a sample.\nA second line with a lone ` in prose of the text."
+            ),
+            vec!["unbalanced_code_span"],
+            "the lone backtick on line two must not be swallowed as 'code'"
+        );
+        // ...a four-backtick fence may hold a three-backtick line...
+        fine(
+            "Text before it.\n````\n```\nlet x = `;\n```\n````\nMore text after the example here.",
+        );
+        // ...and a tilde line cannot close a backtick fence.
+        fine("```\nlet x = `;\n~~~\nstill code `\n```\nDone and dusted after the example here.");
+    }
+
+    #[test]
+    fn an_indented_code_block_is_not_prose() {
+        let text = "Prose before the sample, in a few words.\n\n    let x = `a;\n\nProse after the sample, in a few words.";
+        assert!(prose_smells(text).is_empty(), "{:?}", prose_smells(text));
+    }
+
+    #[test]
+    fn the_rejection_names_the_fix_for_every_smell_it_reports() {
+        let only_span = reject_if_smelly("Behavior", vec!["Behavior: unbalanced_code_span".into()])
+            .unwrap_err()
+            .to_string();
+        assert!(only_span.contains("double-backtick"), "{only_span}");
+        assert!(!only_span.contains("expand it"), "{only_span}");
+
+        let only_thin = reject_if_smelly("Behavior", vec!["Behavior: suspiciously_short".into()])
+            .unwrap_err()
+            .to_string();
+        assert!(only_thin.contains("expand it"), "{only_thin}");
+        assert!(!only_thin.contains("double-backtick"), "{only_thin}");
+
+        // Both at once: the agent is told both things, not only the first.
+        let both = reject_if_smelly(
+            "Behavior",
+            vec![
+                "Behavior: suspiciously_short".into(),
+                "Behavior: unbalanced_code_span".into(),
+            ],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(both.contains("expand it"), "{both}");
+        assert!(both.contains("double-backtick"), "{both}");
     }
 
     #[test]
