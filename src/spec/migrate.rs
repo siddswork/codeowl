@@ -772,6 +772,20 @@ mod tests {
     }
 
     #[test]
+    fn a_spec_written_with_dependency_links_still_reads_as_current_and_not_smelly() {
+        // The links are only in the rendered text; nothing reads them back,
+        // so they must not move a hash or trip the quality check.
+        let (graph, dir) = greeter_people_graph("linked-current");
+        let text = generate_people(&graph, &dir);
+        assert!(text.contains("](greeter.rs.md)"), "{text}");
+        let spec = read_file_spec(&dir, "src/people.rs").unwrap().unwrap();
+        let file_id = graph.find("src/people.rs").unwrap();
+        assert!(file_changes(&graph, file_id, &spec.file).is_empty());
+        assert!(crate::spec::smells::file_spec_smells(&graph, &dir, file_id, &spec).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_dry_run_reports_but_writes_nothing() {
         let (graph, dir) = migrate_fixture("mig-dry");
         let legacy = legacy_file_spec(&graph, &dir, "a.ts");

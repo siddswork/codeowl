@@ -617,6 +617,11 @@ so `docs/specs/` conforms:
 | `resource` | For a file or rollup, the path it describes, relative to the spec. |
 | `sources` | For a feature or the system spec, the files or modules it covers. |
 
+In the body, each dependency in a symbol's `### Depends on` list is a link to
+the spec of the file it comes from (``[`src/graph.rs::Graph`](../graph.rs.md)``),
+so you can follow the specs from one to the next on GitHub or in any markdown
+viewer. A link to a file that has no spec yet simply does not open.
+
 Every spec written from now on has them. Specs written earlier keep working
 (a spec that still says `kind:` is read as before), but they only gain the
 keys when regenerated, unless you run:
