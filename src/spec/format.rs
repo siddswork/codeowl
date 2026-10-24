@@ -776,12 +776,23 @@ mod tests {
     }
 
     #[test]
-    fn the_provenance_line_says_the_spec_was_generated_using_codeowl() {
+    fn a_rendered_spec_says_it_was_generated_using_codeowl() {
         // CodeOwl never writes the prose: the calling agent does. "using" is
-        // the accurate word; "by" would credit CodeOwl with the writing.
+        // the accurate word; "by" would credit CodeOwl with the writing. The
+        // text is written out here, not taken from the constant, so the test
+        // checks what a reader sees on the second line of a rendered spec.
+        let graph = build_graph_from_sources(&[("a.ts", "export function one() {}\n")]);
+        let file_id = graph.find("a.ts").unwrap();
+        let spec = FileSpec {
+            source_path: "a.ts".to_string(),
+            file_summary: "One thing.".to_string(),
+            ..FileSpec::blank("a.ts")
+        };
+        let rendered = render(&graph, Path::new("/nonexistent"), file_id, &spec);
+        let body = rendered.split_once("\n---\n").unwrap().1;
         assert_eq!(
-            PROVENANCE,
-            "> Generated using [CodeOwl](https://github.com/siddswork/codeowl)"
+            body.lines().nth(1),
+            Some("> Generated using [CodeOwl](https://github.com/siddswork/codeowl)")
         );
     }
 

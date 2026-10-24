@@ -656,7 +656,7 @@ so `docs/specs/` conforms:
 | `type` | `file`, `rollup`, `feature` or `system` (this replaces the old `kind`). |
 | `title` | The document's own heading: the file path, directory, feature or repo name. |
 | `description` | A fixed sentence, never taken from the summary, such as "Specification for `src/hash.rs`." |
-| `generated` | `{ by: CodeOwl }`, with no timestamp. |
+| `generated` | `{ by: CodeOwl }`, with no timestamp. (`by` is OKF's own name for the key. The visible line under the title says "Generated *using* CodeOwl", because the agent writes the prose and CodeOwl does not.) |
 | `resource` | For a file or rollup, the path it describes, relative to the spec. |
 | `sources` | For a feature or the system spec, the files or modules it covers. |
 
