@@ -641,6 +641,45 @@ mod tests {
     }
 
     #[test]
+    fn submit_rejects_prose_with_a_code_span_that_never_closes_and_names_the_field() {
+        let dir =
+            std::env::temp_dir().join(format!("codeowl-spec-test-{}-spans", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let graph = build_graph_from_sources(&[("a.ts", "export function one(): void {}\n")]);
+
+        // The Behavior has the nested-backtick slip; the Summary is fine.
+        let err = submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nReturns nothing and exists only for the example.\n\
+             ### Behavior\nWrites a heading such as a `## \\`name\\`` line, then stops.\n",
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("quality check"), "{msg}");
+        assert!(msg.contains("Behavior: unbalanced_code_span"), "{msg}");
+        assert!(
+            !msg.contains("Summary:"),
+            "the clean field is not blamed: {msg}"
+        );
+        // "Expand it" would be the wrong advice here: the message says what to do.
+        assert!(msg.contains("double-backtick"), "{msg}");
+        assert!(!msg.contains("expand it"), "{msg}");
+
+        // The same sentence with a double-backtick span is accepted.
+        submit(
+            &graph,
+            &dir,
+            "a.ts::one",
+            "### Summary\nReturns nothing and exists only for the example.\n\
+             ### Behavior\nWrites a heading such as a ``## `name` `` line, then stops.\n",
+        )
+        .unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn submit_rejects_prose_that_next_task_would_re_offer_forever() {
         let dir =
             std::env::temp_dir().join(format!("codeowl-spec-test-{}-smelly", std::process::id()));
