@@ -89,7 +89,7 @@ Reads one Java file and returns the declarations in it: every top-level class, i
 ### Behavior
 Creates a tree-sitter parser (a library that turns source text into a syntax tree) with the bundled Java grammar; loading the grammar is assumed always to work. If the text cannot be parsed at all it returns an empty list. Otherwise it goes through the top-level items of the file in order and hands each to `visit_item`, which adds symbols to the output, so declarations come out in source order. Nothing from the syntax tree escapes the function, since the tree is dropped when it returns and only plain owned symbols are returned. Package and import lines at the top are not turned into symbols here; `extract_imports` reads those separately.
 ### Depends on
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
 - externals: tree_sitter
 
 ## `visit_item`
@@ -111,8 +111,8 @@ Looks at one Java declaration and records the right kind of symbol for it: a typ
 
 Statements, method bodies and lambdas are never entered. Unrecognised node kinds, such as imports or comments, are silently skipped. It appends to `out` and returns nothing.
 ### Depends on
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
 - externals: tree_sitter
 
 ## `visit_container`
@@ -137,10 +137,10 @@ Public-surface fingerprint (`interface_hash`, only for exported types, otherwise
 
 Finally the container is inserted into the output before its members, so order stays parent then children. It carries the line range, the preceding doc comment, the annotations as markers, the parent id, and the member ids. Nothing is returned.
 ### Depends on
-- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
-- [`src/text.rs::strip_value_for_fold`](text.rs.md) — crate::text
+- [`src/hash.rs::hash_text`](hash.rs.md#hash_text) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
+- [`src/text.rs::strip_value_for_fold`](text.rs.md#strip_value_for_fold) — crate::text
 - externals: tree_sitter
 
 ## `push_leaf`
@@ -158,8 +158,8 @@ Records a simple Java declaration, such as a method, whose name is written in th
 ### Behavior
 Reads the node's `name` field as text. If the node has no readable name it returns without adding anything. Otherwise it passes that name along with the kind, raw kind, parent id, source and file to `push_named_leaf`, which builds and appends the symbol. It exists so callers do not repeat the name lookup, while declarations whose name is not in a `name` field, such as a constructor (named `<init>`) or a field with several declarators, use `push_named_leaf` directly with a name they supply. It appends to `out` and returns nothing.
 ### Depends on
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
 - externals: tree_sitter
 
 ## `push_named_leaf`
@@ -178,9 +178,9 @@ Builds and records the symbol for a Java method, constructor, field or constant,
 ### Behavior
 The id is `<parent id>::<name>`, or `<file>::<name>` when there is no parent. The signature is the declaration text before its body (`signature_before_body`). The symbol is exported only when it has no parent and has a `public` or `protected` modifier; a member is never counted as exported on its own, because it is reached through its type and not imported separately. `source_hash` is a hash of the whole declaration text, body included. `interface_hash` is a hash of the signature alone, and exists only when the symbol is exported, so body edits leave it unchanged. The symbol also records its line range, the preceding doc comment, its annotations as markers, the parent id, and no children. It appends to `out` and returns nothing. In practice leaves almost always have a parent, so they rarely have an interface hash; the container's own public-surface hash covers their signatures.
 ### Depends on
-- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
+- [`src/hash.rs::hash_text`](hash.rs.md#hash_text) — crate::hash
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
 - externals: tree_sitter
 
 ## `type_name`
@@ -308,8 +308,8 @@ Parses the file with the Java grammar and, if parsing fails, returns an empty re
 
 A declaration with no readable path is skipped. After the imports, `extract_qualified_refs` fills the separate qualified-references list from the rest of the file, for classes reached by their full name with no import statement. The file's own path is not used. Cannot fail.
 ### Depends on
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/imports.rs::ImportRef`](imports.rs.md) — crate::imports
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/imports.rs::ImportRef`](imports.rs.md#importref) — crate::imports
 - externals: tree_sitter
 
 ## `extract_qualified_refs`
@@ -321,7 +321,7 @@ Walks the whole syntax tree recursively, skipping `package` and `import` declara
 
 It records every dotted name without checking whether it is a package: a field access on a local variable such as `t.value` is recorded too, and simply fails to match any file later, so resolution is the filter and none is applied here. Comments are separate tokens in the tree, so a class name in a Javadoc `{@code a.b.C}` is not picked up, which avoids a false positive that an earlier plain-text scan had. It appends to `out` and returns nothing.
 ### Depends on
-- [`src/imports.rs::ImportRef`](imports.rs.md) — crate::imports
+- [`src/imports.rs::ImportRef`](imports.rs.md#importref) — crate::imports
 - externals: tree_sitter
 
 ## `resolve_imports`
@@ -340,8 +340,8 @@ Visits files in sorted path order so the saved edge list is stable between runs.
 
 Returns the combined list, explicit imports first. It cannot fail itself; problems appear as edges with no target. A method call is never an edge of its own; the only edges that can point at a method are an import or full-path reference that names one. The same-package check is a whole-word text match with no comment or string handling, so a class name that only appears in a comment or string literal still creates an edge, and "same package" is judged by directory, not by the declared package line.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
 - `src/resolve.rs::ResolvedImport` — crate::resolve
 - externals: std
 
@@ -357,9 +357,9 @@ Adds links for Java classes a file uses by writing out their full path (such as 
 ### Behavior
 First it builds, once, a map from each file to the set of targets it already reaches through earlier edges, so it does not rescan all edges for every file. Then for each file, in sorted order, and each of its qualified references, it resolves the name the same way an explicit import is resolved (`resolve_explicit`, which does not care how the name was written), so no new resolution rules are introduced. It skips a reference that does not resolve, one whose target is in the same file as the reference, and one whose target the file already reaches, whether from an earlier edge or from an earlier reference in the same pass, so the same target is never added twice for a file. The check compares the target's id, not its simple name, so two different classes both called `Fight`, as in one mapper that deals with two of them, each still get an edge, because Java's same-package shadowing rule does not apply to either. Each surviving reference becomes a `ResolvedImport` with the target set. Returns only the new edges, in file order; it does not modify the list it is given. A reference that resolves to nothing, such as an external library class, is dropped silently rather than kept as an unresolved edge.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
 - `src/resolve.rs::ResolvedImport` — crate::resolve
 - externals: std
 
@@ -370,7 +370,7 @@ Finds the Java file that a fully-qualified class name points to, such as `com.ac
 ### Behavior
 Turns the name into a path by replacing dots with slashes and adding `.java`, so `a.b.C` becomes `a/b/C.java`. It then keeps every indexed file whose path equals that or ends with `/a/b/C.java`, which makes it independent of where the source folder is (`src/main/java`, a module folder, or anything else). The matches are sorted and the first is returned, so when the same name exists under two source roots, such as main and test, the alphabetically first path wins and the result is deterministic. A longer name such as `a.b.C.member` (a static import) maps to `a/b/C/member.java`, so callers pass only the class part. It returns `None` when nothing matches. Note the pick among several matches is by path order and is not checked for correctness. Pure lookup, no failure mode.
 ### Depends on
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
 - externals: std
 
 ## `resolve_explicit`
@@ -389,9 +389,9 @@ A star import (`*`) returns `None`, because it names no single declaration. Othe
 
 The first id the graph knows is returned. An external package, a missing file, or a file with no matching declaration gives `None`. `fqn_to_file` matches a file whose path equals or ends with the dotted name turned into a path plus `.java`, with no source-root configuration, and when several files match (say the same package under two source roots) the first in sorted path order wins. It is called for explicit imports (from `resolve_imports`) and for fully-qualified references with no import (from `cross_package_qualified_edges`); the same-package scan does not call it and builds its links directly.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
 - externals: std
 
 ## `same_package_edges`
@@ -409,11 +409,11 @@ Then for each file, in sorted order, it finds the sibling containers: those decl
 
 Returns the new edges. It is a plain text match with no comment or string handling, so a name that appears only in a comment or string also creates an edge, an accepted over-approximation. The source is read once per file that has siblings, which is why this stage needs the repo root.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](symbol.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](symbol.rs.md#symbolid) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
 - `src/resolve.rs::ResolvedImport` — crate::resolve
-- [`src/symbol.rs::SymbolKind`](symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](symbol.rs.md#symbolkind) — crate::symbol
 - externals: std
 
 ## `dir_of`

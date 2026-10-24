@@ -77,7 +77,7 @@ dep_targets:
   src/java/quarkus.rs::resolve_channel_name -> src/symbol.rs::SymbolKind: 264efecb34de
   src/java/quarkus.rs::disambiguate_colliding_slugs -> src/features.rs::EntryPoint: 60acb942d332
 ---
-# src/java/quarkus.rs
+# [`src/java/quarkus.rs`](../../../../src/java/quarkus.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -97,15 +97,15 @@ An HTTP route's title is `VERB /full/path` (class `@Path` joined with method `@P
 
 `admits_to_core` decides whether a given file belongs in a feature's supporting file set: yes if the file declares a class Quarkus's dependency injection actually manages — a scope-annotated bean (`@ApplicationScoped` / `@Singleton`) or a Panache repository (a database-backed repository class) — no otherwise. It ignores which entry point is asking.
 ### Depends on
-- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
-- [`src/features.rs::FeatureModel`](../features.rs.md) — crate::features
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
-- [`src/stack.rs::file_role`](../stack.rs.md) — crate::stack
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/features.rs::EntryPoint`](../features.rs.md#entrypoint) — crate::features
+- [`src/features.rs::FeatureModel`](../features.rs.md#featuremodel) — crate::features
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md#filerole) — crate::lang
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md#symbolkind) — crate::symbol
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
+- [`src/stack.rs::file_role`](../stack.rs.md#file_role) — crate::stack
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 - externals: std
 
 ## `is_cdi_managed`
@@ -115,7 +115,7 @@ Says whether a Java class is one the Quarkus framework creates and wires up itse
 ### Behavior
 Returns true if any of the class's annotations passes `is_admitting_annotation`, or if its signature contains the text `PanacheRepository`, which covers a class declared as implementing a Panache repository. A database entity is deliberately excluded and is handled as data instead. A framework class that is injected, such as `Config` or `ObjectMapper`, never reaches this check, because it is an external class with no resolved link into this repo's graph in the first place. The repository check is a plain text search of the signature, so a class whose signature merely mentions the name in another way would also match. It cannot fail.
 ### Depends on
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 
 ## `is_admitting_annotation`
 `fn is_admitting_annotation(marker: &str) -> bool`
@@ -124,7 +124,7 @@ Checks whether one Java annotation is a Quarkus dependency-injection scope that 
 ### Behavior
 Strips the annotation down to its bare name (via `bare_annotation_name`, which drops any `@`, package qualification, and arguments) and returns `true` only if that name is exactly `"ApplicationScoped"` or `"Singleton"` — the two scope annotations `is_cdi_managed` treats as evidence a class is managed this way. Any other annotation, including other dependency-injection scopes not covered here, returns `false`.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `parse_verb`
 `fn parse_verb(marker: &str) -> Option<String>`
@@ -133,7 +133,7 @@ Turns a JAX-RS HTTP annotation like `@GET` or `@POST` into the plain lowercase v
 ### Behavior
 Strips the annotation to its bare name (bare or fully package-qualified, via `bare_annotation_name`) and checks it for an *exact* match against the list of known HTTP verb annotations (`HTTP_VERBS`) — not a prefix or substring check, so a hypothetical custom annotation like `@GetSomething` is never mistaken for the real `@GET`. On a match, returns the verb lowercased (`Some("get")`); otherwise returns `None`.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `parse_path_annotation`
 `fn parse_path_annotation(marker: &str) -> Option<String>`
@@ -142,7 +142,7 @@ Pulls the URL path out of a JAX-RS `@Path` annotation — e.g. `@Path("entity/fr
 ### Behavior
 Checks the annotation's bare name (bare or fully package-qualified, e.g. `@jakarta.ws.rs.Path(...)`, via `bare_annotation_name`); if it isn't exactly `"Path"`, returns `None` immediately. Otherwise, extracts the first string literal found inside the annotation's text (`first_string_literal`) and returns it. If a `@Path` annotation somehow has no string literal — which shouldn't happen, since JAX-RS requires one — this simply returns `None` for that method-level path rather than panicking.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `first_string_literal`
 `fn first_string_literal(s: &str) -> Option<String>`
@@ -160,8 +160,8 @@ Finds the web address prefix (`@Path`) that applies to a Java class, so each of 
 ### Behavior
 Looks at the class's own annotations and returns the first `@Path` value that parses. If the class has none, it finds the generated interface the class implements, using `generated_interface_for`, and returns that interface's `@Path` instead. The second case is the real shape in projects whose API is generated from a contract: a class such as `HeroResource implements HeroesResource` carries no annotations of its own at all, class or method level, and every one lives on the generated `HeroesResource`. The class's parent link is already an arena id, so the class itself is a direct lookup. It returns `None` if neither the class nor an interface it implements has a `@Path`, or if the id is not a symbol. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
 
 ## `generated_interface_for`
 `fn generated_interface_for(graph: &Graph, class_id: SymbolId) -> Option<SymbolId>`
@@ -172,8 +172,8 @@ Reads the names in the class's `implements` clause, in declaration order, using 
 
 Only one hop is followed: it does not walk the interface's own parents. It returns `None` if the class implements only hand-written interfaces, implements none, or is not a symbol. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
 
 ## `resolve_interface_name`
 `fn resolve_interface_name(graph: &Graph, from_file: &str, name: &str) -> Option<SymbolId>`
@@ -186,10 +186,10 @@ There are two shapes.
 
 In either case it then checks that the target's file has the generated-code role, and returns the target only if so. A name that resolves to a hand-written file, or does not resolve at all, gives `None`. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/lang.rs::FileRole`](../lang.rs.md) — crate::lang
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
-- [`src/stack.rs::file_role`](../stack.rs.md) — crate::stack
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/lang.rs::FileRole`](../lang.rs.md#filerole) — crate::lang
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
+- [`src/stack.rs::file_role`](../stack.rs.md#file_role) — crate::stack
 
 ## `implemented_interface_names`
 `fn implemented_interface_names(signature: &str) -> Vec<String>`
@@ -198,7 +198,7 @@ Reads every interface name out of a class's `implements` clause, in the order th
 ### Behavior
 Strips any generic type arguments first (e.g. `PanacheRepository<Fruit>` becomes `PanacheRepository`), then looks for the `implements` keyword as a whole word — never a plain substring search, since that would false-positive on something like an annotation argument's text that happens to contain the letters "implements". Returns an empty list if there's no `implements` clause at all. Otherwise, takes everything after the keyword, drops the class body (anything from the first `{` onward), splits the rest on commas, and trims each name.
 ### Depends on
-- [`src/stack.rs::strip_angle_bracket_groups`](../stack.rs.md) — crate::stack
+- [`src/stack.rs::strip_angle_bracket_groups`](../stack.rs.md#strip_angle_bracket_groups) — crate::stack
 
 ## `interface_method_by_name`
 `fn interface_method_by_name(
@@ -213,8 +213,8 @@ Takes the interface's id, already resolved by the caller, not the class id, so a
 
 It is not told apart by parameter list. Two overloaded methods of the same name on the interface share one id, which is an existing limit of the Java extractor's id scheme, and this is the first place that resolves across files purely by that name. It was logged and not fixed, because the generated interfaces from API contracts have not produced overloaded methods in any project this tool has been run on. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
 
 ## `is_register_rest_client`
 `fn is_register_rest_client(graph: &Graph, class_id: SymbolId) -> bool`
@@ -223,9 +223,9 @@ Says whether a Java class is an outbound web client, an interface describing a c
 ### Behavior
 Looks up the class and returns false if the id is not a symbol. Otherwise it returns true if any of the class's own annotations has the plain name `RegisterRestClient`, after stripping the `@` and any package qualifier with `bare_annotation_name`, so `@RegisterRestClient(configKey = "x")` and a fully-qualified spelling both count. Only the class's own declaration is checked, not an interface it implements. A client interface is deliberately not treated as this service's own entry point, since it describes something this service calls, not something it serves. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `join_jaxrs_path`
 `fn join_jaxrs_path(class_path: Option<&str>, method_path: Option<&str>) -> String`
@@ -288,7 +288,7 @@ Checks whether an annotation is `@Scheduled`, the marker for a method that runs 
 ### Behavior
 Strips the annotation to its bare name (dropping `@` and any package qualification) and compares it exactly against `"Scheduled"`.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `attr_value`
 `fn attr_value(marker: &str, attr: &str) -> Option<String>`
@@ -324,9 +324,9 @@ Says whether a Java class is marked as a gRPC service with a class-level `@GrpcS
 ### Behavior
 Looks up the class and returns false if the id is not a symbol. Otherwise it returns true if any of the class's own annotations has the plain name `GrpcService`, after stripping the `@` and any package qualifier. Unlike web routes and message handlers, a gRPC service's marker lives only on the class, and the methods are shaped by a generated interface from a `.proto` file, which this tool does not parse at all. So the entry-point finder treats every public method of such a class as an entry point and does not require the `@Override` marker on each, because this project has declined to walk interface hierarchies for inherited annotations. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `is_public_signature`
 `fn is_public_signature(signature: &str) -> bool`
@@ -380,7 +380,7 @@ Reads the channel argument out of an annotation, but only if that annotation is 
 ### Behavior
 Returns `None` if the annotation's bare name isn't exactly `"Incoming"`. Otherwise delegates to `channel_arg` to read and classify its argument.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `outgoing_channel`
 `fn outgoing_channel(marker: &str) -> Option<ChannelArg>`
@@ -389,7 +389,7 @@ Reads the channel argument out of an annotation, but only if that annotation is 
 ### Behavior
 Returns `None` if the annotation's bare name isn't exactly `"Outgoing"`. Otherwise delegates to `channel_arg` to read and classify its argument.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](mod.rs.md#bare_annotation_name) — crate::java
 
 ## `resolve_channel_name`
 `fn resolve_channel_name<'g>(
@@ -405,10 +405,10 @@ If the argument is a literal string, that string is returned as is. If it is a r
 
 The list of a class's constants is built once per class and remembered in the provided cache, in the same way other per-class lookups are, so the whole symbol list is not scanned again on every call. It cannot fail.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::SymbolKind`](../symbol.rs.md) — crate::symbol
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::symbol
+- [`src/symbol.rs::SymbolKind`](../symbol.rs.md#symbolkind) — crate::symbol
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 - externals: std
 
 ## `disambiguate_colliding_slugs`
@@ -418,4 +418,4 @@ Fixes up entry points that ended up sharing the same slug, so a real collision (
 ### Behavior
 Assumes `entries` is already sorted so entries with the same id sit next to each other. Walks through and, for each run of consecutive entries sharing an id, keeps the first one's id as-is and appends `-2`, `-3`, and so on to every entry after it in that run — rather than dropping the later ones, which is what a plain "keep only the first" dedup would do.
 ### Depends on
-- [`src/features.rs::EntryPoint`](../features.rs.md) — crate::features
+- [`src/features.rs::EntryPoint`](../features.rs.md#entrypoint) — crate::features

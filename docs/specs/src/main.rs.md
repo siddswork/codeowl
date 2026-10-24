@@ -17,7 +17,7 @@ dep_targets:
   src/main.rs::main -> src/index.rs::RepoIndex: 481419547059
   src/main.rs::main -> src/mcp.rs::CodeOwlServer: 874e569c4376
 ---
-# src/main.rs
+# [`src/main.rs`](../../../src/main.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This is the command-line entry point of the whole program. It defines the two commands a user can run, `extract`, a one-shot dump of everything found in a repo as JSON, and `serve`, which starts the long-running server that editors and AI agents talk to over standard input and output, parses whichever was typed, and runs it. It also owns the small piece of path handling every run needs first: the path given is turned into an absolute, symlink-free location before anything else uses it. This matters because the import resolver recovers repo-relative paths by stripping that root off absolute paths, and given a relative root such as `.` the stripping silently fails for every import, so every import would resolve to nothing with no error at all. `serve` also takes three size limits, all with sensible defaults, that exist to keep individual responses small enough for a given AI client to handle without it saving them to a temporary file: the size above which a large class is shown as an outline, the hard ceiling on a spec-writing task, and a separate, larger ceiling on a source-reading response. In `serve` mode a short summary of how many imports resolved, and how many files changed since the last run, goes to standard error, since standard output carries only the protocol. The file watcher started there keeps running until the process exits.
@@ -58,8 +58,8 @@ Parses the command line and branches on the command.
 
 `serve <path>`: makes the path absolute, then opens the index, which loads the saved copy and re-reads only files that changed since the last run. It prints to standard error how many named imports resolved out of the total, and, if any files changed while nothing was running, how many were re-indexed. It then creates the server with the three size limits taken from the command-line flags: the large-class threshold, the maximum task size, and the maximum source size. It starts the file watcher, which keeps the server's graph in step with edits, and keeps the returned handle bound for the whole session. Dropping the handle would only detach the watcher thread, which runs until the process exits, so it is a keep-alive and not a stop switch. Finally it serves over standard input and output and waits until the connection closes. Failures starting the watcher or the server are reported with context, and any error is returned as the program's exit error. Standard output carries only protocol traffic in `serve` mode, so all human-readable notices go to standard error.
 ### Depends on
-- [`src/index.rs::RepoIndex`](index.rs.md) — codeowl::index
-- [`src/mcp.rs::CodeOwlServer`](mcp.rs.md) — codeowl::mcp
+- [`src/index.rs::RepoIndex`](index.rs.md#repoindex) — codeowl::index
+- [`src/mcp.rs::CodeOwlServer`](mcp.rs.md#codeowlserver) — codeowl::mcp
 - externals: anyhow
 
 ## `canonical_root`

@@ -16,7 +16,7 @@ dep_targets:
   tests/extraction.rs::react_component_with_hooks_and_generics -> src/symbol.rs::SymbolKind: 264efecb34de
   tests/extraction.rs::barrel_file_has_no_declarations -> src/extract.rs::extract_file: fcab56f46e52
 ---
-# tests/extraction.rs
+# [`tests/extraction.rs`](../../../tests/extraction.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 Integration tests for the TypeScript extractor, run against realistic fixture files and covering the hardest real cases the first extraction milestone called for. One test uses a React component with hooks and a generic function, and checks that exactly the three top-level functions are found, that nothing nested inside the component, such as callbacks and inner arrow functions, leaks out as a symbol of its own, and that the doc comment and generic type parameter are captured. The other uses a barrel file that only re-exports names from other files and checks that it produces no symbols at all. Together they pin down the extractor's rules about what counts as a declaration.
@@ -28,7 +28,7 @@ A test that checks the TypeScript extractor handles a realistic React component 
 ### Behavior
 Reads the fixture `fixtures/component.tsx` into the extractor as the file `component.tsx`. It asserts the symbol ids, in order, are exactly `UserBadge`, `findFirst` and `fetchUser`, so nothing nested inside `UserBadge`, such as the callback passed to the effect hook or its inner arrow functions, appears as a symbol of its own. It asserts that every symbol is a callable with raw kind `function`. It then checks that `UserBadge` has the doc comment "Fetches and displays a user's display name." and a signature containing its name, and that `findFirst`'s signature contains the generic type parameter `<T>`, failing with the actual signature in the message if not. The test fails on any mismatch in count, order, kind, docstring or signature.
 ### Depends on
-- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md) — codeowl
+- [`src/symbol.rs::SymbolKind`](../src/symbol.rs.md#symbolkind) — codeowl
 - `src/extract.rs::extract_file` — codeowl
 
 ## `barrel_file_has_no_declarations`

@@ -44,7 +44,7 @@ dep_targets:
   tests/python_spec.rs::a_named_import_of_a_table_symbol_still_lands_in_data_not_core -> src/index.rs::RepoIndex: 481419547059
   tests/python_spec.rs::a_module_import_of_a_schema_only_file_still_lands_in_data_not_core -> src/index.rs::RepoIndex: 481419547059
 ---
-# tests/python_spec.rs
+# [`tests/python_spec.rs`](../../../tests/python_spec.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 End-to-end tests for Python and FastAPI support, following the same path the real spec-writing command drives. They check that a Python class goes through extraction, the graph, the writing loop and rendering as one section with its methods folded in and never offered as separate tasks, and that a private method is not exported. They check that a `from app.models import Item` line resolves to the right class through the normal index, that a model class declared with `table=True` is recognised as a database table while its sibling request and response classes are not, and that the files using the table are found through ordinary imports with no extra link type. They check that a FastAPI route becomes a feature with its full address, including the router's prefix, and that its table lands in the data list and its shared dependency file in the core. Several tests are regressions for bugs found on real projects or in review: assembling a route that imports whole modules no longer fails; two routes with the same verb and path get distinct ids and neither is dropped; a data-access function imported by name pulls its file into the core the same as a module import does; and a table, or a schema-only file imported as a module, stays in the data list and never gets promoted into the core. Sample files are written to temporary folders, each test removing its own.
@@ -56,9 +56,9 @@ A test helper that turns one piece of Python source text into a small graph, so 
 ### Behavior
 Takes a file path and the file's text. It extracts the declarations with the Python extractor, wraps them in a per-file extraction record together with a fingerprint of the text, and builds a graph from that one record. There is no import resolution and no other file, so the graph holds just that file's node and its symbols. It cannot fail itself, since the extractor returns an empty list for text it cannot parse.
 ### Depends on
-- [`src/graph.rs::FileExtraction`](../src/graph.rs.md) — codeowl::graph
-- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
-- [`src/hash.rs::hash_text`](../src/hash.rs.md) — codeowl::hash
+- [`src/graph.rs::FileExtraction`](../src/graph.rs.md#fileextraction) — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md#graph) — codeowl::graph
+- [`src/hash.rs::hash_text`](../src/hash.rs.md#hash_text) — codeowl::hash
 
 ## `a_class_renders_as_one_section_with_its_methods_folded_in`
 `fn a_class_renders_as_one_section_with_its_methods_folded_in()`
@@ -86,7 +86,7 @@ Creates a temporary project with a model file, `app/models.py`, holding a class 
 
 It then finds the edge from `items.py` for the name `Item`, failing with "items.py imports Item from app.models" if absent, and asserts it resolved to a target whose id is `app/models.py::Item`. It deletes the temporary folder at the end. The test shows the dotted module path being turned into the model file and the class found in it, not only the resolver in isolation.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `a_sqlmodel_table_class_becomes_a_schema_node_with_its_queriers`
 `fn a_sqlmodel_table_class_becomes_a_schema_node_with_its_queriers()`
@@ -97,7 +97,7 @@ Creates a temporary project with a models file containing three classes: `ItemBa
 
 It asserts that `Item` has the table kind, and that `ItemBase` and `ItemCreate` do not, since they are request and response shapes and not tables. It then collects every file whose resolved import targets the `Item` node and asserts both the routes file and the data-access file are in that list. Because the table node is the target of ordinary resolved imports, asking who uses the table works with no separate link type, unlike the TypeScript pack, which needs a query-string link. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `a_fastapi_route_becomes_a_feature_with_its_table_in_data`
 `fn a_fastapi_route_becomes_a_feature_with_its_table_in_data()`
@@ -108,7 +108,7 @@ Creates a temporary project with a models file containing a table class `Item` a
 
 It finds the entry point with the id `http-get-items-id` and asserts its kind is `http`, its title is `GET /items/{id}`, which shows the router's prefix was applied to the route's path, and its file is the routes file. It then assembles the feature's participants and asserts that the data list contains `app/models.py::Item`, the table the route queries, and that the core list contains `app/api/deps.py`, which joins because it touches a table through `SessionDep`. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `a_route_that_imports_modules_assembles_without_crashing`
 `fn a_route_that_imports_modules_assembles_without_crashing()`
@@ -119,7 +119,7 @@ Creates a temporary project with package marker files, a table model, a `crud.py
 
 It assembles the feature's participants and then calls `current_participant_hashes`, expecting success. This is the bug: a whole-module import resolves to a file node and used to leak into the dependencies as a bare file id, which the hash function rejected as "not a symbol". It then asserts that `crud.py`, a data-access module reached by a module import, joined the core; that `security.py`, a module import that is neither data access nor touches a table, appears in neither the core nor the dependencies, since a bare file id must never be a dependency participant. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `colliding_route_slugs_are_disambiguated_not_dropped`
 `fn colliding_route_slugs_are_disambiguated_not_dropped()`
@@ -130,7 +130,7 @@ Creates a temporary project with two routes files, `a_router.py` and `b_router.p
 
 It keeps those whose id starts with `http-get-health` and asserts there are exactly two, not collapsed to one. It asserts the set of their files contains both routes files, and that the set of their ids has two members, meaning the two entries have distinct ids. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `a_named_import_of_a_crud_function_promotes_its_file_to_core_like_a_module_import_does`
 `fn a_named_import_of_a_crud_function_promotes_its_file_to_core_like_a_module_import_does()`
@@ -141,7 +141,7 @@ Before the fix, the feature walk only offered a file to the "belongs inside the 
 
 It creates a temporary project with a table model, a `crud.py` that uses it, and a routes file with a `POST /items` route whose only import of the data-access code is the named `from app.crud import create_item`. It opens the repo, finds the entry point `http-post-items`, and assembles the feature's participants. It asserts that `app/crud.py` is in the core, and that no dependency starts with `app/crud.py::`, because a symbol whose own file is already core must not also appear as a one-hop stub. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `a_named_import_of_a_table_symbol_still_lands_in_data_not_core`
 `fn a_named_import_of_a_table_symbol_still_lands_in_data_not_core()`
@@ -152,7 +152,7 @@ That fix lets a named import make its file join the core. If it also applied to 
 
 It creates a temporary project with a table model and a routes file whose `GET /items` route imports `Item` by name and queries it. It opens the repo, finds the entry point `http-get-items`, and assembles the feature's participants. It asserts that `app/models.py::Item` is in the data list, and that `app/models.py` is not in the core. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index
 
 ## `a_module_import_of_a_schema_only_file_still_lands_in_data_not_core`
 `fn a_module_import_of_a_schema_only_file_still_lands_in_data_not_core()`
@@ -163,4 +163,4 @@ The earlier guard only covered the path where a named import resolves to a symbo
 
 It creates a temporary project with a table model, a data-access module that imports the table by name, and a routes file whose `POST /items` route imports the models module whole and imports `create_item` by name. It opens the repo, finds the entry point `http-post-items`, and assembles the feature's participants. It asserts that `app/models.py` is not in the core, module-import style included, and that `app/models.py::Item` is still in the data list, surfaced through the data-access module's named import of it. It deletes the temporary folder at the end.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index

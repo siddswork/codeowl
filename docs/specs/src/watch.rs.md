@@ -19,7 +19,7 @@ dep_targets:
   src/watch.rs::watch_loop -> src/graph.rs::Graph: 13dbdfa88b0e
   src/watch.rs::watch_loop -> src/index.rs::RepoIndex: 481419547059
 ---
-# src/watch.rs
+# [`src/watch.rs`](../../../src/watch.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This is the in-session file watcher. While `codeowl serve` runs, it keeps the served graph in step with the working directory as the developer edits, so the tools behave like a language server across a long session, not something to re-run. `spawn` starts a background thread, and that thread collects file-system events and waits a short moment (300 milliseconds) after the last one, so a burst of saves from an editor becomes a single update. It hands the changed paths to `RepoIndex::apply_changes`, which re-reads only what changed, and, only if something really changed, swaps the freshly rebuilt graph into a shared atomic cell that the server reads. Request handlers therefore never wait for the watcher and never see a half-built graph, and each works from one consistent snapshot. Watches are placed on each folder in the ignore-aware tree one by one, not recursively on the repo root, because a recursive watch would also cover `node_modules` and exceed the operating system's limit on watches in a real project. A folder created mid-session is picked up and watched on the spot, and a failed update is reported to standard error without stopping later ones. `RepoWatcher` is a handle to the thread. Dropping it only detaches the thread, which runs until the process ends, so it is a keep-alive and not a stop switch.
@@ -42,8 +42,8 @@ Makes the root path absolute and symlink-free first, so the folders it registers
 
 It then starts a thread named `codeowl-watch` that runs the watch loop, handing it the receiving end of the channel, the watcher itself so the watch stays alive, the shared graph cell, and the index, which the thread takes ownership of and updates in place on every change. It returns a handle holding that thread. Errors creating the watcher, registering a watch, or starting the thread are returned with context. The watch loop is what debounces bursts of saves and swaps in the rebuilt graph.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/index.rs::RepoIndex`](index.rs.md) — crate::index
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/index.rs::RepoIndex`](index.rs.md#repoindex) — crate::index
 - externals: anyhow, arc_swap, notify, std
 
 ## `watch_loop`
@@ -62,8 +62,8 @@ With the batch of paths it calls `index.apply_changes`. If at least one change r
 
 The watcher is passed in and kept alive for the whole loop, since event delivery would stop if it were dropped. The end of the function, which drops it explicitly, is not reachable in practice, because the callback holds the only sender and lives inside the watcher, but it makes that ownership visible. Nothing is returned.
 ### Depends on
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/index.rs::RepoIndex`](index.rs.md) — crate::index
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/index.rs::RepoIndex`](index.rs.md#repoindex) — crate::index
 - externals: anyhow, arc_swap, notify, std
 
 ## `collect`

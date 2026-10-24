@@ -195,7 +195,7 @@ dep_targets:
   src/stack.rs::PythonStack -> src/rust.rs::resolve_imports: 49d95cafdb82
   src/stack.rs::PythonStack -> src/symbol.rs::ExtractedSymbol: 314759561cf6
 ---
-# src/stack.rs
+# [`src/stack.rs`](../../../src/stack.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file defines `StackPack`, the single interface through which every language- or framework-specific decision passes, which is what keeps CodeOwl's core (extraction, resolution, spec assembly) free of any one language. A pack answers questions such as which files it reads and how, what role a path plays, how to parse declarations and imports, how to resolve imports to targets, what extra links exist beyond imports (a web call, a database query, a rendered component), whether the stack has a notion of features, which classes are database tables, which test code to leave out of a file summary's input, and what fingerprint decides whether a file's spec is current. Methods with defaults are the optional ones: no feature model, no schema symbols, text kept whole, a whole-text fingerprint, and no generated-source folders. The file implements the trait four times: `TypeScriptNextStack`, `RustStack`, `JavaStack` and `PythonStack`; exactly one is chosen for a repo by `detect`. Only the Rust pack overrides test stripping and the fingerprint; only Java and Python override the table check, and only Java declares generated-source folders. Most methods are thin hand-offs to the code that lives in that language's own file (`extract.rs` and friends for TypeScript, `rust.rs`, `java.rs`, `python.rs`). What is specific to this file is the small set of decisions each pack makes inline: test and generated-code path rules; the Java check that a class is a table when it carries an `Entity` annotation (exact name match) or its own `extends` clause names a Panache entity base, after stripping all generic angle-bracket groups so a bound like `T extends PanacheEntityBase` does not false-match; and the Python check that a class is a table when its base list holds `table=True`, `Base` or `DeclarativeBase`, using a plain comma split that could misparse a nested generic comma. A bare `SQLModel` or `BaseModel` base is deliberately not a table. `for_name` turns a saved pack name back into the pack, falling back to the TypeScript pack for an empty or unknown name, so code that only holds a graph can recover its stack. `typescript_next` returns the TypeScript pack as the default.
@@ -211,30 +211,30 @@ Required methods: `name` returns a stable identifier saved with the cache, so sw
 
 Methods with defaults: `feature_model` returns the stack's model of what a feature is, or `None` for a stack without a runtime entry surface, such as a command-line tool or library (only the Rust pack takes the default; the Java pack returns its Quarkus model even for a plain library, which then simply finds zero entry points, so `Some` does not promise that a repo has any feature). It returns a `'static` reference because the model has no state and can be recovered from just a pack name. `is_schema_symbol(sym)` says whether a freshly extracted symbol is a database table, and the generic pipeline retags those as schema symbols, so an ORM model class can count as a table with no `.sql` file; the default is "no persistence model". `strip_test_code(rel_path, source)` returns the source without test code kept inside source files, used only for the text a file summary is written from; the default returns the text unchanged, and the Rust pack drops its `#[cfg(test)]` modules. The file's hashes still cover the whole file. `file_fingerprint(rel_path, source, symbols, imports)` returns the hash that decides whether a file's own spec is current; the default hashes the whole raw text, which can over-report staleness but never hide a change, and a pack overrides it with a rule that ignores edits a summary would not mention (the Rust pack uses shape, doc comments and body literals). `generated_source_dirs()` lists build-output folders that can hold real source files generated from a contract (Maven's `target/generated-sources`, Gradle's `build/generated`) and that a normal ignore file would hide, so the indexer reads them anyway; the default is none, and a repo that has never been built simply has nothing there, which is not an error.
 ### Depends on
-- [`src/graph.rs::ResolvedImport`](graph.rs.md) — crate::graph
-- [`src/graph.rs::FlowTarget`](graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/lang.rs::FileRole`](lang.rs.md) — crate::lang
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/features.rs::FeatureModel`](features.rs.md) — crate::features
-- [`src/hash.rs::hash_text`](hash.rs.md) — crate::hash
-- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/schema.rs::extract_tables`](typescript/schema.rs.md) — crate::typescript
-- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md) — crate::typescript
-- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md) — crate::typescript
-- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::file_fingerprint`](rust/mod.rs.md) — crate::rust
-- [`src/java/mod.rs::extract_imports`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md) — crate::java
-- [`src/python/mod.rs::extract_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_flow_edges`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_flow_edge`](python/mod.rs.md) — crate::python
+- [`src/graph.rs::ResolvedImport`](graph.rs.md#resolvedimport) — crate::graph
+- [`src/graph.rs::FlowTarget`](graph.rs.md#flowtarget) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md#unresolvedflowedge) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/lang.rs::FileRole`](lang.rs.md#filerole) — crate::lang
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/features.rs::FeatureModel`](features.rs.md#featuremodel) — crate::features
+- [`src/hash.rs::hash_text`](hash.rs.md#hash_text) — crate::hash
+- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md#source_kind) — crate::typescript
+- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md#classify) — crate::typescript
+- [`src/typescript/schema.rs::extract_tables`](typescript/schema.rs.md#extract_tables) — crate::typescript
+- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md#extract_imports) — crate::typescript
+- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md#resolve_imports) — crate::typescript
+- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md#extract_imports) — crate::rust
+- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md#resolve_imports) — crate::rust
+- [`src/rust/mod.rs::file_fingerprint`](rust/mod.rs.md#file_fingerprint) — crate::rust
+- [`src/java/mod.rs::extract_imports`](java/mod.rs.md#extract_imports) — crate::java
+- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md#resolve_imports) — crate::java
+- [`src/python/mod.rs::extract_imports`](python/mod.rs.md#extract_imports) — crate::python
+- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md#resolve_imports) — crate::python
+- [`src/python/mod.rs::extract_flow_edges`](python/mod.rs.md#extract_flow_edges) — crate::python
+- [`src/python/mod.rs::resolve_flow_edge`](python/mod.rs.md#resolve_flow_edge) — crate::python
 - externals: std
 
 ## `TypeScriptNextStack`
@@ -246,40 +246,40 @@ The name is `typescript-next`. `source_kind` maps a `.sql` extension to `Schema`
 
 Flow edges: extraction collects three kinds, each as an unresolved edge holding the file, a kind label and a raw string, in this order: `route-literal` from `fetch("/api/..")` calls, `table-ref` from `.from("table")` calls, and `rendered-component` from `<Component/>` tags. Resolution switches on that label: a route literal goes to `resolve_route_literal`, a table reference to `resolve_table_ref`, and a rendered component to `resolve_rendered_component` followed by a lookup of that file in the graph. An unknown label, or no match, gives `FlowTarget::Unresolved`. `feature_model` returns the default Next.js feature model. The struct has no fields. Of the methods that have defaults it overrides only `feature_model`; the rest keep their defaults, so it has no schema-symbol retagging, no test-code stripping, no generated-source folders, and its file fingerprint is the whole-text hash.
 ### Depends on
-- [`src/graph.rs::ResolvedImport`](graph.rs.md) — crate::graph
-- [`src/graph.rs::FlowTarget`](graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/lang.rs::FileRole`](lang.rs.md) — crate::lang
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/features.rs::FeatureModel`](features.rs.md) — crate::features
-- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/schema.rs::extract_tables`](typescript/schema.rs.md) — crate::typescript
-- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md) — crate::typescript
-- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md) — crate::typescript
-- [`src/typescript/resolve.rs::build_resolver`](typescript/resolve.rs.md) — crate::typescript
-- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md) — crate::typescript
-- [`src/typescript/features.rs::extract_route_literals`](typescript/features.rs.md) — crate::typescript
-- [`src/typescript/features.rs::extract_table_refs`](typescript/features.rs.md) — crate::typescript
-- [`src/typescript/features.rs::extract_rendered_components`](typescript/features.rs.md) — crate::typescript
-- [`src/typescript/features.rs::resolve_route_literal`](typescript/features.rs.md) — crate::typescript
-- [`src/typescript/features.rs::resolve_table_ref`](typescript/features.rs.md) — crate::typescript
-- [`src/typescript/features.rs::resolve_rendered_component`](typescript/features.rs.md) — crate::typescript
-- [`src/typescript/features.rs::default_feature_model`](typescript/features.rs.md) — crate::typescript
-- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md) — crate::rust
-- [`src/java/mod.rs::extract_file`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::extract_imports`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md) — crate::java
-- [`src/python/mod.rs::extract_file`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_flow_edges`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_flow_edge`](python/mod.rs.md) — crate::python
+- [`src/graph.rs::ResolvedImport`](graph.rs.md#resolvedimport) — crate::graph
+- [`src/graph.rs::FlowTarget`](graph.rs.md#flowtarget) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md#unresolvedflowedge) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/lang.rs::FileRole`](lang.rs.md#filerole) — crate::lang
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/features.rs::FeatureModel`](features.rs.md#featuremodel) — crate::features
+- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md#source_kind) — crate::typescript
+- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md#classify) — crate::typescript
+- [`src/typescript/schema.rs::extract_tables`](typescript/schema.rs.md#extract_tables) — crate::typescript
+- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md#extract_file) — crate::typescript
+- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md#extract_imports) — crate::typescript
+- [`src/typescript/resolve.rs::build_resolver`](typescript/resolve.rs.md#build_resolver) — crate::typescript
+- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md#resolve_imports) — crate::typescript
+- [`src/typescript/features.rs::extract_route_literals`](typescript/features.rs.md#extract_route_literals) — crate::typescript
+- [`src/typescript/features.rs::extract_table_refs`](typescript/features.rs.md#extract_table_refs) — crate::typescript
+- [`src/typescript/features.rs::extract_rendered_components`](typescript/features.rs.md#extract_rendered_components) — crate::typescript
+- [`src/typescript/features.rs::resolve_route_literal`](typescript/features.rs.md#resolve_route_literal) — crate::typescript
+- [`src/typescript/features.rs::resolve_table_ref`](typescript/features.rs.md#resolve_table_ref) — crate::typescript
+- [`src/typescript/features.rs::resolve_rendered_component`](typescript/features.rs.md#resolve_rendered_component) — crate::typescript
+- [`src/typescript/features.rs::default_feature_model`](typescript/features.rs.md#default_feature_model) — crate::typescript
+- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md#extract_file) — crate::rust
+- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md#extract_imports) — crate::rust
+- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md#resolve_imports) — crate::rust
+- [`src/java/mod.rs::extract_file`](java/mod.rs.md#extract_file) — crate::java
+- [`src/java/mod.rs::extract_imports`](java/mod.rs.md#extract_imports) — crate::java
+- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md#resolve_imports) — crate::java
+- [`src/python/mod.rs::extract_file`](python/mod.rs.md#extract_file) — crate::python
+- [`src/python/mod.rs::extract_imports`](python/mod.rs.md#extract_imports) — crate::python
+- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md#resolve_imports) — crate::python
+- [`src/python/mod.rs::extract_flow_edges`](python/mod.rs.md#extract_flow_edges) — crate::python
+- [`src/python/mod.rs::resolve_flow_edge`](python/mod.rs.md#resolve_flow_edge) — crate::python
 - externals: std
 
 ## `typescript_next`
@@ -309,8 +309,8 @@ For each of the four candidates (TypeScript/TSX, Rust, Java, Python) it walks th
 
 Packs with a count above zero are the hits. With exactly one hit, a fresh instance of that pack is returned. With none, it fails, saying no extractable source files were found and naming all four supported stacks. With more than one, it fails listing each stack and its file count and suggests pointing CodeOwl at a subdirectory, since one stack per repo is a deliberate limit. A repo that genuinely mixes two stacks therefore cannot be indexed as a whole. Because tests and tooling are skipped only for the count, they are still parsed once the pack is chosen. The directory-name match is by exact top-level segment, so a nested `scripts` folder deeper in the tree is still counted, and any single code file in a second language outside those folders is enough to make the repo ambiguous.
 ### Depends on
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md) — crate::typescript
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md#source_kind) — crate::typescript
 - externals: std
 
 ## `RustStack`
@@ -322,28 +322,28 @@ The name is `rust`. `source_kind` returns `Code` for files with a `.rs` extensio
 
 Two overrides set it apart from the other packs. `strip_test_code` calls `rust::strip_test_modules`, so the text a file summary is written from leaves out `#[cfg(test)]` modules while the file's hashes still cover everything. `file_fingerprint` calls `rust::file_fingerprint` with the source, symbols and imports, so a file's own spec is keyed on what a summary could quote rather than on the whole text. The struct has no fields.
 ### Depends on
-- [`src/graph.rs::ResolvedImport`](graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/lang.rs::FileRole`](lang.rs.md) — crate::lang
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md) — crate::typescript
-- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md) — crate::typescript
-- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md) — crate::typescript
-- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::strip_test_modules`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::file_fingerprint`](rust/mod.rs.md) — crate::rust
-- [`src/java/mod.rs::extract_file`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::extract_imports`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md) — crate::java
-- [`src/python/mod.rs::extract_file`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md) — crate::python
+- [`src/graph.rs::ResolvedImport`](graph.rs.md#resolvedimport) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/lang.rs::FileRole`](lang.rs.md#filerole) — crate::lang
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md#source_kind) — crate::typescript
+- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md#classify) — crate::typescript
+- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md#extract_file) — crate::typescript
+- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md#extract_imports) — crate::typescript
+- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md#resolve_imports) — crate::typescript
+- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md#extract_file) — crate::rust
+- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md#extract_imports) — crate::rust
+- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md#resolve_imports) — crate::rust
+- [`src/rust/mod.rs::strip_test_modules`](rust/mod.rs.md#strip_test_modules) — crate::rust
+- [`src/rust/mod.rs::file_fingerprint`](rust/mod.rs.md#file_fingerprint) — crate::rust
+- [`src/java/mod.rs::extract_file`](java/mod.rs.md#extract_file) — crate::java
+- [`src/java/mod.rs::extract_imports`](java/mod.rs.md#extract_imports) — crate::java
+- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md#resolve_imports) — crate::java
+- [`src/python/mod.rs::extract_file`](python/mod.rs.md#extract_file) — crate::python
+- [`src/python/mod.rs::extract_imports`](python/mod.rs.md#extract_imports) — crate::python
+- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md#resolve_imports) — crate::python
 - externals: std
 
 ## `JavaStack`
@@ -355,28 +355,28 @@ The name is `java`. `source_kind` returns `Code` for `.java` files and `None` ot
 
 `is_schema_symbol` is true for a symbol whose raw kind is `class` and that either carries an entity annotation or extends the Panache active-record base, which already implies the table mapping. It deliberately does not treat a class that implements a Panache repository interface as a table: a repository is the data-access layer around a table, has no columns to report, and tagging it as a table would keep its file out of a feature's core. `generated_source_dirs` returns `target/generated-sources` and `build/generated`, the build-output folders where code generated from an API contract appears. It does not override the test-code stripping or file-fingerprint defaults, so its fingerprint is the whole-text hash. The struct has no fields.
 ### Depends on
-- [`src/graph.rs::ResolvedImport`](graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/lang.rs::FileRole`](lang.rs.md) — crate::lang
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/features.rs::FeatureModel`](features.rs.md) — crate::features
-- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md) — crate::typescript
-- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md) — crate::typescript
-- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md) — crate::typescript
-- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md) — crate::rust
-- [`src/java/mod.rs::extract_file`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::extract_imports`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md) — crate::java
-- [`src/java/quarkus.rs::QuarkusFeatureModel`](java/quarkus.rs.md) — crate::java
-- [`src/python/mod.rs::extract_file`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md) — crate::python
+- [`src/graph.rs::ResolvedImport`](graph.rs.md#resolvedimport) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/lang.rs::FileRole`](lang.rs.md#filerole) — crate::lang
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/features.rs::FeatureModel`](features.rs.md#featuremodel) — crate::features
+- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md#source_kind) — crate::typescript
+- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md#classify) — crate::typescript
+- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md#extract_file) — crate::typescript
+- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md#extract_imports) — crate::typescript
+- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md#resolve_imports) — crate::typescript
+- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md#extract_file) — crate::rust
+- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md#extract_imports) — crate::rust
+- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md#resolve_imports) — crate::rust
+- [`src/java/mod.rs::extract_file`](java/mod.rs.md#extract_file) — crate::java
+- [`src/java/mod.rs::extract_imports`](java/mod.rs.md#extract_imports) — crate::java
+- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md#resolve_imports) — crate::java
+- [`src/java/quarkus.rs::QuarkusFeatureModel`](java/quarkus.rs.md#quarkusfeaturemodel) — crate::java
+- [`src/python/mod.rs::extract_file`](python/mod.rs.md#extract_file) — crate::python
+- [`src/python/mod.rs::extract_imports`](python/mod.rs.md#extract_imports) — crate::python
+- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md#resolve_imports) — crate::python
 - externals: std
 
 ## `is_entity_annotation`
@@ -386,7 +386,7 @@ Says whether a Java annotation marks a class as a database entity, that is, the 
 ### Behavior
 Takes the annotation text as recorded on a class and strips it down to its bare name with `java::bare_annotation_name`, which drops the leading `@`, any package qualifier and any argument list. It returns true only when that name is exactly `Entity`. The match is exact, not a prefix test, so `@EntityListeners(...)` or `@Entityish` do not count; `@Entity` and `@Entity(name = "x")` do. It is used by `JavaStack::is_schema_symbol` to decide whether a class is a table, and mirrors the exact-name convention used for annotation checks in `quarkus.rs`. Pure function with no failure mode.
 ### Depends on
-- [`src/java/mod.rs::bare_annotation_name`](java/mod.rs.md) — crate::java
+- [`src/java/mod.rs::bare_annotation_name`](java/mod.rs.md#bare_annotation_name) — crate::java
 
 ## `extends_panache_entity`
 `fn extends_panache_entity(signature: &str) -> bool`
@@ -419,32 +419,32 @@ The name is `python`. `source_kind` returns `Code` for `.py` files only. `classi
 
 `is_schema_symbol` is true when the symbol's raw kind is `class` and its signature says it is a table model (`python_class_is_table`, covering SQLModel `table=True` and SQLAlchemy base subclasses). An earlier rule also required the class to have no children, so a table with methods was not counted. That was dropped, because once field extraction began adding a table's declared fields as children, every real model failed it, and the Java pack never had the restriction. The judgement uses only the class signature, not its body. It does not override test-code stripping or the file fingerprint, so its fingerprint is the whole-text hash. The struct has no fields.
 ### Depends on
-- [`src/graph.rs::ResolvedImport`](graph.rs.md) — crate::graph
-- [`src/graph.rs::FlowTarget`](graph.rs.md) — crate::graph
-- [`src/graph.rs::Graph`](graph.rs.md) — crate::graph
-- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md) — crate::graph
-- [`src/imports.rs::FileImports`](imports.rs.md) — crate::imports
-- [`src/lang.rs::FileRole`](lang.rs.md) — crate::lang
-- [`src/lang.rs::SourceKind`](lang.rs.md) — crate::lang
-- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md) — crate::symbol
-- [`src/features.rs::FeatureModel`](features.rs.md) — crate::features
-- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md) — crate::typescript
-- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md) — crate::typescript
-- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md) — crate::typescript
-- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md) — crate::typescript
-- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md) — crate::rust
-- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md) — crate::rust
-- [`src/java/mod.rs::extract_file`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::extract_imports`](java/mod.rs.md) — crate::java
-- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md) — crate::java
-- [`src/python/mod.rs::extract_file`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::extract_flow_edges`](python/mod.rs.md) — crate::python
-- [`src/python/mod.rs::resolve_flow_edge`](python/mod.rs.md) — crate::python
-- [`src/python/fastapi.rs::FastApiFeatureModel`](python/fastapi.rs.md) — crate::python
+- [`src/graph.rs::ResolvedImport`](graph.rs.md#resolvedimport) — crate::graph
+- [`src/graph.rs::FlowTarget`](graph.rs.md#flowtarget) — crate::graph
+- [`src/graph.rs::Graph`](graph.rs.md#graph) — crate::graph
+- [`src/graph.rs::UnresolvedFlowEdge`](graph.rs.md#unresolvedflowedge) — crate::graph
+- [`src/imports.rs::FileImports`](imports.rs.md#fileimports) — crate::imports
+- [`src/lang.rs::FileRole`](lang.rs.md#filerole) — crate::lang
+- [`src/lang.rs::SourceKind`](lang.rs.md#sourcekind) — crate::lang
+- [`src/symbol.rs::ExtractedSymbol`](symbol.rs.md#extractedsymbol) — crate::symbol
+- [`src/features.rs::FeatureModel`](features.rs.md#featuremodel) — crate::features
+- [`src/typescript/conventions.rs::source_kind`](typescript/conventions.rs.md#source_kind) — crate::typescript
+- [`src/typescript/conventions.rs::classify`](typescript/conventions.rs.md#classify) — crate::typescript
+- [`src/typescript/mod.rs::extract_file`](typescript/mod.rs.md#extract_file) — crate::typescript
+- [`src/typescript/imports.rs::extract_imports`](typescript/imports.rs.md#extract_imports) — crate::typescript
+- [`src/typescript/resolve.rs::resolve_imports`](typescript/resolve.rs.md#resolve_imports) — crate::typescript
+- [`src/rust/mod.rs::extract_file`](rust/mod.rs.md#extract_file) — crate::rust
+- [`src/rust/mod.rs::extract_imports`](rust/mod.rs.md#extract_imports) — crate::rust
+- [`src/rust/mod.rs::resolve_imports`](rust/mod.rs.md#resolve_imports) — crate::rust
+- [`src/java/mod.rs::extract_file`](java/mod.rs.md#extract_file) — crate::java
+- [`src/java/mod.rs::extract_imports`](java/mod.rs.md#extract_imports) — crate::java
+- [`src/java/mod.rs::resolve_imports`](java/mod.rs.md#resolve_imports) — crate::java
+- [`src/python/mod.rs::extract_file`](python/mod.rs.md#extract_file) — crate::python
+- [`src/python/mod.rs::extract_imports`](python/mod.rs.md#extract_imports) — crate::python
+- [`src/python/mod.rs::resolve_imports`](python/mod.rs.md#resolve_imports) — crate::python
+- [`src/python/mod.rs::extract_flow_edges`](python/mod.rs.md#extract_flow_edges) — crate::python
+- [`src/python/mod.rs::resolve_flow_edge`](python/mod.rs.md#resolve_flow_edge) — crate::python
+- [`src/python/fastapi.rs::FastApiFeatureModel`](python/fastapi.rs.md#fastapifeaturemodel) — crate::python
 - externals: std
 
 ## `python_class_is_table`

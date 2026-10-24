@@ -30,7 +30,7 @@ dep_targets:
   tests/java_spec.rs::a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in -> src/spec.rs::submit: 6b3606c2f3b8
   tests/java_spec.rs::a_same_package_reference_resolves_end_to_end_through_repo_index -> src/index.rs::RepoIndex: 481419547059
 ---
-# tests/java_spec.rs
+# [`tests/java_spec.rs`](../../../tests/java_spec.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 End-to-end tests for Java support, following the same path the real spec-writing command drives, not just the functions in isolation. The first test sends a sample Java class with three methods, one of them private, and a nested enum through extraction, the graph, the loop that hands out writing tasks, and the rendering of the saved document. It checks that the class is described as a single section, that its Javadoc reaches the task, that only the top-level class is offered as a task and neither its methods nor the nested enum, and that the rendered output has exactly one top-level section and none for the enum. It also checks that a private method is not exported yet stays in the graph. The second test writes two classes in the same package, one using the other with no import, which Java allows, and opens the project through the normal index, checking that a link to the used class is found and resolved to the right declaration, and that there is no invented reverse link from the used class back. A small helper builds a one-file graph from Java text.
@@ -42,9 +42,9 @@ A test helper that turns one piece of Java source text into a small graph, so th
 ### Behavior
 Takes a file path and the file's text. It extracts the declarations with the Java extractor, wraps them in a per-file extraction record together with a fingerprint of the text, and builds a graph from that one record. There is no import resolution and no other file, so the graph holds just that file's node and its symbols. It cannot fail itself, since the extractor returns an empty list for text it cannot parse.
 ### Depends on
-- [`src/graph.rs::FileExtraction`](../src/graph.rs.md) — codeowl::graph
-- [`src/graph.rs::Graph`](../src/graph.rs.md) — codeowl::graph
-- [`src/hash.rs::hash_text`](../src/hash.rs.md) — codeowl::hash
+- [`src/graph.rs::FileExtraction`](../src/graph.rs.md#fileextraction) — codeowl::graph
+- [`src/graph.rs::Graph`](../src/graph.rs.md#graph) — codeowl::graph
+- [`src/hash.rs::hash_text`](../src/hash.rs.md#hash_text) — codeowl::hash
 
 ## `a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in`
 `fn a_class_renders_as_one_section_with_methods_and_a_nested_enum_folded_in()`
@@ -72,4 +72,4 @@ Creates a temporary project with two files in the package `com.foo`: class `A`, 
 
 It asserts that an edge exists from `A.java` for the name `B`, then that the edge resolved to a target and that the target's id is `src/main/java/com/foo/B.java::B`. It then asserts there is no edge from `B.java` for the name `A`, so the scan is directional and does not invent a reverse link. It deletes the temporary folder at the end. The test shows the full path from files on disk to a resolved link, not only the resolver function in isolation.
 ### Depends on
-- [`src/index.rs::RepoIndex`](../src/index.rs.md) — codeowl::index
+- [`src/index.rs::RepoIndex`](../src/index.rs.md#repoindex) — codeowl::index

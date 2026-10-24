@@ -61,7 +61,7 @@ dep_targets:
   src/spec/staleness.rs::file_changes -> src/spec/format.rs::HashPair: 46895bbf1c04
   src/spec/staleness.rs::file_changes -> src/symbol.rs::SymbolId: 6733b5c62e75
 ---
-# src/spec/staleness.rs
+# [`src/spec/staleness.rs`](../../../../src/spec/staleness.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 This file decides what a written spec was written against, what is current now, and which parts differ. It builds the dependency fingerprints stored with each spec and compares them with freshly computed ones. A dependency is represented as a `(target id, hash)` pair, where the hash is the target's public-shape hash (`interface_hash`) and falls back to the target's whole source hash, or to a file's own hash when the target is a whole file; the text of a spec is never part of it, so rewording a dependency's prose cannot make its users stale. For a symbol, the pairs cover only the file's resolved imports whose names appear as whole identifiers in that symbol's own source text, excluding an import that points back at the symbol itself; for a file, they cover every resolved import of the file. External or unresolved imports contribute nothing, since their shape cannot be observed. The pairs are sorted and deduplicated, so import order does not matter, and are hashed as `id:hash` lines joined by newlines; that formula is what every stored dependency hash was made with and must not change. A parallel "record" for a symbol or a file returns that hash together with the pairs shortened to 12 hex characters each, computed from one result so the two cannot disagree; an unreadable file node or source yields an empty hash, deliberately different from the hash of an empty list. The comparison side is `symbol_changes` and `file_changes`, each a diff of two fixed keys, `source` and `dependencies`, so a caller can report which one moved; a file compares its fingerprint, not its raw text, so a legacy spec with none always reads as changed. `diff_hash_lists` is the shared diff, also used for feature participants and rollup files: it reports `changed:<id>`, `added:<id>` and `removed:<id>` entries in sorted order, and an empty list means current. None of this calls an LLM or reads prose.
@@ -73,8 +73,8 @@ Gives the fingerprint of something a spec depends on, used to detect when that d
 ### Behavior
 Looks the id up as a symbol. If found, it returns the symbol's `interface_hash` (its public shape, see `GLOSSARY.md`), and falls back to the symbol's whole `source_hash` when it has none, which makes dependents go stale on any edit to that symbol. If the id is not a symbol but a file, it returns the file's `source_hash`. If neither lookup succeeds it returns an empty string. It never uses the text of a spec: rewording a dependency's prose must not make its consumers stale. The fallback to the whole-source hash is a coarse case that can over-mark dependents stale.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `dependency_target_pairs`
 `fn dependency_target_pairs(
@@ -86,8 +86,8 @@ Builds the list of `(target id, hash)` pairs that a dependency hash is made from
 ### Behavior
 For every target it takes the target's text id and its `interface_or_source_hash` (the public-shape hash, or the whole source hash when the target has none, or a file's source hash). The pairs are then sorted and deduplicated. Sorting makes the result independent of import declaration order, which is not a real dependency, and deduplication collapses the case where two different local names resolve to the same target. It is kept as a separate step, rather than folded straight into the hash, so a caller can see which targets a dependency hash was built from and later say which one moved. It does no filtering: a target whose hash is empty (an id that is neither symbol nor file) still produces a pair with an empty hash.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `hash_dependency_pairs`
 `pub(crate) fn hash_dependency_pairs(pairs: &[(String, String)]) -> String`
@@ -96,7 +96,7 @@ Turns a list of `(target id, hash)` pairs into the single dependency-hash value 
 ### Behavior
 Each pair is written as a line `id:hash`, the lines are joined with newlines, and the whole text is passed through `hash_text`. It assumes its input is already sorted and deduplicated and does not do either itself, so two lists with the same pairs in a different order would give different results; `dependency_target_pairs` is what produces the canonical order. An empty list hashes the empty string, which is a valid, stable value. The formula is the one every stored dependency hash was made with, so changing it would make every existing spec read as changed.
 ### Depends on
-- [`src/hash.rs::hash_text`](../hash.rs.md) — crate::hash
+- [`src/hash.rs::hash_text`](../hash.rs.md#hash_text) — crate::hash
 
 ## `dependency_hash`
 `fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) -> String`
@@ -105,9 +105,9 @@ Computes the "have my dependencies changed shape?" fingerprint for one function 
 ### Behavior
 It asks `try_dependency_pairs` for the `(target id, hash)` pairs of the symbol's resolved dependencies, using the same per-symbol narrowing as the "Depends on" list (the symbol's own source text decides which of the file's imports count), and hashes them with `hash_dependency_pairs`. Only dependencies that resolved to a target inside the repo contribute, because CodeOwl cannot observe the shape of an outside package. If the pairs cannot be worked out (the id is not a file node or the symbol's source cannot be read), it returns an empty string rather than an error, so such a symbol compares as unchanged against another empty value. It never uses the text of a spec.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 - externals: std
 
 ## `try_dependency_pairs`
@@ -122,12 +122,12 @@ Finds the `(target id, hash)` pairs for the places one function or type depends 
 ### Behavior
 It returns `None` if `file_id` is not a file node or the symbol's own source text cannot be read from disk; this lets a caller keep the long-standing difference between "could not tell", which stores an empty dependency hash, and "no dependencies", which hashes an empty list. Otherwise it takes the graph's resolved imports and keeps those that come from this file, whose imported name appears in the symbol's text as a whole identifier, and whose target is not the symbol itself (a resolved import can point back at the symbol being asked about, and that is never a real dependency). Imports with no target (external or unresolved) are dropped. The surviving targets go to `dependency_target_pairs`, which sorts and deduplicates them. The match is by identifier in the symbol's text, so a name that merely appears there, in a comment or a string for example, counts as a use.
 ### Depends on
-- [`src/spec/source_text.rs::contains_identifier`](source_text.rs.md) — super::source_text
-- [`src/spec/source_text.rs::symbol_span_text`](source_text.rs.md) — super::source_text
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/graph.rs::Node`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/spec/source_text.rs::contains_identifier`](source_text.rs.md#contains_identifier) — super::source_text
+- [`src/spec/source_text.rs::symbol_span_text`](source_text.rs.md#symbol_span_text) — super::source_text
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/graph.rs::Node`](../graph.rs.md#node) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 - externals: std
 
 ## `dependency_record`
@@ -142,9 +142,9 @@ Produces what is stored for a symbol when its spec is written: the combined depe
 ### Behavior
 It calls `try_dependency_pairs` once and derives both values from the same result, so the hash and the breakdown cannot disagree. When pairs are found, it returns the hash of the full pairs from `hash_dependency_pairs` and the same pairs with each hash shortened by `shorten_dep_targets`; the hash is computed over the full-length hashes, and only the stored list is shortened. When the pairs cannot be worked out (the file node or the symbol's source is unreadable), it returns an empty hash and an empty list, matching what `dependency_hash` answers in that case. Used by submission and by the adoption step, which stores prose through the same path.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 - externals: std
 
 ## `shorten_dep_targets`
@@ -163,8 +163,8 @@ Computes the "have my dependencies changed shape?" fingerprint for a whole file.
 ### Behavior
 It asks `try_file_dependency_pairs` for the `(target id, hash)` pairs of every import in the file that resolved to a target inside the repo, and hashes them with `hash_dependency_pairs`. Unlike `dependency_hash`, it does not narrow by what each symbol mentions, because a file summary is about the file as a whole, so any dependency changing shape can matter. Unresolved imports are ignored since their shape cannot be observed. If the pairs cannot be worked out (the id is not a file node), it returns an empty string rather than failing.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `try_file_dependency_pairs`
 `pub(crate) fn try_file_dependency_pairs(
@@ -176,9 +176,9 @@ Finds the `(target id, hash)` pairs for everything a whole file imports from ins
 ### Behavior
 Returns `None` if `file_id` is not a file node, which lets `file_dependency_hash` keep answering with an empty string in that case instead of the hash of an empty list. Otherwise it takes every resolved import in the graph whose source file is this one, drops those with no target (an external package or a broken import), and passes the remaining targets to `dependency_target_pairs`, which sorts and deduplicates them. There is no narrowing by what any symbol uses: every in-repo import of the file counts.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/graph.rs::Node`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/graph.rs::Node`](../graph.rs.md#node) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `file_dependency_record`
 `pub(super) fn file_dependency_record(
@@ -190,8 +190,8 @@ Produces what is stored for a file when its spec is written: the combined depend
 ### Behavior
 It calls `try_file_dependency_pairs` once and derives both values from that single result, so the hash and the breakdown cannot disagree. When pairs are found, it returns the hash from `hash_dependency_pairs` over the full-length hashes and the same pairs shortened by `shorten_dep_targets` for storage. When the id is not a file node it returns an empty hash and an empty list, matching what `file_dependency_hash` answers in that case. Every in-repo import of the file counts, with no narrowing by symbol.
 ### Depends on
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
 
 ## `diff_hash_lists`
 `pub fn diff_hash_lists(current: &[(String, String)], stored: &[(String, String)]) -> Vec<String>`
@@ -215,10 +215,10 @@ Reports what has changed for one function or type since its spec was written. An
 ### Behavior
 Builds two lists of (name, hash) pairs with the fixed keys `source` and `dependencies`. The current list uses the symbol's present `source_hash` and a freshly computed `dependency_hash`. The stored list uses the hashes saved in the `HashPair`. Both go to `diff_hash_lists`, which reports the keys whose values differ, as entries such as `changed:source` or `changed:dependencies`. Using the same two keys each time lets `get_spec` tell a caller which of the two moved. The stored `spec_hash` is not involved, since editing prose never makes a spec stale. If the source cannot be read, `dependency_hash` returns an empty string, which will not match a stored non-empty value and so shows as a `dependencies` change.
 ### Depends on
-- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
-- [`src/symbol.rs::Symbol`](../symbol.rs.md) — crate::symbol
+- [`src/spec/format.rs::HashPair`](format.rs.md#hashpair) — super::format
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph
+- [`src/symbol.rs::Symbol`](../symbol.rs.md#symbol) — crate::symbol
 - externals: std
 
 ## `file_changes`
@@ -228,6 +228,6 @@ Reports what has changed for a whole file since its spec was written. An empty r
 ### Behavior
 Works like `symbol_changes` but at file level, and the `source` side compares the file's fingerprint, not its raw text hash: the fingerprint is the language pack's hash of what a file summary could quote, so edits the summary would not mention leave it unchanged. The current side is the file's present fingerprint (an empty string if the id is not a file) and `file_dependency_hash`; the stored side is the `fingerprint` and `deps_hash` saved in the `HashPair`. `diff_hash_lists` reports whichever of the keys `source` and `dependencies` differ. A spec written before fingerprints existed stored none, so it always differs and shows a `source` change until it is migrated or regenerated. It needs no disk access, because the fingerprint is already in the graph, so it takes no `root` argument. A file that vanished from the graph compares as having an empty fingerprint and therefore shows as changed.
 ### Depends on
-- [`src/spec/format.rs::HashPair`](format.rs.md) — super::format
-- [`src/graph.rs::Graph`](../graph.rs.md) — crate::graph
-- [`src/symbol.rs::SymbolId`](../symbol.rs.md) — crate::graph
+- [`src/spec/format.rs::HashPair`](format.rs.md#hashpair) — super::format
+- [`src/graph.rs::Graph`](../graph.rs.md#graph) — crate::graph
+- [`src/symbol.rs::SymbolId`](../symbol.rs.md#symbolid) — crate::graph

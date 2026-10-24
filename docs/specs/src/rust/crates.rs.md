@@ -13,7 +13,7 @@ symbols:
 dep_targets:
   src/rust/crates.rs::CrateMap -> src/imports.rs::FileImports: 7a834189d6b3
 ---
-# src/rust/crates.rs
+# [`src/rust/crates.rs`](../../../../src/rust/crates.rs)
 > Generated using [CodeOwl](https://github.com/siddswork/codeowl)
 ## Summary
 
@@ -29,7 +29,7 @@ Holds three things: `libs` maps a library crate's name to the directory holding 
 
 `crate_root(file, files)` gives the directory that `crate::` means for a file: the nearest enclosing directory that holds a `lib.rs` or `main.rs`, or that a manifest declares as a library root. So a binary with its own modules resolves inside itself, and two workspace crates each resolve inside themselves. A file under no such directory, such as one in `tests/` or `examples/`, falls back to the `src` of the package that owns it, never another package's, and to a top-level `src` when there is no `Cargo.toml` above it.
 ### Depends on
-- [`src/imports.rs::FileImports`](../imports.rs.md) — crate::imports
+- [`src/imports.rs::FileImports`](../imports.rs.md#fileimports) — crate::imports
 - externals: std
 
 ## `parent_dir`
