@@ -633,9 +633,14 @@ fn parse_hash_pair(flow_map: &str) -> HashPair {
 }
 
 /// Find `heading` in `text`, return the trimmed text between it and the
-/// next `next_marker` (or end of `text`).
+/// next `next_marker` (or end of `text`). The heading must start a line: a
+/// summary that quotes `### Behavior` in a sentence is not that heading, and
+/// `## Summary` is not found inside `### Summary`.
 pub(super) fn extract_section(text: &str, heading: &str, next_marker: &str) -> Option<String> {
-    let idx = text.find(heading)?;
+    let idx = text
+        .match_indices(heading)
+        .map(|(idx, _)| idx)
+        .find(|&idx| idx == 0 || text.as_bytes()[idx - 1] == b'\n')?;
     let after = &text[idx + heading.len()..];
     let after = after.strip_prefix('\n').unwrap_or(after);
     let end = after.find(next_marker).unwrap_or(after.len());
@@ -1496,6 +1501,51 @@ impl<T: Render> Panel<T> {\n\
             "{rendered}"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn extract_section_takes_a_heading_only_at_the_start_of_a_line() {
+        // A Summary that quotes the next heading's name must not be taken
+        // for that heading: the Behavior is the text after the real one.
+        let text = "### Summary\nPulls sections (`## Summary`, `### Behavior` and so on) out.\n### Behavior\nThe real text.\n";
+        assert_eq!(
+            extract_section(text, "### Behavior", "\n### ").as_deref(),
+            Some("The real text.")
+        );
+        assert_eq!(
+            extract_section(text, "### Summary", "\n### ").as_deref(),
+            Some("Pulls sections (`## Summary`, `### Behavior` and so on) out.")
+        );
+        // The first line of the text counts as the start of a line.
+        assert_eq!(
+            extract_section("## Summary\nBody.\n", "## Summary", "\n## ").as_deref(),
+            Some("Body.")
+        );
+    }
+
+    #[test]
+    fn extract_section_does_not_find_a_shallower_heading_inside_a_deeper_one() {
+        // `## Summary` is a substring of `### Summary`, but not a line that
+        // starts with it.
+        assert_eq!(
+            extract_section("### Summary\nBody.\n", "## Summary", "\n## "),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_section_finds_nothing_when_the_heading_only_appears_in_prose() {
+        let text = "### Summary\nSee `### Behavior` for the rest.\n";
+        assert_eq!(extract_section(text, "### Behavior", "\n### "), None);
+    }
+
+    #[test]
+    fn a_summary_that_quotes_the_behavior_heading_does_not_become_the_behavior() {
+        let doc = "---\ntype: file\nsource_paths: [src/a.rs]\nsymbols:\n  src/a.rs::f: { source_hash: a, deps_hash: b, spec_hash: c }\n---\n# src/a.rs\n## Summary\nFile.\n## `f`\n`fn f()`\n### Summary\nPulls sections (`## Summary`, `### Behavior` and so on) back out.\n### Behavior\nFinds the heading.\n### Depends on\n- (none)\n";
+        let spec = parse(doc).unwrap();
+        let (_, prose) = &spec.sections[0];
+        assert_eq!(prose.behavior, "Finds the heading.");
+        assert!(prose.summary.ends_with("and so on) back out."));
     }
 
     #[test]
