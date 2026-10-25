@@ -32,7 +32,7 @@ symbols:
   src/spec/format.rs::parse: { source_hash: 65bca278c9fd480aa4cea4bbe1e43f59afc0e024bbd69183f5fb8f669b71fa3b, deps_hash: 19ffa284a4f48d108654ee290458cf2d7a690842cc039c1dc8fe8a1acf992ad8, spec_hash: 516fa3610435e66a230770f36e9fbf867350de8e44beae569d492a98934d6b66 }
   src/spec/format.rs::record_dep_target: { source_hash: 2da482310abb83b06fc7639af042613f6928c486a47a9d79b9518fe3311e91f0, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 7ff004bb3300ce11767372b27a493c3ff8ed622299c488038ae26ad26acfd1d0 }
   src/spec/format.rs::parse_hash_pair: { source_hash: 4f93e09d14b055d577cd3739fc9973f7cd7a8450cb9b64ceec357e63ac888a85, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: a51dbd5a10bbe0b145a0a43c979928f162b839ce5d64df83feb5960fda933a9e }
-  src/spec/format.rs::extract_section: { source_hash: eb4a6964861a73e6ee673bec3dea88162c1a9d5c0cce9e3c7a1adb2e71b2725c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 02c1d12ef0fde7442bb3dc879460dd122f3ffaa0863d9abc4f2de02e0834dd06 }
+  src/spec/format.rs::extract_section: { source_hash: eb4a6964861a73e6ee673bec3dea88162c1a9d5c0cce9e3c7a1adb2e71b2725c, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 4af8cf27a6efc96fe6dac793d263b2b623bbdb9dd979005874af92f3b7835efa }
   src/spec/format.rs::read_file_spec: { source_hash: 94ddd07c09c53d9a4e06279f20eb5da6ed687c3f47daba7ab3849053b927f7b8, deps_hash: af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262, spec_hash: 04accf5385d9023f9d21cc8cfe08aff711eed064c5bf726c2b2d8e5e1bd98211 }
   src/spec/format.rs::read_existing: { source_hash: c7e1e6cd5e31707f6b23d191d93baf9ad4951999ff5c8de2ba26511792b80651, deps_hash: 1af8021f8d163b0722d470c742fdfe8564c5819dc70b6fb76e3ba0b406e704a7, spec_hash: e95ed452b46f56e787e20739a283a2890394a89fab35b7add37fbe1106d41614 }
   src/spec/format.rs::write: { source_hash: 760f1a94f804e99d027b7e9aeb2cc8dccd5c5f2e363f66400b924d71a575ce98, deps_hash: 1c9c6774a259d9aea3cf669f0871f7044d0adec93451a83c6cb7199ca1b79ca2, spec_hash: 96ed0e755c0bd1d0d511bdcef762554c6648ab6a7fbfdf36cd0fe1b55dc6b41f }
@@ -368,9 +368,11 @@ Strips the surrounding `{` and `}`, splits the inside on commas, and for each `k
 ## `extract_section`
 `pub(super) fn extract_section(text: &str, heading: &str, next_marker: &str) -> Option<String>`
 ### Summary
-A small text-extraction helper: finds a named heading and returns what sits between it and the next section marker, trimmed. It is the primitive the spec parsers use repeatedly to pull individual sections (`## Summary`, `### Behavior` and so on) back out of rendered markdown.
+Cuts one section out of a markdown document: the trimmed text that follows a given heading, up to the next marker or the end of the text. The spec parsers use it to pull the prose back out of a stored page.
 ### Behavior
-` and so on) back out of rendered markdown.
+Finds the first occurrence of the heading string anywhere in the text; if it is not there the result is `None`. It takes everything after the heading, drops a single newline directly after it if there is one, and then searches that remainder for the next marker. The section ends at the marker, or at the end of the text when the marker never appears. The slice is trimmed and returned as an owned string, so an empty section comes back as `Some` of an empty string, not `None`.
+
+The match is a plain substring search, not a line-anchored one, and the marker search starts after the heading. That has consequences: a heading such as `## Summary` also matches inside `### Summary`, and a heading quoted inside prose or a code block can be found first. The marker is matched literally too, so a newline followed by `## ` and a space stops at the next heading of exactly that depth but passes over a deeper `###` heading, whose third character is not a space. Only the first match counts, so a repeated heading is never reported. Callers choose the heading and marker, so the function carries no knowledge of the spec layout.
 ### Depends on
 - (none)
 
