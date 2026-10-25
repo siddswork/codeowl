@@ -288,10 +288,16 @@ pub fn submit(graph: &Graph, root: &Path, id: &str, content: &str) -> Result<Has
                 .context("symbol has no containing file to attach its spec to")?;
             let summary = extract_section(content, "### Summary", "\n### ")
                 .filter(|s| !s.is_empty())
-                .context("submitted content missing a non-empty `### Summary` section")?;
+                .context(
+                    "submitted content missing a non-empty `### Summary` section \
+                     (the heading must start its own line)",
+                )?;
             let behavior = extract_section(content, "### Behavior", "\n### ")
                 .filter(|s| !s.is_empty())
-                .context("submitted content missing a non-empty `### Behavior` section")?;
+                .context(
+                    "submitted content missing a non-empty `### Behavior` section \
+                     (the heading must start its own line)",
+                )?;
             reject_if_smelly(
                 &format!("submitted prose for {id:?}"),
                 prose_smells(&summary)
