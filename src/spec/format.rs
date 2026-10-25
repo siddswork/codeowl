@@ -554,7 +554,7 @@ pub fn parse(content: &str) -> Result<FileSpec> {
     let mut sections = Vec::new();
     for (id, _) in &symbols {
         let heading = format!("## `{}`\n", short_name(id));
-        let Some(start) = body.find(&heading) else {
+        let Some(start) = line_start_of(&body, &heading) else {
             continue;
         };
         let rest = &body[start..];
@@ -632,15 +632,20 @@ fn parse_hash_pair(flow_map: &str) -> HashPair {
     pair
 }
 
+/// Where `needle` first occurs at the start of a line of `text` (index 0, or
+/// right after a newline). The same text inside a sentence is not a match.
+fn line_start_of(text: &str, needle: &str) -> Option<usize> {
+    text.match_indices(needle)
+        .map(|(idx, _)| idx)
+        .find(|&idx| idx == 0 || text.as_bytes()[idx - 1] == b'\n')
+}
+
 /// Find `heading` in `text`, return the trimmed text between it and the
 /// next `next_marker` (or end of `text`). The heading must start a line: a
 /// summary that quotes `### Behavior` in a sentence is not that heading, and
 /// `## Summary` is not found inside `### Summary`.
 pub(super) fn extract_section(text: &str, heading: &str, next_marker: &str) -> Option<String> {
-    let idx = text
-        .match_indices(heading)
-        .map(|(idx, _)| idx)
-        .find(|&idx| idx == 0 || text.as_bytes()[idx - 1] == b'\n')?;
+    let idx = line_start_of(text, heading)?;
     let after = &text[idx + heading.len()..];
     let after = after.strip_prefix('\n').unwrap_or(after);
     let end = after.find(next_marker).unwrap_or(after.len());
@@ -1546,6 +1551,35 @@ impl<T: Render> Panel<T> {\n\
         let (_, prose) = &spec.sections[0];
         assert_eq!(prose.behavior, "Finds the heading.");
         assert!(prose.summary.ends_with("and so on) back out."));
+    }
+
+    #[test]
+    fn a_file_summary_that_ends_a_line_with_a_symbol_heading_does_not_start_its_section() {
+        // The file summary mentions the heading text at the end of a line;
+        // the section starts at the real heading, which begins its line.
+        let doc = "---\ntype: file\nsource_paths: [src/a.rs]\nsymbols:\n  src/a.rs::f: { source_hash: a, deps_hash: b, spec_hash: c }\n---\n# src/a.rs\n## Summary\nThe helper is documented under ## `f`\nand is small.\n## `f`\n`fn f()`\n### Summary\nReal summary.\n### Behavior\nReal behavior.\n### Depends on\n- (none)\n";
+        let spec = parse(doc).unwrap();
+        let (_, prose) = &spec.sections[0];
+        assert_eq!(prose.summary, "Real summary.");
+        assert_eq!(prose.behavior, "Real behavior.");
+    }
+
+    #[test]
+    fn extract_section_does_not_take_an_indented_heading_and_reads_crlf() {
+        // Pinned on purpose: a heading with leading spaces is not a heading.
+        assert_eq!(
+            extract_section("  ### Summary\nBody.\n", "### Summary", "\n### "),
+            None
+        );
+        assert_eq!(
+            extract_section(
+                "### Summary\r\nBody.\r\n### Behavior\r\n",
+                "### Summary",
+                "\n### "
+            )
+            .as_deref(),
+            Some("Body.")
+        );
     }
 
     #[test]
