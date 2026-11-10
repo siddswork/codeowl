@@ -1190,7 +1190,9 @@ Suggested order: 1, then 2, then 4, then 3. Idea 1 is the cheapest and the only 
 
 ## Future: a C++ pack (wanted by the owner — recorded 2026-11-10, not yet planned in detail)
 
-> **Status: the owner wants this (2026-11-10); no milestone number, no approved plan, nothing built.** It supersedes "`leveldb` isn't on the schedule" in the test-repo table above as an intention, not yet as a schedule. The design below is a starting point to check against the code and to measure on `leveldb` before any of it is fixed. Claims marked *unverified* were not checked.
+> **Superseded the same day by `docs/cpp-pack-plan.md`** (decisions in `DECISIONS.md` question 28, data in `experiments/exp-08-cpp-tree-sitter-or-compiler.md`). The plan reverses three things written below: a class gets one spec across header and source, not one per file; includes are followed transitively, not directly; and `<…>` includes are resolved against the repository too. Read the plan, not this section, for the design. Nothing is built.
+>
+> **Original status: the owner wants this (2026-11-10); no milestone number, no approved plan, nothing built.** It supersedes "`leveldb` isn't on the schedule" in the test-repo table above as an intention, not yet as a schedule. The design below is a starting point to check against the code and to measure on `leveldb` before any of it is fixed. Claims marked *unverified* were not checked.
 
 **Vision.** CodeOwl indexes a C++ codebase the way it indexes the other four stacks: classes, functions, namespaces and their headers become symbols with hashes; `#include` becomes resolved edges; specs are generated and go stale per symbol. A team with a large, old C++ codebase, the hardest kind to read, gets the same current, checked documentation.
 

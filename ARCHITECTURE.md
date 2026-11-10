@@ -502,7 +502,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 
 | # | Question | Status |
 |---|---|---|
-| [1](DECISIONS.md#q1) | tree-sitter vs. LSP — precision against speed and breadth, especially for C++ | Open |
+| [1](DECISIONS.md#q1) | tree-sitter vs. LSP — precision against speed and breadth, especially for C++ | Open; decided for C++ (2026-11-10): tree-sitter as the base layer, an optional compiler-grade index as a second layer. Not built |
 | [2](DECISIONS.md#q2) | Token-budget threshold for deciding when a unit is small enough to spec directly | Open |
 | [3](DECISIONS.md#q3) | Polyglot and non-code artifact resolution within one repo | Open |
 | [4](DECISIONS.md#q4) | Feature boundaries and naming — one feature per entry point doesn't fit every flow | Open, manifest format deferred |
@@ -533,6 +533,7 @@ Requirements-level open questions (whether something is in scope at all) live in
 | [16](DECISIONS.md#q16) | Zero-field marker type and its trait impl as unlinked nodes | Degenerate case folded; general case gets an impl → type edge |
 | [19](DECISIONS.md#q19) | A folded impl's header invisible to dependency scoping | Fixed for cross-file traits; same-file trait gap measured, not built |
 | [20](DECISIONS.md#q20) | Rust resolution assumed one crate root per repo (wrong and non-deterministic in workspaces; crate-name `use` never resolved) | `crate::` is per-file; library crate names resolved from `Cargo.toml`. Test-crate roots and nested-brace re-exports not covered |
+| [28](DECISIONS.md#q28) | How is a C++ pack built, given that C++ is to be CodeOwl's strongest language? | Decided 2026-11-10, not built: two layers (tree-sitter with macro handling, an optional compiler-grade index); macro blanking first, then a macro table; one spec per class across header and source; transitive includes; accuracy targets against a compiler. Plan: `docs/cpp-pack-plan.md` |
 | [27](DECISIONS.md#q27) | Should the specs conform to Open Knowledge Format (OKF)? | Yes: `type` (replacing `kind`), `generated: { by: CodeOwl }`, `title`, a fixed `description`, `resource` / `sources`; `STYLE.md` moved out of `docs/specs/`; `Depends on` entries are links to the dependency's file spec; `codeowl migrate-to-okf` converts stored specs, links included. `tags`, `verified`, `status` and the rest declined |
 
 ## Non-goals (for now)
