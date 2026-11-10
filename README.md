@@ -130,12 +130,12 @@ printing the symbols CodeOwl found (`extract`). They are listed in
 
 ```mermaid
 flowchart LR
-  code["Your code"] --> graph["Structural graph<br/>symbols, imports, flow edges"]
-  graph --> task["get_next_spec_task"]
+  code["Your code"] --> sg["Structural graph<br/>symbols, imports, flow edges"]
+  sg --> task["get_next_spec_task"]
   task --> agent["Your agent writes the spec"]
   agent --> submit["submit_spec"]
   submit --> spec["docs/specs/<br/>spec + hashes"]
-  graph -. "hashes differ from the spec's" .-> stale["Spec marked stale,<br/>with what moved"]
+  sg -. "hashes differ from the spec's" .-> stale["Spec marked stale,<br/>with what moved"]
   spec -.-> stale
 ```
 
