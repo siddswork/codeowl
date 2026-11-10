@@ -1044,6 +1044,194 @@ Open from it: question 24 (CodeOwl's resolver does not resolve a bare child-modu
 
 ---
 
+## Future: the change guard (idea, not scheduled — recorded 2026-11-10)
+
+> **Status: a proposal from a competitor review, not a commitment.** Nothing is built and no milestone is assigned. It is written down so the reasoning is not lost; it needs the owner's decision (see "Conflicts to settle first").
+
+**The idea.** CodeOwl tells the agent or developer what a change just broke, without being asked. `codeowl impact [--json]` compares the working tree with `HEAD` and reports:
+
+| Report | Source (all already in the graph) |
+|---|---|
+| Symbols whose `interface_hash` moved | the graph at `HEAD` against the working tree |
+| **Unvisited callers**: callers of a changed symbol that the change did not touch (an agent changes a signature, fixes two call sites, says "done") | reference edges |
+| Affected cross-layer flows (a renamed column and the `.from("t")` files and route that depend on it) | `flow_edges` |
+| Specs that are now stale, and why | existing staleness hashes |
+
+**Three surfaces for one command.**
+
+| Surface | Use |
+|---|---|
+| Agent harness | A Stop hook runs it and refuses "done" while unvisited callers remain. It pushes the answer instead of waiting for the agent to think of calling `get_callers`. |
+| Developer | The same command, before a commit. |
+| CI | A `codeowl check` and a GitHub Action: the PR comment lists stale specs and affected flows, and can fail the build past a drift threshold. Reviewers, QA and BAs see the impact with no IDE or MCP setup. |
+
+**Why it fits.** No LLM call and no credentials (the hard invariant holds, and the privacy advantage carries into CI). It rests on what competitors lack: hash-based staleness, deterministic flow edges, specs in git. It is measurable ("unvisited callers caught per session"), which gives the agent-context claim its first number. It would move `NORTHSTAR.md` P1 (enforced freshness), P4 and P12.
+
+**Conflicts to settle first.**
+1. `NORTHSTAR.md` marks P12 (use as agent context) a **non-goal**, "no claim made". This feature reopens it.
+2. `ARCHITECTURE.md` records that `impact_analysis` was never built because `get_callers` answers it. The case for reopening: this is pushed, not pulled, and diff-based, which `get_callers` is not.
+3. `CLAUDE.md`'s standing rule: Sidd is the only user, so do not build tooling for hypothetical users. The CI action and a zero-setup install (prebuilt binaries, a `codeowl init` that wires MCP) serve people who do not exist yet; the local command and the hook serve the owner.
+
+**Risks to design around.**
+- A missed caller destroys trust. `get_callers` cannot see same-file calls, and an unresolved import is no edge, so its importers never show. The report must close those gaps or state them in its output.
+- It covers only the four supported stacks; on any other language it is silent, and should say so.
+- Open technical question: how cheaply the graph can be built at `HEAD` for the comparison (a stored baseline in `.codeowl/`, or an extraction of a git tree). Unmeasured.
+
+**What it would need beside it** (from the same review): a small repeatable benchmark of the same tasks with and without the CodeOwl tools (correctness and tokens; `SWD-Bench` is the nearest published design), and a setup that takes minutes.
+
+**Validation when it is picked up** (to be written as tests first): on a branch that changes a signature in a repo with known callers, the report lists exactly the callers a compiler flags, with none missing and none extra for the resolved languages; a negative control with an unresolved import shows the stated gap; the hook blocks a session that leaves a caller unvisited.
+
+---
+
+## Future: four more ideas from the same review (not scheduled — recorded 2026-11-10)
+
+> **Status: proposals, not commitments.** Nothing here is built, measured or assigned a milestone. Each one names the `NORTHSTAR.md` parameter it would move and the decision it reopens. Each "how" is a starting design to check against the code, not a settled plan; the claims marked *unverified* were not checked when this was written.
+
+| # | Idea | Parameter it moves (score on 2026-10-02) | Against competitors | LLM call? |
+|---|---|---|---|---|
+| 1 | Checked prose | P2 measured accuracy (2) | Ahead: no product found verifies generated docs mechanically | No |
+| 2 | Diagrams from real edges | P5 reading experience (2) | Level on looks, ahead on trust | No |
+| 3 | Import a compiler-grade index (SCIP) | P3 language breadth (2), P1 through K2 | Level with Sourcegraph and Serena | No |
+| 4 | `search_specs` | P12 agent context (3), P5 | Level with Augment and the wikis' chat | No (a local embedding model at most) |
+
+Suggested order: 1, then 2, then 4, then 3. Idea 1 is the cheapest and the only one that gives CodeOwl something no competitor has. Idea 4 is worth little until the spec corpus is complete. Idea 3 is the largest and the least certain.
+
+### Idea 1: checked prose
+
+**Vision.** Every spec carries a number a reader can trust: "31 of 32 named things verified against the code". An AI-written document stops being something you take on faith. A claim that cannot be verified is flagged at submit time, before it reaches git, and a claim that stops being true later is flagged without waiting for a hash to move.
+
+**Need.** The main objection to generated documentation is that it may be wrong and nobody can tell where. Today the only quality evidence is the owner's sample read (`NORTHSTAR.md` P2 = 2). The regeneration showed the failure concretely: the drafts that were wrong were the ones naming code that had moved (`Graph::file_role`, `spec.rs` as an importer, a helper that went to `fixtures.rs`), and each was caught by hand with `get_source` and `search_code`. That manual check is this feature.
+
+**Gap it addresses.**
+- P2: no competitor publishes a per-document verification rate; CodeWikiBench scores documents against a rubric once, not continuously.
+- A hole in staleness: prose can name a symbol that is not one of its graph dependencies. When that symbol is renamed or deleted, no hash moves and the spec stays "current" while saying something false.
+- The smell check (`spec/smells.rs`) judges the style of the prose, never its facts.
+
+**How.**
+1. **Extract the named things.** Take every code span in the LLM-written prose (not the signature or the `Depends on` list, which CodeOwl fills in itself). Classify each: a file path, a symbol name or id, a table, or something else (a keyword, a literal, an external crate's type).
+2. **Check existence.** A path must be a file in the graph; a symbol must resolve, looked up first in the spec's own file, then among its dependencies and dependents, then repo-wide by name; a table must be a `table` node. The adoption planner already has a stale-file-reference check (`spec/adopt.rs`); start from it.
+3. **Check connection.** If symbol A's spec names B, look for an edge that explains it: A calls or imports B, B calls A, they share a file or a flow. A named thing with no edge is a weaker flag ("unconnected mention"), not a failure.
+4. **Do not parse English.** The check proves "the thing named exists and is connected", never "the sentence is true". "Retries three times" stays unverifiable, and the output must say what share of a spec is checkable.
+5. **Surface it in three places.** A new smell (for example `dangling_reference`) on `get_spec` and `get_spec_coverage`; a refusal or warning in `submit_spec`, so a wrong name is fixed while the agent still has the source open; a per-spec and repo-wide rate for the KPI.
+6. **Compute on read, store nothing.** `DECISIONS.md` q27 declined the OKF `verified` frontmatter key; a stored number would also churn every spec file. The rate is derived from the graph each time.
+7. **Layering.** A new `spec/` module after `smells`, reading the graph and the parsed spec; no pack involvement.
+
+**Measure first** (as an experiment, in the `experiments/` pattern, before any wiring). Run the extractor over the 60 stored specs, hand-label a sample of the flags, and report the false-positive rate. The expected noise is code spans that are not repository names (`true`, `Option`, `anyhow::Result`, shell commands). Kill criterion: if the flags cannot be brought under roughly one false alarm in ten without an allow-list that needs upkeep, stop at the file-path check, which is already known to work.
+
+**Validation when picked up.** A fixture spec naming a deleted symbol, a renamed file and a real dependency yields exactly two flags; replaying the known-wrong adopted drafts from the regeneration flags each of the moved names; a new KPI under P2 in `NORTHSTAR.md` with its baseline from the experiment.
+
+### Idea 2: diagrams from real edges
+
+**Vision.** A feature spec opens with its flow drawn (page, API route, table), a rollup with its directory's module dependencies, the system spec with a map of the top-level parts. Every arrow is an edge in the graph, so a diagram cannot show a connection that does not exist. GitHub renders it in place; a BA reads it in the browser with nothing installed.
+
+**Need.** Reading experience is CodeOwl's widest gap against the wiki products (P5 = 2 against 5). Diagrams are the first thing DeepWiki and Google Code Wiki show. Theirs are drawn by an LLM, so they can be wrong in the same way prose can; CodeOwl can draw the same picture from facts.
+
+**Gap it addresses.** P5 without building the web viewer. It also supports P4: the deterministic flow edges are a strength a reader cannot currently see.
+
+**How.**
+1. **Mermaid in the markdown.** GitHub renders it natively and the README already uses it. No image files, no viewer, no dependency.
+2. **Filled by CodeOwl, like the signature and the `Depends on` list.** The LLM never writes a diagram (the invariant "the LLM never writes what the graph already knows"). The block is not hashed and the parsers skip it, the same treatment as the provenance line (`spec/format.rs`).
+3. **One diagram per spec kind.**
+
+   | Spec | Diagram | Source |
+   |---|---|---|
+   | Feature | Entry point to participants to tables, left to right | `flow_edges`, the feature model's participants |
+   | Rollup | Files and child directories with import edges between them | file-level import edges, children collapsed to one node |
+   | System | Top-level directories and features | rollup-level edges |
+   | File | None at first | a file's symbols rarely make a readable picture |
+
+4. **Keep it readable.** Cap the node count (about 25), collapse a directory into one node past the cap, and say in a caption what was collapsed. Escape node ids: `graph` is a reserved word in Mermaid and already broke the README once.
+5. **Refreshing.** A diagram changes when edges change, even if the prose is current, and a current spec is never offered for regeneration. So: write it on every render, and add an explicit command (or extend an existing migration-style command) that rewrites the diagram block of stored specs. Never on reindex: writes happen only under an explicit command (`DECISIONS.md` q26). The change guard's check can report "diagram out of date".
+6. **Relation to other plans.** This is the cheap first step of the web viewer and may answer part of the open `codeowl viz` questions; settle those together.
+
+**Validation when picked up.** A fixture graph renders a diagram whose edge set equals the graph's edge set for that scope (parsed back from the Mermaid text); the diagram for a talentTrail feature matches the flow the owner traced by hand when the feature layer was designed; every stored spec still parses with the block present and with it absent; `okf validate` still passes.
+
+### Idea 3: import a compiler-grade index (SCIP)
+
+**Vision.** Any language that has a SCIP indexer (*unverified list:* TypeScript, Java, Python, Rust through rust-analyzer, Go, C and C++) works in CodeOwl without a hand-written pack, and the edges for the languages that do have a pack become as precise as the compiler's. CodeOwl keeps what is its own (hashes, staleness, flows, specs) and stops competing on name resolution.
+
+**Need.** Language breadth is scored 2 against 4 or 5 for every competitor, and each new pack is weeks of work. Separately, resolution gaps are the stated reason freshness is 4 and not 5: an unresolved import is no edge, so its importers never go stale (K2), and `get_callers` cannot see same-file calls. Open questions 19, 23 and 24 are all resolver gaps of this kind.
+
+**Gap it addresses.** P3, and P1 through K2. It is also one concrete answer to open question 1 (tree-sitter or LSP), which has been deferred since the start.
+
+**How, in two stages.**
+1. **Stage 1, an overlay on the existing packs.** Tree-sitter still produces symbols, spans, signatures and hashes. When a SCIP index file is present, its definition and reference occurrences replace or add to the pack's resolved edges. Nothing about the symbol shape or the hashes changes, so the risk is contained and the gain is measurable at once: unresolved imports and missing callers before and after.
+2. **Stage 2, a generic pack for a language with no pack.** Symbols come from SCIP definitions, with kinds mapped to `Container` / `Callable` / `Value` / `Schema`. It has no feature model and no fingerprint rule (whole-text hashing, as Java and Python have today). It is registered in `stack::registered_packs` like any other.
+
+**Open problems, to resolve in a spike before either stage.**
+- **Hashes.** `interface_hash` needs a signature text. Whether SCIP indexers supply one reliably, and whether they supply the enclosing range of a definition (needed for spans and containment), is *unverified* and varies by indexer. If they do not, stage 2 needs tree-sitter for spans anyway.
+- **A static file against a live index.** The watcher re-parses an edited file in about a second; a SCIP file is as old as its last indexer run. Record what the index was built from and fall back to the pack's own edges for any file changed since.
+- **Setup cost.** Running an indexer needs the project's build toolchain. That works against P8 (setup effort), so the index must stay optional: CodeOwl works without it and says which precision it is running at.
+- **One stack per repo.** A polyglot repo has one index per language; this depends on the polyglot work.
+- **A new dependency** (a protobuf reader), weighed against the single self-contained binary.
+
+**Spike.** On talentTrail and commons-lang, produce a SCIP index, load it read-only, and compare with today's graph: unresolved imports, edge counts, same-file calls found, and how many definitions carry a usable signature and range. Kill criterion: if stage 1 does not cut unresolved imports and missing callers materially on both repos, record the numbers under open question 1 and stop.
+
+**Validation when picked up.** `graph_stats` with and without the index on the test repos, with the difference explained edge by edge on a sample; K2 re-measured; a stale index (a file edited after indexing) demonstrably falls back instead of serving wrong edges; a `FORMAT_VERSION` bump.
+
+### Idea 4: `search_specs`
+
+**Vision.** An agent or a person new to a repository asks "where do we validate the order total" and gets the spec sections that describe it, each with the symbol id to pass to `get_source`, `get_callers` or `get_spec`. The specs become the index for questions that have no name to search for.
+
+**Need.** `search_code` is regex only. Augment, Sourcegraph and the wikis' chat all answer a question asked in plain words, and that is the question someone has on their first day in a codebase. CodeOwl holds an asset the code-embedding tools do not: prose about every symbol, checked against hashes, at several granularities. The full reasoning is already in "Deferred behind the polyglot core" above (the three kinds of lookup, coverage honesty, the distribution cost); this entry adds the staging.
+
+**Gap it addresses.** P12 and P5. It is the "level with competitors" item: it surpasses nobody, but its absence is noticed.
+
+**How, in stages, each one useful by itself.**
+1. **Rank `search_code` on what the graph knows.** Prefer a declaration line, and `Domain` files before `Test` before `Generated`. No new dependency. (Already identified above; it is the cheap fix for the "where is the thing called X" lookup.)
+2. **Word-based search over spec prose.** Score spec sections by term overlap (BM25), in memory or with `tantivy`; return the section, its symbol id, its status (current, stale, smelly), and what was searched ("340 specs, 61 % of eligible symbols"). No model file. This may be enough: spec prose uses the domain's own words, which raw code often does not.
+3. **Embeddings, only if stage 2 measurably misses.** Behind an optional build feature or a model downloaded on first use, so the default binary stays self-contained (`ARCHITECTURE.md` §9).
+
+**Preconditions.** A complete corpus: with the regeneration about 15 % done, a search over the specs would mostly return nothing. And a measurement, on real sessions, that name-less lookups are still what sends an agent to `grep`.
+
+**Validation when picked up.** A fixed set of plain-language questions about CodeOwl's own repository and talentTrail, each with the symbol that answers it, written before the code; report how often the right symbol is in the top five for stage 2 alone, and build stage 3 only if that number is poor; a stale or smelly section is labelled as such in the results.
+
+---
+
+## Future: a C++ pack (wanted by the owner — recorded 2026-11-10, not yet planned in detail)
+
+> **Status: the owner wants this (2026-11-10); no milestone number, no approved plan, nothing built.** It supersedes "`leveldb` isn't on the schedule" in the test-repo table above as an intention, not yet as a schedule. The design below is a starting point to check against the code and to measure on `leveldb` before any of it is fixed. Claims marked *unverified* were not checked.
+
+**Vision.** CodeOwl indexes a C++ codebase the way it indexes the other four stacks: classes, functions, namespaces and their headers become symbols with hashes; `#include` becomes resolved edges; specs are generated and go stale per symbol. A team with a large, old C++ codebase, the hardest kind to read, gets the same current, checked documentation.
+
+**Need.**
+- `REQUIREMENTS.md` names C++ first in its problem statement ("multi-language: C++, Java, Python"), and it is the only one of the three with no pack.
+- Open question 1 (tree-sitter or LSP) has stayed open "especially for C++" since the start; only a real C++ pack can answer it with numbers.
+- It is where the competition is weakest: CodeWikiBench found every benchmarked generator weaker on C and C++ (`NORTHSTAR.md` §3).
+
+**Gap it addresses.** P3 language breadth (scored 2) and K6. It also turns open question 1 from an argument into a measurement.
+
+**What is different about C++** (each is a design decision the other packs did not need):
+
+| Problem | Why it is new | Proposed starting point |
+|---|---|---|
+| **Declaration and definition live in two files** (`db.h` declares `DB::Open`, `db_impl.cc` defines it) | Every other pack has one place per symbol | The class in the header is the `Container` and carries the interface. An out-of-class definition `Foo::bar` in a `.cc` is a `Callable` there with an edge to the type, in the direction already chosen for Rust (`impl → type` only). This fits the hashes well: editing a body in the `.cc` moves no interface. Whether header and source get one file spec each or one shared spec is open. |
+| **`#include` names a file, not symbols** | A header's every declaration becomes a dependency, so any change in it would make every includer stale | Narrow the edge to the names the including file actually uses, as the Java pack does for star imports (*unverified* that the same mechanism can be reused). |
+| **Include paths come from the build** | `"leveldb/db.h"` resolves under `include/`, `"db/builder.h"` from the repo root; neither is relative to the including file | Read `compile_commands.json` when present; otherwise try the including file's directory, the repo root, `include/` and `src/`. `<…>` is external. Report the unresolved count. |
+| **The preprocessor** | tree-sitter parses the text before preprocessing: both branches of an `#ifdef`, and macros it cannot expand. `class LEVELDB_EXPORT DB` (an export macro between `class` and the name) is in every public `leveldb` header and is a known weak spot | Measure the parse-error rate first. If export macros break class extraction, recognise the pattern (an all-caps identifier before the class name) in the pack. |
+| **Overloads, templates, namespaces** | Overloads share a name; a template's interface includes its parameters; namespaces nest and reopen across files | Overloads follow the Java rule (they share an id and both fold into the parent's interface hash). The template header is part of the signature. A namespace is not a spec-bearing symbol; it qualifies ids. |
+| **Visibility** | No `pub` or `export` keyword | Exported means declared in a header and not in an anonymous namespace or `static`. |
+| **Virtual dispatch** | A call through `Iterator*` cannot be resolved by syntax | Accept it: `get_callers` on a virtual method returns calls by name, and the limit is stated. This is the case the SCIP overlay (idea 3 above, `scip-clang`) would close. |
+
+**How (the build sequence).**
+1. **Add the grammar and a pack directory.** `tree-sitter-cpp` (0.23.4 on crates.io on 2026-11-10; its fit with the `tree-sitter` 0.27 in `Cargo.toml` is *unverified*). `src/cpp/mod.rs`, a `CppStack` implementing `StackPack`, one entry in `stack::registered_packs`. `source_kind` takes `.cc`, `.cpp`, `.cxx`, `.h`, `.hpp`, `.hh`. Plain C (`.c`) is left out at first.
+2. **Smoke pass before design.** As soon as `extract_symbols` compiles, run `codeowl extract` on `leveldb` (132 source files, 30 of them `*_test.cc`, CMake, vendored `third_party/`) and record: parse errors, symbols by kind, classes lost to the export macro. This decides the macro handling before anything else is written.
+3. **`classify`.** `*_test.cc` and `*_test.cpp` are `Test`; `third_party/`, `build/` and `*.pb.h` / `*.pb.cc` are `Generated` or outside the identity tree.
+4. **Includes.** `extract_imports` and `resolve_imports` with the lookup order above; then the narrowing to used names. Measure unresolved includes (K2's method).
+5. **Header and source pairing.** The out-of-class definition edge, with tests for a method defined inline, defined in the paired `.cc`, and defined in a differently named `.cc`.
+6. **No feature model, no fingerprint rule at first.** `feature_model()` returns `None` (`leveldb` is a library, like `commons-lang`), and the file fingerprint is the whole text, as Java and Python have today.
+7. **A real generation.** A budgeted `/codeowl-generate` on `leveldb`; the owner reads about ten specs, including one interface (`Comparator` or `Iterator`), one class split across header and source, and one rollup.
+8. **Then decide open question 1 for C++**, from the measured numbers: accept tree-sitter's precision, or build the SCIP overlay.
+
+**Risks.**
+- The pack list is one stack per repo, and C++ repositories often carry Python or shell beside the C++; `detect` picks the primary language and ignores the rest.
+- `leveldb` is small and clean. A codebase with heavy macros and templates will behave worse; a second, harder test repo is needed before calling the pack done (not chosen yet).
+- The include narrowing is the piece most likely to be wrong in either direction: too wide and everything goes stale together, too narrow and a real change is missed.
+
+**Validation when picked up** (written as tests first, per the workflow rule): pack unit tests for each row of the table above; on `leveldb`, every public class under `include/leveldb/` is extracted (checked against a list made by hand or by `grep`), unresolved quoted includes are near zero and each remaining one is explained; `graph_stats` on the other test repos is identical before and after (a new pack must not change an existing one); a `FORMAT_VERSION` bump if anything shared changes; the result logged against K6 in `NORTHSTAR.md`. `REQUIREMENTS.md` ("C++ is a held-in-reserve datapoint"), the test-repo table and `ARCHITECTURE.md` are updated when the work is scheduled, not before.
+
+---
+
 ## Provisional decisions this ordering makes
 
 Worth flagging since I made these calls rather than asking:
