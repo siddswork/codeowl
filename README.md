@@ -127,8 +127,9 @@ flowchart LR
   task --> agent["Your agent writes the spec"]
   agent --> submit["submit_spec"]
   submit --> spec["docs/specs/<br/>spec + hashes"]
-  sg -. "hashes differ from the spec's" .-> stale["Spec marked stale,<br/>with what moved"]
+  sg -. "compared when a spec is read" .-> stale["Spec marked stale,<br/>with what moved"]
   spec -.-> stale
+  stale -- "regenerate" --> task
 ```
 
 CodeOwl extracts a structural graph once — symbols, containment, resolved
