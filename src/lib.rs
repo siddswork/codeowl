@@ -1,3 +1,4 @@
+pub mod cpp;
 pub mod explain;
 pub mod features;
 #[cfg(test)]
