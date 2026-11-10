@@ -96,14 +96,14 @@ current.
 > CodeOwl never calls an LLM and never holds an API key. Your own agent
 > writes the spec text; CodeOwl only assembles context and stores the result.
 
-| | What you get | In practice |
-|---|---|---|
-| 🕑 | **Staleness you can trust** | Every spec carries hashes of the code it describes and of what that code depends on. Change a signature or a dependency and the spec reads `stale`, with the cause named; change nothing that matters and it stays current. The prose is never hashed, so there is no guessing and no churn. |
-| 🔌 | **Bring your own model** | Your agent (Claude Code, or VS Code with Copilot) writes the spec text with whatever model you already use. CodeOwl makes no model calls and adds no new place your source is sent. |
-| 📖 | **An open format** | Specs are [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog): Markdown with YAML frontmatter, linked from title to source and from each dependency to its section. Other tools can read them without CodeOwl. |
-| 🔍 | **Sees what grep can't** | Framework conventions become real edges: a `fetch("/api/x")` reaches its route, a `.from("payments")` reaches its `CREATE TABLE`, a `<Form/>` reaches its component, and `get_callers` on a database table lists the app code that queries it. |
-| 💸 | **Cheap to keep current** | Write the corpus once with `--all`; after that only the specs a change invalidates are regenerated, and specs follow code you move (`adopt-moved-specs`) instead of being rewritten. |
-| 🗂 | **Plain Markdown in git** | Specs live in `docs/specs/`, reviewed in a PR and readable by people first: a feature spec is a narrative a business analyst can follow. |
+| What you get | In practice |
+|---|---|
+| **Staleness you can trust** | Every spec carries hashes of the code it describes and of what that code depends on. Change a signature or a dependency and the spec reads `stale`, with the cause named; change nothing that matters and it stays current. The prose is never hashed, so there is no guessing and no churn. |
+| **Bring your own model** | Your agent (Claude Code, or VS Code with Copilot) writes the spec text with whatever model you already use. CodeOwl makes no model calls and adds no new place your source is sent. |
+| **An open format** | Specs are [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog): Markdown with YAML frontmatter, linked from title to source and from each dependency to its section. Other tools can read them without CodeOwl. |
+| **Sees what grep can't** | Framework conventions become real edges: a `fetch("/api/x")` reaches its route, a `.from("payments")` reaches its `CREATE TABLE`, a `<Form/>` reaches its component, and `get_callers` on a database table lists the app code that queries it. |
+| **Cheap to keep current** | Write the corpus once with `--all`; after that only the specs a change invalidates are regenerated, and specs follow code you move (`adopt-moved-specs`) instead of being rewritten. |
+| **Plain Markdown in git** | Specs live in `docs/specs/`, reviewed in a PR and readable by people first: a feature spec is a narrative a business analyst can follow. |
 
 ## Quick start
 
