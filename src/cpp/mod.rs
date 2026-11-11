@@ -30,6 +30,8 @@
 //! (pairing, `docs/cpp-pack-plan.md` §4.6).
 
 mod macros;
+#[cfg(test)]
+mod standards;
 
 pub use self::macros::blank_macros;
 
@@ -96,17 +98,33 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> Vec<ExtractedSymbo
     out
 }
 
+/// Extensions of files other files include (template implementation files
+/// and module interface units among them).
+const HEADER_EXTENSIONS: &[&str] = &[
+    "h", "hpp", "hh", "hxx", "ipp", "inl", "tpp", "tcc", "cppm", "ixx",
+];
+
+/// Extensions of files compiled by themselves. Plain C (`.c`) is not read.
+const SOURCE_EXTENSIONS: &[&str] = &["cc", "cpp", "cxx"];
+
+/// The extension in lower case: `.H` and `.HPP` exist.
+fn extension(rel_path: &str) -> String {
+    let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    name.rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+/// Whether the pack reads this file at all. The one list `CppStack` and
+/// [`is_header`] share, so a header extension cannot be read as a source file.
+pub fn is_cpp_file(rel_path: &str) -> bool {
+    let ext = extension(rel_path);
+    HEADER_EXTENSIONS.contains(&ext.as_str()) || SOURCE_EXTENSIONS.contains(&ext.as_str())
+}
+
 /// A file other files include. Decides what "exported" means (module doc).
 fn is_header(rel_path: &str) -> bool {
-    let ext = rel_path
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(
-        ext.as_str(),
-        "h" | "hpp" | "hh" | "hxx" | "h++" | "ipp" | "inl" | "tpp" | "tcc" | "cuh" | "cppm" | "ixx"
-    )
+    HEADER_EXTENSIONS.contains(&extension(rel_path).as_str())
 }
 
 /// What every visit needs and none changes.
@@ -173,6 +191,13 @@ impl<'a> Cx<'a> {
             | "preproc_elif" | "preproc_elifdef" | "ERROR" => {
                 self.visit_children(node, scope, out);
             }
+            // A C++20 `export { … }` block: with `export` blanked it parses
+            // as a bare block between declarations. Any other bare block is
+            // the body of something whose head did not parse (a Catch2
+            // `TEST_CASE("…") { … }`), and its locals are not declarations.
+            "compound_statement" if self.follows_export(node) => {
+                self.visit_children(node, scope, out);
+            }
             "template_declaration" => {
                 let mut cursor = node.walk();
                 let inner = node.named_children(&mut cursor).find(|c| {
@@ -234,6 +259,19 @@ impl<'a> Cx<'a> {
             "preproc_def" | "preproc_function_def" => self.macro_definition(node, out),
             _ => {}
         }
+    }
+
+    /// Whether the original text has the keyword `export` directly in front
+    /// of `node`.
+    fn follows_export(&self, node: Node) -> bool {
+        let before = self
+            .src
+            .get(..node.start_byte())
+            .unwrap_or_default()
+            .trim_end();
+        before
+            .strip_suffix("export")
+            .is_some_and(|rest| !rest.ends_with(|c: char| c.is_alphanumeric() || c == '_'))
     }
 
     fn visit_children(&self, node: Node, scope: &mut Scope, out: &mut Vec<ExtractedSymbol>) {
@@ -1364,6 +1402,16 @@ class Outer {
         // Template implementation files are headers; the extension's case is ignored.
         assert!(is_header("a/vec.tpp") && is_header("a/vec.TCC") && is_header("a/X.H"));
         assert!(!is_header("a/x.cc"));
+        assert!(is_cpp_file("a/x.cc") && is_cpp_file("a/X.H") && is_cpp_file("m.ixx"));
+        assert!(!is_cpp_file("a/x.c") && !is_cpp_file("Makefile") && !is_cpp_file("a.b/README"));
+
+        // A bare block is read only when it is an `export { … }` block. The
+        // body of a test macro the grammar could not attach to a function
+        // must not leak its locals as declarations.
+        let leak = source(
+            "TEST_CASE(\"vectors\", \"[vector]\") {\n  std::vector<int> v(5);\n  int local = 1;\n}\nint real;\n",
+        );
+        assert_eq!(ids(&leak), ["db.cc::real"]);
 
         // Doc text that starts with a marker character keeps it.
         let doc = header("// <T> must be copyable\n// *Note*: thread safe\nint a;\n");

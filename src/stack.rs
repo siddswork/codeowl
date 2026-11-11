@@ -88,8 +88,8 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// The stack's model of "what is a feature", or `None` if it has no
     /// runtime entry surface — a CLI or a utility library gets symbol /
     /// file / rollup / system specs and no feature layer (M13-pre;
-    /// `ROADMAP.md` M13 piece 3, design decision 3). Only `RustStack` takes
-    /// this default `None`. `JavaStack` returns its Quarkus model even for a
+    /// `ROADMAP.md` M13 piece 3, design decision 3). `RustStack` and `CppStack`
+    /// take this default `None`. `JavaStack` returns its Quarkus model even for a
     /// plain library like commons-lang, which then enumerates zero entry
     /// points, so `Some` does not promise that a repo has any feature.
     ///
@@ -293,6 +293,10 @@ pub fn registered_packs() -> &'static [Registered] {
             label: "Python",
             build: || Box::new(PythonStack),
         },
+        Registered {
+            label: "C++",
+            build: || Box::new(CppStack),
+        },
     ];
     PACKS
 }
@@ -332,7 +336,8 @@ pub fn for_name(name: &str) -> anyhow::Result<Box<dyn StackPack>> {
 ///
 /// A pack "recognises" a repo by the count of files whose `source_kind`
 /// is [`SourceKind::Code`] — its *primary* language (`.ts`/`.tsx` for TS,
-/// `.rs` for Rust, `.java` for Java). A `.sql` schema file is
+/// `.rs` for Rust, `.java` for Java, `.py` for Python, the C++ source and
+/// header extensions for C++). A `.sql` schema file is
 /// `SourceKind::Schema`, not `Code`, so it never makes a repo "TypeScript"
 /// on its own (a Rust repo with migrations is still a Rust repo).
 ///
@@ -727,6 +732,94 @@ impl StackPack for PythonStack {
     }
 }
 
+/// The C++ stack: `tree-sitter-cpp` extraction over text whose
+/// grammar-breaking macros were blanked first (`cpp/macros.rs`). Planned in
+/// `docs/cpp-pack-plan.md`; decisions in `DECISIONS.md` question 28.
+///
+/// **What it does not do yet.** `#include` is not read, so a C++ graph has
+/// symbols and no edges between files: nothing goes stale because of
+/// another file, and `get_callers` finds nothing. A method defined outside
+/// its class is a separate top-level symbol until pairing folds it in. Both
+/// are later steps of the plan; do not generate specs for a C++ repository
+/// before them.
+///
+/// No feature model (the trait's default `None`): the first target is a
+/// library. No fingerprint rule: the whole text, like Java and Python.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CppStack;
+
+impl StackPack for CppStack {
+    fn name(&self) -> &str {
+        "cpp"
+    }
+
+    fn source_kind(&self, path: &Path) -> Option<SourceKind> {
+        // The extension list lives in the pack (`cpp::is_cpp_file`), shared
+        // with its header test. Plain C (`.c`) is deliberately not read, and
+        // `.h` is taken to be C++.
+        path.to_str()
+            .is_some_and(crate::cpp::is_cpp_file)
+            .then_some(SourceKind::Code)
+    }
+
+    fn classify(&self, rel_path: &str) -> FileRole {
+        // Called per file from the spec layer, so it only slices the path
+        // and allocates nothing.
+        let (dir, file) = rel_path.rsplit_once('/').unwrap_or(("", rel_path));
+        // The file name without its extension: `db_test` for `db/db_test.cc`.
+        let stem = file.split('.').next().unwrap_or("");
+        let top = dir.split('/').next().unwrap_or("");
+        // Code the repository carries but does not write. `third_party` is
+        // unmistakable at any depth; `vendor` and `external` are also names a
+        // project gives its own code (`src/external/api.h`), so they count
+        // only at the root. `Generated` is never given a spec, which is why
+        // this errs toward keeping a file.
+        let vendored = dir
+            .split('/')
+            .any(|s| matches!(s, "third_party" | "3rdparty" | "thirdparty"))
+            || matches!(top, "vendor" | "external" | "extern" | "deps");
+        let test_dir = dir.split('/').any(|s| {
+            matches!(
+                s,
+                "test" | "tests" | "unittests" | "testing" | "benchmarks" | "mocks"
+            )
+        });
+        let test_name = ["_test", "_tests", "_unittest", "_benchmark", "-test"]
+            .iter()
+            .any(|suffix| stem.ends_with(suffix))
+            || stem.starts_with("test_")
+            || stem.starts_with("mock_");
+        if vendored || file.contains(".pb.") {
+            FileRole::Generated
+        } else if test_dir || test_name {
+            // Benchmarks sort with tests: neither is the product.
+            FileRole::Test
+        } else {
+            FileRole::Domain
+        }
+    }
+
+    fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
+        crate::cpp::extract_file(source, rel_path)
+    }
+
+    fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
+        // Includes are the next step of the plan. Reporting none (instead of
+        // reporting them and resolving none) keeps the unresolved-import
+        // count honest: zero read, not hundreds failed.
+        FileImports::default()
+    }
+
+    fn resolve_imports(
+        &self,
+        _root: &Path,
+        _file_imports: &HashMap<String, FileImports>,
+        _graph: &Graph,
+    ) -> Vec<ResolvedImport> {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -919,6 +1012,122 @@ mod tests {
         let imports = pack.extract_imports("A.java", "import com.ex.Thing;\npublic class A {}\n");
         assert_eq!(imports.imports[0].imported_name, "Thing");
         assert!(pack.extract_flow_edges("A.java", "").is_empty());
+    }
+
+    #[test]
+    fn cpp_pack_reads_headers_and_sources_and_has_no_feature_model() {
+        let pack = for_name("cpp").expect("the C++ pack is registered");
+        assert_eq!(pack.name(), "cpp");
+        for file in [
+            "db/db_impl.cc",
+            "a.cpp",
+            "a.cxx",
+            "include/leveldb/db.h",
+            "a.hpp",
+            "a.hh",
+            "a.hxx",
+            "a.ipp",
+            "a.inl",
+            "a.tpp",
+            "a.tcc",
+            "shapes.cppm",
+            "shapes.ixx",
+            "LEGACY.H",
+        ] {
+            assert_eq!(
+                pack.source_kind(Path::new(file)),
+                Some(SourceKind::Code),
+                "{file}"
+            );
+        }
+        // Plain C is not read (`DECISIONS.md` question 28), nor anything else.
+        for file in ["a.c", "lib.rs", "A.java", "CMakeLists.txt", "README.md"] {
+            assert_eq!(pack.source_kind(Path::new(file)), None, "{file}");
+        }
+        assert!(pack.feature_model().is_none());
+
+        // The pack blanks the export macro before parsing: with the grammar
+        // alone this class would come out as a function.
+        let syms = pack.extract_symbols(
+            "db.h",
+            "class LEVELDB_EXPORT DB {\n public:\n  int Get();\n};\n",
+        );
+        assert_eq!(syms[0].id, "db.h::DB");
+        assert_eq!(syms[0].kind, crate::symbol::SymbolKind::Container);
+        assert_eq!(syms[1].id, "db.h::DB::Get");
+
+        // Includes are a later step: no import is reported yet, so nothing
+        // is resolved and nothing is recorded as unresolved.
+        let imports = pack.extract_imports("db.cc", "#include \"db.h\"\n");
+        assert_eq!(imports, FileImports::default());
+        assert!(pack.extract_flow_edges("db.cc", "").is_empty());
+    }
+
+    #[test]
+    fn cpp_pack_classifies_tests_and_vendored_code() {
+        let pack = CppStack;
+        for file in [
+            "db/db_test.cc",
+            "util/env_tests.cpp",
+            "base/string_unittest.cc",
+            "tests/helpers.h",
+            "src/test/fixture.cc",
+            "benchmarks/db_bench.cc",
+            "absl/strings/str_cat_benchmark.cc",
+            "test/format-test.cc",
+            "util/test_helpers.cc",
+            "llvm/unittests/ADT/APIntTest.cpp",
+            "db/mocks/mock_env.h",
+        ] {
+            assert_eq!(pack.classify(file), FileRole::Test, "{file}");
+        }
+        for file in [
+            "third_party/googletest/gtest.h",
+            "src/third_party/zlib/inflate.cc",
+            "vendor/zlib/inflate.cc",
+            "external/fmt/format.h",
+            "proto/messages.pb.h",
+            "proto/messages.pb.cc",
+        ] {
+            assert_eq!(pack.classify(file), FileRole::Generated, "{file}");
+        }
+        // `external` and `vendor` below the root may be the project's own
+        // code; a file wrongly called generated would never get a spec.
+        for file in [
+            "db/db_impl.cc",
+            "include/leveldb/db.h",
+            "util/testable.h",
+            "src/external/api.h",
+            "include/shop/vendor/client.h",
+            "db/contest.cc",
+        ] {
+            assert_eq!(pack.classify(file), FileRole::Domain, "{file}");
+        }
+    }
+
+    #[test]
+    fn detect_picks_cpp_and_ignores_cpp_fixtures_in_another_stacks_tests() {
+        let dir = std::env::temp_dir().join(format!("codeowl-detect-cpp-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("include/db")).unwrap();
+        std::fs::create_dir_all(dir.join("db")).unwrap();
+        std::fs::write(dir.join("include/db/db.h"), "class DB {};\n").unwrap();
+        std::fs::write(dir.join("db/db.cc"), "#include \"db/db.h\"\n").unwrap();
+        assert_eq!(detect(&dir).unwrap().name(), "cpp");
+
+        // A Rust crate whose tests carry C++ fixtures is still a Rust crate
+        // (the layout of two existing test repositories).
+        std::fs::remove_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join("tests/fixtures")).unwrap();
+        std::fs::write(dir.join("lib.rs"), "pub fn f() {}\n").unwrap();
+        std::fs::write(dir.join("tests/fixtures/logger.cpp"), "int f();\n").unwrap();
+        std::fs::write(dir.join("tests/fixtures/logger.h"), "int f();\n").unwrap();
+        assert_eq!(detect(&dir).unwrap().name(), "rust");
+
+        // C++ beside another stack's own source is refused, like any two stacks.
+        std::fs::write(dir.join("wrapper.h"), "int g();\n").unwrap();
+        assert!(detect(&dir).is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

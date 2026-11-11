@@ -317,7 +317,7 @@ pub struct Graph {
     #[serde(default)]
     format_version: u32,
     /// The `StackPack::name()` of the pack that built this graph
-    /// (`"typescript-next"` / `"rust"` / `"java"` / `"python"`). Lets a
+    /// (`"typescript-next"` / `"rust"` / `"java"` / `"python"` / `"cpp"`). Lets a
     /// pure-read caller
     /// (`spec/`, `mcp.rs`) recover the pack — for `classify` and the
     /// feature model — without threading it down, and lets `RepoIndex`
