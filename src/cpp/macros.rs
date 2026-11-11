@@ -41,8 +41,9 @@ enum Kind {
     /// A string or character literal.
     Str,
     Number,
-    /// A whole preprocessor directive, continuation lines included. Never
-    /// blanked; it also acts as a statement boundary for the rules.
+    /// A whole preprocessor directive, continuation lines included. It acts
+    /// as a statement boundary for the rules, and is blanked in one case
+    /// only: a conditional that splits a declaration (`split_conditional`).
     Preproc,
 }
 
@@ -380,11 +381,25 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
     let mut i = 0;
     while i < toks.len() {
         let t = &toks[i];
+        if t.kind == Kind::Preproc {
+            split_conditional(toks, i, &mut out);
+            i += 1;
+            continue;
+        }
         if t.kind != Kind::Ident {
             i += 1;
             continue;
         }
         let prev = i.checked_sub(1).map(|p| &toks[p]);
+        // Two rules blank a neighbour of the token along with it, so they
+        // report a byte range of their own.
+        if let Some((range, last)) =
+            template_parameter_macro(toks, i, prev).or_else(|| unnamed_enum_base(toks, i))
+        {
+            out.push(range);
+            i = last + 1;
+            continue;
+        }
         // C++26 `= delete("reason")`: the one rule that blanks what follows
         // the token and keeps the token itself.
         // (A let-chain: the `if let` and the plain conditions in one `if`,
@@ -415,6 +430,237 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
         }
     }
     out
+}
+
+/// The word after a directive's `#`: `if`, `ifdef`, `else`, `endif`, …
+///
+/// The result borrows from the source text (`'a`), not from the token: with
+/// two references in the signature Rust cannot guess which one the returned
+/// `&str` follows, so it has to be said.
+fn directive<'a>(t: &Tok<'a>) -> &'a str {
+    let rest = t.text.trim_start_matches('#').trim_start();
+    let end = rest
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(rest.len());
+    &rest[..end]
+}
+
+/// A conditional that starts in the middle of a declaration:
+///
+/// ```text
+/// Limiter(int n)
+///     :
+/// #if !defined(NDEBUG)
+///       max_(n),
+/// #endif
+///       allowed_(n) {}
+/// ```
+///
+/// The grammar reads directives only between declarations, so this one
+/// would break the constructor around it. Its `#if` and `#endif` lines are
+/// blanked, and so is everything from an `#else` on: the declaration is read
+/// with its first branch. (A conditional *between* declarations is left
+/// alone, and both of its branches are extracted.)
+///
+/// The same is done for a conditional whose first branch opens a brace or a
+/// parenthesis it does not close (or closes one it did not open): the
+/// matching half is under another `#if` further down, and the grammar cannot
+/// nest that. `#ifdef __cplusplus` / `extern "C" {` / `#endif` is the
+/// everyday case.
+fn split_conditional(toks: &[Tok], i: usize, out: &mut Vec<(usize, usize)>) {
+    if !matches!(directive(&toks[i]), "if" | "ifdef" | "ifndef") {
+        return;
+    }
+    let prev = i.checked_sub(1).map(|p| &toks[p]);
+    let before = i.checked_sub(2).map(|p| &toks[p]);
+    let mid_declaration = prev.is_some_and(|prev| match prev.kind {
+        // After `,` `(` `=` or an operator nothing has ended yet. A `:` is a
+        // constructor's initialiser list only when it follows a `)`;
+        // `public:` ends a label.
+        Kind::Punct => {
+            // Inside braces a comma separates entries of an enum or an
+            // initialiser, which the grammar reads whole with every branch.
+            (prev.text == "," && enclosing_opener(toks, i) != Some("{"))
+                || matches!(prev.text, "(" | "=" | "&&" | "|" | "+")
+                || (prev.text == ":" && is_punct(before, ")"))
+        }
+        Kind::Ident => matches!(prev.text, "class" | "struct" | "union"),
+        _ => false,
+    });
+    let mut depth = 0usize;
+    let mut first_else = None;
+    let mut end = None;
+    for (k, t) in toks.iter().enumerate().skip(i + 1) {
+        if t.kind != Kind::Preproc {
+            continue;
+        }
+        match directive(t) {
+            "if" | "ifdef" | "ifndef" => depth += 1,
+            "endif" if depth == 0 => {
+                end = Some(k);
+                break;
+            }
+            "endif" => depth -= 1,
+            "else" | "elif" | "elifdef" | "elifndef" if depth == 0 && first_else.is_none() => {
+                first_else = Some(k);
+            }
+            _ => {}
+        }
+    }
+    let Some(end) = end else {
+        return;
+    };
+    let first_branch_end = first_else.unwrap_or(end);
+    // Net braces and parentheses opened by the first branch.
+    let mut net = [0i32; 2];
+    // A conditional nested in the first branch is counted by its first
+    // branch only: its `#else` side would otherwise be added on top.
+    let mut nested = 0usize;
+    let mut skipping = false;
+    for t in &toks[i + 1..first_branch_end] {
+        if t.kind == Kind::Preproc {
+            match directive(t) {
+                "if" | "ifdef" | "ifndef" => nested += 1,
+                "else" | "elif" | "elifdef" | "elifndef" if nested > 0 => skipping = true,
+                "endif" if nested > 0 => {
+                    nested -= 1;
+                    if nested == 0 {
+                        skipping = false;
+                    }
+                }
+                _ => {}
+            }
+            continue;
+        }
+        if skipping {
+            continue;
+        }
+        if t.kind == Kind::Punct {
+            match t.text {
+                "{" => net[0] += 1,
+                "}" => net[0] -= 1,
+                "(" => net[1] += 1,
+                ")" => net[1] -= 1,
+                _ => {}
+            }
+        }
+    }
+    if !(mid_declaration || net != [0, 0]) {
+        return;
+    }
+    out.push((toks[i].start, toks[i].end));
+    out.push((toks[first_branch_end].start, toks[end].end));
+}
+
+/// The nearest bracket opened before `toks[i]` and not yet closed.
+fn enclosing_opener(toks: &[Tok], i: usize) -> Option<&'static str> {
+    let mut depth = [0usize; 3];
+    for t in toks[..i].iter().rev() {
+        if t.kind != Kind::Punct {
+            continue;
+        }
+        let (idx, opens) = match t.text {
+            ")" => (0, false),
+            "(" => (0, true),
+            "]" => (1, false),
+            "[" => (1, true),
+            "}" => (2, false),
+            "{" => (2, true),
+            _ => continue,
+        };
+        if !opens {
+            depth[idx] += 1;
+        } else if depth[idx] > 0 {
+            depth[idx] -= 1;
+        } else {
+            return Some(["(", "[", "{"][idx]);
+        }
+    }
+    None
+}
+
+/// `template <typename T, MACRO(cond)>`: a macro standing for a template
+/// parameter (`FMT_ENABLE_IF`). It goes together with the comma that
+/// separates it, so no empty parameter is left behind.
+fn template_parameter_macro(
+    toks: &[Tok],
+    i: usize,
+    prev: Option<&Tok>,
+) -> Option<((usize, usize), usize)> {
+    if !is_macro_name(&toks[i]) {
+        return None;
+    }
+    let close = matching_paren(toks, i + 1)?;
+    let next = toks.get(close + 1)?;
+    let after_comma = is_punct(prev, ",");
+    let before_comma = is_punct(Some(next), ",");
+    if !(after_comma || is_punct(prev, "<")) || !(before_comma || is_punct(Some(next), ">")) {
+        return None;
+    }
+    // Walk back to the `<` that opens this list; it must follow `template`.
+    let mut depth = 0usize;
+    let mut k = i;
+    let limit = i.saturating_sub(300);
+    let in_template_list = loop {
+        let Some(p) = k.checked_sub(1) else {
+            break false;
+        };
+        if p < limit {
+            break false;
+        }
+        k = p;
+        let t = &toks[k];
+        if t.kind == Kind::Preproc {
+            break false;
+        }
+        if t.kind != Kind::Punct {
+            continue;
+        }
+        match t.text {
+            ">" => depth += 1,
+            "<" if depth == 0 => {
+                break k
+                    .checked_sub(1)
+                    .is_some_and(|p| is_word(toks.get(p), "template"));
+            }
+            "<" => depth -= 1,
+            ";" | "{" | "}" => break false,
+            _ => {}
+        }
+    };
+    if !in_template_list {
+        return None;
+    }
+    let range = if after_comma {
+        (prev?.start, toks[close].end)
+    } else if before_comma {
+        (toks[i].start, next.end)
+    } else {
+        (toks[i].start, toks[close].end)
+    };
+    Some((
+        range,
+        if after_comma {
+            close
+        } else if before_comma {
+            close + 1
+        } else {
+            close
+        },
+    ))
+}
+
+/// `enum : unsigned { … }`: the grammar does not read an underlying type on
+/// an enum with no name. The `: type` goes; the enumerators stay.
+fn unnamed_enum_base(toks: &[Tok], i: usize) -> Option<((usize, usize), usize)> {
+    if toks[i].text != "enum" || !is_punct(toks.get(i + 1), ":") {
+        return None;
+    }
+    let brace = (i + 2..toks.len().min(i + 10)).find(|&k| is_punct(toks.get(k), "{"))?;
+    let all_type_words = toks[i + 2..brace]
+        .iter()
+        .all(|t| t.kind == Kind::Ident || (t.kind == Kind::Punct && t.text == "::"));
+    (brace > i + 2 && all_type_words).then(|| ((toks[i + 1].start, toks[brace - 1].end), brace - 1))
 }
 
 /// `class MACRO Name` / `class MACRO(args) Name`: the macro between the
@@ -522,10 +768,12 @@ fn annotation_after_member(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option
 /// A line that is nothing but a macro use with no semicolon
 /// (`FMT_BEGIN_NAMESPACE`, `Q_OBJECT`, `ABSL_NAMESPACE_END`).
 fn macro_alone_on_line(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option<usize> {
-    if !is_macro_name(&toks[i]) {
+    let last = macro_end(toks, i);
+    // With arguments and no semicolon the position is clear enough that the
+    // name need not have an underscore (`COMPOP(>, <, AtLeast)`).
+    if !(is_macro_name(&toks[i]) || (is_caps(&toks[i]) && last != i)) {
         return None;
     }
-    let last = macro_end(toks, i);
     let next = toks.get(last + 1);
     let alone = prev.is_none_or(|p| p.end_line < toks[i].line)
         && next.is_none_or(|n| n.line > toks[last].end_line);
@@ -573,6 +821,13 @@ fn macro_before_declaration(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Optio
     }
     if has_args || DECL_KEYWORDS.contains(&t1.text) {
         return Some(last);
+    }
+    // `MACRO Name(params) : member(x) {}` and `explicit MACRO Name(params)`:
+    // a constructor, so the macro is not its return type. A plain
+    // `MY_TYPE make(int)` has neither mark and is kept.
+    if let Some(close) = matching_paren(toks, last + 2) {
+        let is_constructor = is_word(prev, "explicit") || is_punct(toks.get(close + 1), ":");
+        return is_constructor.then_some(last);
     }
     // `MACRO Type name…`: what follows `t1` decides. `MY_TYPE value;`,
     // `MY_TYPE f()`, `MY_TYPE a, b` keep the name as a type.
@@ -670,12 +925,14 @@ mod tests {
         out
     }
 
-    /// `src` with each `expected` macro replaced by spaces.
+    /// `src` with the first occurrence of each given piece replaced by
+    /// spaces (line breaks inside a piece are kept).
     fn spaced(src: &str, macros: &[&str]) -> String {
         let mut out = src.to_string();
         for m in macros {
             assert!(out.contains(m), "test bug: `{m}` not in source");
-            out = out.replacen(m, &" ".repeat(m.len()), 1);
+            let blank: String = m.chars().map(|c| if c == '\n' { c } else { ' ' }).collect();
+            out = out.replacen(m, &blank, 1);
         }
         out
     }
@@ -823,6 +1080,121 @@ mod tests {
     fn macro_between_if_and_its_condition() {
         let src = "int f() { if FMT_CONSTEXPR20 (sizeof(int) != 1) return 1; return 0; }\n";
         assert_eq!(blank(src), spaced(src, &["FMT_CONSTEXPR20"]));
+    }
+
+    #[test]
+    fn a_constructor_behind_a_macro() {
+        let src = "struct V {\n  FMT_CONSTEXPR V(const char* s) : data_(s) {}\n\
+                   \x20 constexpr FMT_INLINE V() : data_(nullptr) {}\n\
+                   \x20 explicit FMT_API V(int n);\n  MY_TYPE make(int a);\n};\n";
+        assert_eq!(
+            blank(src),
+            spaced(src, &["FMT_CONSTEXPR", "FMT_INLINE", "FMT_API"])
+        );
+    }
+
+    #[test]
+    fn a_macro_standing_for_a_template_parameter() {
+        let src = "template <typename T, FMT_ENABLE_IF(is_int<T>::value)>\nvoid f(T);\n\
+                   template <FMT_ENABLE_IF(true), typename U> void g(U);\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &[", FMT_ENABLE_IF(is_int<T>::value)", "FMT_ENABLE_IF(true),"]
+            )
+        );
+        unchanged("bool r = a < b, MY_CHECK(x) > c;\n");
+    }
+
+    #[test]
+    fn an_all_capitals_call_alone_on_its_line() {
+        let src = "COMPOP(>, <, AtLeast)\nCOMPOP(<=, >=, AtLeast)\nint x;\n";
+        assert_eq!(
+            blank(src),
+            spaced(src, &["COMPOP(>, <, AtLeast)", "COMPOP(<=, >=, AtLeast)"])
+        );
+        // No arguments and no underscore: it could be anything.
+        unchanged("int a;\nFOO\nint b;\n");
+    }
+
+    #[test]
+    fn underlying_type_of_an_unnamed_enum() {
+        let src = "struct S { enum : unsigned { kA = 1 }; enum : std::uint8_t { kB }; };\n";
+        assert_eq!(blank(src), spaced(src, &[": unsigned", ": std::uint8_t"]));
+        unchanged("enum class M : int { A };\nenum E : char { B };\n");
+    }
+
+    #[test]
+    fn a_conditional_that_splits_a_declaration() {
+        let src = "struct L {\n  L(int n)\n      :\n#if !defined(NDEBUG)\n        max_(n),\n\
+                   #endif  // !defined(NDEBUG)\n        allowed_(n) {}\n};\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &["#if !defined(NDEBUG)", "#endif  // !defined(NDEBUG)"]
+            )
+        );
+
+        // With an `#else`, the declaration is read with its first branch.
+        let src = "int size =\n#if BIG\n    64;\n#else\n    32;\n#endif\nint next;\n";
+        assert_eq!(
+            blank(src),
+            spaced(src, &["#if BIG", "#else\n    32;\n#endif"])
+        );
+
+        let src = "class\n#if defined(WIDE)\n    alignas(16)\n#endif\n    Wide {};\n";
+        assert_eq!(blank(src), spaced(src, &["#if defined(WIDE)", "#endif"]));
+    }
+
+    #[test]
+    fn a_conditional_whose_branch_leaves_a_brace_open() {
+        // The `{` opened under the first `#ifdef` is closed under the second.
+        let src = "#ifdef __cplusplus\nextern \"C\" {\n#endif\nint c_api(int);\n\
+                   #ifdef __cplusplus\n}\n#endif\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &[
+                    "#ifdef __cplusplus",
+                    "#endif",
+                    "#ifdef __cplusplus",
+                    "#endif"
+                ]
+            )
+        );
+
+        // Two openings, one per branch: read with the first.
+        let src = "#if A\nvoid f(int a) {\n#else\nvoid f(long a) {\n#endif\n  g(a);\n}\n";
+        assert_eq!(
+            blank(src),
+            spaced(src, &["#if A", "#else\nvoid f(long a) {\n#endif"])
+        );
+    }
+
+    #[test]
+    fn a_nested_conditional_does_not_count_its_else_side() {
+        // The inner `#if` / `#else` pair adds two braces if both sides are
+        // counted, which would make the include guard look unbalanced.
+        let src = "#ifndef H_\n#define H_\n#if A\nvoid f() {\n#else\nvoid f(int) {\n#endif\n}\nint g();\n#endif\n";
+        let out = blank(src);
+        assert!(out.starts_with("#ifndef H_\n#define H_\n"), "{out}");
+        assert!(out.trim_end().ends_with("#endif"), "{out}");
+    }
+
+    #[test]
+    fn an_enumerator_list_with_branches_is_kept_whole() {
+        unchanged("enum E {\n  kA,\n#if X\n  kB,\n#else\n  kC,\n#endif\n  kD\n};\n");
+    }
+
+    #[test]
+    fn a_conditional_between_declarations_is_kept() {
+        unchanged(
+            "class C {\n public:\n#if A\n  int a();\n#else\n  int b();\n#endif\n};\n\
+             int x;\n#ifdef B\nint y;\n#endif\n",
+        );
     }
 
     #[test]
