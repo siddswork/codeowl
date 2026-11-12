@@ -1,0 +1,58 @@
+{
+  "_comment": "Repositories the C++ accuracy check runs on (docs/cpp-pack-plan.md step 5, experiments/exp-08-cpp-tree-sitter-or-compiler.md). `dir` is the folder beside this repository (`../test-repos/<dir>`); `commit` is the revision the numbers in the experiment were measured on; run.py clones or warns if the checkout differs. `skip` and `only` are regular expressions over repo-relative paths; `limit` takes an even sample of that many files (0 = all); `extra_args` are passed to the compiler. `class` is which targets of the plan apply: `clean` or `hard`.",
+  "targets": {
+    "clean": {"classes": 100.0, "functions": 99.0, "recall": 97.0, "precision": 98.0},
+    "hard": {"classes": 95.0, "functions": 97.0, "recall": 93.0, "precision": 80.0}
+  },
+  "repos": {
+    "leveldb": {
+      "dir": "leveldb",
+      "url": "https://github.com/google/leveldb",
+      "commit": "7ee830d02b623e8ffe0b95d59a74db1e58da04c5",
+      "class": "clean",
+      "std": "c++17",
+      "include_dirs": [".", "include"],
+      "skip": "(_test\\.cc$|^benchmarks/|^third_party/|env_windows|windows|testutil|testharness|^issues/)",
+      "only": ".",
+      "limit": 0,
+      "extra_args": ["-DLEVELDB_PLATFORM_POSIX=1", "-DLEVELDB_COMPILE_LIBRARY=1"],
+      "generated": {"port/port_config.h": "port/port_config.h.in"}
+    },
+    "abseil": {
+      "dir": "abseil-cpp",
+      "url": "https://github.com/abseil/abseil-cpp",
+      "commit": "fce9e66e20f464ac4d007e3c2d478c32694962f2",
+      "class": "hard",
+      "std": "c++17",
+      "include_dirs": ["."],
+      "skip": "(_test\\.cc$|_test_.*\\.(cc|h)$|_benchmark\\.cc$|/testing/|test_util|_testing\\.|mock_|/internal/.*test|^ci/|^CMake/|win32|windows|darwin|akaros|emscripten|wasm|^absl/copts)",
+      "only": "^absl/",
+      "limit": 160,
+      "extra_args": []
+    },
+    "fmt": {
+      "dir": "fmt",
+      "url": "https://github.com/fmtlib/fmt",
+      "commit": "e7e6e3f71033fbfc71eba1709789328bcb0ceb28",
+      "class": "hard",
+      "std": "c++20",
+      "include_dirs": ["include"],
+      "skip": "^(test|doc|support)/",
+      "only": "^(include|src)/",
+      "limit": 0,
+      "extra_args": []
+    },
+    "json": {
+      "dir": "json",
+      "url": "https://github.com/nlohmann/json",
+      "commit": "eac1b4343b644bd23cdf53359e9f8b0add473754",
+      "class": "hard",
+      "std": "c++17",
+      "include_dirs": ["include"],
+      "skip": "^(tests|docs|single_include|tools|cmake)/",
+      "only": "^include/",
+      "limit": 0,
+      "extra_args": []
+    }
+  }
+}
