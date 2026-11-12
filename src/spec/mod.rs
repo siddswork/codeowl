@@ -66,7 +66,8 @@ pub use self::file_task::{SpecTask, next_task, submit};
 pub use self::format::{FileSpec, HashPair, read_file_spec, render};
 pub(crate) use self::layout::spec_bearing_children;
 pub use self::layout::{
-    GeneratedSourcesSummary, directory_is_spec_bearing, generated_sources_summary, spec_path,
+    GeneratedSourcesSummary, PartiallyRead, directory_is_spec_bearing, generated_sources_summary,
+    partially_read, spec_path,
 };
 pub use self::migrate::{backfill_dep_targets, migrate_file_fingerprints, migrate_to_okf};
 pub use self::orphans::{OrphanedSpec, find_orphaned_specs};

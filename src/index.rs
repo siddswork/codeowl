@@ -42,6 +42,10 @@ pub struct FileInputs {
     /// against the whole graph in `rebuild`.
     #[serde(default)]
     pub flow_edges: Vec<UnresolvedFlowEdge>,
+    /// The unread-place count from `StackPack::extract_symbols_counted`,
+    /// cached like the fingerprint.
+    #[serde(default)]
+    pub parse_errors: usize,
 }
 
 impl FileInputs {
@@ -54,7 +58,7 @@ impl FileInputs {
     /// replacement for M10's file-level `.sql`-is-schema rule.
     fn extract(pack: &dyn StackPack, rel_path: &str, source: &str) -> Self {
         let source_hash = hash_text(source);
-        let mut symbols = pack.extract_symbols(rel_path, source);
+        let (mut symbols, parse_errors) = pack.extract_symbols_counted(rel_path, source);
         for s in &mut symbols {
             if s.kind != SymbolKind::Schema && pack.is_schema_symbol(s) {
                 s.kind = SymbolKind::Schema;
@@ -69,6 +73,7 @@ impl FileInputs {
                     symbols,
                     imports,
                     flow_edges: Vec::new(),
+                    parse_errors,
                 }
             }
             Some(SourceKind::Code) | None => {
@@ -79,6 +84,7 @@ impl FileInputs {
                     symbols,
                     imports,
                     flow_edges: pack.extract_flow_edges(rel_path, source),
+                    parse_errors,
                 }
             }
         }
@@ -410,6 +416,9 @@ impl RepoIndex {
         for (rel, f) in &self.files {
             if !f.fingerprint.is_empty() {
                 graph.set_file_fingerprint(rel, &f.fingerprint);
+            }
+            if f.parse_errors > 0 {
+                graph.set_file_parse_errors(rel, f.parse_errors);
             }
         }
         let file_imports: HashMap<String, FileImports> = self
@@ -1099,6 +1108,38 @@ mod tests {
         let file = graph.get_file(graph.find("a.ts").unwrap()).unwrap();
         assert_eq!(file.fingerprint, "cached");
         assert_eq!(file.source_hash, hash_text("export const a = 1;\n"));
+    }
+
+    #[test]
+    fn the_rebuilt_graph_carries_each_files_parse_error_count() {
+        let dir = tempdir("parse-errors");
+        write(&dir, "ok.h", "class Clean {\n public:\n  int Get();\n};\n");
+        write(&dir, "bad.h", "class { int ; ] ) = ;\nint after;\n");
+        let index = RepoIndex::build(&dir).unwrap();
+        assert_eq!(index.files["ok.h"].parse_errors, 0);
+        assert!(index.files["bad.h"].parse_errors > 0);
+
+        let graph = index.rebuild().unwrap();
+        let errors = |id: &str| {
+            graph
+                .get_file(graph.find(id).unwrap())
+                .unwrap()
+                .parse_errors
+        };
+        assert_eq!(errors("ok.h"), 0);
+        assert_eq!(errors("bad.h"), index.files["bad.h"].parse_errors);
+
+        // A pack that does not count them reports a file as fully read.
+        let ts = tempdir("parse-errors-ts");
+        write(&ts, "a.ts", "export const = ;;; {{{\n");
+        let graph = RepoIndex::build(&ts).unwrap().rebuild().unwrap();
+        assert_eq!(
+            graph
+                .get_file(graph.find("a.ts").unwrap())
+                .unwrap()
+                .parse_errors,
+            0
+        );
     }
 
     #[test]

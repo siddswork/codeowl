@@ -143,6 +143,23 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
         crate::hash::hash_text(source)
     }
 
+    /// [`extract_symbols`](Self::extract_symbols), and with it the number of
+    /// places in the file the pack's parser could not read. Zero means the
+    /// whole file was read, and is the default for a pack that does not
+    /// count: the grammars of the other languages rarely fail on real code,
+    /// so nothing has asked for it yet. `CppStack` counts, because C++ is
+    /// read before the preprocessor runs and a macro can hide a declaration
+    /// (`experiments/exp-08-cpp-tree-sitter-or-compiler.md`). One call, so
+    /// the file is parsed once. A non-zero count is shown to the user as
+    /// "partly read": symbols in that file may be missing.
+    fn extract_symbols_counted(
+        &self,
+        rel_path: &str,
+        source: &str,
+    ) -> (Vec<ExtractedSymbol>, usize) {
+        (self.extract_symbols(rel_path, source), 0)
+    }
+
     /// Repo-relative, forward-slash build-output directories this pack
     /// knows can hold real source-language files generated from a
     /// declarative contract (an OpenAPI spec, a `.proto`, a GraphQL SDL) —
@@ -803,6 +820,15 @@ impl StackPack for CppStack {
         crate::cpp::extract_file(source, rel_path)
     }
 
+    fn extract_symbols_counted(
+        &self,
+        rel_path: &str,
+        source: &str,
+    ) -> (Vec<ExtractedSymbol>, usize) {
+        // One parse gives both: the walk that extracts also counts.
+        crate::cpp::extract_counted(source, rel_path)
+    }
+
     fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
         // Includes are the next step of the plan. Reporting none (instead of
         // reporting them and resolving none) keeps the unresolved-import
@@ -1061,6 +1087,27 @@ mod tests {
         let imports = pack.extract_imports("db.cc", "#include \"db.h\"\n");
         assert_eq!(imports, FileImports::default());
         assert!(pack.extract_flow_edges("db.cc", "").is_empty());
+    }
+
+    #[test]
+    fn only_the_cpp_pack_counts_parse_errors() {
+        let broken = "class { int ; ] ) = ;\nint after;\n";
+        let (syms, errors) = CppStack.extract_symbols_counted("a.h", broken);
+        assert!(errors > 0);
+        assert!(syms.iter().any(|s| s.id == "a.h::after"));
+        assert_eq!(
+            CppStack.extract_symbols_counted("a.h", "class A {};\n").1,
+            0
+        );
+        // The default: a pack that does not count says nothing was missed,
+        // and its symbols are what `extract_symbols` returns.
+        let (syms, errors) = RustStack.extract_symbols_counted("a.rs", "fn ( {{{");
+        assert_eq!(errors, 0);
+        assert_eq!(syms, RustStack.extract_symbols("a.rs", "fn ( {{{"));
+        assert_eq!(
+            JavaStack.extract_symbols_counted("A.java", "class {{{").1,
+            0
+        );
     }
 
     #[test]

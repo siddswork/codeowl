@@ -42,18 +42,47 @@ use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its declarations.
 pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
+    extract_with(source, rel_path, true).0
+}
+
+/// [`extract_file`] and the number of places tree-sitter could not read,
+/// from one parse. Zero means the whole file was read; a high count means
+/// symbols may be missing.
+pub fn extract_counted(source: &str, rel_path: &str) -> (Vec<ExtractedSymbol>, usize) {
     extract_with(source, rel_path, true)
 }
 
-/// The number of places tree-sitter could not parse, after blanking. Zero
-/// means the whole file was read; a high count means symbols may be missing.
+/// The number of places tree-sitter could not parse, after blanking.
 pub fn parse_error_count(source: &str) -> usize {
-    fn count(node: Node) -> usize {
-        let own = usize::from(node.is_error() || node.is_missing());
-        let mut cursor = node.walk();
-        own + node.children(&mut cursor).map(count).sum::<usize>()
+    parse(&blank_macros(source)).map_or(0, |tree| count_errors(&tree))
+}
+
+/// Error and missing nodes in `tree`. Walks with a cursor and no recursion:
+/// a long chain of `+` or a big initialiser list nests hundreds of
+/// thousands of levels deep, and a recursive walk of that overflows the
+/// stack of a watcher thread. An error node is counted once and not
+/// entered, so one broken region counts once however much is inside it.
+fn count_errors(tree: &Tree) -> usize {
+    let mut cursor = tree.walk();
+    let mut count = 0;
+    loop {
+        let node = cursor.node();
+        let broken = node.is_error() || node.is_missing();
+        count += usize::from(broken);
+        // Descend, unless this node is itself the unreadable region.
+        if !broken && node.has_error() && cursor.goto_first_child() {
+            continue;
+        }
+        // Otherwise move to the next sibling, climbing as far as needed.
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return count;
+            }
+        }
     }
-    parse(&blank_macros(source)).map_or(0, |tree| count(tree.root_node()))
 }
 
 fn parse(text: &str) -> Option<Tree> {
@@ -66,7 +95,7 @@ fn parse(text: &str) -> Option<Tree> {
 
 /// [`extract_file`], with blanking optional so a test can show what the
 /// grammar does without it.
-fn extract_with(source: &str, rel_path: &str, blank: bool) -> Vec<ExtractedSymbol> {
+fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymbol>, usize) {
     // `blanked` has the same length and line breaks as `source`, so a byte
     // range taken from the tree is valid in `source` too.
     let blanked = if blank {
@@ -77,8 +106,9 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> Vec<ExtractedSymbo
     // `tree` owns the arena every `Node<'_>` below borrows from; nothing
     // escapes this function (CLAUDE.md's "don't let Node<'a> escape" rule).
     let Some(tree) = parse(&blanked) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
+    let errors = count_errors(&tree);
     let cx = Cx {
         src: source,
         file: rel_path,
@@ -95,7 +125,7 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> Vec<ExtractedSymbo
     for child in root.children(&mut cursor) {
         cx.visit(child, child, &mut scope, &mut out);
     }
-    out
+    (out, errors)
 }
 
 /// Extensions of files other files include (template implementation files
@@ -501,9 +531,20 @@ impl<'a> Cx<'a> {
         let Some(declarator) = node.child_by_field_name("declarator") else {
             return;
         };
-        let Some(d) = self.declared(declarator) else {
+        let Some(mut d) = self.declared(declarator) else {
             return;
         };
+        // `constexpr uint128::operator int() const { … }`: with a specifier
+        // in front, the grammar reads `uint128::operator` as the return type
+        // and `int` as the function's name. Put the two halves back together.
+        if let Some(scope) = node
+            .child_by_field_name("type")
+            .map(|t| one_line(self.text(t)))
+            .as_deref()
+            .and_then(|t| t.strip_suffix("::operator"))
+        {
+            d.name = format!("{}::operator {}", plain_name(scope), d.name);
+        }
         // The signature stops at the constructor's initialiser list, or at
         // the body.
         let mut cursor = node.walk();
@@ -749,9 +790,31 @@ impl<'a> Cx<'a> {
             match node.kind() {
                 "function_declarator" => {
                     let inner = node.child_by_field_name("declarator")?;
+                    // `A (max)() { … }` with no return type the grammar can
+                    // see: it reads `A(max)` as a function taking a `max`
+                    // and the real parameter list as a second call. The
+                    // name is the lone "parameter type" of the inner one.
+                    if inner.kind() == "function_declarator"
+                        && let Some(name) = self.lone_parameter_type(inner)
+                    {
+                        return Some(Declared {
+                            name: plain_name(name),
+                            is_function: true,
+                            end_byte: node.end_byte(),
+                        });
+                    }
                     // `int (*handler)(int);` declares a variable that holds a
-                    // function, not a function.
-                    if inner.kind() != "parenthesized_declarator" {
+                    // function, not a function. `int (min)(int, int)` is a
+                    // function whose name is only wrapped in parentheses.
+                    let wraps_a_plain_name = inner.kind() == "parenthesized_declarator"
+                        && inner.named_child_count() == 1
+                        && inner.named_child(0).is_some_and(|c| {
+                            matches!(
+                                c.kind(),
+                                "identifier" | "field_identifier" | "qualified_identifier"
+                            )
+                        });
+                    if inner.kind() != "parenthesized_declarator" || wraps_a_plain_name {
                         is_function = true;
                     }
                     end_byte = node.end_byte();
@@ -777,9 +840,22 @@ impl<'a> Cx<'a> {
                 }
                 // `operator double() const`
                 "operator_cast" => {
-                    let ty = node.child_by_field_name("type").map(|t| self.text(t))?;
                     return Some(Declared {
-                        name: format!("operator {}", one_line(ty)),
+                        name: self.conversion_name(node)?,
+                        is_function: true,
+                        end_byte: node.end_byte(),
+                    });
+                }
+                // `V::operator bool() const`, defined outside the class: the
+                // conversion operator sits at the end of the qualified name.
+                "qualified_identifier" if self.innermost_name(node).kind() == "operator_cast" => {
+                    let cast = self.innermost_name(node);
+                    let scope = self
+                        .src
+                        .get(node.start_byte()..cast.start_byte())
+                        .unwrap_or_default();
+                    return Some(Declared {
+                        name: format!("{}{}", plain_name(scope), self.conversion_name(cast)?),
                         is_function: true,
                         end_byte: node.end_byte(),
                     });
@@ -801,6 +877,46 @@ impl<'a> Cx<'a> {
                 _ => return None,
             }
         }
+    }
+
+    /// The last `name` of a (possibly nested) qualified identifier:
+    /// `ns::V::operator bool` gives the `operator bool` node.
+    fn innermost_name<'t>(&self, mut node: Node<'t>) -> Node<'t> {
+        while node.kind() == "qualified_identifier"
+            && let Some(name) = node.child_by_field_name("name")
+        {
+            node = name;
+        }
+        node
+    }
+
+    /// `operator const char*` for an `operator_cast` node: its text up to
+    /// the parameter list, so qualifiers and pointers stay in the name.
+    fn conversion_name(&self, cast: Node) -> Option<String> {
+        // The declarator chain (`*`, `&`) ends in the `()` of the operator.
+        let mut d = cast.child_by_field_name("declarator")?;
+        while d.kind() != "abstract_function_declarator" {
+            d = d.child_by_field_name("declarator")?;
+        }
+        let params = d.child_by_field_name("parameters")?;
+        let text = self.src.get(cast.start_byte()..params.start_byte())?;
+        Some(one_line(text))
+    }
+
+    /// If `declarator` (a function declarator) has exactly one parameter and
+    /// that parameter is a bare type with no name, the type's text.
+    fn lone_parameter_type(&self, declarator: Node) -> Option<&'a str> {
+        let params = declarator.child_by_field_name("parameters")?;
+        if params.named_child_count() != 1 {
+            return None;
+        }
+        let only = params.named_child(0)?;
+        if only.kind() != "parameter_declaration"
+            || only.child_by_field_name("declarator").is_some()
+        {
+            return None;
+        }
+        only.child_by_field_name("type").map(|t| self.text(t))
     }
 
     /// The comment block directly above `node`: a run of `//` lines or one
@@ -1041,7 +1157,7 @@ class LEVELDB_EXPORT DB {
     fn without_blanking_the_grammar_loses_the_class() {
         // The negative control for the test above: the same text, parsed as
         // written, yields no container at all.
-        let syms = extract_with(DB, "db.h", false);
+        let syms = extract_with(DB, "db.h", false).0;
         assert!(
             !syms.iter().any(|s| s.kind == SymbolKind::Container),
             "{:?}",
@@ -1424,6 +1540,107 @@ class Outer {
             get(&doc, "db.h::b").docstring.as_deref(),
             Some("Block *text*.")
         );
+    }
+
+    #[test]
+    fn conversion_operators_defined_outside_their_class() {
+        // Three shapes the grammar gives the same thing.
+        let syms = source(
+            "V::operator bool() const { return true; }\n\
+             inline ns::V::operator const char*() const { return p; }\n\
+             constexpr uint128::operator int() const { return lo_; }\n",
+        );
+        assert_eq!(
+            ids(&syms),
+            [
+                "db.cc::V::operator bool",
+                "db.cc::ns::V::operator const char*",
+                "db.cc::uint128::operator int",
+            ]
+        );
+        for s in &syms {
+            assert_eq!(
+                (s.kind, s.raw.as_str()),
+                (SymbolKind::Callable, "qualified_function")
+            );
+        }
+        assert_eq!(syms[0].signature, "V::operator bool() const");
+        assert_eq!(syms[2].signature, "constexpr uint128::operator int() const");
+
+        // Inside the class the whole target type is the name too.
+        let inside =
+            header("struct V { operator const char*() const; explicit operator bool() const; };\n");
+        assert_eq!(
+            ids(&inside),
+            [
+                "db.h::V",
+                "db.h::V::operator const char*",
+                "db.h::V::operator bool"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_function_name_in_parentheses() {
+        // `(min)(…)` is written that way so a `min` macro cannot expand it.
+        let syms = header(
+            "int (min)(int a, int b) { return a; }\n\
+             struct A {\n  static constexpr A (max)() { return A(); }\n  int (clamp)(int v);\n};\n\
+             constexpr uint128 (std::numeric_limits<uint128>::max)() { return 1; }\n\
+             int (*handler)(int);\n",
+        );
+        let kind = |id: &str| (get(&syms, id).kind, get(&syms, id).raw.clone());
+        assert_eq!(
+            kind("db.h::min"),
+            (SymbolKind::Callable, "function".to_string())
+        );
+        assert_eq!(
+            kind("db.h::A::max"),
+            (SymbolKind::Callable, "method".to_string())
+        );
+        assert_eq!(
+            kind("db.h::A::clamp"),
+            (SymbolKind::Callable, "method".to_string())
+        );
+        assert_eq!(
+            kind("db.h::std::numeric_limits::max"),
+            (SymbolKind::Callable, "qualified_function".to_string())
+        );
+        // A pointer in the parentheses still means a variable.
+        assert_eq!(
+            kind("db.h::handler"),
+            (SymbolKind::Value, "variable".to_string())
+        );
+    }
+
+    #[test]
+    fn counting_parse_errors_survives_a_very_deep_tree() {
+        // 200,000 terms nest 200,000 levels deep in the syntax tree. A
+        // recursive walk of it overflows the stack (found in review).
+        let terms = vec!["1"; 200_000].join(" + ");
+        let src = format!("int x = {terms};\nint after;\n");
+        // Run on a thread with a small stack, as the watcher's are.
+        let handle = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                let (syms, errors) = extract_counted(&src, "big.h");
+                (syms.iter().any(|s| s.id == "big.h::after"), errors)
+            })
+            .unwrap();
+        let (found, errors) = handle.join().expect("no stack overflow");
+        assert!(found);
+        assert_eq!(errors, 0);
+    }
+
+    #[test]
+    fn extraction_and_the_error_count_come_from_one_parse() {
+        let (syms, errors) = extract_counted("class A {};\nclass { int ; ] ) = ;\n", "a.h");
+        assert!(syms.iter().any(|s| s.id == "a.h::A"));
+        assert_eq!(
+            errors,
+            parse_error_count("class A {};\nclass { int ; ] ) = ;\n")
+        );
+        assert!(errors > 0);
     }
 
     #[test]

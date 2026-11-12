@@ -363,6 +363,50 @@ pub struct CoverageResponse {
     /// `setup/codeowl-generate.md` for why `mvn generate-sources` alone
     /// isn't enough, and why the Gradle case is still unverified.
     pub generated_sources: Option<GeneratedSourcesResponse>,
+    /// Files the parser could not read whole. `None` when every file was
+    /// read whole, which is always the case for a language whose parser
+    /// does not report this (only C++ does today). When present, the
+    /// symbols of the listed files may be incomplete: a declaration hidden
+    /// by a macro the parser could not handle is missing from the index,
+    /// so `get_symbol` will not find it and a spec written for that file
+    /// may leave it out. Read such a file with `get_source` before
+    /// trusting its symbol list. Covers the whole repository whatever
+    /// `scope` was asked for.
+    pub partially_read: Option<PartiallyReadResponse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct PartiallyReadResponse {
+    /// How many files have at least one place the parser could not read.
+    pub files: usize,
+    /// How many files the index holds, for the share.
+    pub total_files: usize,
+    /// The number of unread places over all of those files.
+    pub parse_errors: usize,
+    /// The ten files with the most unread places, most first. `files` says
+    /// how many there are in all.
+    pub worst: Vec<PartiallyReadFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct PartiallyReadFile {
+    pub file: String,
+    pub parse_errors: usize,
+}
+
+impl From<crate::spec::PartiallyRead> for PartiallyReadResponse {
+    fn from(p: crate::spec::PartiallyRead) -> Self {
+        PartiallyReadResponse {
+            files: p.files,
+            total_files: p.total_files,
+            parse_errors: p.parse_errors,
+            worst: p
+                .worst
+                .into_iter()
+                .map(|(file, parse_errors)| PartiallyReadFile { file, parse_errors })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
@@ -1772,6 +1816,7 @@ impl CodeOwlServer {
             .collect();
         let generated_sources =
             crate::spec::generated_sources_summary(&graph).map(GeneratedSourcesResponse::from);
+        let partially_read = crate::spec::partially_read(&graph).map(PartiallyReadResponse::from);
         Ok(Json(CoverageResponse {
             current: summary.current,
             stale: summary.stale,
@@ -1788,6 +1833,7 @@ impl CodeOwlServer {
             pending,
             next_cursor,
             generated_sources,
+            partially_read,
         }))
     }
 }
