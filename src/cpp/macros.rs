@@ -22,9 +22,9 @@
 /// One lexical token. `text` borrows from the source; `line` / `end_line`
 /// are 0-based rows of its first and last byte.
 #[derive(Debug, Clone, Copy)]
-struct Tok<'a> {
-    kind: Kind,
-    text: &'a str,
+pub(super) struct Tok<'a> {
+    pub(super) kind: Kind,
+    pub(super) text: &'a str,
     start: usize,
     end: usize,
     line: usize,
@@ -32,7 +32,7 @@ struct Tok<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     /// An identifier or keyword.
     Ident,
     /// Punctuation, one token per operator (`::`, `->`, `[[`, `&&` are kept
@@ -75,7 +75,7 @@ pub fn blank_macros(source: &str) -> String {
 }
 
 /// Split `source` into tokens, dropping whitespace and comments.
-fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
+pub(super) fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
     let b = source.as_bytes();
     let mut toks = Vec::new();
     let mut i = 0;

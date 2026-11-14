@@ -59,4 +59,12 @@ pub struct FileImports {
     /// reaches another module without naming it at the use site.
     #[serde(default)]
     pub qualified_refs: Vec<ImportRef>,
+    /// The distinct identifier-like words the file uses, sorted: comments
+    /// and string literals excluded, preprocessor lines included. Only the
+    /// C++ pack fills it (`cpp::includes`): a C++ include brings in a whole
+    /// header, so an edge to a symbol is drawn only when the file writes
+    /// that symbol's name, and the resolver needs the words to decide. Empty
+    /// for every other pack.
+    #[serde(default)]
+    pub identifiers: Vec<String>,
 }

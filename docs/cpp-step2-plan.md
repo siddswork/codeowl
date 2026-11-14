@@ -167,3 +167,19 @@ Recorded so they are not rediscovered. None blocks this step.
 ## 11. Review record (2026-11-14)
 
 A review of the first version against the code and three measurements changed it in these places: the same-file fold moved in from step 2b (section 3.0; shared ids affect 10 to 23 % of top-level names on the hard repositories, and edges to them would have been silently incomplete); angle-bracket includes resolve by stricter rules (a system header was taken for a repository file); the cache-growth fallback was one that extraction cannot perform, and is now the scan-at-resolution alternative; coverage time is measured as well as rebuild time; the include marker is `*`, as in the Java pack; one edge per target was considered for enumerators and rejected (section 3.2). Unchanged: the edge model, no cascade for transitive includes, no watcher rule.
+
+## 12. Progress
+
+**Part 0** (the same-file fold): merged as #133. The accuracy check equals the K11 baseline exactly.
+
+**Part A** (`src/cpp/includes.rs`; 2026-11-14): `extract(source)` returns the includes (path with delimiters, `imported_name: "*"`, each once, any branch of an `#if`, `include_next` too) and `FileImports.identifiers` (distinct, sorted, comments and string literals excluded, preprocessor lines included). It is not wired into `CppStack` yet: the comment there is right that reporting includes before they resolve would inflate the unresolved-import count, so the wiring and the `FORMAT_VERSION` bump for it come with part C. Measured with a throwaway probe on the four repositories:
+
+| Repository | Files | Words per file: median / 90th percentile / max | Serialised words next to serialised symbols |
+|---|---|---|---|
+| `abseil` | 880 | 67 / 202 / 1,063 | 1.10 MB next to 11.9 MB |
+| `json` | 628 | 26 / 179 / 3,871 | 0.59 MB next to 7.8 MB |
+| `fmt` | 73 | 105 / 428 / 2,428 | 0.23 MB next to 4.2 MB |
+| `leveldb` | 132 | 59 / 180 / 496 | 0.13 MB next to 1.5 MB |
+
+The words are about 9 to 15 % of the symbols' size, so the cache-growth kill criterion (more than double) is far away (S2-6 holds). Against the accuracy check's regex stand-in the new scan finds no word the stand-in lacks, and lacks only fragments of numbers and literals (`x80`, `ull`, `e20f`, the `L` of `L'x'`): never a name. Part E will show whether the edge numbers move.
+
