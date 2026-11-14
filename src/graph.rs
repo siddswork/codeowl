@@ -124,6 +124,13 @@ pub struct FileNode {
     /// without it is discarded by `FORMAT_VERSION`.
     #[serde(default)]
     pub fingerprint: String,
+    /// How many places the pack's parser could not read in this file
+    /// (`StackPack::extract_symbols_counted`). Zero for a file read whole, and for
+    /// every file of a pack that does not count. Starts at zero;
+    /// `RepoIndex::rebuild` sets the real value. Not part of any hash: it
+    /// says how much to trust the symbols, not what they are.
+    #[serde(default)]
+    pub parse_errors: usize,
     /// Its top-level symbols, in declaration order.
     pub children: Vec<SymbolId>,
 }
@@ -267,7 +274,16 @@ pub struct FileExtraction {
 /// whole-text values. 23 = that rule no longer reads imports (or a
 /// fully-qualified `crate::…` reference) inside a `#[cfg(test)]` module, which
 /// moves the cached fingerprint of every Rust file whose tests do either.
-pub const FORMAT_VERSION: u32 = 23;
+/// 24 = the parse-error count (`FileNode` and the index's `FileInputs` gain
+/// `parse_errors`, the pack's count of places it could not read in a file).
+/// A cache built before it would read every file as fully read, which for a
+/// C++ repository hides exactly the files whose symbols may be missing. It
+/// also changes what the C++ pack's `extract_symbols` returns for a
+/// conversion operator defined outside its class (`V::operator bool` where
+/// it was `V::int`) and for a function whose name is written in parentheses
+/// (`(min)(a, b)`, a `min` before and after), which a pure logic change
+/// needs a bump for as well.
+pub const FORMAT_VERSION: u32 = 24;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
@@ -317,7 +333,7 @@ pub struct Graph {
     #[serde(default)]
     format_version: u32,
     /// The `StackPack::name()` of the pack that built this graph
-    /// (`"typescript-next"` / `"rust"` / `"java"` / `"python"`). Lets a
+    /// (`"typescript-next"` / `"rust"` / `"java"` / `"python"` / `"cpp"`). Lets a
     /// pure-read caller
     /// (`spec/`, `mcp.rs`) recover the pack — for `classify` and the
     /// feature model — without threading it down, and lets `RepoIndex`
@@ -417,6 +433,7 @@ impl Graph {
                 id: file.rel_path,
                 fingerprint: file.source_hash.clone(),
                 source_hash: file.source_hash,
+                parse_errors: 0,
                 children,
             }));
             nodes.extend(symbol_nodes);
@@ -448,6 +465,21 @@ impl Graph {
         match &mut self.nodes[id.index()] {
             Node::File(file) => {
                 file.fingerprint = fingerprint.to_string();
+                true
+            }
+            Node::Symbol(_) => false,
+        }
+    }
+
+    /// Set one file's parse-error count (see [`FileNode::parse_errors`]).
+    /// `false` if `rel_path` is not a file in this graph.
+    pub fn set_file_parse_errors(&mut self, rel_path: &str, parse_errors: usize) -> bool {
+        let Some(id) = self.find(rel_path) else {
+            return false;
+        };
+        match &mut self.nodes[id.index()] {
+            Node::File(file) => {
+                file.parse_errors = parse_errors;
                 true
             }
             Node::Symbol(_) => false,

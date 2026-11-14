@@ -224,10 +224,15 @@ you rely on an answer:
   the signal to run a real build (`mvn compile`, not `generate-sources`
   alone — see `setup/codeowl-generate.md`) before generating, or entry
   points hidden behind a build-generated interface won't be found. `null`
-  on every other stack. Every other field (`missing`, `by_kind`,
-  `by_module`, `top_stale_by_impact`, `orphaned`, `generated_sources`) is
-  already whole-repo regardless of pagination — only `pending` itself is
-  paged.
+  on every other stack. On a C++ repo it returns `partially_read` —
+  `{files, total_files, parse_errors, worst}`: how many files the parser
+  could not read whole, and the ten most affected. A declaration hidden by
+  a macro the parser could not handle is missing from the index, so read
+  such a file with `get_source` before trusting its symbol list. `null`
+  when every file was read whole, and on every other stack. Every other
+  field (`missing`, `by_kind`, `by_module`, `top_stale_by_impact`,
+  `orphaned`, `generated_sources`, `partially_read`) is already whole-repo
+  regardless of pagination — only `pending` itself is paged.
 - **`get_next_spec_task(target, cursor?)`** / **`submit_spec(id, content)`** —
   the generation loop's two halves: the first hands back the next
   uncovered unit with its source and dependency specs pre-assembled, the
@@ -609,8 +614,11 @@ entry has:
 | `markers` | The attributes or annotations written on it, as source text (`#[test]`, `@Override`, `@Order(DEFAULT_ORDER + 1)`). |
 | `parent`, `children` | The symbol or file it sits in, and what sits inside it. |
 
-It prints symbols, not import edges. Use it to check what CodeOwl sees in a
-file, to feed a script, or to compare two runs:
+It prints symbols, not import edges. On a C++ repo it also prints a note on
+stderr when some files were only partly parsed, with the ten most affected:
+symbols in those files may be missing. The JSON on stdout is unaffected.
+Use `extract` to check what CodeOwl sees in a file, to feed a script, or to
+compare two runs:
 
 ```
 codeowl extract . > symbols.json

@@ -132,6 +132,17 @@ async fn main() -> Result<()> {
                 .filter_map(|id| codeowl::graph::SymbolView::from_graph(&graph, id))
                 .collect();
             println!("{}", serde_json::to_string_pretty(&views)?);
+            // On stderr, so the JSON on stdout stays one valid document.
+            if let Some(p) = codeowl::spec::partially_read(&graph) {
+                eprintln!(
+                    "note: {} of {} files were only partly parsed ({} places the parser could \
+                     not read); symbols in those files may be missing. Most affected:",
+                    p.files, p.total_files, p.parse_errors
+                );
+                for (file, n) in &p.worst {
+                    eprintln!("  {n:>4}  {file}");
+                }
+            }
             Ok(())
         }
         Command::AdoptMovedSpecs { path, list, write } => {

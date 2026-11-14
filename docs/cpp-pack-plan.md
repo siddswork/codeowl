@@ -133,6 +133,29 @@ So a `.cc` file's own spec holds what is declared only there (private classes, h
 - The spec layout (`spec/layout.rs`) must not count a paired definition as spec-bearing.
 - This is a change every pack's cache sees, so it is a `FORMAT_VERSION` bump, and `graph_stats` on the other repositories must be unchanged apart from the new field.
 
+### 4.7 Declarations that share an id (decided 2026-11-11, built in step 2b)
+
+C++ gives several different declarations one id: overloads (`write(int)`, `write(double)`), a prototype and its definition in one file, both branches of an `#if`, and a template with its specialisation (`Box` and `Box<bool>`). `Graph::build` keeps one node per id (`by_id.insert`, last wins), so today the earlier declarations cannot be looked up and a member can be attached to the wrong parent. The extractor reads every one of them on purpose (S2), so the pack must not hand the graph duplicates.
+
+**Decision: merge them into one symbol with several spans** (option C of the discussion). The pack ends `extract_file` with a fold step, the same move the TypeScript pack already makes in `typescript::fold_same_id` and the Rust pack makes for an `impl` block:
+
+| Field of the merged symbol | Value |
+|---|---|
+| id, kind, signature, main span | From the strongest declaration (container before callable before value); the first on a tie |
+| `extra_spans` | The line range of every other declaration |
+| source hash and interface hash | A hash over every declaration's hash, so an edit to any one moves it |
+| exported | True if any declaration is |
+| children | The union |
+| docstring | The first that exists |
+
+Consequences, accepted:
+
+- A spec describes all the overloads together. Editing one overload makes the whole spec stale, which is correct and costs one extra regeneration.
+- `get_source` shows every declaration, because it already reads the main span and every extra span.
+- Nothing is lost for callers: C++ has no call-level resolution yet, and the merged symbol is the unit a dependency edge points at.
+
+**Same file first, then across files.** The fold within one file needs no core change (the span list already exists); it is the cheap half and can be built before the rest of 2b. Across files (a prototype in `db.h`, its body in `db.cc`) a span needs a file beside it, which is the core change of §4.6; the cross-file case uses this same merged shape, so the two are one mechanism.
+
 **Open points, decided when step 2b is planned in detail:** how a class with dozens of bodies is offered to the writer without exceeding the task size (the file ladder and paging exist for files, not yet for one symbol's bodies); whether the spec of a public header (`include/leveldb/db.h`) should name the internal file that implements it; what a reader of the `.cc` on GitHub sees when that file has no spec of its own.
 
 ## 5. Build sequence
@@ -144,7 +167,8 @@ Each step is its own branch and pull request, tests first, `utility/check.sh` be
 | 0 | This plan and experiment 8 | Done 2026-11-10: D0 to D7 answered |
 | 1 | **Extraction with blanking.** `tree-sitter-cpp`, `src/cpp/mod.rs`, `macros.rs`, `CppStack`, registration, parse-error reporting, a fixture test per standard (§6) | Unit tests for every row of §4.1 and every blanking rule, each with a negative control; `detect` and `graph_stats` unchanged on the existing test repositories; classes and functions measured on the four repositories |
 | 2 | **Includes and edges.** Both include forms, transitive closure, narrowing | Unit tests per rule; edge recall and precision measured on the four repositories; a signature edit in a header makes its users stale |
-| 2b | **Pairing: one spec per class** (§4.6). The core change for a span in another file, the pairing pass, the layout rule. Planned in detail, with the core traced, before any code. **No generation is run on a C++ repository before this step** | A test for every row of the table in §4.6; a body edit in a `.cc` makes the class's spec stale and no user of the class; the share of out-of-class definitions paired on the four repositories, with the unpaired ones explained; `graph_stats` unchanged on the other packs' repositories |
+| 2b | **Pairing and shared ids: one spec per class** (§4.6) **and one symbol per id** (§4.7). The same-file fold first (no core change); then the core change for a span in another file, the pairing pass, the layout rule. Planned in detail, with the core traced, before any code. **No generation is run on a C++ repository before this step** | A test for every row of the table in §4.6 and §4.7; no two symbols of one file share an id (checked on the four repositories); a body edit in a `.cc` makes the class's spec stale and no user of the class; the share of out-of-class definitions paired, with the unpaired ones explained; `graph_stats` unchanged on the other packs' repositories |
+| 2c | **A pack per file: several languages in one repository.** Its own plan, `docs/multi-language-plan.md`, approved before any code. Needed before `abseil`, `fmt` and `nlohmann/json` can be indexed at all: each carries Python scripts, and `detect` refuses a repository with two stacks | Those three repositories index as C++ with their scripts as Python; `graph_stats` identical on the nine single-language repositories; the plan's own tests |
 | 3 | **The macro table** (§4.3). Expected to be needed; skipped only if step 1 already meets the class targets on all four repositories. The pre-pass, the classification, and the watcher rule for an edited `#define` | Classes found meet §7 on all four repositories; an edit to a `#define` re-extracts the files it affects, with a test; `graph_stats` unchanged on the other packs' repositories |
 | 4 | **Precision.** The rules of §4.2, one at a time, each kept only if precision rises without recall falling | Edge precision on `fmt`, `json`, `abseil` reported before and after each rule |
 | 5 | **The measurement becomes a repeatable check.** The reference script and the comparison move into `utility/`, run against the real pack's output; `NORTHSTAR.md` gains a C++ accuracy KPI with its baseline (S4) | Anyone can re-run it; the numbers of experiment 8 are reproduced or the difference explained |
@@ -152,7 +176,7 @@ Each step is its own branch and pull request, tests first, `utility/check.sh` be
 | 7 | **The compiler layer**, as the spike decides | Edges for covered files equal the reference; an index older than a file falls back to the base layer for that file, with a test |
 | 8 | **Dogfood and docs.** `/codeowl-generate` on `leveldb`, then on part of `abseil`; the owner reads about ten specs from each. `ARCHITECTURE.md` §9 and open question 1, `GLOSSARY.md`, `REQUIREMENTS.md`, the roadmap's test-repo table, `setup/USAGE.md`, the README, `NORTHSTAR.md` | The owner judges the specs; D2 is confirmed or reopened; open question 1 is closed for C++ with the numbers |
 
-Steps 1, 2, 2b and 8 alone give a working C++ pack. Steps 3 to 7 are what make it the strong suit, and each has a measurement that can stop it.
+Steps 1, 2, 2b, 2c and 8 alone give a working C++ pack. (2c is not C++ work as such, but three of the four measurement repositories cannot be indexed without it, so steps 3 to 5 cannot be measured before it.) Steps 3 to 7 are what make it the strong suit, and each has a measurement that can stop it.
 
 `FORMAT_VERSION`: step 1 adds a pack and needs no bump if `graph_stats` is identical on the other repositories; every later step that changes what the C++ pack produces bumps it.
 
@@ -193,7 +217,7 @@ The hard-code precision target is the one most likely to be missed; if it is, th
 - **Scope.** This is several times the work of the Java or Python pack. Steps 1, 2, 2b and 8 are the minimum useful cut; the rest can be stopped at any measurement.
 - **Pairing changes the core, not only the pack.** A symbol that owns a span in a second file touches hashing, `get_source`, the watcher and the spec layout for every language. It is the riskiest step in the minimum cut, which is why it gets its own detailed plan and why `graph_stats` on the other repositories is its control.
 - **A wrong pairing puts a body in the wrong class's spec.** Matching is by qualified name over reachable headers; two classes of the same name in different namespaces are the case to test, and an ambiguous match is left unpaired and reported.
-- **One stack per repository** still holds: a repository that mixes C++ with another supported language outside `tests/`, `scripts/` or `tools/` is refused by `detect`.
+- **One stack per repository holds only until step 2c.** Until then a repository that mixes C++ with another supported language outside `tests/`, `scripts/` or `tools/` is refused by `detect` (measured: `abseil`, `fmt` and `nlohmann/json` all are). Step 2c replaces the rule; see `docs/multi-language-plan.md`.
 
 ## 9. Out of scope
 

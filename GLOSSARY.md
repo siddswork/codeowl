@@ -336,6 +336,35 @@ why CodeOwl cares.
   Every document kind (file, feature, rollup, system) is written this way.
   (`src/spec/format.rs::write_replacing`)
 
+**Partly read (also: parse errors, `partially_read`)**
+: A file whose text the language's parser could not read in full. The
+  parser (tree-sitter) marks the places it gave up on as *error* or
+  *missing* nodes; the pack counts them while it extracts
+  (`StackPack::extract_symbols_counted`), and the count is kept per file.
+  C++ is the case that needs it: the text is parsed *before* the
+  preprocessor runs, so a macro the pack's blanking rules (see **Macro
+  blanking**) do not recognise can hide a declaration, and that symbol is
+  then missing from the index. A "partly read" file is therefore one whose
+  symbol list may be incomplete, not one that is wrong. The count is in no
+  hash (it says how far to trust the symbols, not what they are); it is
+  shown by `codeowl extract` and by `get_spec_coverage` (`partially_read`:
+  how many files, and the ten most affected, the repository's own code
+  before tests before vendored files). Zero for every language but C++,
+  whose parsers do not report it. (`src/cpp/mod.rs::count_errors`,
+  `src/spec/layout.rs::partially_read`)
+
+**Macro blanking**
+: Replacing, before parsing, a C++ macro that the grammar cannot place
+  with the same number of spaces, so byte offsets and line numbers do not
+  move (spans, signatures and hashes are still read from the original
+  text). The rules are positional: they know where a macro sits
+  (`class LEVELDB_EXPORT DB`, an annotation after a parameter list, a
+  macro alone on a line), never what it expands to; reading the
+  repository's own `#define`s is the later *macro table*. The same pass
+  shims syntax newer than the grammar (C++20 `export` and `module`, the
+  C++23 explicit object parameter, C++26 `= delete("reason")` and contract
+  clauses). (`src/cpp/macros.rs::blank_macros`, `DECISIONS.md` question 28)
+
 **Spec-bearing**
 : A piece of code that gets **its own spec section or file**, rather than
   being folded into its parent's.

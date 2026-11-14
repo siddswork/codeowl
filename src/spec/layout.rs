@@ -220,6 +220,62 @@ pub struct GeneratedSourcesSummary {
     pub found: usize,
 }
 
+/// Files the pack could not read whole (see [`partially_read`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartiallyRead {
+    /// How many files have at least one parse error.
+    pub files: usize,
+    /// How many files the graph holds, for the share.
+    pub total_files: usize,
+    /// Parse errors over all of them.
+    pub parse_errors: usize,
+    /// Ten files, the repository's own before tests before vendored or
+    /// generated ones, and within each group the most errors first.
+    pub worst: Vec<(String, usize)>,
+}
+
+/// How many entries of [`PartiallyRead::worst`] are listed. A repository
+/// can have hundreds of such files; the count says how many, the list says
+/// where to look first.
+const PARTIALLY_READ_LISTED: usize = 10;
+
+/// Which files the pack's parser could not read whole, or `None` when every
+/// file was (always the case for a pack that does not count parse errors).
+/// The symbols of a listed file may be incomplete, so a spec written for it
+/// may miss declarations.
+pub fn partially_read(graph: &Graph) -> Option<PartiallyRead> {
+    let mut worst: Vec<(String, usize)> = graph
+        .files()
+        .filter(|f| f.parse_errors > 0)
+        .map(|f| (f.id.clone(), f.parse_errors))
+        .collect();
+    if worst.is_empty() {
+        return None;
+    }
+    // The repository's own code first, then tests, then vendored and
+    // generated files: the list says where to look, and in a repository
+    // with `third_party/` the ten worst files are otherwise all vendored.
+    let rank = |file: &str| match classify_in(graph, file) {
+        FileRole::Generated => 2,
+        FileRole::Test => 1,
+        _ => 0,
+    };
+    worst.sort_by(|a, b| {
+        rank(&a.0)
+            .cmp(&rank(&b.0))
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    let report = PartiallyRead {
+        files: worst.len(),
+        total_files: graph.files().count(),
+        parse_errors: worst.iter().map(|(_, n)| n).sum(),
+        worst: Vec::new(),
+    };
+    worst.truncate(PARTIALLY_READ_LISTED);
+    Some(PartiallyRead { worst, ..report })
+}
+
 pub fn generated_sources_summary(graph: &Graph) -> Option<GeneratedSourcesSummary> {
     let pack = crate::stack::for_graph(graph);
     let dirs = pack.generated_source_dirs();
@@ -534,6 +590,63 @@ mod tests {
             summary.found, 1,
             "only the file under a generated dir counts"
         );
+    }
+
+    #[test]
+    fn partially_read_lists_the_files_with_parse_errors_worst_first() {
+        let mut sources: Vec<(String, String)> = (0..12)
+            .map(|i| (format!("f{i:02}.ts"), "export const a = 1;\n".to_string()))
+            .collect();
+        sources.push(("clean.ts".to_string(), "export const b = 2;\n".to_string()));
+        let borrowed: Vec<(&str, &str)> = sources
+            .iter()
+            .map(|(p, s)| (p.as_str(), s.as_str()))
+            .collect();
+        let mut graph = build_graph_from_sources(&borrowed);
+        // Nothing counted: nothing to report.
+        assert_eq!(partially_read(&graph), None);
+
+        for i in 0..12 {
+            assert!(graph.set_file_parse_errors(&format!("f{i:02}.ts"), i + 1));
+        }
+        let report = partially_read(&graph).expect("twelve files have errors");
+        assert_eq!(report.files, 12);
+        assert_eq!(report.total_files, 13);
+        assert_eq!(report.parse_errors, (1..=12).sum::<usize>());
+        // The worst ten, most errors first.
+        assert_eq!(report.worst.len(), 10);
+        assert_eq!(report.worst[0], ("f11.ts".to_string(), 12));
+        assert_eq!(report.worst[9], ("f02.ts".to_string(), 3));
+    }
+
+    #[test]
+    fn partially_read_lists_the_repositorys_own_files_before_vendored_and_test_ones() {
+        // Java's `classify` marks `target/generated-sources/` generated and
+        // `src/test/` a test; everything else is the repository's own.
+        let mut graph = build_graph_from_sources(&[
+            ("src/main/java/A.java", "class A {}\n"),
+            ("src/main/java/B.java", "class B {}\n"),
+            ("src/test/java/T.java", "class T {}\n"),
+            ("target/generated-sources/G.java", "class G {}\n"),
+        ]);
+        graph.set_pack_name("java");
+        assert!(graph.set_file_parse_errors("target/generated-sources/G.java", 90));
+        assert!(graph.set_file_parse_errors("src/test/java/T.java", 50));
+        assert!(graph.set_file_parse_errors("src/main/java/A.java", 2));
+        assert!(graph.set_file_parse_errors("src/main/java/B.java", 1));
+        let report = partially_read(&graph).unwrap();
+        let order: Vec<&str> = report.worst.iter().map(|(f, _)| f.as_str()).collect();
+        assert_eq!(
+            order,
+            [
+                "src/main/java/A.java",
+                "src/main/java/B.java",
+                "src/test/java/T.java",
+                "target/generated-sources/G.java"
+            ]
+        );
+        // The counts still cover every file.
+        assert_eq!((report.files, report.parse_errors), (4, 143));
     }
 
     #[test]
