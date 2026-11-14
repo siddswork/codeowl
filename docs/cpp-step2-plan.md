@@ -81,7 +81,8 @@ No edge is emitted for an unresolved include: the graph holds only what resolved
 |---|---|
 | `src/imports.rs` | `FileImports.identifiers: Vec<String>` (`#[serde(default)]`) |
 | `src/cpp/mod.rs` | The same-file fold at the end of `extract_file` (section 3.0), with its tests |
-| `src/cpp/includes.rs` (new) | Include extraction, the identifier scan, path resolution, closure, narrowing, with their unit tests |
+| `src/cpp/includes.rs` (new) | Include extraction and the identifier scan (part A), with their unit tests |
+| `src/cpp/resolve.rs` (new) | Path resolution and the include closure (part B), then the narrowing (part C); split from `includes.rs` so each file has one job |
 | `src/cpp/macros.rs` | Expose the existing lexer to `includes.rs` (it already skips comments and strings and yields directives whole) |
 | `src/stack.rs` | `CppStack::extract_imports` and `resolve_imports` call into `cpp::includes`; the doc comment that says "includes are not read" is rewritten |
 | `src/graph.rs` | `FORMAT_VERSION` 24 to 25, with its note (the shape of `FileImports` and what the C++ pack produces both change) |
@@ -184,4 +185,15 @@ A review of the first version against the code and three measurements changed it
 The words are about 9 to 15 % of the symbols' size, so the cache-growth kill criterion (more than double) is far away (S2-6 holds). Against the accuracy check's regex stand-in the new scan finds no word the stand-in lacks, and lacks only fragments of numbers and literals (`x80`, `ull`, `e20f`, the `L` of `L'x'`): never a name. Part E will show whether the edge numbers move.
 
 **Part A, after review.** `/code-review` found real defects, all fixed: the words of an `#include` path (`vector`, `h`) and the directive keyword (`include`, `define`, `if`) were counted as words, so a repository symbol with such a name would have had an edge from every file; a digit separator (`1'000`) or an apostrophe in a directive hid the rest of it; and a block comment running on from a directive line leaked its words, which was a lexer defect in `macros.rs` (the directive now ends where the comment ends; `FORMAT_VERSION` 26; the accuracy check is unchanged). Declined: `#import` (Objective-C; no measured repository uses it) and a `//` comment continued by a backslash, which swallows the next line in C++ too. Cross-check: the includes `extract` finds equal those of the accuracy probe's independent line scanner on all four repositories (8,794 / 3,063 / 618 / 772 distinct file and path pairs; no difference either way). The word counts above were taken before these fixes and are a little high.
+
+**Part B** (`src/cpp/resolve.rs`; 2026-11-14): `FileSet::resolve` (the two forms, the lookup order of section 3.2, a unique path-suffix match, dot segments followed and never out of the repository) and `IncludeGraph` (`build`, `includes`, `reach`, `unresolved`). Pure functions over a list of paths; nothing reads the disk. 12 tests; four deliberate breaks (the bare-angle guard, the unique-suffix rule, the file leaving itself out of its own closure, the sibling directory tried first) each fail the intended test. Measured on the four repositories with a throwaway probe:
+
+| Repository | Files | Includes | Unresolved: quoted / angle | Build, then the closure of every file | Mean / max files reached |
+|---|---|---|---|---|---|
+| `leveldb` | 132 | 772 | 36 / 239 | 2.7 ms, 0.2 ms | 9 / 39 |
+| `fmt` | 73 | 618 | 8 / 440 | 0.4 ms, 0.05 ms | 5 / 16 |
+| `json` | 628 | 3,063 | 2 / 1,970 | 2.6 ms, 5.0 ms | 54 / 84 |
+| `abseil` | 880 | 8,794 | 504 / 3,907 | 7.7 ms, 10.0 ms | 35 / 177 |
+
+The resolution kill criterion (more than one second on `abseil`) is two orders of magnitude away. Of the distinct unresolved quoted includes, none names a file with a C++ extension that is in the repository: `leveldb` 5, `fmt` 8, `json` 2 and `abseil` 4 are not in the repository at all (gtest, benchmark, Abseil seen from `fmt`), and 24 of `abseil`'s 28 are `.inc` files (`spinlock_linux.inc`, `stacktrace_generic-inl.inc`), real files the pack does not read as C++. That is a known gap: a name defined only in a `.inc` file has no symbol, so it can have no edge. The unresolved angle includes are system and third-party headers, as intended.
 

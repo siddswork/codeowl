@@ -31,6 +31,7 @@
 
 pub mod includes;
 mod macros;
+pub mod resolve;
 #[cfg(test)]
 mod standards;
 
