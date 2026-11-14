@@ -1,6 +1,6 @@
 # Plan: C++ step 2, includes and edges
 
-> **Status: a plan awaiting the owner's approval (2026-11-14). No code is written.** Step 2 of `docs/cpp-pack-plan.md`, written in detail because the one-line version there left eight questions open. Grounded in a read of `index.rs` (`rebuild`, `apply_changes`), `graph.rs` (`ResolvedImport`), `spec/staleness.rs`, `spec/source_text.rs::scoped_symbol_deps`, `mcp.rs` (`get_callers`, `get_callees`) and `java/mod.rs` (`same_package_edges`, the nearest precedent). Everything marked *proposed* is the owner's to decide.
+> **Status: a plan awaiting the owner's approval (2026-11-14; revised the same day after a review, see section 10). No code is written.** Step 2 of `docs/cpp-pack-plan.md`, written in detail because the one-line version there left eight questions open. Grounded in a read of `index.rs` (`rebuild`, `apply_changes`), `graph.rs` (`ResolvedImport`), `spec/staleness.rs`, `spec/source_text.rs::scoped_symbol_deps`, `mcp.rs` (`get_callers`, `get_callees`) and `java/mod.rs` (`same_package_edges`, the nearest precedent). Everything marked *proposed* is the owner's to decide.
 
 ## 1. What this step delivers
 
@@ -24,20 +24,33 @@ All four facts are from the code, not assumed:
 
 ## 3. Design
 
+### 3.0 First: one symbol per id within a file
+
+An edge points at "the symbol with this id". C++ gives several declarations one id (overloads, a prototype and its definition, both branches of an `#if`, a template and its specialisation), and `Graph::build` keeps only the last of them, so an edge would point at that one alone: a signature change to any earlier declaration would make no user stale, and the spec would look current. Measured on 2026-11-14, top-level names declared more than once in a file: `leveldb` 6 of 987 (0.6 %), `abseil` 1,257 of 12,604 (10 %), `fmt` 532 of 3,744 (14 %), `json` 1,112 of 4,860 (23 %).
+
+So the same-file half of `docs/cpp-pack-plan.md` section 4.7 moves here from step 2b and is built before any edge: `extract_file` ends with a fold, the move `typescript::fold_same_id` already makes. The merged symbol takes its kind, signature and main span from the strongest declaration, keeps the other line ranges as `extra_spans`, and hashes every declaration into both its hashes, so an edit to any one of them moves the interface hash the edge reads. No core change is needed (the span list exists). The cross-file half (a prototype in a header, its body in a source file) stays in step 2b.
+
 ### 3.1 Extraction: `extract_imports`
 
 `CppStack::extract_imports` (today: empty) returns, per file:
 
-- **Includes.** One `ImportRef { specifier: <path as written>, imported_name: "" }` for each `#include "x"` or `#include <x>`, read from the original text (preprocessor lines are tokens already, `macros.rs::lex`). Found anywhere in the file, including inside `#if`: every configuration is read. Not read: a computed include (`#include MACRO_NAME`), and `__has_include`.
+- **Includes.** One `ImportRef { specifier: <path as written, with its quotes or angle brackets>, imported_name: "*" }` for each `#include "x"` or `#include <x>`, read from the original text (preprocessor lines are tokens already, `macros.rs::lex`). Found anywhere in the file, including inside `#if`: every configuration is read. Not read: a computed include (`#include MACRO_NAME`), and `__has_include`.
 - **The words the file uses.** A new field `identifiers: Vec<String>` on `FileImports` (shared struct, `#[serde(default)]`, empty for every other pack): the distinct identifier-like words of the file outside comments and string literals, **including those in preprocessor lines**, sorted. This is what the accuracy check's stand-in used (a regex over the text after stripping comments and strings), so the numbers stay comparable.
 
-`imported_name: ""` marks an include (a file, not a name). No edge is ever emitted with an empty name, so `contains_identifier` is never asked about one.
+`imported_name: "*"` marks an include (a file, not a name), the convention the Java pack already uses for `import a.b.*;`. The specifier keeps its delimiters because the two forms resolve differently (section 3.2). No edge is ever emitted with `*` as its name.
 
 ### 3.2 Resolution: `resolve_imports`
 
 For every file `f`, in sorted order (deterministic output):
 
-1. **Resolve each include to a repo file**, trying in order: the including file's directory; the repository root; `include/`; `src/`; then a **unique** path-suffix match (`ends_with("/" + path)`) among all files. Both forms use the same rules (nlohmann/json includes its own headers with angle brackets). Zero or several suffix matches resolve to nothing. A `<…>` include of a system header matches nothing and is ignored.
+1. **Resolve each include to a repo file.** Zero or several suffix matches resolve to nothing.
+
+   | Form | Tried in order |
+   |---|---|
+   | `"path"` | The including file's directory; the repository root; `include/`; `src/`; a **unique** path-suffix match (`ends_with("/" + path)`) among all files |
+   | `<path>` | The repository root; `include/`; `src/`; a unique path-suffix match **only when the path has a directory in it** |
+
+   A library may include its own headers with angle brackets (nlohmann/json does, all 343 times), so `<…>` is resolved, but more strictly: a compiler does not look beside the including file for it, and a bare name is almost always a system header. Measured: with one rule for both forms, `#include <time.h>` in `abseil` resolved to `absl/time/time.h` four times.
 2. **Close over includes.** `reach(f)` is every file reachable through the resolved includes, excluding `f`. Computed once per file with a memo; cycles are normal and terminate.
 3. **Narrow.** For each file `g` in `reach(f)` and each **top-level symbol** `s` of `g`, emit an edge if `s`'s name is in `f.identifiers`, or (for an enum) one of its enumerators is. Edge:
 
@@ -49,7 +62,7 @@ For every file `f`, in sorted order (deterministic output):
    | `target` | `s` |
 
    "Top-level symbol" means a symbol with no parent, **except** an out-of-class method definition (`DB::Open`), which belongs to its class and is not a target. Macros (D5), prototypes (D4) and typedefs are targets.
-4. **No self edges**, and one edge per (file, target, word).
+4. **No self edges**, and one edge per (file, target, word). One edge per *target* would be tidier but wrong: a symbol's dependencies are the edges whose word appears in its own text, so a symbol that uses only `kWrite` would lose its link to the enum if the file's single edge carried `kRead`.
 
 No edge is emitted for an unresolved include: the graph holds only what resolved. How many did not is reported by the accuracy check (section 6) and, proposed, by `codeowl extract` (open question 5).
 
@@ -67,6 +80,7 @@ No edge is emitted for an unresolved include: the graph holds only what resolved
 | File | Change |
 |---|---|
 | `src/imports.rs` | `FileImports.identifiers: Vec<String>` (`#[serde(default)]`) |
+| `src/cpp/mod.rs` | The same-file fold at the end of `extract_file` (section 3.0), with its tests |
 | `src/cpp/includes.rs` (new) | Include extraction, the identifier scan, path resolution, closure, narrowing, with their unit tests |
 | `src/cpp/macros.rs` | Expose the existing lexer to `includes.rs` (it already skips comments and strings and yields directives whole) |
 | `src/stack.rs` | `CppStack::extract_imports` and `resolve_imports` call into `cpp::includes`; the doc comment that says "includes are not read" is rewritten |
@@ -95,8 +109,9 @@ Each part: tests first, a negative control where it applies, `utility/check.sh`,
 
 | Part | Content | Done when |
 |---|---|---|
+| 0 | **The same-file fold** (section 3.0) | Tests for each kind of shared id (overloads, prototype plus definition, `#if` branches, a specialisation, a class beside a function of the same name): one symbol, the other ranges in `extra_spans`, and an edit to *any* declaration moves the interface hash. On the four repositories no two symbols of one file share an id (the probe counts them). The accuracy check's class and function numbers do not fall |
 | A | `includes.rs`: include extraction and the identifier scan, with `FileImports.identifiers` | Tests: both forms, `# include`, inside `#if`, a computed include ignored, comments and strings not scanned, preprocessor words scanned |
-| B | Path resolution and closure | Tests for each lookup rule in order, a unique and an ambiguous suffix match, a missing file, a system header ignored, a diamond, a cycle |
+| B | Path resolution and closure | Tests for each lookup rule in order and for each form; a unique and an ambiguous suffix match; a missing file; `<time.h>` beside a repo file `x/time.h` stays unresolved while `"time.h"` and `<x/time.h>` resolve; a diamond; a cycle |
 | C | Narrowing and the edges; `CppStack` wired; `FORMAT_VERSION` bump | Tests on a small repository built through `RepoIndex`: the edge fields of section 3.2; a name in a comment is no edge; an enumerator links its enum; a transitive edge reaches the defining header; no self edge; an out-of-class definition is not a target. Negative control: with the narrowing step removed the edge tests fail |
 | D | The staleness and callers behaviour end to end | A test in the pattern of `tests/java_spec.rs`: editing a public member's signature in a header changes the `deps_hash` of a user symbol that names the class and of its file; editing an unrelated symbol of the header changes neither; `get_callers` on the class lists the including file and the implementing source file |
 | E | The measurement uses the pack's own edges | `cpp_probe` prints the graph's edges; `compare.py` reports them beside the stand-in |
@@ -109,6 +124,7 @@ Each part: tests first, a negative control where it applies, `utility/check.sh`,
 | `graph_stats` on nine repositories of the other four packs, before and after | Identical |
 | `utility/cpp_accuracy/run.sh`: the pack's own edges against the compiler | Within one percentage point of the stand-in's recall and precision on all four repositories (K11: 97.1 / 89.8 / 92.7 / 89.9 % recall, 98.8 / 69.0 / 32.3 / 53.1 % precision). A larger difference is investigated and explained, not accepted |
 | The end-to-end staleness and callers tests (part D) | Pass |
+| Symbols of one file sharing an id, on the four repositories | None |
 | Rebuild time | Section 8 |
 
 Step 2 is **not** judged by the section 7 targets of the main plan: the hard repositories miss the precision target by a wide margin, and raising it is step 4.
@@ -118,8 +134,9 @@ Step 2 is **not** judged by the section 7 targets of the main plan: the hard rep
 | Measure | Method | Kill criterion |
 |---|---|---|
 | Resolution time per rebuild | Time `RepoIndex::rebuild` on `abseil` (880 files) and `json` (442) with a build of the example, before and after | If resolution adds more than one second on `abseil`, memoise `reach` across files and re-measure before going on |
-| Cache growth | Size of `.codeowl/index` on `abseil`, before and after | If it more than doubles, store only the words that match some top-level name of another file |
-| The words per file | Count on the `abseil` sample | Informs S2-6 before part C |
+| Cache growth | Size of `.codeowl/index` on `abseil`, before and after | If it more than doubles, do not cache the words: scan each file at resolution instead, as `java/mod.rs::same_package_edges` does (decision S2-1's alternative). Extraction sees one file at a time, so it cannot filter the words by other files' names |
+| Coverage time | Time `get_spec_coverage`'s computation on `abseil` before and after. It scans the whole edge list once per symbol, and C++ will have many more edges per file than the other packs | If it grows past a second, index the edges by file once per call (a change in `spec/`, measured on the other packs too) |
+| The words per file | Measured 2026-11-14: median 30 to 105 per file, 90th percentile 190 to 570, a few files in the thousands (largest 5,671) | Informs S2-6; the cache-growth row decides |
 
 ## 9. Risks
 
@@ -127,4 +144,26 @@ Step 2 is **not** judged by the section 7 targets of the main plan: the hard rep
 - **Header-only libraries.** The closure of `fmt/format.h` is nearly the whole library, so most files link to most names they use. This is what the 32 to 53 % precision measures.
 - **Names read from text, not from the grammar.** A local variable that happens to share a name with a header symbol links to it. Step 4's rules address it; step 2 accepts it.
 - **A missed edge is the dangerous kind.** A name reached only through a macro expansion, or an include path the rules cannot resolve, produces no edge, and a change to its target does not make the user stale. Measured as recall (89.8 to 97.1 %); the compiler layer (steps 6 and 7) is the answer for what remains.
+- **A macro's body is not its interface.** A macro's interface hash covers `#define NAME(params)` only, so changing what it expands to leaves its users current, although the expansion is compiled into them. The other packs strip values the same way, but for a macro the hole is larger. Left as it is here; decided with the macro table (step 3).
+- **Fan-in is inflated.** `file_fan_in` counts edges, and this step emits one per word, so a file that uses ten enumerators of one enum adds ten to that header's count, which feeds generation priority. Not changed here (it is shared code and the other packs' order would move); see section 10.
 - **The cache shape changes.** Every repository rebuilds its cache once after the `FORMAT_VERSION` bump.
+
+## 10. To look at again later
+
+Recorded so they are not rediscovered. None blocks this step.
+
+| What | Why it is open | When |
+|---|---|---|
+| Edge precision on template-heavy code (32 to 69 %) | This step builds the measured method as it is; the rules that should raise it are untested | Step 4. If rules cannot reach the 80 % target, the compiler layer becomes the recommended setup for such repositories |
+| Whether a macro's body belongs in its interface hash | See risks | Step 3, with the macro table |
+| Fan-in counted per edge, not per file | See risks. Fixing it changes priority order for every pack | Step 8, when C++ generation order is first looked at |
+| Real repositories other than `leveldb` cannot be indexed by `codeowl` itself | `detect` refuses a repository with two stacks; the accuracy check reads files directly, so this step can be measured, but its end-to-end behaviour can be tried only on `leveldb` | Step 2c (`docs/multi-language-plan.md`) |
+| The other half of shared ids and pairing (a prototype in a header, its body in a source file) | Needs a span in a second file, a core change | Step 2b |
+| `compile_commands.json`, C++20 `import` edges | No measured repository needs either | When one does |
+| Unresolved includes are visible only in the accuracy check | A missed edge is the dangerous kind, and a user cannot see it yet | Step 8 at the latest; earlier if the count on a real repository is not near zero |
+| `abseil` edge precision differs from experiment 8 (58.7 to 69.0 %) | Cause not isolated; the first scripts are gone | When step 4 studies precision |
+| All four measurement repositories are libraries | An application, generated code (`moc`, protobuf) and heavy conditional compilation are unmeasured | Before C++ is called supported |
+
+## 11. Review record (2026-11-14)
+
+A review of the first version against the code and three measurements changed it in these places: the same-file fold moved in from step 2b (section 3.0; shared ids affect 10 to 23 % of top-level names on the hard repositories, and edges to them would have been silently incomplete); angle-bracket includes resolve by stricter rules (a system header was taken for a repository file); the cache-growth fallback was one that extraction cannot perform, and is now the scan-at-resolution alternative; coverage time is measured as well as rebuild time; the include marker is `*`, as in the Java pack; one edge per target was considered for enumerators and rejected (section 3.2). Unchanged: the edge model, no cascade for transitive includes, no watcher rule.
