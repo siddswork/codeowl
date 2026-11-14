@@ -29,7 +29,9 @@
 //! qualified name in its id. Folding it into its class is a later step
 //! (pairing, `docs/cpp-pack-plan.md` §4.6).
 
+pub mod includes;
 mod macros;
+pub mod resolve;
 #[cfg(test)]
 mod standards;
 

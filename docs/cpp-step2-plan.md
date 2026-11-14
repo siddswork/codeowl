@@ -81,7 +81,8 @@ No edge is emitted for an unresolved include: the graph holds only what resolved
 |---|---|
 | `src/imports.rs` | `FileImports.identifiers: Vec<String>` (`#[serde(default)]`) |
 | `src/cpp/mod.rs` | The same-file fold at the end of `extract_file` (section 3.0), with its tests |
-| `src/cpp/includes.rs` (new) | Include extraction, the identifier scan, path resolution, closure, narrowing, with their unit tests |
+| `src/cpp/includes.rs` (new) | Include extraction and the identifier scan (part A), with their unit tests |
+| `src/cpp/resolve.rs` (new) | Path resolution and the include closure (part B), then the narrowing (part C); split from `includes.rs` so each file has one job |
 | `src/cpp/macros.rs` | Expose the existing lexer to `includes.rs` (it already skips comments and strings and yields directives whole) |
 | `src/stack.rs` | `CppStack::extract_imports` and `resolve_imports` call into `cpp::includes`; the doc comment that says "includes are not read" is rewritten |
 | `src/graph.rs` | `FORMAT_VERSION` 24 to 25, with its note (the shape of `FileImports` and what the C++ pack produces both change) |
@@ -142,6 +143,7 @@ Step 2 is **not** judged by the section 7 targets of the main plan: the hard rep
 
 - **Linking to every header that defines a name.** A common name defined in many headers links a file to all of them; that is the measured precision gap, left to step 4. Staleness over-reports (never under-reports), so a false edge costs a regeneration, not a missed change.
 - **Header-only libraries.** The closure of `fmt/format.h` is nearly the whole library, so most files link to most names they use. This is what the 32 to 53 % precision measures.
+- **A system header taken for a repository shim.** An angle include with a directory (`<sys/time.h>`) that no root resolves falls back to a unique path-suffix match, so a repository that carries a file ending in `sys/time.h` (a compatibility shim used on one platform, a vendored or test copy) gets a wrong edge from every file that includes the system header. Measured on the four repositories: 883 such includes, 880 resolved by a root and 3 by suffix alone (vendored `gtest`/`gmock` under `fmt`'s `test/gtest`, a versioned header under `json`'s `tests/abi`), all correct by reading the paths and the build layout, not checked against the compiler. Kept, because a missed edge is the dangerous kind and a false one costs a regeneration; an ambiguous match resolves to nothing. Untested on an application with shims, since all four repositories are libraries. Revisit if one shows wrong edges; the options then are to drop the suffix rule for angle includes or to ask for `compile_commands.json` (S2-3).
 - **Names read from text, not from the grammar.** A local variable that happens to share a name with a header symbol links to it. Step 4's rules address it; step 2 accepts it.
 - **A missed edge is the dangerous kind.** A name reached only through a macro expansion, or an include path the rules cannot resolve, produces no edge, and a change to its target does not make the user stale. Measured as recall (89.8 to 97.1 %); the compiler layer (steps 6 and 7) is the answer for what remains.
 - **A macro's body is not its interface.** A macro's interface hash covers `#define NAME(params)` only, so changing what it expands to leaves its users current, although the expansion is compiled into them. The other packs strip values the same way, but for a macro the hole is larger. Left as it is here; decided with the macro table (step 3).
@@ -167,3 +169,34 @@ Recorded so they are not rediscovered. None blocks this step.
 ## 11. Review record (2026-11-14)
 
 A review of the first version against the code and three measurements changed it in these places: the same-file fold moved in from step 2b (section 3.0; shared ids affect 10 to 23 % of top-level names on the hard repositories, and edges to them would have been silently incomplete); angle-bracket includes resolve by stricter rules (a system header was taken for a repository file); the cache-growth fallback was one that extraction cannot perform, and is now the scan-at-resolution alternative; coverage time is measured as well as rebuild time; the include marker is `*`, as in the Java pack; one edge per target was considered for enumerators and rejected (section 3.2). Unchanged: the edge model, no cascade for transitive includes, no watcher rule.
+
+## 12. Progress
+
+**Part 0** (the same-file fold): merged as #133. The accuracy check equals the K11 baseline exactly.
+
+**Part A** (`src/cpp/includes.rs`; 2026-11-14): `extract(source)` returns the includes (path with delimiters, `imported_name: "*"`, each once, any branch of an `#if`, `include_next` too) and `FileImports.identifiers` (distinct, sorted, comments and string literals excluded, preprocessor lines included). It is not wired into `CppStack` yet: the comment there is right that reporting includes before they resolve would inflate the unresolved-import count, so the wiring and the `FORMAT_VERSION` bump for it come with part C. Measured with a throwaway probe on the four repositories:
+
+| Repository | Files | Words per file: median / 90th percentile / max | Serialised words next to serialised symbols |
+|---|---|---|---|
+| `abseil` | 880 | 67 / 202 / 1,063 | 1.10 MB next to 11.9 MB |
+| `json` | 628 | 26 / 179 / 3,871 | 0.59 MB next to 7.8 MB |
+| `fmt` | 73 | 105 / 428 / 2,428 | 0.23 MB next to 4.2 MB |
+| `leveldb` | 132 | 59 / 180 / 496 | 0.13 MB next to 1.5 MB |
+
+The words are about 9 to 15 % of the symbols' size, so the cache-growth kill criterion (more than double) is far away (S2-6 holds). Against the accuracy check's regex stand-in the new scan finds no word the stand-in lacks, and lacks only fragments of numbers and literals (`x80`, `ull`, `e20f`, the `L` of `L'x'`): never a name. Part E will show whether the edge numbers move.
+
+**Part A, after review.** `/code-review` found real defects, all fixed: the words of an `#include` path (`vector`, `h`) and the directive keyword (`include`, `define`, `if`) were counted as words, so a repository symbol with such a name would have had an edge from every file; a digit separator (`1'000`) or an apostrophe in a directive hid the rest of it; and a block comment running on from a directive line leaked its words, which was a lexer defect in `macros.rs` (the directive now ends where the comment ends; `FORMAT_VERSION` 26; the accuracy check is unchanged). Declined: `#import` (Objective-C; no measured repository uses it) and a `//` comment continued by a backslash, which swallows the next line in C++ too. Cross-check: the includes `extract` finds equal those of the accuracy probe's independent line scanner on all four repositories (8,794 / 3,063 / 618 / 772 distinct file and path pairs; no difference either way). The word counts above were taken before these fixes and are a little high.
+
+**Part B** (`src/cpp/resolve.rs`; 2026-11-14): `FileSet::resolve` (the two forms, the lookup order of section 3.2, a unique path-suffix match, dot segments followed and never out of the repository) and `IncludeGraph` (`build`, `includes`, `reach`, `unresolved`). Pure functions over a list of paths; nothing reads the disk. 12 tests; four deliberate breaks (the bare-angle guard, the unique-suffix rule, the file leaving itself out of its own closure, the sibling directory tried first) each fail the intended test. Measured on the four repositories with a throwaway probe:
+
+| Repository | Files | Includes | Unresolved: quoted / angle | Build, then the closure of every file | Mean / max files reached |
+|---|---|---|---|---|---|
+| `leveldb` | 132 | 772 | 36 / 239 | 2.7 ms, 0.2 ms | 9 / 39 |
+| `fmt` | 73 | 618 | 8 / 440 | 0.4 ms, 0.05 ms | 5 / 16 |
+| `json` | 628 | 3,063 | 2 / 1,970 | 2.6 ms, 5.0 ms | 54 / 84 |
+| `abseil` | 880 | 8,794 | 504 / 3,907 | 7.7 ms, 10.0 ms | 35 / 177 |
+
+The resolution kill criterion (more than one second on `abseil`) is two orders of magnitude away. Of the distinct unresolved quoted includes, none names a file with a C++ extension that is in the repository: `leveldb` 5, `fmt` 8, `json` 2 and `abseil` 4 are not in the repository at all (gtest, benchmark, Abseil seen from `fmt`), and 24 of `abseil`'s 28 are `.inc` files (`spinlock_linux.inc`, `stacktrace_generic-inl.inc`), real files the pack does not read as C++. That is a known gap: a name defined only in a `.inc` file has no symbol, so it can have no edge. The unresolved angle includes are system and third-party headers, as intended.
+
+**Part B, after review.** Fixed: a `/*` inside a trailing `//` comment on a directive line made the lexer swallow the lines after it (a regression of the part A lexer fix: the directive scan now skips a line comment, backslash continuations included); a CRLF line continuation inside a string in a directive; a block comment between `#include` and the path; an absolute path (never a repository file) and backslash separators in an include; the sibling directory tried twice for a file at the root; one allocation per repeated word; `IncludeGraph::unresolved` is an accessor. Declined, with data: dropping the suffix match for an angle include that has a directory. Across the four repositories 883 such includes resolve, 880 by a root and 3 by suffix alone (vendored `gtest`/`gmock` under `test/gtest`, a versioned header under `tests/abi`), all correct, and a missed edge is the dangerous kind where a false one only over-reports. Declined: replacing the directive word scan with the lexer (its apostrophe rule swallows `don't stop Here`, which a test requires; a raw string in a directive can still leak its words, accepted). The accuracy check equals the baseline after the lexer changes.
+

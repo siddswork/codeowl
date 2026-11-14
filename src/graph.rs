@@ -285,8 +285,11 @@ pub struct FileExtraction {
 /// needs a bump for as well. 25 = the C++ pack folds symbols that share an
 /// id into one (overloads, a prototype and its definition, `#if` branches,
 /// a specialisation), so a cached C++ graph holds duplicate-id symbols and
-/// unmerged hashes.
-pub const FORMAT_VERSION: u32 = 25;
+/// unmerged hashes. 26 = the C++ lexer ends a preprocessor directive after
+/// a block comment that runs on past its line, and ignores `/*` inside a
+/// string in a directive, which can move what a C++ file's declarations are
+/// read as.
+pub const FORMAT_VERSION: u32 = 26;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

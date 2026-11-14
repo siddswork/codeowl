@@ -22,9 +22,9 @@
 /// One lexical token. `text` borrows from the source; `line` / `end_line`
 /// are 0-based rows of its first and last byte.
 #[derive(Debug, Clone, Copy)]
-struct Tok<'a> {
-    kind: Kind,
-    text: &'a str,
+pub(super) struct Tok<'a> {
+    pub(super) kind: Kind,
+    pub(super) text: &'a str,
     start: usize,
     end: usize,
     line: usize,
@@ -32,7 +32,7 @@ struct Tok<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     /// An identifier or keyword.
     Ident,
     /// Punctuation, one token per operator (`::`, `->`, `[[`, `&&` are kept
@@ -75,7 +75,7 @@ pub fn blank_macros(source: &str) -> String {
 }
 
 /// Split `source` into tokens, dropping whitespace and comments.
-fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
+pub(super) fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
     let b = source.as_bytes();
     let mut toks = Vec::new();
     let mut i = 0;
@@ -121,6 +121,48 @@ fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
         } else if c == b'#' && at_line_start {
             let start = i;
             while i < b.len() && b[i] != b'\n' {
+                // A block comment that starts on the directive's line ends the
+                // directive where it ends, lines later; a string cannot hold
+                // one (`#define S "/*"`).
+                if b[i] == b'"' {
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' && b[i] != b'\n' {
+                        i += if b[i] == b'\\' && b[i + 1..].starts_with(b"\r\n") {
+                            3
+                        } else if b[i] == b'\\' {
+                            2
+                        } else {
+                            1
+                        };
+                    }
+                    // Past the closing quote, when there is one.
+                    if b.get(i) == Some(&b'"') {
+                        i += 1;
+                    }
+                    continue;
+                }
+                // A line comment runs to the end of the line (or of the
+                // lines a backslash joins to it), whatever it contains.
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+                    while i < b.len() && b[i] != b'\n' {
+                        if b[i] == b'\\' && b[i + 1..].starts_with(b"\n") {
+                            i += 2;
+                        } else if b[i] == b'\\' && b[i + 1..].starts_with(b"\r\n") {
+                            i += 3;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                    continue;
+                }
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    i += 2;
+                    while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
+                        i += 1;
+                    }
+                    i = (i + 2).min(b.len());
+                    continue;
+                }
                 // A backslash at the end of the line continues the directive.
                 if b[i] == b'\\' && b.get(i + 1) == Some(&b'\n') {
                     i += 1;
