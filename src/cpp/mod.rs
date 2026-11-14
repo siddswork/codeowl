@@ -161,11 +161,16 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         };
         let first = &mut folded[at];
         // Equal kinds: a declaration with a body outranks a bare prototype,
-        // so a prototype written first does not stand for its definition.
+        // so a prototype written first does not stand for its definition;
+        // then one another file can name (a public or protected member, or
+        // a non-member) outranks a private one, so the symbol is described
+        // by the overload a user can call.
         let rank = |s: &ExtractedSymbol| {
+            let private = s.markers.iter().any(|m| m == "private");
             (
                 strength(&s.kind),
                 !s.markers.iter().any(|m| m == "declaration"),
+                !private,
             )
         };
         if rank(&sym) > rank(first) {
@@ -1785,6 +1790,23 @@ class Outer {
         let syms = header(src);
         assert_eq!(count(&syms, "db.h::C::n"), 1);
         assert_eq!(get(&syms, "db.h::C").children, ["db.h::C::n"]);
+    }
+
+    #[test]
+    fn the_public_overload_stands_for_a_private_one_written_before_it() {
+        let src = "class C {\n private:\n  void f(double);\n public:\n  void f(int);\n};\n";
+        let syms = header(src);
+        let f = get(&syms, "db.h::C::f");
+        // The symbol is described by the overload a user can call.
+        assert_eq!(f.signature, "void f(int)");
+        assert_eq!(f.lines, [5, 5]);
+        // The class's interface (what a dependant reads) is unaffected by
+        // an edit to the private overload.
+        let edited = header(&src.replace("f(double)", "f(double, int)"));
+        assert_eq!(
+            get(&edited, "db.h::C").interface_hash,
+            get(&syms, "db.h::C").interface_hash
+        );
     }
 
     #[test]
