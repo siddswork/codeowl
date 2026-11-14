@@ -160,7 +160,15 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             continue;
         };
         let first = &mut folded[at];
-        if strength(&sym.kind) > strength(&first.kind) {
+        // Equal kinds: a declaration with a body outranks a bare prototype,
+        // so a prototype written first does not stand for its definition.
+        let rank = |s: &ExtractedSymbol| {
+            (
+                strength(&s.kind),
+                !s.markers.iter().any(|m| m == "declaration"),
+            )
+        };
+        if rank(&sym) > rank(first) {
             std::mem::swap(first, &mut sym);
         }
         first.docstring = first.docstring.take().or(sym.docstring);
@@ -185,11 +193,7 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         if declared {
             first.markers.push("declaration".to_string());
         }
-        for child in sym.children {
-            if !first.children.contains(&child) {
-                first.children.push(child);
-            }
-        }
+        first.children.extend(sym.children);
     }
     // A class that lists a member in both `#if` branches names it twice.
     for sym in &mut folded {
@@ -1781,6 +1785,28 @@ class Outer {
         let syms = header(src);
         assert_eq!(count(&syms, "db.h::C::n"), 1);
         assert_eq!(get(&syms, "db.h::C").children, ["db.h::C::n"]);
+    }
+
+    #[test]
+    fn the_definition_stands_for_a_prototype_written_before_it() {
+        let syms = source("int f(int);\nint f(int x) { return x; }\nint f(long);\n");
+        let f = get(&syms, "db.cc::f");
+        assert_eq!(f.lines, [2, 2]);
+        assert_eq!(f.extra_spans, [[1, 1], [3, 3]]);
+        // Three folds: the marker stays off once a body is among them.
+        assert!(!f.markers.iter().any(|m| m == "declaration"));
+        assert_ne!(f.raw, "prototype");
+    }
+
+    #[test]
+    fn a_doc_comment_on_a_later_declaration_is_kept() {
+        let syms = header("void g(int);\n// Sets the thing.\nvoid g(double);\n");
+        let g = get(&syms, "db.h::g");
+        assert!(
+            g.docstring
+                .as_deref()
+                .is_some_and(|d| d.contains("Sets the thing"))
+        );
     }
 
     #[test]

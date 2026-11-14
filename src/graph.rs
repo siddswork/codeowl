@@ -282,8 +282,11 @@ pub struct FileExtraction {
 /// conversion operator defined outside its class (`V::operator bool` where
 /// it was `V::int`) and for a function whose name is written in parentheses
 /// (`(min)(a, b)`, a `min` before and after), which a pure logic change
-/// needs a bump for as well.
-pub const FORMAT_VERSION: u32 = 24;
+/// needs a bump for as well. 25 = the C++ pack folds symbols that share an
+/// id into one (overloads, a prototype and its definition, `#if` branches,
+/// a specialisation), so a cached C++ graph holds duplicate-id symbols and
+/// unmerged hashes.
+pub const FORMAT_VERSION: u32 = 25;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
