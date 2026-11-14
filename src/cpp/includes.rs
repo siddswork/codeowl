@@ -21,7 +21,11 @@ pub fn extract(source: &str) -> FileImports {
     for tok in lex(source) {
         match tok.kind {
             Kind::Ident => {
-                words.insert(tok.text.to_string());
+                // Most tokens repeat a word already seen; allocate only for
+                // a new one.
+                if !words.contains(tok.text) {
+                    words.insert(tok.text.to_string());
+                }
             }
             Kind::Preproc => {
                 // A backslash-newline joins lines before anything is read.
@@ -62,7 +66,11 @@ fn include_specifier(directive: &str) -> Option<&str> {
     if rest.starts_with(|c: char| c.is_ascii_alphanumeric() || c == '_') {
         return None;
     }
-    let rest = rest.trim_start();
+    // Blanks and block comments may stand between the keyword and the path.
+    let mut rest = rest.trim_start();
+    while let Some(after) = rest.strip_prefix("/*") {
+        rest = after[after.find("*/")? + 2..].trim_start();
+    }
     let close = match rest.chars().next()? {
         '"' => '"',
         '<' => '>',
@@ -269,6 +277,28 @@ mod tests {
         // Two strings on one line: the second is not mistaken for a gap.
         let s3 = "#define T \"a\" \"/*\"\nint Seen;\n";
         assert!(has(s3, "Seen"));
+    }
+
+    #[test]
+    fn a_comment_marker_inside_a_line_comment_on_a_directive_opens_nothing() {
+        let src = "#endif // see src/*.cc\nint Visible;\n/* c */\nint Later;\n";
+        assert!(has(src, "Visible") && has(src, "Later"));
+        let inc = "#include \"b.h\" // glob a/*\n#include \"c.h\"\n";
+        assert_eq!(specs(inc), ["\"b.h\"", "\"c.h\""]);
+    }
+
+    #[test]
+    fn a_line_continuation_in_a_string_in_a_directive_works_with_crlf() {
+        let src = "#define MSG \"abc\\\r\ndef\"\r\nint Next;\r\n";
+        assert!(has(src, "Next"));
+        assert!(!has(src, "def"));
+    }
+
+    #[test]
+    fn a_comment_between_the_keyword_and_the_path_is_skipped() {
+        assert_eq!(specs("#include /* generated */ \"a.h\"\n"), ["\"a.h\""]);
+        assert!(!has("#include /* generated */ \"a.h\"\n", "generated"));
+        assert_eq!(specs("#include/*x*//*y*/<b.h>\n"), ["<b.h>"]);
     }
 
     #[test]

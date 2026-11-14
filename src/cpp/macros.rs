@@ -127,11 +127,31 @@ pub(super) fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
                 if b[i] == b'"' {
                     i += 1;
                     while i < b.len() && b[i] != b'"' && b[i] != b'\n' {
-                        i += if b[i] == b'\\' { 2 } else { 1 };
+                        i += if b[i] == b'\\' && b[i + 1..].starts_with(b"\r\n") {
+                            3
+                        } else if b[i] == b'\\' {
+                            2
+                        } else {
+                            1
+                        };
                     }
                     // Past the closing quote, when there is one.
                     if b.get(i) == Some(&b'"') {
                         i += 1;
+                    }
+                    continue;
+                }
+                // A line comment runs to the end of the line (or of the
+                // lines a backslash joins to it), whatever it contains.
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'/') {
+                    while i < b.len() && b[i] != b'\n' {
+                        if b[i] == b'\\' && b[i + 1..].starts_with(b"\n") {
+                            i += 2;
+                        } else if b[i] == b'\\' && b[i + 1..].starts_with(b"\r\n") {
+                            i += 3;
+                        } else {
+                            i += 1;
+                        }
                     }
                     continue;
                 }

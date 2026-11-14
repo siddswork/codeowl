@@ -60,12 +60,17 @@ impl FileSet {
         } else {
             (false, specifier.strip_prefix('<')?.strip_suffix('>')?)
         };
-        if path.is_empty() {
+        // `\` separates directories in code written for Windows; an
+        // absolute path names the filesystem, never a repository file.
+        let path = path.replace('\\', "/");
+        let path = path.as_str();
+        if path.is_empty() || path.starts_with('/') {
             return None;
         }
         let dir = from_file.rsplit_once('/').map_or("", |(d, _)| d);
         let mut roots: Vec<&str> = Vec::new();
-        if quoted {
+        // For a file at the root the sibling directory is the root itself.
+        if quoted && !dir.is_empty() {
             roots.push(dir);
         }
         roots.extend(["", "include", "src"]);
@@ -115,7 +120,7 @@ pub struct IncludeGraph {
     direct: BTreeMap<String, Vec<String>>,
     /// Includes that named no repository file: (file, specifier). System
     /// headers are most of them.
-    pub unresolved: Vec<(String, String)>,
+    unresolved: Vec<(String, String)>,
 }
 
 impl IncludeGraph {
@@ -144,6 +149,12 @@ impl IncludeGraph {
                 .insert(path.clone(), direct.into_iter().collect());
         }
         graph
+    }
+
+    /// The includes that named no repository file, as (file, specifier), in
+    /// file order. One entry per occurrence.
+    pub fn unresolved(&self) -> &[(String, String)] {
+        &self.unresolved
     }
 
     /// The files `file` includes directly.
@@ -262,6 +273,14 @@ mod tests {
         assert_eq!(s.resolve("a/c.cc", &q("../../z.h")), None);
     }
 
+    #[test]
+    fn an_absolute_path_is_no_repository_file_and_backslashes_are_separators() {
+        let s = set(&["x.h", "a/b.h"]);
+        assert_eq!(s.resolve("m.cc", &q("/x.h")), None);
+        assert_eq!(s.resolve("m.cc", &a("/usr/include/x.h")), None);
+        assert_eq!(s.resolve("m.cc", &q("a\\b.h")), Some("a/b.h"));
+    }
+
     fn imports(specs: &[&str]) -> FileImports {
         FileImports {
             imports: specs
@@ -294,7 +313,10 @@ mod tests {
             ("b.h", &[]),
         ]);
         assert_eq!(g.includes("m.cc"), ["a.h", "b.h"]);
-        assert_eq!(g.unresolved, [("m.cc".to_string(), "<vector>".to_string())]);
+        assert_eq!(
+            g.unresolved(),
+            [("m.cc".to_string(), "<vector>".to_string())]
+        );
     }
 
     #[test]
