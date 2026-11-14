@@ -76,7 +76,7 @@ fn main() {
             continue;
         };
         let source = String::from_utf8_lossy(&bytes);
-        let (symbols, errors) = codeowl::cpp::extract_counted(&source, &rel);
+        let (symbols, errors) = codeowl::cpp::extract_unfolded_counted(&source, &rel);
         println!("F\t{rel}\t{errors}\t{}", source.lines().count());
         for (form, path) in includes(&source) {
             println!("I\t{rel}\t{form}\t{path}");
@@ -118,12 +118,11 @@ fn main() {
                 (_, "typedef" | "using" | "concept") => "alias",
                 _ => "var",
             };
-            // A folded symbol stands for several declarations; the compiler
-            // counts each, so the comparison gets one line per range.
-            let starts = std::iter::once(sym.lines[0]).chain(sym.extra_spans.iter().map(|s| s[0]));
-            for line in starts {
-                println!("S\t{rel}\t{kind}\t{name}\t{line}\t{}", u8::from(top));
-            }
+            println!(
+                "S\t{rel}\t{kind}\t{name}\t{}\t{}",
+                sym.lines[0],
+                u8::from(top)
+            );
         }
     }
 }

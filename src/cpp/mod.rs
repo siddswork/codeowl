@@ -44,13 +44,24 @@ use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its declarations.
 pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
-    extract_with(source, rel_path, true).0
+    extract_counted(source, rel_path).0
 }
 
 /// [`extract_file`] and the number of places tree-sitter could not read,
 /// from one parse. Zero means the whole file was read; a high count means
 /// symbols may be missing.
 pub fn extract_counted(source: &str, rel_path: &str) -> (Vec<ExtractedSymbol>, usize) {
+    let (symbols, errors) = extract_with(source, rel_path, true);
+    (fold_same_id(symbols), errors)
+}
+
+/// [`extract_counted`] before declarations that share an id are folded: one
+/// symbol per declaration, each with its own kind and markers. For the
+/// accuracy check (`examples/cpp_probe.rs`), which measures what the pack
+/// reads against what the compiler reads, declaration by declaration; the
+/// graph only ever sees the folded view.
+#[doc(hidden)]
+pub fn extract_unfolded_counted(source: &str, rel_path: &str) -> (Vec<ExtractedSymbol>, usize) {
     extract_with(source, rel_path, true)
 }
 
@@ -95,8 +106,8 @@ fn parse(text: &str) -> Option<Tree> {
     parser.parse(text, None)
 }
 
-/// [`extract_file`], with blanking optional so a test can show what the
-/// grammar does without it.
+/// [`extract_file`] before the fold, with blanking optional so a test can
+/// show what the grammar does without it.
 fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymbol>, usize) {
     // `blanked` has the same length and line breaks as `source`, so a byte
     // range taken from the tree is valid in `source` too.
@@ -127,7 +138,7 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymb
     for child in root.children(&mut cursor) {
         cx.visit(child, child, &mut scope, &mut out);
     }
-    (fold_same_id(out), errors)
+    (out, errors)
 }
 
 /// Merge symbols that share an id into one, so the graph (which keeps one
@@ -1790,6 +1801,19 @@ class Outer {
         let syms = header(src);
         assert_eq!(count(&syms, "db.h::C::n"), 1);
         assert_eq!(get(&syms, "db.h::C").children, ["db.h::C::n"]);
+    }
+
+    #[test]
+    fn the_unfolded_view_keeps_each_declaration_with_its_own_kind() {
+        let src = "struct stat_t { int a; };\nint stat_t(int);\nint stat_t(int x) { return x; }\n";
+        let (syms, _) = extract_unfolded_counted(src, "db.h");
+        let of_id: Vec<&ExtractedSymbol> = syms.iter().filter(|s| s.id == "db.h::stat_t").collect();
+        assert_eq!(of_id.len(), 3);
+        assert_eq!(of_id[0].kind, SymbolKind::Container);
+        assert!(of_id[1].markers.iter().any(|m| m == "declaration"));
+        assert!(!of_id[2].markers.iter().any(|m| m == "declaration"));
+        // The folded view of the same text is one symbol.
+        assert_eq!(count(&extract_file(src, "db.h"), "db.h::stat_t"), 1);
     }
 
     #[test]
