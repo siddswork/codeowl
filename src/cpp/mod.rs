@@ -148,9 +148,10 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymb
 /// definition, both branches of an `#if`, a template and its specialisation.
 /// The strongest kind (`Container`, then `Callable`, then `Value`) supplies
 /// the kind, signature and main span, ties going to the first. The others
-/// add their line ranges to `extra_spans` and their hashes into both of the
-/// survivor's, so an edit to any declaration moves the interface hash that
-/// dependants read. Children are merged by id; a child that was declared in
+/// add their line ranges to `extra_spans`. The survivor's hashes are one
+/// hash of every declaration's hash, sorted, so an edit to any declaration
+/// moves the interface hash that dependants read and reordering them moves
+/// nothing. Children are merged by id; a child that was declared in
 /// both halves is listed once. The same move as `typescript::fold_same_id`,
 /// applied to members too, since an overloaded method shares an id as well.
 fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
@@ -164,6 +165,11 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
 
     let mut folded: Vec<ExtractedSymbol> = Vec::with_capacity(symbols.len());
     let mut index: HashMap<String, usize> = HashMap::new();
+    // Every declaration's own (source, interface) hashes, by folded index,
+    // for the symbols that folded. They are combined sorted at the end, so
+    // the result does not depend on the order the declarations were written
+    // in nor on which one outranked the others.
+    let mut parts: HashMap<usize, (Vec<String>, Vec<String>)> = HashMap::new();
     for mut sym in symbols {
         let Some(&at) = index.get(&sym.id) else {
             index.insert(sym.id.clone(), folded.len());
@@ -171,6 +177,14 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             continue;
         };
         let first = &mut folded[at];
+        let (sources, ifaces) = parts.entry(at).or_insert_with(|| {
+            (
+                vec![first.source_hash.clone()],
+                first.interface_hash.iter().cloned().collect(),
+            )
+        });
+        sources.push(sym.source_hash.clone());
+        ifaces.extend(sym.interface_hash.clone());
         // Equal kinds: a declaration with a body outranks a bare prototype,
         // so a prototype written first does not stand for its definition;
         // then one another file can name (a public or protected member, or
@@ -188,11 +202,6 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             std::mem::swap(first, &mut sym);
         }
         first.docstring = first.docstring.take().or(sym.docstring);
-        first.source_hash = hash_text(&format!("{}\n{}", first.source_hash, sym.source_hash));
-        first.interface_hash = match (first.interface_hash.take(), sym.interface_hash) {
-            (Some(a), Some(b)) => Some(hash_text(&format!("{a}\n{b}"))),
-            (a, b) => a.or(b),
-        };
         first.is_exported |= sym.is_exported;
         first.extra_spans.push(sym.lines);
         first.extra_spans.extend(sym.extra_spans);
@@ -210,6 +219,12 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
             first.markers.push("declaration".to_string());
         }
         first.children.extend(sym.children);
+    }
+    for (at, (mut sources, mut ifaces)) in parts {
+        sources.sort();
+        ifaces.sort();
+        folded[at].source_hash = hash_text(&sources.join("\n"));
+        folded[at].interface_hash = (!ifaces.is_empty()).then(|| hash_text(&ifaces.join("\n")));
     }
     // A class that lists a member in both `#if` branches names it twice.
     for sym in &mut folded {
@@ -1753,6 +1768,20 @@ class Outer {
         let (a, b) = (get(&a, "db.h::set"), get(&b, "db.h::set"));
         assert_ne!(a.interface_hash, b.interface_hash);
         assert_ne!(a.source_hash, b.source_hash);
+    }
+
+    #[test]
+    fn reordering_declarations_of_one_id_changes_no_hash() {
+        let a = header("void set(int);\nvoid set(double);\nvoid set(char*);\n");
+        let b = header("void set(char*);\nvoid set(int);\nvoid set(double);\n");
+        let (a, b) = (get(&a, "db.h::set"), get(&b, "db.h::set"));
+        assert_eq!(a.interface_hash, b.interface_hash);
+        assert_eq!(a.source_hash, b.source_hash);
+        // A prototype moved below its definition is no change either.
+        let p = source("int f(int);\nint f(int x) { return x; }\n");
+        let q = source("int f(int x) { return x; }\nint f(int);\n");
+        let (p, q) = (get(&p, "db.cc::f"), get(&q, "db.cc::f"));
+        assert_eq!(p.source_hash, q.source_hash);
     }
 
     #[test]
