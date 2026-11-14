@@ -35,6 +35,8 @@ mod standards;
 
 pub use self::macros::blank_macros;
 
+use std::collections::HashMap;
+
 use tree_sitter::{Node, Parser, Tree};
 
 use crate::hash::hash_text;
@@ -42,13 +44,24 @@ use crate::symbol::{ExtractedSymbol, SymbolKind};
 
 /// Parse `source` (the contents of `rel_path`) and extract its declarations.
 pub fn extract_file(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
-    extract_with(source, rel_path, true).0
+    extract_counted(source, rel_path).0
 }
 
 /// [`extract_file`] and the number of places tree-sitter could not read,
 /// from one parse. Zero means the whole file was read; a high count means
 /// symbols may be missing.
 pub fn extract_counted(source: &str, rel_path: &str) -> (Vec<ExtractedSymbol>, usize) {
+    let (symbols, errors) = extract_with(source, rel_path, true);
+    (fold_same_id(symbols), errors)
+}
+
+/// [`extract_counted`] before declarations that share an id are folded: one
+/// symbol per declaration, each with its own kind and markers. For the
+/// accuracy check (`examples/cpp_probe.rs`), which measures what the pack
+/// reads against what the compiler reads, declaration by declaration; the
+/// graph only ever sees the folded view.
+#[doc(hidden)]
+pub fn extract_unfolded_counted(source: &str, rel_path: &str) -> (Vec<ExtractedSymbol>, usize) {
     extract_with(source, rel_path, true)
 }
 
@@ -93,8 +106,8 @@ fn parse(text: &str) -> Option<Tree> {
     parser.parse(text, None)
 }
 
-/// [`extract_file`], with blanking optional so a test can show what the
-/// grammar does without it.
+/// [`extract_file`] before the fold, with blanking optional so a test can
+/// show what the grammar does without it.
 fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymbol>, usize) {
     // `blanked` has the same length and line breaks as `source`, so a byte
     // range taken from the tree is valid in `source` too.
@@ -126,6 +139,99 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymb
         cx.visit(child, child, &mut scope, &mut out);
     }
     (out, errors)
+}
+
+/// Merge symbols that share an id into one, so the graph (which keeps one
+/// symbol per id) loses nothing and an edge to the id sees every declaration.
+///
+/// C++ gives several declarations one id: overloads, a prototype and its
+/// definition, both branches of an `#if`, a template and its specialisation.
+/// The strongest kind (`Container`, then `Callable`, then `Value`) supplies
+/// the kind, signature and main span, ties going to the first. The others
+/// add their line ranges to `extra_spans`. The survivor's hashes are one
+/// hash of every declaration's hash, sorted, so an edit to any declaration
+/// moves the interface hash that dependants read and reordering them moves
+/// nothing. Children are merged by id; a child that was declared in
+/// both halves is listed once. The same move as `typescript::fold_same_id`,
+/// applied to members too, since an overloaded method shares an id as well.
+fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
+    fn strength(kind: &SymbolKind) -> u8 {
+        match kind {
+            SymbolKind::Container => 2,
+            SymbolKind::Callable => 1,
+            SymbolKind::Value | SymbolKind::Schema => 0,
+        }
+    }
+
+    let mut folded: Vec<ExtractedSymbol> = Vec::with_capacity(symbols.len());
+    let mut index: HashMap<String, usize> = HashMap::new();
+    // Every declaration's own (source, interface) hashes, by folded index,
+    // for the symbols that folded. They are combined sorted at the end, so
+    // the result does not depend on the order the declarations were written
+    // in nor on which one outranked the others.
+    let mut parts: HashMap<usize, (Vec<String>, Vec<String>)> = HashMap::new();
+    for mut sym in symbols {
+        let Some(&at) = index.get(&sym.id) else {
+            index.insert(sym.id.clone(), folded.len());
+            folded.push(sym);
+            continue;
+        };
+        let first = &mut folded[at];
+        let (sources, ifaces) = parts.entry(at).or_insert_with(|| {
+            (
+                vec![first.source_hash.clone()],
+                first.interface_hash.iter().cloned().collect(),
+            )
+        });
+        sources.push(sym.source_hash.clone());
+        ifaces.extend(sym.interface_hash.clone());
+        // Equal kinds: a declaration with a body outranks a bare prototype,
+        // so a prototype written first does not stand for its definition;
+        // then one another file can name (a public or protected member, or
+        // a non-member) outranks a private one, so the symbol is described
+        // by the overload a user can call.
+        let rank = |s: &ExtractedSymbol| {
+            let private = s.markers.iter().any(|m| m == "private");
+            (
+                strength(&s.kind),
+                !s.markers.iter().any(|m| m == "declaration"),
+                !private,
+            )
+        };
+        if rank(&sym) > rank(first) {
+            std::mem::swap(first, &mut sym);
+        }
+        first.docstring = first.docstring.take().or(sym.docstring);
+        first.is_exported |= sym.is_exported;
+        first.extra_spans.push(sym.lines);
+        first.extra_spans.extend(sym.extra_spans);
+        // "declaration" means the symbol has no body anywhere: it survives
+        // only if every folded declaration carries it.
+        let declared = first.markers.iter().any(|m| m == "declaration")
+            && sym.markers.iter().any(|m| m == "declaration");
+        first.markers.retain(|m| m != "declaration");
+        for marker in sym.markers {
+            if marker != "declaration" && !first.markers.contains(&marker) {
+                first.markers.push(marker);
+            }
+        }
+        if declared {
+            first.markers.push("declaration".to_string());
+        }
+        first.children.extend(sym.children);
+    }
+    for (at, (mut sources, mut ifaces)) in parts {
+        sources.sort();
+        ifaces.sort();
+        folded[at].source_hash = hash_text(&sources.join("\n"));
+        folded[at].interface_hash = (!ifaces.is_empty()).then(|| hash_text(&ifaces.join("\n")));
+    }
+    // A class that lists a member in both `#if` branches names it twice.
+    for sym in &mut folded {
+        let mut seen = std::collections::HashSet::new();
+        sym.children.retain(|c| seen.insert(c.clone()));
+    }
+    folded
 }
 
 /// Extensions of files other files include (template implementation files
@@ -1281,8 +1387,10 @@ template <> class Box<bool> {};
             get(&syms, "db.h::Max").signature,
             "template <typename T> T Max(T a, T b)"
         );
-        // A specialisation shares the primary template's id.
-        assert_eq!(syms.iter().filter(|s| s.id == "db.h::Box").count(), 2);
+        // A specialisation shares the primary template's id, so it folds
+        // into the primary: one symbol, the specialisation's range kept.
+        assert_eq!(syms.iter().filter(|s| s.id == "db.h::Box").count(), 1);
+        assert_eq!(b.extra_spans, [[7, 7]]);
     }
 
     #[test]
@@ -1394,7 +1502,10 @@ class Snappy {};
 #endif
 ";
         let syms = header(src);
-        assert_eq!(syms.iter().filter(|s| s.id == "db.h::Open").count(), 2);
+        // Both branches are read; the two `Open`s are one symbol.
+        let open = get(&syms, "db.h::Open");
+        assert_eq!(count(&syms, "db.h::Open"), 1);
+        assert_eq!(open.extra_spans, [[4, 4]]);
         get(&syms, "db.h::Snappy");
     }
 
@@ -1430,7 +1541,8 @@ bool operator==(const V& a, const V& b);
         ] {
             assert_eq!(get(&syms, id).kind, SymbolKind::Callable, "{id}");
         }
-        assert_eq!(syms.iter().filter(|s| s.id == "db.h::V::set").count(), 2);
+        // The two `set` overloads are one symbol.
+        assert_eq!(syms.iter().filter(|s| s.id == "db.h::V::set").count(), 1);
     }
 
     #[test]
@@ -1630,6 +1742,153 @@ class Outer {
         let (found, errors) = handle.join().expect("no stack overflow");
         assert!(found);
         assert_eq!(errors, 0);
+    }
+
+    // ---- one symbol per id (step 2, part 0) ----
+
+    fn count(syms: &[ExtractedSymbol], id: &str) -> usize {
+        syms.iter().filter(|s| s.id == id).count()
+    }
+
+    #[test]
+    fn overloads_fold_into_one_symbol_keeping_every_range() {
+        let syms = header("void set(int);\nvoid set(double);\nvoid set(char*);\n");
+        assert_eq!(count(&syms, "db.h::set"), 1);
+        let set = get(&syms, "db.h::set");
+        assert_eq!(set.lines, [1, 1]);
+        assert_eq!(set.extra_spans, [[2, 2], [3, 3]]);
+    }
+
+    #[test]
+    fn an_edit_to_any_overload_moves_both_hashes() {
+        let base = "void set(int);\nvoid set(double);\n";
+        let edited = "void set(int);\nvoid set(double, int);\n";
+        let a = header(base);
+        let b = header(edited);
+        let (a, b) = (get(&a, "db.h::set"), get(&b, "db.h::set"));
+        assert_ne!(a.interface_hash, b.interface_hash);
+        assert_ne!(a.source_hash, b.source_hash);
+    }
+
+    #[test]
+    fn reordering_declarations_of_one_id_changes_no_hash() {
+        let a = header("void set(int);\nvoid set(double);\nvoid set(char*);\n");
+        let b = header("void set(char*);\nvoid set(int);\nvoid set(double);\n");
+        let (a, b) = (get(&a, "db.h::set"), get(&b, "db.h::set"));
+        assert_eq!(a.interface_hash, b.interface_hash);
+        assert_eq!(a.source_hash, b.source_hash);
+        // A prototype moved below its definition is no change either.
+        let p = source("int f(int);\nint f(int x) { return x; }\n");
+        let q = source("int f(int x) { return x; }\nint f(int);\n");
+        let (p, q) = (get(&p, "db.cc::f"), get(&q, "db.cc::f"));
+        assert_eq!(p.source_hash, q.source_hash);
+    }
+
+    #[test]
+    fn a_prototype_and_its_definition_in_one_file_fold() {
+        let syms = source("int f(int);\nint f(int x) { return x; }\n");
+        assert_eq!(count(&syms, "db.cc::f"), 1);
+        assert_eq!(get(&syms, "db.cc::f").extra_spans.len(), 1);
+        // A definition is among them, so the folded symbol is not "only
+        // declared"; a prototype folded with a prototype still is.
+        assert!(
+            !get(&syms, "db.cc::f")
+                .markers
+                .iter()
+                .any(|m| m == "declaration")
+        );
+        let protos = source("int g(int);\nint g(long);\n");
+        assert!(
+            get(&protos, "db.cc::g")
+                .markers
+                .iter()
+                .any(|m| m == "declaration")
+        );
+    }
+
+    #[test]
+    fn both_branches_of_an_if_fold() {
+        let src = "#if A\nint v() { return 1; }\n#else\nint v() { return 2; }\n#endif\n";
+        let syms = header(src);
+        assert_eq!(count(&syms, "db.h::v"), 1);
+        assert_eq!(get(&syms, "db.h::v").extra_spans.len(), 1);
+    }
+
+    #[test]
+    fn a_stronger_kind_survives_whichever_comes_first() {
+        let syms = header("struct stat_t;\nint stat_t(int);\nstruct stat_t { int a; };\n");
+        let s = get(&syms, "db.h::stat_t");
+        assert_eq!(s.kind, SymbolKind::Container);
+        assert_eq!(count(&syms, "db.h::stat_t"), 1);
+        // The member survives with its parent.
+        assert_eq!(s.children, ["db.h::stat_t::a"]);
+    }
+
+    #[test]
+    fn members_declared_in_both_branches_are_one_child() {
+        let src = "class C {\n#if A\n  int n() const;\n#else\n  long n() const;\n#endif\n};\n";
+        let syms = header(src);
+        assert_eq!(count(&syms, "db.h::C::n"), 1);
+        assert_eq!(get(&syms, "db.h::C").children, ["db.h::C::n"]);
+    }
+
+    #[test]
+    fn the_unfolded_view_keeps_each_declaration_with_its_own_kind() {
+        let src = "struct stat_t { int a; };\nint stat_t(int);\nint stat_t(int x) { return x; }\n";
+        let (syms, _) = extract_unfolded_counted(src, "db.h");
+        let of_id: Vec<&ExtractedSymbol> = syms.iter().filter(|s| s.id == "db.h::stat_t").collect();
+        assert_eq!(of_id.len(), 3);
+        assert_eq!(of_id[0].kind, SymbolKind::Container);
+        assert!(of_id[1].markers.iter().any(|m| m == "declaration"));
+        assert!(!of_id[2].markers.iter().any(|m| m == "declaration"));
+        // The folded view of the same text is one symbol.
+        assert_eq!(count(&extract_file(src, "db.h"), "db.h::stat_t"), 1);
+    }
+
+    #[test]
+    fn the_public_overload_stands_for_a_private_one_written_before_it() {
+        let src = "class C {\n private:\n  void f(double);\n public:\n  void f(int);\n};\n";
+        let syms = header(src);
+        let f = get(&syms, "db.h::C::f");
+        // The symbol is described by the overload a user can call.
+        assert_eq!(f.signature, "void f(int)");
+        assert_eq!(f.lines, [5, 5]);
+        // The class's interface (what a dependant reads) is unaffected by
+        // an edit to the private overload.
+        let edited = header(&src.replace("f(double)", "f(double, int)"));
+        assert_eq!(
+            get(&edited, "db.h::C").interface_hash,
+            get(&syms, "db.h::C").interface_hash
+        );
+    }
+
+    #[test]
+    fn the_definition_stands_for_a_prototype_written_before_it() {
+        let syms = source("int f(int);\nint f(int x) { return x; }\nint f(long);\n");
+        let f = get(&syms, "db.cc::f");
+        assert_eq!(f.lines, [2, 2]);
+        assert_eq!(f.extra_spans, [[1, 1], [3, 3]]);
+        // Three folds: the marker stays off once a body is among them.
+        assert!(!f.markers.iter().any(|m| m == "declaration"));
+        assert_ne!(f.raw, "prototype");
+    }
+
+    #[test]
+    fn a_doc_comment_on_a_later_declaration_is_kept() {
+        let syms = header("void g(int);\n// Sets the thing.\nvoid g(double);\n");
+        let g = get(&syms, "db.h::g");
+        assert!(
+            g.docstring
+                .as_deref()
+                .is_some_and(|d| d.contains("Sets the thing"))
+        );
+    }
+
+    #[test]
+    fn no_two_symbols_of_a_file_share_an_id() {
+        let syms = header(DB);
+        let mut seen = std::collections::HashSet::new();
+        assert!(syms.iter().all(|s| seen.insert(s.id.clone())));
     }
 
     #[test]

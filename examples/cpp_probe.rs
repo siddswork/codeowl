@@ -76,7 +76,7 @@ fn main() {
             continue;
         };
         let source = String::from_utf8_lossy(&bytes);
-        let (symbols, errors) = codeowl::cpp::extract_counted(&source, &rel);
+        let (symbols, errors) = codeowl::cpp::extract_unfolded_counted(&source, &rel);
         println!("F\t{rel}\t{errors}\t{}", source.lines().count());
         for (form, path) in includes(&source) {
             println!("I\t{rel}\t{form}\t{path}");
