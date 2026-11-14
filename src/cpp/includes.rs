@@ -34,8 +34,10 @@ pub fn extract(source: &str) -> FileImports {
                     if !imports.contains(&import) {
                         imports.push(import);
                     }
+                } else {
+                    // An include names a file, not a symbol: no words.
+                    words_in_directive(&joined, &mut words);
                 }
-                words_in_directive(&joined, &mut words);
             }
             Kind::Punct | Kind::Str | Kind::Number => {}
         }
@@ -70,11 +72,19 @@ fn include_specifier(directive: &str) -> Option<&str> {
     Some(&rest[..end])
 }
 
-/// Add the words of one directive: its identifiers, without those inside a
-/// comment or a string literal.
+/// Add the words of one directive: its identifiers, without the directive's
+/// own keyword (`define`, `if`, …) and without those inside a comment or a
+/// string or character literal.
 fn words_in_directive(directive: &str, words: &mut BTreeSet<String>) {
     let b = directive.as_bytes();
+    // Past the `#`, the blanks and the keyword.
     let mut i = 0;
+    while i < b.len() && (b[i] == b'#' || b[i].is_ascii_whitespace()) {
+        i += 1;
+    }
+    while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+        i += 1;
+    }
     while i < b.len() {
         match b[i] {
             b'/' if b.get(i + 1) == Some(&b'/') => break,
@@ -85,16 +95,27 @@ fn words_in_directive(directive: &str, words: &mut BTreeSet<String>) {
                 }
                 i += 2;
             }
-            q @ (b'"' | b'\'') => {
+            b'"' => {
                 i += 1;
-                while i < b.len() && b[i] != q {
+                while i < b.len() && b[i] != b'"' {
                     i += if b[i] == b'\\' { 2 } else { 1 };
                 }
                 i += 1;
             }
+            // A character literal is short (`'Z'`, `'\\x41'`). An apostrophe
+            // with no closing quote near it (`don't`) is only an apostrophe.
+            b'\'' => {
+                let close = b[i + 1..].iter().take(6).position(|&c| c == b'\'');
+                i += close.map_or(1, |n| n + 2);
+            }
             c if c.is_ascii_digit() => {
-                // A number, suffixes and all: `0x1F`, `1e5`, `10UL`.
-                while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+                // A number, suffixes and digit separators and all: `0x1F`,
+                // `1e5`, `10UL`, `1'000`.
+                while i < b.len()
+                    && (b[i].is_ascii_alphanumeric()
+                        || b[i] == b'_'
+                        || (b[i] == b'\'' && b.get(i + 1).is_some_and(u8::is_ascii_alphanumeric)))
+                {
                     i += 1;
                 }
             }
@@ -210,6 +231,44 @@ mod tests {
     fn words_are_distinct_and_sorted() {
         let src = "int b; int a; int b;\n";
         assert_eq!(extract(src).identifiers, ["a", "b", "int"]);
+    }
+
+    #[test]
+    fn the_directive_keyword_and_an_include_path_are_not_words() {
+        let src = "#include <vector>\n#include \"db/db.h\"\n#include <Foo/Foo.h> // note\n#define Name 1\n#if defined(X)\n#endif\n";
+        let fi = extract(src);
+        for absent in [
+            "include", "define", "if", "endif", "vector", "db", "h", "Foo", "note",
+        ] {
+            assert!(!fi.identifiers.iter().any(|w| w == absent), "{absent}");
+        }
+        // What a directive uses is still a word.
+        for word in ["Name", "defined", "X"] {
+            assert!(fi.identifiers.iter().any(|w| w == word), "{word}");
+        }
+    }
+
+    #[test]
+    fn a_digit_separator_or_an_apostrophe_does_not_hide_the_rest() {
+        assert!(has("#if A > 1'000'000 && Tail\n#endif\n", "Tail"));
+        assert!(has("#error don't stop Here\n", "Here"));
+        // A real character literal is still skipped.
+        assert!(!has("#if C == 'Z' && Rest\n#endif\n", "Z"));
+        assert!(has("#if C == 'Z' && Rest\n#endif\n", "Rest"));
+    }
+
+    #[test]
+    fn a_block_comment_that_runs_on_from_a_directive_hides_its_words() {
+        let src = "#define X 1 /* start\n Hidden words */\nint after;\n";
+        let fi = extract(src);
+        assert!(!has(src, "Hidden") && !has(src, "words"));
+        assert!(fi.identifiers.iter().any(|w| w == "after"));
+        // A comment marker inside a string is not a comment.
+        let s2 = "#define S \"/*\"\nint Visible;\n";
+        assert!(has(s2, "Visible"));
+        // Two strings on one line: the second is not mistaken for a gap.
+        let s3 = "#define T \"a\" \"/*\"\nint Seen;\n";
+        assert!(has(s3, "Seen"));
     }
 
     #[test]

@@ -121,6 +121,28 @@ pub(super) fn lex<'a>(source: &'a str) -> Vec<Tok<'a>> {
         } else if c == b'#' && at_line_start {
             let start = i;
             while i < b.len() && b[i] != b'\n' {
+                // A block comment that starts on the directive's line ends the
+                // directive where it ends, lines later; a string cannot hold
+                // one (`#define S "/*"`).
+                if b[i] == b'"' {
+                    i += 1;
+                    while i < b.len() && b[i] != b'"' && b[i] != b'\n' {
+                        i += if b[i] == b'\\' { 2 } else { 1 };
+                    }
+                    // Past the closing quote, when there is one.
+                    if b.get(i) == Some(&b'"') {
+                        i += 1;
+                    }
+                    continue;
+                }
+                if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
+                    i += 2;
+                    while i < b.len() && !(b[i] == b'*' && b.get(i + 1) == Some(&b'/')) {
+                        i += 1;
+                    }
+                    i = (i + 2).min(b.len());
+                    continue;
+                }
                 // A backslash at the end of the line continues the directive.
                 if b[i] == b'\\' && b.get(i + 1) == Some(&b'\n') {
                     i += 1;
