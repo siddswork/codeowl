@@ -953,7 +953,8 @@ fn macro_before_declaration(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Optio
 
 /// The index of the first token after what a constructor may carry between
 /// its parameter list and its initialiser list: `noexcept`, `noexcept(…)`,
-/// `throw(…)` and `[[…]]` (`FMT_CONSTEXPR buffer(int n) noexcept : n_(n) {}`).
+/// `throw(…)`, `[[…]]`, a `requires` clause and a function-try-block's `try`
+/// (`FMT_CONSTEXPR buffer(int n) noexcept : n_(n) {}`).
 fn skip_constructor_specifiers(toks: &[Tok], mut at: usize) -> usize {
     loop {
         match toks.get(at) {
@@ -967,10 +968,33 @@ fn skip_constructor_specifiers(toks: &[Tok], mut at: usize) -> usize {
                 }
             }
             Some(t) if is_punct(Some(t), "[[") => {
-                match toks[at..].iter().position(|t| is_punct(Some(t), "]]")) {
+                // The attribute closes before the declaration ends.
+                let end = toks[at..]
+                    .iter()
+                    .take_while(|t| !(t.kind == Kind::Punct && matches!(t.text, ";" | "{")))
+                    .position(|t| is_punct(Some(t), "]]"));
+                match end {
                     Some(end) => at += end + 1,
                     None => return at,
                 }
+            }
+            // A function-try-block: `V() try : x_{} {} catch (...) {}`.
+            Some(t) if t.kind == Kind::Ident && t.text == "try" => at += 1,
+            // `V(int a) requires C<T> : x_(a) {}`: the constraint runs to the
+            // `:` that begins the initialiser list (a `::` is its own token).
+            Some(t) if t.kind == Kind::Ident && t.text == "requires" => {
+                let mut depth = 0usize;
+                while let Some(t) = toks.get(at) {
+                    match (t.kind, t.text) {
+                        (Kind::Punct, "(") => depth += 1,
+                        (Kind::Punct, ")") => depth = depth.saturating_sub(1),
+                        (Kind::Punct, ":") if depth == 0 => return at,
+                        (Kind::Punct, ";" | "{") if depth == 0 => return at,
+                        _ => {}
+                    }
+                    at += 1;
+                }
+                return at;
             }
             _ => return at,
         }
@@ -984,11 +1008,11 @@ fn skip_constructor_specifiers(toks: &[Tok], mut at: usize) -> usize {
 /// is enough. With arguments (`FMT_CATCH(...) {`) it looks like the head of a
 /// test (`TEST_F(A, B) {`), so it is taken only after the `}` of a block that
 /// a macro or `try` opened.
-fn statement_block_macro(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option<usize> {
+fn statement_block_macro(toks: &[Tok], i: usize, _prev: Option<&Tok>) -> Option<usize> {
     if !is_macro_name(&toks[i]) {
         return None;
     }
-    if !prev.is_some_and(|p| p.kind == Kind::Punct && matches!(p.text, ";" | "}" | "{")) {
+    if !starts_a_statement(toks, i) {
         return None;
     }
     let last = macro_end(toks, i);
@@ -1012,9 +1036,31 @@ fn statement_block_macro(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option<u
         }
         depth == 0
     })?;
-    let before = toks.get(open.checked_sub(1)?)?;
-    (is_word(Some(before), "try") || (before.kind == Kind::Ident && is_macro_name(before)))
+    let head = open.checked_sub(1)?;
+    let before = &toks[head];
+    // `try {`, or `TRY {` standing where a statement starts; not a macro-named
+    // namespace or type (`namespace DETAIL_NS {`, `struct INNER_T {`).
+    (is_word(Some(before), "try") || (is_macro_name(before) && starts_a_statement(toks, head)))
         .then_some(last)
+}
+
+/// Whether the token at `i` stands where a statement begins: after `;`, `}` or
+/// a `{` that opens a block. A `{` that follows `=`, `,` or `(` opens a braced
+/// initialiser (`Table t = { ROW_A{1} };`), whose entries are no statements.
+fn starts_a_statement(toks: &[Tok], i: usize) -> bool {
+    let Some(prev) = i.checked_sub(1).map(|p| &toks[p]) else {
+        return false;
+    };
+    if prev.kind != Kind::Punct {
+        return false;
+    }
+    match prev.text {
+        ";" | "}" => true,
+        "{" => !i.checked_sub(2).is_some_and(|k| {
+            toks[k].kind == Kind::Punct && matches!(toks[k].text, "=" | "," | "(")
+        }),
+        _ => false,
+    }
 }
 
 /// `if MACRO (cond)`: `if FMT_CONSTEXPR20 (…)`.
@@ -1358,18 +1404,46 @@ mod tests {
                 ]
             )
         );
+        // The positive case with `namespace` around it: still blanked.
+        let src = "namespace n {\nvoid f() {\n  FMT_TRY { g(); }\n  FMT_CATCH(...) {}\n}\n}\n";
+        assert_eq!(blank(src), spaced(src, &["FMT_TRY", "FMT_CATCH(...)"]));
         // After a plain `try` block too.
         let src = "void f() {\n  try { a(); }\n  MY_CATCH(e) { b(); }\n}\n";
         assert_eq!(blank(src), spaced(src, &["MY_CATCH(e)"]));
     }
 
     #[test]
-    fn a_macro_with_arguments_before_a_block_is_left_alone_unless_a_macro_try_precedes() {
+    fn a_macro_with_arguments_before_a_block_is_left_alone() {
         // gtest: the heads of test blocks, one after another.
         unchanged("TEST_F(A, B) {\n}\nTEST_F(A, C) {\n}\n");
+        // A block opened by a macro-named namespace or type is no try block.
+        unchanged("namespace DETAIL_NS {\n}\nTEST_F(A, B) {\n}\n");
+        unchanged("struct S {\n  struct INNER_T {\n  };\n};\nFOR_EACH(i, v) {\n}\n");
+        // A braced initialiser of macro-named types is no statement.
+        // (A *nested* initialiser, `{ { ROW_A{1} } }`, looks like a block in a
+        // block and is blanked; it still parses and changes no symbol.)
+        unchanged("Table t = { ROW_A{1}, ROW_B{2} };\n");
         unchanged("void f() {\n  if (x) { a(); }\n  FOR_EACH(i, v) { b(); }\n}\n");
         // An initialiser is no statement.
         unchanged("int a[] = { 1, 2 };\nint b = BASE_VALUE + 1;\n");
+    }
+
+    #[test]
+    fn a_constructor_with_a_requires_clause_or_a_function_try_block_loses_its_macro() {
+        let src = "struct V {\n  FMT_CONSTEXPR V(int a) requires C<T> : x_(a) {}\n\
+                   \x20 FMT_CONSTEXPR V() try : x_{} {} catch (...) {}\n};\n";
+        assert_eq!(blank(src), spaced(src, &["FMT_CONSTEXPR", "FMT_CONSTEXPR"]));
+    }
+
+    #[test]
+    fn what_follows_a_parameter_list_is_not_a_constructor_unless_an_initialiser_list_does() {
+        // Not constructors: a function with `noexcept` and a body, a
+        // declaration, and an attribute that never closes before a `:` that
+        // belongs to something else.
+        unchanged(
+            "struct S {\n  MY_TYPE make(int a) noexcept { return 1; }\n  MY_TYPE get(int a) noexcept;\n  int bits : 3;\n};\n",
+        );
+        unchanged("struct S {\n  MY_TYPE make(int a) [[;\n  int y = c ? z[w[0]] : 1;\n};\n");
     }
 
     #[test]
