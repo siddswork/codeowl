@@ -198,6 +198,10 @@ def report(name, cfg, m):
         e = m[f"edges_{label}"]
         print(f"  edges via {label} includes: {e['found']} found, recall {e['recall']:.1f}%, "
               f"precision {e['precision']:.1f}%")
+    e = m["edges_pack"]
+    print(f"  edges of the pack itself: {e['found']} found, recall {e['recall']:.1f}%, "
+          f"precision {e['precision']:.1f}%; {e['only_pack']} only the pack's, "
+          f"{e['only_standin']} only the stand-in's")
     for k, v in m["judged"].items():
         print(f"  target {k:<10} {v['measured']:>6.1f}% vs {v['target']:.0f}%  {'ok' if v['met'] else 'MISSED'}")
 

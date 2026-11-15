@@ -195,3 +195,21 @@ fn macros_prototypes_and_typedefs_are_targets() {
     assert_eq!(got, ["u.h::Handle", "u.h::LIMIT", "u.h::compute"]);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn an_enumerator_inside_a_class_is_not_a_word_that_reaches_the_class() {
+    // `buffer_size` is a member constant of `Buf`; another file writing the
+    // same word names something of its own, not `Buf`.
+    let (dir, graph) = repo(
+        "class-enum",
+        &[
+            (
+                "buf.h",
+                "class Buf { public: enum { buffer_size = 8 }; };\n",
+            ),
+            ("a.cc", "#include \"buf.h\"\nint buffer_size = 4;\n"),
+        ],
+    );
+    assert!(edges_from(&graph, "a.cc").is_empty());
+    std::fs::remove_dir_all(&dir).ok();
+}

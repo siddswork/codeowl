@@ -49,11 +49,12 @@ about a second. Re-running after a change to the pack is therefore cheap.
 * **Classes, enums, functions**: of the definitions the compiler sees in the
   files in scope, the share the pack also reports (same file, kind and name).
 * **Edge recall and precision**: a file depends on a top-level symbol of
-  another file. The pack has no edges of its own until plan step 2, so the
-  check measures the method that step will use: follow `#include` transitively
-  and link to each top-level symbol of an included file whose name is written
-  in the including file. When step 2 lands, point `compare.py` at the pack's
-  real edges instead.
+  another file. Two sets are scored: the pack's own edges (the probe's `E`
+  lines, from the functions the index runs) and, beside them, a regex
+  stand-in that follows `#include` transitively and links to each top-level
+  symbol of an included file whose name is written in the including file.
+  The targets judge the pack's edges. The stand-in stays as a cross-check:
+  `compare.py` reports how many edges only one of them has.
 * **Targets** are section 7 of the plan: on clean code (`leveldb`) 100 % of
   classes, 99 % of functions, 97 % recall, 98 % precision; on macro- and
   template-heavy code 95 %, 97 %, 93 %, 80 %.

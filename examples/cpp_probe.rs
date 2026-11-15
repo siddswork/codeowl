@@ -11,10 +11,19 @@
 //! | `I` | file, `q` (quotes) or `a` (angle brackets), the include path |
 //! | `S` | file, kind (`class` `enum` `func` `proto` `macro` `test` `alias` `var`), name, line, 1 if at namespace scope |
 //! | `N` | file, name of a top-level enum, one of its enumerators |
+//! | `E` | the pack's own edge: file, the file of the target, the target symbol's name |
+//!
+//! The `E` lines come from the same functions the index runs
+//! (`cpp::includes::extract`, then `cpp::edges::resolve` over a graph of the
+//! folded symbols), called directly because `abseil`, `fmt` and `json` have
+//! Python scripts and `detect` refuses a repository with two stacks.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 
+use codeowl::graph::{FileExtraction, Graph};
+use codeowl::hash::hash_text;
+use codeowl::imports::FileImports;
 use codeowl::symbol::SymbolKind;
 
 fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) {
@@ -71,11 +80,19 @@ fn main() {
     collect(root, root, &mut files);
     files.sort();
 
+    let mut extractions: Vec<FileExtraction> = Vec::new();
+    let mut file_imports: HashMap<String, FileImports> = HashMap::new();
     for rel in files {
         let Ok(bytes) = std::fs::read(root.join(&rel)) else {
             continue;
         };
         let source = String::from_utf8_lossy(&bytes);
+        extractions.push(FileExtraction {
+            rel_path: rel.clone(),
+            source_hash: hash_text(&source),
+            symbols: codeowl::cpp::extract_file(&source, &rel),
+        });
+        file_imports.insert(rel.clone(), codeowl::cpp::includes::extract(&source));
         let (symbols, errors) = codeowl::cpp::extract_unfolded_counted(&source, &rel);
         println!("F\t{rel}\t{errors}\t{}", source.lines().count());
         for (form, path) in includes(&source) {
@@ -124,5 +141,19 @@ fn main() {
                 u8::from(top)
             );
         }
+    }
+
+    // The pack's own edges, as the index would build them.
+    let graph = Graph::build(extractions);
+    let mut edges: BTreeSet<(String, String, String)> = BTreeSet::new();
+    for e in codeowl::cpp::edges::resolve(&file_imports, &graph) {
+        let Some(target) = e.target else { continue };
+        let id = graph.string_id(target);
+        let file = graph.owning_file_id(target);
+        let name = id.strip_prefix(&format!("{file}::")).unwrap_or(id);
+        edges.insert((e.from_file, file.to_string(), name.to_string()));
+    }
+    for (from, file, name) in edges {
+        println!("E\t{from}\t{file}\t{name}");
     }
 }

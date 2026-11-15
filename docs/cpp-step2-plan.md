@@ -220,3 +220,26 @@ Kill criteria: resolution adds well under a second (0.3 to 0.6 s including the l
 **Part D** (`tests/cpp_staleness.rs`; 2026-11-15): two end-to-end tests through `RepoIndex::open` and the real `submit`. A header `widget.h` (class `Widget` with a public and a private member, plus an unrelated `other_fn`), a user file and an implementing file. After a symbol spec and a file spec are stored for the user file: editing the unrelated symbol, and editing a private member, leave both current; editing the public member's signature makes the user symbol and its file report `changed:dependencies`. `get_callers`' filter on `Widget` lists the including and the implementing file. With edge resolution stubbed out both tests fail (negative control).
 
 **Part D, after review.** Added: a comment-only header edit stales nobody; a transitive dependant (two includes away, the middle header unchanged) goes stale; the edge is asserted to exist before the "nobody moves" steps (so they cannot pass for a pack with no edges); the callers check names the word and would show a duplicate edge; a real `get_callers` call on a C++ class in `mcp.rs`. Negative control, run by hand: replace the body of `CppStack::resolve_imports` with `Vec::new()` and run `cargo test --test cpp_staleness` and `cargo test get_callers_on_a_cpp`: the edge, the staleness and the callers tests fail. Found and recorded (section 9): an implementing file does not learn a private member changed; pinned in the test until pairing. Declined: building the fixture elsewhere than `std::env::temp_dir()` (every integration test does the same; a `TMPDIR` inside an ignoring repository is hypothetical).
+
+**Part E** (2026-11-15): `cpp_probe` prints the pack's own edges (`E` lines: the same `includes::extract`, folded symbols and `edges::resolve` the index runs, called directly because three of the four repositories have two stacks), and `compare.py` scores them (`edges_pack`) beside the stand-in; the targets now judge the pack's edges. Result, `leveldb` / `abseil` / `fmt` / `json`:
+
+| | Stand-in | Pack |
+|---|---|---|
+| Recall | 97.1 / 89.8 / 92.7 / 89.9 % | **97.1 / 89.8 / 92.7 / 89.9 %** (equal) |
+| Precision | 98.8 / 69.0 / 32.3 / 53.1 % | 98.8 / 73.2 / 48.9 / 62.2 % |
+| Edges found | 753 / 864 / 1,604 / 1,689 | 753 / 814 / 1,059 / 1,443 |
+| Only one side has | | 0 only the pack's; 0 / 50 / 545 / 246 only the stand-in's |
+
+The acceptance bar was recall and precision within one point of the stand-in. Recall is equal; precision is higher by 0 / 4.2 / 16.6 / 9.1 points, which the bar says to investigate and explain. Every edge only the stand-in has was classified (a script over the probe and the sources; none of them is an edge of the compiler's reference, which is why recall did not move):
+
+| Cause | `abseil` | `fmt` | `json` | Which side is right |
+|---|---|---|---|---|
+| A self edge: the stand-in's closure contains the file itself when includes form a cycle | 0 | 518 | 87 | The pack: no self edge by design |
+| The word `operator` against symbols the stand-in reads as `operator` | 42 | 0 | 36 | The pack. See the free-operator risk, section 9: it is a missed edge in theory, but the reference holds none |
+| A qualified definition (`static_const::value`) the stand-in reads as a top-level `value` | 8 | 20 | 48 | The pack |
+| A word only in an `#include` path or a directive keyword (`json` from `<nlohmann/json.hpp>`, `else` from `#else`) | 0 | 7 | 73 | The pack (the part A review fix) |
+| A character literal (`'m'`) the stand-in's regex does not strip | 0 | 0 | 2 | The pack |
+
+**A defect the check found.** Before this measurement the pack had 9 edges (`fmt`) and 22 (`json`) that the stand-in lacked, none of them the compiler's: the constants of an anonymous enum inside a class (`format_int`, `iterator_buffer`) were words that reached the class, so any file writing `buffer_size` linked to it. Fixed: only an enum's enumerators are words that reach it; test `an_enumerator_inside_a_class_is_not_a_word_that_reaches_the_class` (red first). No `FORMAT_VERSION` bump: edges are recomputed on every rebuild from the cached words and symbols, neither of which changed.
+
+The targets of the main plan's section 7 are still missed on the three hard repositories (recall 89.8 / 92.7 / 89.9 % against 93; precision 73.2 / 48.9 / 62.2 % against 80); step 2 is not judged by them (section 7 above), and step 4 raises precision. Recall did not move: the stand-in and the pack find the same true edges. Why the rest are missed (the plan's section 9 suspects a name that arrives through a macro expansion, or an include the rules cannot resolve) is **not investigated yet**; it is the next thing to look at for recall. The K11 row is in `NORTHSTAR.md`.
