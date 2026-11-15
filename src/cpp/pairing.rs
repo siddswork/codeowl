@@ -79,6 +79,11 @@ pub struct PairingReport {
     /// Definitions moved into their class, which declares no member of that
     /// name (a member a macro declared, say).
     pub to_class: usize,
+    /// Of `paired` and `to_class`, those found by a name shorter than the
+    /// definition's own id (a repeated enclosing namespace, or a header whose
+    /// namespaces were lost): the ones whose correctness rests on lookup and
+    /// not on an exact id, counted so the claim can be checked.
+    pub shortened: usize,
     /// Qualified definitions with several candidates: left where they are.
     pub ambiguous: usize,
     /// Qualified definitions with no declaration in any file they reach.
@@ -104,6 +109,8 @@ struct Move {
     to_file: usize,
     target: String,
     kind: Kind,
+    /// Found by a name shorter than the definition's own id.
+    shortened: bool,
 }
 
 /// Pair every out-of-file definition with its declaration. See the module
@@ -204,83 +211,75 @@ pub fn pair(
             };
             let wanted_field = def.raw == "qualified_variable";
             let reachable = |&&(g, _): &&(usize, usize)| reach.contains(&g);
-            // The ids this definition may name, innermost namespace first. The
-            // first one with a declaration decides, as C++ lookup would.
+            // The ids this definition may name, innermost namespace first.
+            // C++ lookup stops at the first level that has the name, so does
+            // this: a declaration of the member there, else the class there
+            // (a member the extractor did not see), and an outer level is
+            // never consulted once an inner one has the name.
             let names = names_to_try(def, suffix);
-            let candidates: Vec<(usize, usize)> = names
-                .iter()
-                .map(|name| {
-                    declarations
-                        .get(name.as_str())
-                        .map(|v| {
-                            v.iter()
-                                .filter(reachable)
-                                .filter(|&&(g, s)| {
-                                    let cand = &files[g].symbols[s];
-                                    if (cand.raw == "field") != wanted_field {
-                                        return false;
-                                    }
-                                    // A plain function with a body is the
-                                    // implementation of a bare prototype.
-                                    // Another function with a body is no
-                                    // prototype (an overload, or a second
-                                    // definition).
-                                    qualified
-                                        || cand.raw == "field"
-                                        || cand.markers.iter().any(|m| m == "declaration")
-                                })
-                                .copied()
-                                .collect::<Vec<_>>()
-                        })
+            let kind_of = |class: bool| match (class, qualified) {
+                (true, _) => Kind::Class,
+                (false, true) => Kind::Member,
+                (false, false) => Kind::Free,
+            };
+            let mut decided = false;
+            for (depth, name) in names.iter().enumerate() {
+                let declared: Vec<(usize, usize)> = declarations
+                    .get(name.as_str())
+                    .map(|v| {
+                        v.iter()
+                            .filter(reachable)
+                            .filter(|&&(g, s)| {
+                                let cand = &files[g].symbols[s];
+                                if (cand.raw == "field") != wanted_field {
+                                    return false;
+                                }
+                                // A plain function with a body is the
+                                // implementation of a bare prototype. Another
+                                // function with a body is no prototype (an
+                                // overload, or a second definition).
+                                qualified
+                                    || cand.raw == "field"
+                                    || cand.markers.iter().any(|m| m == "declaration")
+                            })
+                            .copied()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // A qualified definition may belong to a class that declares
+                // no member of that name.
+                let owners: Vec<(usize, usize)> = if declared.is_empty() && qualified {
+                    name.rsplit_once("::")
+                        .and_then(|(class, _)| classes.get(class))
+                        .map(|v| v.iter().filter(reachable).copied().collect())
                         .unwrap_or_default()
-                })
-                .find(|found| !found.is_empty())
-                .unwrap_or_default();
-            match candidates.as_slice() {
-                [(g, s)] => {
-                    moves.push(Move {
+                } else {
+                    Vec::new()
+                };
+                let (found, class) = if declared.is_empty() {
+                    (owners, true)
+                } else {
+                    (declared, false)
+                };
+                match found.as_slice() {
+                    [] => continue,
+                    [(g, s)] => moves.push(Move {
                         from_file: fi,
                         definition: def.id.clone(),
                         to_file: *g,
                         target: files[*g].symbols[*s].id.clone(),
-                        kind: if qualified { Kind::Member } else { Kind::Free },
-                    });
-                    continue;
+                        kind: kind_of(class),
+                        shortened: depth > 0,
+                    }),
+                    _ => report.ambiguous += 1,
                 }
-                [] => {}
-                _ => {
-                    report.ambiguous += 1;
-                    continue;
-                }
+                decided = true;
+                break;
             }
-            // No declaration of that name. A qualified definition may still
-            // belong to a class that declares no such member.
-            if !qualified {
-                continue;
-            }
-            let owners: Vec<(usize, usize)> = names
-                .iter()
-                .filter_map(|name| name.rsplit_once("::").map(|(class, _)| class))
-                .map(|class| {
-                    classes
-                        .get(class)
-                        .map(|v| v.iter().filter(reachable).copied().collect::<Vec<_>>())
-                        .unwrap_or_default()
-                })
-                .find(|found| !found.is_empty())
-                .unwrap_or_default();
-            match owners.as_slice() {
-                [(g, s)] => {
-                    moves.push(Move {
-                        from_file: fi,
-                        definition: def.id.clone(),
-                        to_file: *g,
-                        target: files[*g].symbols[*s].id.clone(),
-                        kind: Kind::Class,
-                    });
-                }
-                [] => report.unmatched += 1,
-                _ => report.ambiguous += 1,
+            // A plain function with no prototype is just a function; a
+            // qualified definition nothing declares is counted.
+            if !decided && qualified {
+                report.unmatched += 1;
             }
         }
     }
@@ -297,6 +296,14 @@ pub fn pair(
                 report.free_paired += 1;
             }
             Kind::Class => report.to_class += 1,
+        }
+        report.shortened += usize::from(mv.shortened);
+    }
+    // `chain:N` was bookkeeping for the pass: the graph shows markers to
+    // people, and an unpaired definition must not carry it there.
+    for file in files.iter_mut() {
+        for sym in &mut file.symbols {
+            sym.markers.retain(|m| !m.starts_with("chain:"));
         }
     }
     report
@@ -657,6 +664,91 @@ mod tests {
     }
 
     #[test]
+    fn an_inner_class_without_the_member_is_not_passed_over_for_an_outer_declaration() {
+        // Inside `namespace a`, `Status` is `a::Status` (found first), which
+        // does not declare `f`; a global `::Status::f` exists too. C++ lookup
+        // stops at the innermost `Status`, so the body belongs to `a::Status`
+        // as a class member the extractor did not see, never to `::Status::f`.
+        let outer = "class Status {\n public:\n  int f();\n};\n";
+        let inner = "namespace a {\nclass Status {\n public:\n  int x;\n};\n}\n";
+        let cc =
+            "#include \"o.h\"\n#include \"i.h\"\nnamespace a {\nint Status::f() { return 1; }\n}\n";
+        let (files, report) = paired(&[("o.h", outer), ("i.h", inner), ("c.cc", cc)]);
+        assert_eq!(report.paired, 0, "{report:?}");
+        assert_eq!(report.to_class, 1);
+        assert_eq!(find(&files, "i.h::a::Status").other_file_spans.len(), 1);
+        assert!(find(&files, "o.h::Status::f").other_file_spans.is_empty());
+    }
+
+    #[test]
+    fn two_declarations_at_the_innermost_level_are_ambiguous_and_do_not_fall_outward() {
+        let a = "namespace x {\nclass S {\n public:\n  void f();\n};\n}\n";
+        let b = "namespace x {\nclass S {\n public:\n  void f();\n};\n}\n";
+        let outer = "class S {\n public:\n  void f();\n};\n";
+        let cc = "#include \"a.h\"\n#include \"b.h\"\n#include \"o.h\"\nnamespace x {\nvoid S::f() { }\n}\n";
+        let (files, report) = paired(&[("a.h", a), ("b.h", b), ("o.h", outer), ("c.cc", cc)]);
+        assert_eq!(report.ambiguous, 1, "{report:?}");
+        assert_eq!(report.paired, 0);
+        assert!(find(&files, "o.h::S::f").other_file_spans.is_empty());
+        assert_eq!(ids(&files, "c.cc"), ["c.cc::x::S::f"]);
+    }
+
+    #[test]
+    fn a_member_the_class_does_not_declare_is_found_through_the_shortened_name() {
+        let h = "namespace absl {\nclass Status {\n public:\n  int x;\n};\n}\n";
+        let cc = "#include \"s.h\"\nnamespace absl {\nint absl::Status::made_by_a_macro() { return 1; }\n}\n";
+        let (files, report) = paired(&[("s.h", h), ("s.cc", cc)]);
+        assert_eq!(report.to_class, 1, "{report:?}");
+        assert_eq!(report.shortened, 1);
+        assert_eq!(find(&files, "s.h::absl::Status").other_file_spans.len(), 1);
+    }
+
+    #[test]
+    fn a_definition_written_from_the_global_namespace_pairs() {
+        // `::absl::Status::Make` names the global lookup explicitly.
+        let h = "namespace absl {\nclass Status {\n public:\n  static int Make(int m);\n};\n}\n";
+        let cc = "#include \"s.h\"\nnamespace absl {\nint ::absl::Status::Make(int m) { return m; }\n}\n";
+        let (files, report) = paired(&[("s.h", h), ("s.cc", cc)]);
+        assert_eq!(report.paired, 1, "{report:?}");
+        assert_eq!(
+            find(&files, "s.h::absl::Status::Make")
+                .other_file_spans
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn an_operator_of_a_template_class_in_a_namespace_pairs_by_its_qualification() {
+        let h = "namespace a {\ntemplate <class P>\nclass btree {\n public:\n  btree& operator=(const btree& o);\n};\n}\n";
+        let cc = "#include \"b.h\"\nnamespace a {\ntemplate <class P>\nbtree<P>& btree<P>::operator=(const btree& o) { return *this; }\n}\n";
+        let (files, report) = paired(&[("b.h", h), ("b.cc", cc)]);
+        assert_eq!(report.paired, 1, "{report:?}");
+        assert_eq!(report.shortened, 0, "an exact id, not a shortened one");
+        assert_eq!(
+            find(&files, "b.h::a::btree::operator=")
+                .other_file_spans
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn the_internal_chain_marker_does_not_outlive_the_pass() {
+        // `chain:N` is bookkeeping for pairing; an unpaired definition must
+        // not carry it into the graph, where markers are labels people read.
+        let cc = "namespace a {\nint A::f() { return 1; }\n}\n";
+        let (files, report) = paired(&[("a.cc", cc)]);
+        assert_eq!(report.unmatched, 1);
+        let left = find(&files, "a.cc::a::A::f");
+        assert!(
+            left.markers.iter().all(|m| !m.starts_with("chain:")),
+            "{:?}",
+            left.markers
+        );
+    }
+
+    #[test]
     fn a_name_written_with_the_enclosing_namespace_again_still_pairs() {
         // abseil's status.cc: inside `namespace absl`, `absl::Status::Make`.
         // C++ finds `absl` by looking outward from the innermost namespace,
@@ -667,6 +759,7 @@ mod tests {
         let (files, report) = paired(&[("s.h", h), ("s.cc", cc)]);
         assert_eq!(report.paired, 1, "{report:?}");
         assert_eq!(report.unmatched, 0);
+        assert_eq!(report.shortened, 1, "found by a name shorter than its id");
         assert!(ids(&files, "s.cc").is_empty(), "{:?}", ids(&files, "s.cc"));
         assert_eq!(
             find(&files, "s.h::absl::Status::Make").other_file_spans,
@@ -846,6 +939,7 @@ mod tests {
             to_file: 0,
             target: "db.h::DB::NoSuchMember".to_string(),
             kind: Kind::Member,
+            shortened: false,
         };
         let before = files.clone();
         assert_eq!(apply(&mut files, &[mv]), [false]);
@@ -869,6 +963,7 @@ mod tests {
                 to_file: 2,
                 target: "t.h::f".to_string(),
                 kind: Kind::Member,
+                shortened: false,
             },
             Move {
                 from_file: 2,
@@ -876,6 +971,7 @@ mod tests {
                 to_file: 1,
                 target: "p.h::f".to_string(),
                 kind: Kind::Free,
+                shortened: false,
             },
         ];
         assert_eq!(apply(&mut files, &moves), [false, true]);

@@ -12,7 +12,7 @@
 //! | `S` | file, kind (`class` `enum` `func` `proto` `macro` `test` `alias` `var`), name (with its namespaces: `leveldb::DB`), line, 1 if at namespace scope, 1 if a definition written outside its class |
 //! | `N` | file, name of a top-level enum, one of its enumerators |
 //! | `E` | the pack's own edge: file, the file of the target, the target symbol's name |
-//! | `P` | what pairing did: definitions paired (of them, free functions), moved into their class, ambiguous, unmatched |
+//! | `P` | what pairing did: definitions paired (of them, free functions), moved into their class, ambiguous, unmatched, found by a shortened name |
 //!
 //! The `E` lines come from the same functions the index runs
 //! (`cpp::includes::extract`, then `cpp::edges::resolve` over a graph of the
@@ -160,8 +160,13 @@ fn main() {
     // paired with their declarations first.
     let report = codeowl::cpp::pairing::pair(&mut extractions, &file_imports);
     println!(
-        "P\t{}\t{}\t{}\t{}\t{}",
-        report.paired, report.free_paired, report.to_class, report.ambiguous, report.unmatched
+        "P\t{}\t{}\t{}\t{}\t{}\t{}",
+        report.paired,
+        report.free_paired,
+        report.to_class,
+        report.ambiguous,
+        report.unmatched,
+        report.shortened
     );
     let graph = Graph::build(extractions);
     let mut edges: BTreeSet<(String, String, String)> = BTreeSet::new();
