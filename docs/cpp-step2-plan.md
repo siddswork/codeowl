@@ -243,4 +243,25 @@ The acceptance bar was recall and precision within one point of the stand-in. Re
 
 **A defect the check found.** Before this measurement the pack had 9 edges (`fmt`) and 22 (`json`) that the stand-in lacked, none of them the compiler's: the constants of an anonymous enum inside a class (`format_int`, `iterator_buffer`) were words that reached the class, so any file writing `buffer_size` linked to it. Fixed: only an enum's enumerators are words that reach it; test `an_enumerator_inside_a_class_is_not_a_word_that_reaches_the_class` (red first). No `FORMAT_VERSION` bump: `RepoIndex::open` always calls `rebuild`, which re-runs `resolve_imports` over the cached words and symbols (neither changed), and `.codeowl/graph` is only written, never read back (`Graph::load` has no caller in `src/`). A change that starts loading the saved graph must bump the version for any change to edge resolution.
 
-The targets of the main plan's section 7 are still missed on the three hard repositories (recall 89.8 / 92.7 / 89.9 % against 93; precision 73.2 / 48.9 / 62.2 % against 80); step 2 is not judged by them (section 7 above), and step 4 raises precision. Recall did not move: the stand-in and the pack find the same true edges. Why the rest are missed (the plan's section 9 suspects a name that arrives through a macro expansion, or an include the rules cannot resolve) is **not investigated yet**; it is the next thing to look at for recall. The K11 row is in `NORTHSTAR.md`.
+The targets of the main plan's section 7 are still missed on the three hard repositories (recall 89.8 / 92.7 / 89.9 % against 93; precision 73.2 / 48.9 / 62.2 % against 80); step 2 is not judged by them (section 7 above), and step 4 raises precision. Recall did not move: the stand-in and the pack find the same true edges. Why the rest are missed is investigated in the next paragraphs, and one cause fixed. The K11 row is in `NORTHSTAR.md`.
+
+**Part E, the recall gap investigated and one cause fixed** (2026-11-15). Every one of the 232 reference edges the pack missed (22 / 68 / 41 / 101) was classified by what was absent, with throwaway scripts over the probe output and the sources:
+
+| Cause | `leveldb` | `abseil` | `fmt` | `json` | Total |
+|---|---|---|---|---|---|
+| **A.** The pack extracts no symbol of that name in the header | 4 | 5 | 12 | 100 | 121 |
+| **B.** Symbol and include path exist; the file never writes the word | 18 | 63 | 29 | 1 | 111 |
+
+A, in detail: `NLOHMANN_JSON_NAMESPACE_END` alone is 74 (a `#define` with `/* … */ \` makes tree-sitter-cpp report an error and drop the macro; reproduced on the exact text); `basic_memory_buffer` 9 on `fmt` and `FastIntToBuffer` 4 on `abseil` (a class and a function behind an `absl_nonnull` annotation, both in K11's missing lists); `class Env;` and `class WriteBatch;` forward declarations on `leveldb` (4; whether a forward declaration should be a target is a design question: a user of one does not depend on the class body); about 30 others not examined one by one. B, in detail: 41 come through a macro expansion (the word is in the body of a macro the file uses: 32 `abseil`, 9 `fmt`), 70 are neither written nor brought by a macro. For the 70 the likely cause is a type the file never names (`db_impl.cc` uses `options_.block_cache` and `NewLRUCache(...)`, both `Cache*`, and never writes `Cache`; checked for that example and sampled, not verified for all), plus macros with token pasting that the check does not follow.
+
+**Fixed here: a block comment inside a continued directive.** `blank_macros` now blanks block comments inside a directive that a backslash continues over several lines (string and `//` comment aware, same length, line breaks kept) before the rules run. Two tests written red first (the lexer rule, and the `json` text end to end through `extract_counted`: no parse error, the macro is a symbol), three that must stay unchanged (a marker in a string, after a `//`, in a single-line directive). `FORMAT_VERSION` 28. After it, `leveldb` / `abseil` / `fmt` / `json`:
+
+| | Before | After |
+|---|---|---|
+| Classes | 100 / 96.6 / 92.5 / 95.9 % | 100 / 96.6 / 92.5 / 96.2 % |
+| Functions | 100 / 95.4 / 97.4 / 95.7 % | 100 / 95.4 / 97.4 / 95.9 % |
+| Edge recall | 97.1 / 89.8 / 92.7 / 89.9 % | 97.1 / 89.8 / 92.7 / **97.9 %** |
+| Edge precision | 98.8 / 73.2 / 48.9 / 62.2 % | 98.8 / 73.2 / 49.5 / 69.6 % |
+| Files partly read | 7 / 46 / 15 / 32 | 7 / 43 / 15 / 31 |
+
+`json` recall rises by 8.0 points, more than the 74 edges alone would give (7.4), because the dropped macro also hid the declarations after it; it now meets the 93 % target. Nothing fell. `fmt` finds 13 fewer edges (1,059 to 1,046) and precision rises 0.6 points; not examined. What is left of the gap, by the table above: macro expansion (step 3, the macro table), types never written (needs type analysis, a ceiling of a name-based pack), and the K11 missing classes and functions (extraction).

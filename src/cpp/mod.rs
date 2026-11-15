@@ -1461,6 +1461,16 @@ template <typename T> concept Number = std::integral<T>;
     }
 
     #[test]
+    fn a_macro_with_a_block_comment_before_a_continuation_is_extracted() {
+        // From nlohmann/json: tree-sitter-cpp reports an error on this text
+        // and drops the macro unless the comment is blanked first.
+        let src = "#ifndef NS_END\n#define NS_END                  \\\n    }  /* namespace (inline) NOLINT */ \\\n    }  // namespace nlohmann\n#endif\nint after;\n";
+        let (syms, errors) = extract_counted(src, "abi.h");
+        assert_eq!(errors, 0);
+        assert!(ids(&syms).contains(&"abi.h::NS_END"), "{:?}", ids(&syms));
+    }
+
+    #[test]
     fn macros_are_symbols_and_an_include_guard_is_not() {
         let src = "\
 #ifndef STORAGE_DB_H_
