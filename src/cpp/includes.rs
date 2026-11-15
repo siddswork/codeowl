@@ -1,6 +1,7 @@
 //! What a C++ file says about other files: the headers it includes and the
-//! words it uses. Step 2 of `docs/cpp-step2-plan.md`; resolution (which repo
-//! file an include means, and which symbols the words reach) is the next part.
+//! words it uses. Step 2 of `docs/cpp-step2-plan.md`; resolution is in
+//! `resolve.rs` (which repo file an include means) and `edges.rs` (which
+//! symbols the words reach).
 //!
 //! Both come from the lexer in `macros.rs`, which already skips comments and
 //! string literals and returns each preprocessor directive whole.

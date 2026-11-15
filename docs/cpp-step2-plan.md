@@ -148,6 +148,7 @@ Step 2 is **not** judged by the section 7 targets of the main plan: the hard rep
 - **A missed edge is the dangerous kind.** A name reached only through a macro expansion, or an include path the rules cannot resolve, produces no edge, and a change to its target does not make the user stale. Measured as recall (89.8 to 97.1 %); the compiler layer (steps 6 and 7) is the answer for what remains.
 - **A macro's body is not its interface.** A macro's interface hash covers `#define NAME(params)` only, so changing what it expands to leaves its users current, although the expansion is compiled into them. The other packs strip values the same way, but for a macro the hole is larger. Left as it is here; decided with the macro table (step 3).
 - **Fan-in is inflated.** `file_fan_in` counts edges, and this step emits one per word, so a file that uses ten enumerators of one enum adds ten to that header's count, which feeds generation priority. Not changed here (it is shared code and the other packs' order would move); see section 10.
+- **A free operator is never a target** (found by the part C review). `operator==`, `operator<<` and the like are symbols whose name is not an identifier, and the word list holds identifiers, so a file that writes `a == b` or `os << x` gets no edge to the operator declared in a header; editing it leaves that file current. Fixing it needs a rule over punctuation tokens (any use of the symbol for an `operator` symbol), a later step; measure how many such headers a repository has before choosing.
 - **The cache shape changes.** Every repository rebuilds its cache once after the `FORMAT_VERSION` bump.
 
 ## 10. To look at again later
@@ -200,3 +201,17 @@ The resolution kill criterion (more than one second on `abseil`) is two orders o
 
 **Part B, after review.** Fixed: a `/*` inside a trailing `//` comment on a directive line made the lexer swallow the lines after it (a regression of the part A lexer fix: the directive scan now skips a line comment, backslash continuations included); a CRLF line continuation inside a string in a directive; a block comment between `#include` and the path; an absolute path (never a repository file) and backslash separators in an include; the sibling directory tried twice for a file at the root; one allocation per repeated word; `IncludeGraph::unresolved` is an accessor. Declined, with data: dropping the suffix match for an angle include that has a directory. Across the four repositories 883 such includes resolve, 880 by a root and 3 by suffix alone (vendored `gtest`/`gmock` under `test/gtest`, a versioned header under `tests/abi`), all correct, and a missed edge is the dangerous kind where a false one only over-reports. Declined: replacing the directive word scan with the lexer (its apostrophe rule swallows `don't stop Here`, which a test requires; a raw string in a directive can still leak its words, accepted). The accuracy check equals the baseline after the lexer changes.
 
+
+**Part C** (`src/cpp/edges.rs`, wired into `CppStack`; 2026-11-15): `cpp::edges::resolve` builds the `IncludeGraph`, and for each file and each file in its `reach` emits one `ResolvedImport` per (file, top-level symbol, word written): `specifier` the header's repository path, `imported_name` the word (an enumerator reaches its enum), `target` the symbol. An out-of-class definition (a name with `::` after the file prefix) is no target; macros, prototypes and typedefs are. No self edge; an unresolved include gives nothing. `FORMAT_VERSION` 27. 9 tests through `RepoIndex::open` (`tests/cpp_edges.rs`), written red first (7 failed before the code); with the narrowing check forced true, 5 fail (the negative control).
+
+Acceptance and cost, measured on copies of `abseil` and `json` with their Python scripts removed (so `detect` accepts them), release build, master against this branch:
+
+| Measure | `abseil` (880 files) | `json` (628 files) |
+|---|---|---|
+| File-level edges, master then branch | 0, then 4,942 | 0, then 4,061 |
+| Edges (import statements) | 12,638 | 8,367 |
+| Graph build plus statistics, master then branch | 6.6 s, 6.9 s | 5.9 s, 6.5 s |
+| `.codeowl/index`, master then branch | 17.8 MB, 20.7 MB (+16 %) | 11.2 MB, 12.6 MB (+12 %) |
+| `.codeowl/graph`, master then branch | 18.2 MB, 20.5 MB | 11.1 MB, 12.7 MB |
+
+Kill criteria: resolution adds well under a second (0.3 to 0.6 s including the larger graph), and the cache is far from doubling. `graph_stats` on the seven repositories of the other four packs that exist locally (`bat`, `commons-lang`, `full-stack-fastapi-template`, `graphify`, `quarkus-quickstarts`, `quarkus-super-heroes`, `ripgrep`) is byte-identical on master and the branch. **Not measured:** the coverage-time row (`get_spec_coverage` scans the edge list once per symbol; it needs the server and specs), and the accuracy check against the compiler (part E).
