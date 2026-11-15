@@ -143,7 +143,8 @@ fn an_out_of_class_definition_is_not_a_target() {
             ("use.cc", "#include \"db.cc\"\nvoid f() { Open(); }\n"),
         ],
     );
-    // `db.cc::DB::Open` is a symbol, but never the target of an edge.
+    // `db.cc::DB::Open` is a symbol, but never the target of an edge (no
+    // word a file writes contains `::`, so nothing matches it).
     assert!(
         graph
             .imports()

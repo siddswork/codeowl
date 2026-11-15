@@ -30,11 +30,11 @@ fn targets(graph: &Graph, file: &str) -> Vec<(String, SymbolId)> {
         let Some(name) = sym.id.strip_prefix(&prefix) else {
             continue;
         };
-        // `DB::Open` defined outside its class: it belongs to its class and
-        // is reached through it (pairing, a later step, folds it in).
-        if name.contains("::") {
-            continue;
-        }
+        // A `DB::Open` defined outside its class has `::` in its name, and
+        // no word a file writes ever does, so it is never matched: it is
+        // reached through its class (pairing, a later step, folds it in).
+        // Likewise a free `operator==` is never matched, because the word
+        // list holds identifiers and not punctuation (plan section 9).
         out.push((name.to_string(), id));
         // An enumerator is written without its enum, so it is a word that
         // reaches the enum.
@@ -67,10 +67,10 @@ pub fn resolve(file_imports: &HashMap<String, FileImports>, graph: &Graph) -> Ve
             continue;
         }
         for header in includes.reach(from_file) {
-            let symbols = offered
-                .entry(header.clone())
-                .or_insert_with(|| targets(graph, &header));
-            for (word, id) in symbols.iter() {
+            if !offered.contains_key(&header) {
+                offered.insert(header.clone(), targets(graph, &header));
+            }
+            for (word, id) in &offered[&header] {
                 if words.binary_search(word).is_ok() {
                     out.push(ResolvedImport {
                         from_file: from_file.clone(),
