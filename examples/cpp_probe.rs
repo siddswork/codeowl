@@ -87,6 +87,9 @@ fn main() {
             continue;
         };
         let source = String::from_utf8_lossy(&bytes);
+        // Parsed twice on purpose: the accuracy check counts declarations as
+        // the compiler does (`extract_unfolded_counted`, below), while the
+        // edges need the folded symbols the index builds its graph from.
         extractions.push(FileExtraction {
             rel_path: rel.clone(),
             source_hash: hash_text(&source),

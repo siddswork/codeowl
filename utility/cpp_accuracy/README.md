@@ -54,7 +54,11 @@ about a second. Re-running after a change to the pack is therefore cheap.
   stand-in that follows `#include` transitively and links to each top-level
   symbol of an included file whose name is written in the including file.
   The targets judge the pack's edges. The stand-in stays as a cross-check:
-  `compare.py` reports how many edges only one of them has.
+  `compare.py` reports how many edges only one of them has. Both sets and the
+  compiler's reference keep only edges whose target is a plain identifier, so
+  **recall does not cover operators** (`operator==`, `operator<<`): the pack
+  draws no edge to them (plan section 9, free operators) and this check cannot
+  show it.
 * **Targets** are section 7 of the plan: on clean code (`leveldb`) 100 % of
   classes, 99 % of functions, 97 % recall, 98 % precision; on macro- and
   template-heavy code 95 %, 97 %, 93 %, 80 %.

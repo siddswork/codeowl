@@ -219,8 +219,11 @@ def compare(repo, truth, probe_path):
         return found_edges
 
     out["reference_edges"] = len(tedges)
+    standin = set()
     for label, reach in (("direct", lambda f: direct.get(f, set())), ("transitive", closure)):
         h = edges_over(reach)
+        if label == "transitive":
+            standin = h
         tp = len(h & tedges)
         out[f"edges_{label}"] = {
             "found": len(h),
@@ -230,12 +233,10 @@ def compare(repo, truth, probe_path):
     # The pack's own edges (`E` lines of the probe), on the stand-in's terms:
     # both ends in scope, the target named by a plain identifier.
     pedges = {
-        (a, b, n)
+        (a, b, norm(n))
         for a, b, n in pack_edges
         if a in scope and b in scope and re.fullmatch(r"[A-Za-z_]\w*", norm(n))
     }
-    pedges = {(a, b, norm(n)) for a, b, n in pedges}
-    standin = edges_over(closure)
     ptp = len(pedges & tedges)
     out["edges_pack"] = {
         "found": len(pedges),
