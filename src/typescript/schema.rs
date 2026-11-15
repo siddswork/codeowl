@@ -59,6 +59,7 @@ pub fn extract_tables(source: &str, rel_path: &str) -> Vec<ExtractedSymbol> {
                 interface_hash: None,
                 markers: Vec::new(),
                 extra_spans: Vec::new(),
+                other_file_spans: Vec::new(),
                 parent: None,
                 children: Vec::new(),
             }

@@ -578,6 +578,7 @@ impl<'a> Cx<'a> {
             interface_hash: is_exported.then(|| hash_text(&sig)),
             markers: Self::markers(scope),
             extra_spans: Vec::new(),
+            other_file_spans: Vec::new(),
             parent: scope.parent.clone(),
             children: Vec::new(),
         });
@@ -720,6 +721,7 @@ impl<'a> Cx<'a> {
                 interface_hash: is_exported.then(|| hash_text(&iface)),
                 markers: Self::markers(scope),
                 extra_spans: Vec::new(),
+                other_file_spans: Vec::new(),
                 parent: scope.parent.clone(),
                 children,
             },
@@ -981,6 +983,7 @@ impl<'a> Cx<'a> {
             interface_hash: is_exported.then(|| hash_text(&sig)),
             markers: Vec::new(),
             extra_spans: Vec::new(),
+            other_file_spans: Vec::new(),
             parent: None,
             children: Vec::new(),
         });

@@ -72,6 +72,25 @@ pub struct SourceResponse {
     /// so it may no longer point at the right place if the edit moved
     /// things around.
     pub graph_in_sync: bool,
+    /// The parts of this symbol's source that live in **other files**, one
+    /// entry per block, each with its file and 1-based inclusive lines. A C++
+    /// class's method bodies are in the `.cc` that implements it: `file` and
+    /// `lines` above are the header's, `source` carries the header's text
+    /// first and then each of these blocks under a `// from <file>, lines
+    /// a-b` line, and `graph_in_sync` is `false` if any of the files changed.
+    /// Absent for every symbol whose source is all in `file`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub elsewhere: Vec<OtherFileSpan>,
+}
+
+/// A block of a symbol's source in a file other than the one it is declared
+/// in: see `SourceResponse::elsewhere`.
+#[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
+pub struct OtherFileSpan {
+    /// The repo-relative path of the file holding this block.
+    pub file: String,
+    /// The block's lines in that file, 1-based inclusive.
+    pub lines: [usize; 2],
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -1105,8 +1124,10 @@ impl CodeOwlServer {
                 // externals folded to one line — the same treatment the
                 // rendered `### Depends on` section gets, so a Rust symbol
                 // isn't handed a wall of `Vec`/`Result`/`BTreeMap`.
-                let scoped =
-                    crate::spec::scoped_symbol_deps(graph, &file.id, source.as_str(), Some(sym_id));
+                // Read file by file, so a class split over two files lists
+                // what the bodies in the other one name too.
+                let scoped = crate::spec::symbol_scoped_deps(&self.root, graph, sym)
+                    .map_err(|e| e.to_string())?;
                 let mut dependencies: Vec<String> = scoped
                     .resolved
                     .iter()
@@ -1223,7 +1244,7 @@ impl CodeOwlServer {
     }
 
     #[tool(
-        description = "The real source text behind a symbol or file id -- what get_symbol/get_spec don't give you: get_symbol stops at the signature (the text before the body), and get_spec is LLM-written prose about the symbol, not the code itself. Use this to verify a claim about actual behavior. Accepts a symbol id (\"lib/utils.ts::cn\") or a bare file path (\"lib/utils.ts\"). `context_lines` (default 0, capped at 20) pulls in surrounding lines -- e.g. the imports a snippet depends on. `truncated: true` means `source` was cut short of the true `lines` span (re-read the file directly for the rest); `graph_in_sync: false` means the file changed on disk more recently than the index was rebuilt, so `lines` may not point at the right place in the file's current text."
+        description = "The real source text behind a symbol or file id -- what get_symbol/get_spec don't give you: get_symbol stops at the signature (the text before the body), and get_spec is LLM-written prose about the symbol, not the code itself. Use this to verify a claim about actual behavior. Accepts a symbol id (\"lib/utils.ts::cn\") or a bare file path (\"lib/utils.ts\"). `context_lines` (default 0, capped at 20) pulls in surrounding lines -- e.g. the imports a snippet depends on. `truncated: true` means `source` was cut short of the true `lines` span (re-read the file directly for the rest); `graph_in_sync: false` means the file changed on disk more recently than the index was rebuilt, so `lines` may not point at the right place in the file's current text. When a symbol's source is split over files (a C++ class and its method bodies in the .cc that implements it), `file` and `lines` are where it is declared, `source` carries that text first and then each other file's part under a `// from <file>, lines a-b` line, `elsewhere` lists those parts, and `graph_in_sync` is false if any of the files changed."
     )]
     async fn get_source(
         &self,
@@ -1289,7 +1310,50 @@ impl CodeOwlServer {
             spans.first().map(|s| s[0]).unwrap_or(1),
             spans.last().map(|s| s[1]).unwrap_or(total_lines),
         ];
-        let source_text = crate::spec::render_spans(&content, spans);
+        let mut source_text = crate::spec::render_spans(&content, spans);
+        // The parts of a symbol that live in other files follow the home
+        // file's text, each under a line saying where it is from. A file's
+        // text is only in sync if every one of those files still hashes to
+        // what the graph recorded for it.
+        let mut elsewhere = Vec::new();
+        let mut graph_in_sync = graph_in_sync;
+        if let Node::Symbol(sym) = graph.get(id) {
+            for (other_file, other_spans) in crate::spec::other_file_blocks(&graph, sym) {
+                // The home file is intact (it was read above); one of the
+                // others may have been removed since the last reindex. That
+                // is a flagged gap in the answer, not a failed call.
+                let Ok(other) = std::fs::read_to_string(self.root.join(&other_file)) else {
+                    graph_in_sync = false;
+                    source_text.push_str(&format!(
+                        "\n\n// from {other_file}: could not be read (changed or removed since the last reindex)"
+                    ));
+                    elsewhere.extend(other_spans.into_iter().map(|lines| OtherFileSpan {
+                        file: other_file.clone(),
+                        lines,
+                    }));
+                    continue;
+                };
+                graph_in_sync &= graph
+                    .find(&other_file)
+                    .and_then(|file_id| graph.get_file(file_id))
+                    .is_some_and(|f| f.source_hash == crate::hash::hash_text(&other));
+                let other_total = other.lines().count().max(1);
+                for [start, end] in other_spans {
+                    // The same context the home span gets, clamped to this
+                    // file's own length.
+                    let span = [
+                        start.saturating_sub(context_lines).clamp(1, other_total),
+                        (end + context_lines).min(other_total),
+                    ];
+                    source_text.push_str("\n\n");
+                    source_text.push_str(&crate::spec::other_block_text(&other_file, &other, span));
+                    elsewhere.push(OtherFileSpan {
+                        file: other_file.clone(),
+                        lines: span,
+                    });
+                }
+            }
+        }
         let (source, truncated) = crate::text::cap_source_text(source_text, self.max_source_bytes);
 
         Ok(Json(SourceResponse {
@@ -1299,6 +1363,7 @@ impl CodeOwlServer {
             source,
             truncated,
             graph_in_sync,
+            elsewhere,
         }))
     }
 
@@ -4453,6 +4518,153 @@ mod tests {
     }
 
     // --- M20: get_source ------------------------------------------------
+
+    #[tokio::test]
+    async fn get_source_on_a_symbol_split_over_two_files_names_where_each_part_is() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("get-source");
+        let server = CodeOwlServer::new(dir.clone(), graph);
+        let request = || SourceRequest {
+            id: "a.h::A".to_string(),
+            context_lines: None,
+        };
+        let result = server.get_source(Parameters(request())).await.unwrap().0;
+        // The header's text first, then the source file's, under a line that
+        // says where it is from.
+        assert!(result.source.starts_with("class A {"), "{}", result.source);
+        assert!(
+            result
+                .source
+                .contains("// from a.cc, lines 2-8\nint A::f(int x) {"),
+            "{}",
+            result.source
+        );
+        assert_eq!(result.file, "a.h");
+        assert_eq!(result.lines, [1, 4], "`lines` stays the home file's span");
+        assert_eq!(
+            result.elsewhere,
+            [OtherFileSpan {
+                file: "a.cc".to_string(),
+                lines: [2, 8]
+            }]
+        );
+        assert!(result.graph_in_sync);
+
+        // The source file changes on disk: the graph's record of it is stale.
+        let mut text = std::fs::read_to_string(dir.join("a.cc")).unwrap();
+        text.push_str("// edited\n");
+        std::fs::write(dir.join("a.cc"), text).unwrap();
+        assert!(
+            !server
+                .get_source(Parameters(request()))
+                .await
+                .unwrap()
+                .0
+                .graph_in_sync,
+            "an edit to the other file must not read as in sync"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_source_still_answers_when_another_file_of_the_symbol_is_gone() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("get-source-gone");
+        let server = CodeOwlServer::new(dir.clone(), graph);
+        std::fs::remove_file(dir.join("a.cc")).unwrap();
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.h::A".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .expect("the header is intact, so there is still an answer")
+            .0;
+        assert!(result.source.starts_with("class A {"), "{}", result.source);
+        assert!(
+            result.source.contains("// from a.cc: could not be read"),
+            "{}",
+            result.source
+        );
+        assert!(!result.graph_in_sync);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_source_widens_the_other_files_parts_by_context_lines_and_clamps_them() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("get-source-context");
+        let server = CodeOwlServer::new(dir.clone(), graph);
+        let get = |context_lines| {
+            server.get_source(Parameters(SourceRequest {
+                id: "a.h::A::f".to_string(),
+                context_lines: Some(context_lines),
+            }))
+        };
+        // `f`'s body is lines 2-4 of the 8-line `a.cc`.
+        let one = get(1).await.unwrap().0;
+        assert_eq!(
+            one.elsewhere,
+            [OtherFileSpan {
+                file: "a.cc".to_string(),
+                lines: [1, 5]
+            }]
+        );
+        assert!(
+            one.source
+                .contains("// from a.cc, lines 1-5\n#include \"a.h\"\nint A::f(int x) {"),
+            "{}",
+            one.source
+        );
+        // Asking for more than the file has stops at its ends.
+        let many = get(20).await.unwrap().0;
+        assert_eq!(many.elsewhere[0].lines, [1, 8]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_source_of_an_ordinary_symbol_has_no_elsewhere() {
+        let server = test_server(&[("a.ts", "export function f(): void {}\n")]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.ts::f".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap();
+        assert!(result.0.elsewhere.is_empty());
+        // And it is not in the serialised response at all.
+        let json = serde_json::to_string(&result.0).unwrap();
+        assert!(!json.contains("elsewhere"), "{json}");
+    }
+
+    #[tokio::test]
+    async fn a_generation_task_for_a_class_split_over_two_files_has_both_parts_and_both_files_deps()
+    {
+        let (graph, dir) = crate::spec::test_support::paired_graph("task");
+        let server = CodeOwlServer::new(dir.clone(), graph);
+        let Json(task) = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "a.h".to_string(),
+                cursor: None,
+            }))
+            .await
+            .unwrap();
+        let SpecTaskResponse::Symbol {
+            id,
+            source,
+            dependencies,
+            ..
+        } = task
+        else {
+            panic!("expected a symbol task, got {task:?}");
+        };
+        assert_eq!(id, "a.h::A");
+        assert!(source.contains("// from a.cc, lines 2-8"), "{source}");
+        assert!(source.contains("return Bar() + 1;"), "{source}");
+        let deps = dependencies.join("\n");
+        assert!(deps.contains("foo.h::Foo"), "the header's: {deps}");
+        assert!(deps.contains("bar.h::Bar"), "the source file's: {deps}");
+        assert!(!deps.contains("other.h"), "the decoys add nothing: {deps}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[tokio::test]
     async fn get_source_returns_the_body_not_just_the_signature() {

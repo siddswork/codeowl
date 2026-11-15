@@ -436,6 +436,7 @@ impl Graph {
                     interface_hash: sym.interface_hash,
                     markers: sym.markers,
                     extra_spans: sym.extra_spans,
+                    other_file_spans: sym.other_file_spans,
                     parent,
                     children: sym
                         .children
@@ -727,6 +728,61 @@ mod tests {
     }
 
     #[test]
+    fn spans_in_another_file_survive_the_cache_and_are_absent_when_there_are_none() {
+        let sym = |id: &str, other: Vec<(String, [usize; 2])>| ExtractedSymbol {
+            id: id.into(),
+            kind: SymbolKind::Callable,
+            raw: "method".into(),
+            file: "a.h".into(),
+            lines: [1, 1],
+            signature: "int f()".into(),
+            docstring: None,
+            is_exported: true,
+            source_hash: hash_text(id),
+            interface_hash: None,
+            markers: Vec::new(),
+            extra_spans: Vec::new(),
+            other_file_spans: other,
+            parent: None,
+            children: Vec::new(),
+        };
+        let graph = Graph::build(vec![FileExtraction {
+            rel_path: "a.h".into(),
+            source_hash: hash_text("x"),
+            symbols: vec![
+                sym("a.h::paired", vec![("a.cc".into(), [4, 9])]),
+                sym("a.h::plain", Vec::new()),
+            ],
+        }]);
+        let paired = graph
+            .get_symbol(graph.find("a.h::paired").unwrap())
+            .unwrap();
+        assert_eq!(paired.other_file_spans, [("a.cc".to_string(), [4, 9])]);
+
+        let json = serde_json::to_string(&graph).unwrap();
+        let back: Graph = serde_json::from_str(&json).unwrap();
+        let again = back.get_symbol(back.find("a.h::paired").unwrap()).unwrap();
+        assert_eq!(again.other_file_spans, [("a.cc".to_string(), [4, 9])]);
+
+        // A symbol with none carries no such key, so the cache of every pack
+        // that never pairs is exactly what it was before the field existed.
+        let plain = graph.get_symbol(graph.find("a.h::plain").unwrap()).unwrap();
+        assert!(
+            !serde_json::to_string(plain)
+                .unwrap()
+                .contains("other_file_spans")
+        );
+        // And a cache written before the field existed still loads.
+        let old: Symbol = serde_json::from_str(
+            &serde_json::to_string(plain)
+                .unwrap()
+                .replace(",\"other_file_spans\":[]", ""),
+        )
+        .unwrap();
+        assert!(old.other_file_spans.is_empty());
+    }
+
+    #[test]
     fn markers_carry_from_extraction_through_the_arena_and_a_round_trip() {
         // The TS+Next pack leaves `markers` empty in M13; this proves the
         // plumbing that M14 (Rust `#[tool]`/`#[derive]`) and M17 (Java
@@ -744,6 +800,7 @@ mod tests {
             interface_hash: Some(hash_text("function handler()")),
             markers: vec!["#[tool]".into(), "#[derive(Debug)]".into()],
             extra_spans: Vec::new(),
+            other_file_spans: Vec::new(),
             parent: None,
             children: Vec::new(),
         };

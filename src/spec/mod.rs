@@ -49,7 +49,7 @@ mod staleness;
 mod system;
 mod task_input;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 pub use self::adopt::{AdoptionPlan, Deps, Finding, Successor, Summary, plan as plan_adoption};
 pub use self::adopt_write::{
@@ -82,8 +82,8 @@ pub use self::source_text::{
     MAX_SOURCE_TEXT_BYTES_DEFAULT,
 };
 pub(crate) use self::source_text::{
-    cap_generation_text, maybe_reduce_container_source, merged_symbol_spans, render_spans,
-    scoped_symbol_deps, symbol_span_text,
+    cap_generation_text, maybe_reduce_container_source, merged_symbol_spans, other_block_text,
+    other_file_blocks, render_spans, symbol_scoped_deps, symbol_span_text,
 };
 pub use self::staleness::{diff_hash_lists, file_changes, symbol_changes};
 pub(crate) use self::staleness::{

@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail};
 
 use super::format::read_existing;
 use super::layout::spec_bearing_children;
-use super::source_text::{container_outline, symbol_span_text};
+use super::source_text::{container_outline, symbol_home_text};
 use crate::graph::{Graph, SymbolId};
 use crate::hash::hash_text;
 use crate::symbol::SymbolKind;
@@ -180,7 +180,7 @@ pub(crate) fn largest_container_percent(
     file_id: SymbolId,
     file_bytes: usize,
 ) -> Result<Option<(SymbolId, usize)>> {
-    let file = graph
+    graph
         .get_file(file_id)
         .context("container share asked of a non-file id")?;
     let mut best: Option<(SymbolId, usize)> = None;
@@ -189,7 +189,9 @@ pub(crate) fn largest_container_percent(
         if sym.kind != SymbolKind::Container {
             continue;
         }
-        let bytes = symbol_span_text(root, graph, &file.id, sym)?.len();
+        // The text in this file only: the share is of the file, and a part of
+        // the symbol in another file is not part of this one.
+        let bytes = symbol_home_text(root, graph, sym)?.len();
         if best.is_none_or(|(_, b)| bytes > b) {
             best = Some((sym_id, bytes));
         }
@@ -361,6 +363,21 @@ mod tests {
     use crate::fixtures::build_graph_from_sources;
 
     use crate::spec::test_support::{BIG_JAVA, java_graph};
+
+    #[test]
+    fn a_containers_share_of_its_file_counts_only_the_text_in_that_file() {
+        // `A` is 39 bytes of `a.h` and has a body in `a.cc` as well. Its share
+        // of `a.h` is its own text over the file, not the other file's text
+        // added on top (which would read as a container bigger than its file).
+        let (graph, dir) = crate::spec::test_support::paired_graph("share");
+        let file_id = graph.find("a.h").unwrap();
+        let (id, percent) = largest_container_percent(&graph, &dir, file_id, 1000)
+            .unwrap()
+            .unwrap();
+        assert_eq!(graph.string_id(id), "a.h::A");
+        assert_eq!(percent, 3, "39 bytes of 1000");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     // ---- the file-task ladder: which input, and how each is built ----
 

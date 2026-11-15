@@ -87,6 +87,167 @@ impl Greeter for Polite {\n    fn greet(&self) -> String {\n        String::new(
     (graph, dir)
 }
 
+/// A symbol whose source is in two files, built by hand (no C++ involved):
+/// the class `A` in `a.h`, whose members `f` and `g` have their bodies in
+/// `a.cc`. `a.h` names `Foo` (an edge to `foo.h::Foo`), `a.cc` names `Bar`
+/// (an edge to `bar.h::Bar`), and two decoy edges must never count for `A`:
+/// one from `a.h` whose word appears only in `a.cc`'s text, one from `a.cc`
+/// whose word appears only in `a.h`'s. The decoys resolve to *other* symbols
+/// (`other.h::Bar`, `other.h::Foo`) so that counting one is visible in the
+/// targets, not hidden by a real edge to the same symbol.
+pub(crate) fn paired_graph(suffix: &str) -> (Graph, PathBuf) {
+    use crate::graph::{FileExtraction, ResolvedImport};
+    use crate::symbol::{ExtractedSymbol, SymbolKind};
+
+    let dir = std::env::temp_dir().join(format!(
+        "codeowl-paired-test-{}-{suffix}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let a_h = "class A {\n  int f(Foo x);\n  int g();\n};\n";
+    let a_cc = "#include \"a.h\"\nint A::f(int x) {\n  return Bar() + 1;\n}\n\nint A::g() {\n  return 2;\n}\n";
+    let foo_h = "int Foo();\n";
+    let bar_h = "int Bar();\n";
+    let other_h = "int Foo();\nint Bar();\n";
+    for (rel, text) in [
+        ("a.h", a_h),
+        ("a.cc", a_cc),
+        ("foo.h", foo_h),
+        ("bar.h", bar_h),
+        ("other.h", other_h),
+    ] {
+        std::fs::write(dir.join(rel), text).unwrap();
+    }
+    let sym = |id: &str,
+               file: &str,
+               kind: SymbolKind,
+               lines: [usize; 2],
+               parent: Option<&str>,
+               children: &[&str],
+               other: &[(&str, [usize; 2])]| ExtractedSymbol {
+        id: id.to_string(),
+        kind,
+        raw: "x".to_string(),
+        file: file.to_string(),
+        lines,
+        signature: id.to_string(),
+        docstring: None,
+        is_exported: true,
+        source_hash: hash_text(id),
+        interface_hash: Some(hash_text(&format!("{id} interface"))),
+        markers: Vec::new(),
+        extra_spans: Vec::new(),
+        other_file_spans: other.iter().map(|(f, l)| (f.to_string(), *l)).collect(),
+        parent: parent.map(str::to_string),
+        children: children.iter().map(|c| c.to_string()).collect(),
+    };
+    let mut graph = Graph::build(vec![
+        FileExtraction {
+            rel_path: "a.h".to_string(),
+            source_hash: hash_text(a_h),
+            symbols: vec![
+                sym(
+                    "a.h::A",
+                    "a.h",
+                    SymbolKind::Container,
+                    [1, 4],
+                    None,
+                    &["a.h::A::f", "a.h::A::g"],
+                    &[],
+                ),
+                sym(
+                    "a.h::A::f",
+                    "a.h",
+                    SymbolKind::Callable,
+                    [2, 2],
+                    Some("a.h::A"),
+                    &[],
+                    &[("a.cc", [2, 4])],
+                ),
+                sym(
+                    "a.h::A::g",
+                    "a.h",
+                    SymbolKind::Callable,
+                    [3, 3],
+                    Some("a.h::A"),
+                    &[],
+                    &[("a.cc", [6, 8])],
+                ),
+            ],
+        },
+        FileExtraction {
+            rel_path: "a.cc".to_string(),
+            source_hash: hash_text(a_cc),
+            symbols: Vec::new(),
+        },
+        FileExtraction {
+            rel_path: "foo.h".to_string(),
+            source_hash: hash_text(foo_h),
+            symbols: vec![sym(
+                "foo.h::Foo",
+                "foo.h",
+                SymbolKind::Callable,
+                [1, 1],
+                None,
+                &[],
+                &[],
+            )],
+        },
+        FileExtraction {
+            rel_path: "bar.h".to_string(),
+            source_hash: hash_text(bar_h),
+            symbols: vec![sym(
+                "bar.h::Bar",
+                "bar.h",
+                SymbolKind::Callable,
+                [1, 1],
+                None,
+                &[],
+                &[],
+            )],
+        },
+        FileExtraction {
+            rel_path: "other.h".to_string(),
+            source_hash: hash_text(other_h),
+            symbols: vec![
+                sym(
+                    "other.h::Foo",
+                    "other.h",
+                    SymbolKind::Callable,
+                    [1, 1],
+                    None,
+                    &[],
+                    &[],
+                ),
+                sym(
+                    "other.h::Bar",
+                    "other.h",
+                    SymbolKind::Callable,
+                    [2, 2],
+                    None,
+                    &[],
+                    &[],
+                ),
+            ],
+        },
+    ]);
+    let edge = |from: &str, spec: &str, name: &str, target: &str| ResolvedImport {
+        from_file: from.to_string(),
+        specifier: spec.to_string(),
+        imported_name: name.to_string(),
+        target: graph.find(target),
+    };
+    let edges = vec![
+        edge("a.h", "foo.h", "Foo", "foo.h::Foo"),
+        edge("a.cc", "bar.h", "Bar", "bar.h::Bar"),
+        // Decoys: each word is written only in the other file's text.
+        edge("a.h", "other.h", "Bar", "other.h::Bar"),
+        edge("a.cc", "other.h", "Foo", "other.h::Foo"),
+    ];
+    graph.set_resolved_imports(edges);
+    (graph, dir)
+}
+
 /// Write a small fixture repo to a fresh temp dir and build the *whole*
 /// graph off it — imports resolved, route literals / table refs /
 /// rendered components extracted and set — exactly the pipeline
