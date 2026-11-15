@@ -39,6 +39,7 @@
 pub mod edges;
 pub mod includes;
 mod macros;
+pub mod pairing;
 pub mod resolve;
 #[cfg(test)]
 mod standards;
@@ -1198,7 +1199,7 @@ fn one_line(text: &str) -> String {
 fn plain_name(text: &str) -> String {
     let name: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let name = name.trim_start_matches("::");
-    if let Some(at) = name.find("operator") {
+    if let Some(at) = operator_keyword(name) {
         // `operator+`, `operator()`: no space. `operator new`, `operator
         // delete[]`, `operator bool`: the keyword stays a separate word.
         let (head, rest) = name.split_at(at + "operator".len());
@@ -1209,21 +1210,74 @@ fn plain_name(text: &str) -> String {
         } else {
             rest.split_whitespace().collect()
         };
-        return format!("{head}{rest}");
+        // What is written before `operator` is the class (`btree<P>::`): its
+        // template arguments go, as they do for any other member, or the id
+        // would differ from the class's own `btree::operator=`.
+        let head: String = head.split_whitespace().collect();
+        return format!("{}{rest}", without_template_arguments(&head));
     }
     let name: String = name.split_whitespace().collect();
-    let name = name.as_str();
-    let mut out = String::new();
-    let mut depth = 0usize;
-    for c in name.chars() {
+    without_template_arguments(&name)
+}
+
+/// For each character of a name: whether it is inside a `<…>` group (the
+/// brackets themselves included) and whether it is inside parentheses. A `>`
+/// closes a group only when it is not part of `->` and not inside
+/// parentheses, and a `<` opens one only outside parentheses, so
+/// `X<decltype(a->b)>` and `S<(N>0)>` are read as one group each.
+fn groups(text: &str) -> Vec<(usize, char, bool, bool)> {
+    let (mut angle, mut paren) = (0usize, 0usize);
+    let mut previous = None;
+    let mut out = Vec::new();
+    for (at, c) in text.char_indices() {
+        let (mut in_angle, mut in_paren) = (angle > 0, paren > 0);
         match c {
-            '<' => depth += 1,
-            '>' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => out.push(c),
+            '(' => {
+                paren += 1;
+                in_paren = true;
+            }
+            ')' => paren = paren.saturating_sub(1),
+            '<' if paren == 0 => {
+                angle += 1;
+                in_angle = true;
+            }
+            '>' if paren == 0 && previous != Some('-') && angle > 0 => {
+                angle -= 1;
+                in_angle = true;
+            }
             _ => {}
         }
+        out.push((at, c, in_angle, in_paren));
+        previous = Some(c);
     }
     out
+}
+
+/// Where the `operator` keyword of a function name is: outside any template
+/// arguments and parentheses (an `operator[]` inside `is_contiguous<…>` is an
+/// expression in an argument, not what is being declared) and as a word of
+/// its own (not the letters inside `is_operator`).
+fn operator_keyword(name: &str) -> Option<usize> {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    for (at, c, in_angle, in_paren) in groups(name) {
+        if c == 'o' && !in_angle && !in_paren && name[at..].starts_with("operator") {
+            let before = name[..at].chars().next_back();
+            let after = name[at + "operator".len()..].chars().next();
+            if !word(before) && !word(after) {
+                return Some(at);
+            }
+        }
+    }
+    None
+}
+
+/// `text` with every `<…>` group (nested ones too) taken out.
+fn without_template_arguments(text: &str) -> String {
+    groups(text)
+        .into_iter()
+        .filter(|&(_, _, in_angle, _)| !in_angle)
+        .map(|(_, c, _, _)| c)
+        .collect()
 }
 
 /// Whether the declaration is `const` or `constexpr`.
@@ -1532,6 +1586,48 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
         for s in &syms {
             assert!(s.extra_spans.is_empty(), "nothing folded: {}", s.id);
         }
+    }
+
+    #[test]
+    fn template_arguments_are_taken_out_of_a_name_and_an_operator_keeps_its_symbol() {
+        // An `operator` inside the arguments is not the name's operator: this
+        // is a specialisation of fmt's `is_contiguous`, as written.
+        assert_eq!(
+            plain_name(
+                "detail::is_contiguous<T, void_t<decltype(std::declval<T&>().data()), \
+                 decltype(std::declval<T&>().operator[](size_t()))>>"
+            ),
+            "detail::is_contiguous"
+        );
+        // The class's arguments before an operator go; the operator's own
+        // `<`, `<<` and `<=>` stay.
+        assert_eq!(plain_name("btree<P>::operator="), "btree::operator=");
+        assert_eq!(plain_name("A<X, Y>::operator<"), "A::operator<");
+        assert_eq!(plain_name("A<X>::operator<<"), "A::operator<<");
+        assert_eq!(plain_name("operator<=>"), "operator<=>");
+        assert_eq!(plain_name("V::operator bool"), "V::operator bool");
+        assert_eq!(plain_name("V<T>::operator()"), "V::operator()");
+        // A `>` that is an arrow or a comparison closes no argument list.
+        assert_eq!(
+            plain_name("X<decltype(a->b), decltype(c.operator[](0))>"),
+            "X"
+        );
+        assert_eq!(plain_name("X<decltype(a->b)>"), "X");
+        assert_eq!(
+            plain_name("enable_if<(N>0)>::value_type"),
+            "enable_if::value_type"
+        );
+        assert_eq!(plain_name("S<(N>0)>::operator()"), "S::operator()");
+        // An operator whose own symbol has `>` in it.
+        assert_eq!(plain_name("A::operator->"), "A::operator->");
+        assert_eq!(plain_name("A<T>::operator>="), "A::operator>=");
+        assert_eq!(plain_name("A<T>::operator->*"), "A::operator->*");
+        // A name that merely contains the letters is no operator.
+        assert_eq!(plain_name("is_operator<T>"), "is_operator");
+        assert_eq!(
+            plain_name("operator_name<T>::value"),
+            "operator_name::value"
+        );
     }
 
     #[test]

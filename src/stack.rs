@@ -49,6 +49,21 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// Replaces the scattered `is_test_path` / `is_ui_primitive`.
     fn classify(&self, rel_path: &str) -> FileRole;
 
+    /// Move a definition into the symbol whose body it is, when the two are
+    /// in different files: a C++ method defined in the `.cc` that implements
+    /// the class its header declares. Called once per graph build, over the
+    /// per-file extractions (copies; the cache is untouched) and the files'
+    /// imports, before the arena is built, so a definition that was paired
+    /// is no longer a symbol of its own file and its target owns the span
+    /// (`Symbol::other_file_spans`). The default does nothing: in every
+    /// other language a symbol's source is in one file.
+    fn pair_definitions(
+        &self,
+        _files: &mut [crate::graph::FileExtraction],
+        _file_imports: &HashMap<String, FileImports>,
+    ) {
+    }
+
     /// The name a spec section for the top-level symbol `id` is headed by,
     /// and found by when the spec is read back. The default is the last
     /// `::` segment of the id, which is the heading every stored spec of the
@@ -852,6 +867,14 @@ impl StackPack for CppStack {
     /// sections of one file, and a spec finds a section by its heading.
     fn section_name<'a>(&self, id: &'a str) -> &'a str {
         id.split_once("::").map_or(id, |(_, rest)| rest)
+    }
+
+    fn pair_definitions(
+        &self,
+        files: &mut [crate::graph::FileExtraction],
+        file_imports: &HashMap<String, FileImports>,
+    ) {
+        crate::cpp::pairing::pair(files, file_imports);
     }
 
     fn extract_symbols_counted(

@@ -74,7 +74,9 @@ fn a_header_edit_stales_only_the_dependants_that_name_what_changed() {
     );
     let sym_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
     let file_pair = submit(&graph, &repo.0, "user.cc", FILE_PROSE).unwrap();
-    let impl_pair = submit(&graph, &repo.0, "widget.cc::Widget::size", PROSE).unwrap();
+    // The class is the home of `size`'s body (pairing moved it out of
+    // widget.cc), so the class is what has a spec.
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
     let file_id = graph.find("user.cc").unwrap();
     assert!(changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &sym_pair).is_empty());
     assert!(file_changes(&graph, file_id, &file_pair).is_empty());
@@ -96,11 +98,14 @@ fn a_header_edit_stales_only_the_dependants_that_name_what_changed() {
     repo.write("widget.h", &HEADER.replace("int n_;", "long n_;"));
     let graph = repo.graph();
     assert!(changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &sym_pair).is_empty());
-    // KNOWN LIMIT until pairing (step 2b): `Widget::size` in widget.cc reads
-    // `n_`, but a private member is no part of the class's interface hash and
-    // the method is its own symbol, so it stays current. Pairing should make
-    // this stale; when it does, change this assertion.
-    assert!(changes_of_symbol(&graph, &repo.0, "widget.cc::Widget::size", &impl_pair).is_empty());
+    // The limit this test used to pin is gone: `Widget::size` in widget.cc
+    // reads `n_`, and since pairing it is part of the class, so a change to
+    // the class's own text makes the class's spec stale while its users stay
+    // current (a private member is no part of the interface they read).
+    assert_eq!(
+        changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair),
+        ["changed:source"]
+    );
 
     // A public member's signature: the user symbol and its file both move.
     repo.write("widget.h", &HEADER.replace("int size();", "long size();"));

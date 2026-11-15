@@ -4620,6 +4620,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_source_on_a_cpp_class_reads_the_bodies_in_the_file_that_implements_it() {
+        // The whole chain, from files to the tool: extraction, the pairing in
+        // the index's graph build, and `get_source`.
+        let server = test_server(&[
+            (
+                "db.h",
+                "namespace leveldb {\nclass DB {\n public:\n  int Get(int k);\n};\n}\n",
+            ),
+            (
+                "db.cc",
+                "#include \"db.h\"\nnamespace leveldb {\nint DB::Get(int k) {\n  return k;\n}\n}\n",
+            ),
+        ]);
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "db.h::leveldb::DB".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .unwrap()
+            .0;
+        assert!(result.source.starts_with("class DB {"), "{}", result.source);
+        assert!(
+            result
+                .source
+                .contains("// from db.cc, lines 3-5\nint DB::Get(int k) {"),
+            "{}",
+            result.source
+        );
+        assert_eq!(
+            result.elsewhere,
+            [OtherFileSpan {
+                file: "db.cc".to_string(),
+                lines: [3, 5]
+            }]
+        );
+        // The old per-method id is gone: the body is reached through the class.
+        assert!(
+            server
+                .get_source(Parameters(SourceRequest {
+                    id: "db.cc::leveldb::DB::Get".to_string(),
+                    context_lines: None,
+                }))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_cpp_class_depends_on_what_the_bodies_in_its_source_file_use() {
+        // `crc.h` is included by `db.cc` only. Before pairing, the body was
+        // `db.cc::DB::Get` and went stale when `Checksum` changed; now it is
+        // part of the class, which must still depend on `Checksum`.
+        let server = test_server(&[
+            ("crc.h", "int Checksum(int k);\n"),
+            ("db.h", "class DB {\n public:\n  int Get(int k);\n};\n"),
+            (
+                "db.cc",
+                "#include \"db.h\"\n#include \"crc.h\"\nint DB::Get(int k) {\n  return Checksum(k);\n}\n",
+            ),
+        ]);
+        let task = server
+            .get_next_spec_task(Parameters(GenerateTaskRequest {
+                target: "db.h".to_string(),
+                cursor: None,
+            }))
+            .await
+            .unwrap()
+            .0;
+        let SpecTaskResponse::Symbol {
+            id,
+            source,
+            dependencies,
+            ..
+        } = task
+        else {
+            panic!("expected a symbol task, got {task:?}");
+        };
+        assert_eq!(id, "db.h::DB");
+        assert!(source.contains("return Checksum(k);"), "{source}");
+        assert!(
+            dependencies.iter().any(|d| d.contains("crc.h::Checksum")),
+            "the body's dependency is the class's: {dependencies:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn get_source_of_an_ordinary_symbol_has_no_elsewhere() {
         let server = test_server(&[("a.ts", "export function f(): void {}\n")]);
         let result = server

@@ -401,7 +401,7 @@ impl RepoIndex {
     /// construction plus import resolution, no parsing — every file's
     /// symbols and imports are already in hand.
     pub fn rebuild(&self) -> Result<Graph> {
-        let extractions: Vec<FileExtraction> = self
+        let mut extractions: Vec<FileExtraction> = self
             .files
             .iter()
             .map(|(rel, f)| FileExtraction {
@@ -410,6 +410,15 @@ impl RepoIndex {
                 symbols: f.symbols.clone(),
             })
             .collect();
+        let file_imports: HashMap<String, FileImports> = self
+            .files
+            .iter()
+            .map(|(rel, f)| (rel.clone(), f.imports.clone()))
+            .collect();
+        // A definition whose body is in another file than its declaration is
+        // moved into the declaration's symbol, on these copies and on every
+        // rebuild, so editing either file re-pairs.
+        self.pack.pair_definitions(&mut extractions, &file_imports);
 
         let mut graph = Graph::build(extractions);
         graph.set_pack_name(self.pack.name());
@@ -421,11 +430,6 @@ impl RepoIndex {
                 graph.set_file_parse_errors(rel, f.parse_errors);
             }
         }
-        let file_imports: HashMap<String, FileImports> = self
-            .files
-            .iter()
-            .map(|(rel, f)| (rel.clone(), f.imports.clone()))
-            .collect();
         let resolved = self.pack.resolve_imports(&self.root, &file_imports, &graph);
         graph.set_resolved_imports(resolved);
         // Still a free-function call: `resolved_default_imports` is
