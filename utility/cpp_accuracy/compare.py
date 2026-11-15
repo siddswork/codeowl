@@ -79,10 +79,11 @@ def compare(repo, truth, probe_path):
     all_files, symbols, includes, enumerators, pack_edges = read_probe(probe_path)
     # A broken reference (libclang finding no headers, nothing parsing) would
     # otherwise show up as a perfect score.
-    if not truth["defs"] or not truth["edges"] or not all_files:
+    if not truth["defs"] or not truth["edges"] or not all_files or not pack_edges:
         raise SystemExit(
             f"the check is not valid: the reference has {len(truth['defs'])} definitions and "
-            f"{len(truth['edges'])} edges, the probe saw {len(all_files)} files. "
+            f"{len(truth['edges'])} edges, the probe saw {len(all_files)} files and "
+            f"{len(pack_edges)} edges of the pack (an old probe prints none). "
             "Look at the compiler's diagnostics (--refresh to rebuild the reference)."
         )
 

@@ -100,11 +100,24 @@ fn blank_comments_in_continued_directive(bytes: &mut [u8], start: usize, end: us
                 }
                 i += 1;
             }
+            (b'\'', _) => {
+                // `'x'` and `'\x'` are characters, so a `"` or `/*` in one is
+                // not a string or a comment. Anything else (a digit
+                // separator, `1'000`) is stepped over.
+                i += match (bytes.get(i + 1), bytes.get(i + 2), bytes.get(i + 3)) {
+                    (Some(b'\\'), _, Some(b'\'')) => 4,
+                    (Some(c), Some(b'\''), _) if *c != b'\\' => 3,
+                    _ => 1,
+                };
+            }
             (b'/', Some(b'/')) => {
-                // To the end of the line, or of the lines a backslash joins.
+                // To the end of the line, or of the lines a backslash joins
+                // (LF or CRLF).
                 while i < end && bytes[i] != b'\n' {
                     i += if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'\n') {
                         2
+                    } else if bytes[i] == b'\\' && bytes[i + 1..].starts_with(b"\r\n") {
+                        3
                     } else {
                         1
                     };
@@ -1054,6 +1067,26 @@ mod tests {
         unchanged("#define S \\\n  \"/* not a comment */\" \\\n  x\n");
         // A line comment hides a `/*` after it.
         unchanged("#define L \\\n  a // see /* here \\\n  b\n");
+    }
+
+    #[test]
+    fn a_character_literal_in_a_continued_directive_does_not_open_a_string() {
+        // `'"'` is a character, not the start of a string: the comment after
+        // it must still be blanked.
+        let src = "#define Q '\"' /* c */ \\\n  x\nint y;\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
+        let src = "#define R '\\'' /* c */ \\\n  x\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
+    }
+
+    #[test]
+    fn crlf_line_endings_in_a_continued_directive() {
+        // A `//` comment continued by a backslash and CRLF swallows the next
+        // line, so the `/*` on it is not a comment of its own; a block
+        // comment before a CRLF continuation is blanked.
+        unchanged("#define L a // note \\\r\n  b /* x */ \\\r\n  c\r\n");
+        let src = "#define E \\\r\n  }  /* c */ \\\r\n  }\r\nint x;\r\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
     }
 
     #[test]
