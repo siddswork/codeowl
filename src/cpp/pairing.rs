@@ -9,13 +9,30 @@
 //! its span (`Symbol::other_file_spans`), so one spec describes the class from
 //! both files.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::resolve::IncludeGraph;
 use crate::graph::FileExtraction;
 use crate::hash::hash_text;
 use crate::imports::FileImports;
 use crate::symbol::SymbolKind;
+
+/// Whether `sym` is a definition this pass may move: a top-level symbol that
+/// can be reached from another file, written with a qualified name (a member
+/// or a namespace function) or a plain function with a body (whose prototype
+/// may be in a header). A `static` helper or anything in an anonymous
+/// namespace is a different entity from a header's of the same name.
+fn is_pairable(sym: &crate::symbol::ExtractedSymbol) -> bool {
+    if sym.parent.is_some() || !sym.is_exported {
+        return false;
+    }
+    let qualified = matches!(
+        sym.raw.as_str(),
+        "qualified_function" | "qualified_variable"
+    );
+    let free = sym.raw == "function" && !sym.markers.iter().any(|m| m == "declaration");
+    qualified || free
+}
 
 /// What a pass did, for the accuracy probe and the tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -35,12 +52,25 @@ pub struct PairingReport {
     pub unmatched: usize,
 }
 
+/// What a definition is moved into.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    /// The declaration of the member or function it defines.
+    Member,
+    /// The prototype of the plain function it implements.
+    Free,
+    /// The class, which declares no member of that name.
+    Class,
+}
+
 /// Where a definition goes: the file and symbol id of its target.
+#[derive(Debug)]
 struct Move {
     from_file: usize,
     definition: String,
     to_file: usize,
     target: String,
+    kind: Kind,
 }
 
 /// Pair every out-of-file definition with its declaration. See the module
@@ -63,6 +93,13 @@ struct Move {
 /// A definition in a source file that is not exported (`static`, in an
 /// anonymous namespace) is a different entity from a header's of the same
 /// name and is never paired.
+///
+/// **Fresh copies.** `files` is the per-file extraction `rebuild` copies from
+/// the index's cache on every graph build, never the cache itself. A
+/// definition that was moved is no longer in its file, so a second pass over
+/// the same extractions finds nothing and changes nothing; but it must not be
+/// given extractions in which a paired definition has been put back, which it
+/// would move a second time (the span twice, the hash folded twice).
 pub fn pair(
     files: &mut [FileExtraction],
     file_imports: &HashMap<String, FileImports>,
@@ -112,25 +149,23 @@ pub fn pair(
     let mut moves: Vec<Move> = Vec::new();
     for &fi in &order {
         let file = &files[fi];
-        let reach: Vec<usize> = includes
-            .reach(&file.rel_path)
-            .iter()
-            .filter_map(|p| by_path.get(p.as_str()).copied())
-            .collect();
+        // The files this one reaches through includes: worked out only for a
+        // file that has a definition to pair, which most do not.
+        let reach: HashSet<usize> = if file.symbols.iter().any(is_pairable) {
+            includes
+                .reach(&file.rel_path)
+                .iter()
+                .filter_map(|p| by_path.get(p.as_str()).copied())
+                .collect()
+        } else {
+            continue;
+        };
         let prefix = format!("{}::", file.rel_path);
-        for def in &file.symbols {
-            if def.parent.is_some() || !def.is_exported {
-                continue;
-            }
+        for def in file.symbols.iter().filter(|s| is_pairable(s)) {
             let qualified = matches!(
                 def.raw.as_str(),
                 "qualified_function" | "qualified_variable"
             );
-            // A free function with a body can have its prototype elsewhere.
-            let free = def.raw == "function" && !def.markers.iter().any(|m| m == "declaration");
-            if !qualified && !free {
-                continue;
-            }
             let Some(suffix) = def.id.strip_prefix(&prefix) else {
                 continue;
             };
@@ -165,9 +200,8 @@ pub fn pair(
                         definition: def.id.clone(),
                         to_file: *g,
                         target: files[*g].symbols[*s].id.clone(),
+                        kind: if qualified { Kind::Member } else { Kind::Free },
                     });
-                    report.paired += 1;
-                    report.free_paired += usize::from(!qualified);
                     continue;
                 }
                 [] => {}
@@ -193,8 +227,8 @@ pub fn pair(
                         definition: def.id.clone(),
                         to_file: *g,
                         target: files[*g].symbols[*s].id.clone(),
+                        kind: Kind::Class,
                     });
-                    report.to_class += 1;
                 }
                 [] => report.unmatched += 1,
                 _ => report.ambiguous += 1,
@@ -202,39 +236,67 @@ pub fn pair(
         }
     }
 
-    apply(files, &moves);
+    // What was actually done, not what was planned.
+    for (mv, done) in moves.iter().zip(apply(files, &moves)) {
+        if !done {
+            continue;
+        }
+        match mv.kind {
+            Kind::Member => report.paired += 1,
+            Kind::Free => {
+                report.paired += 1;
+                report.free_paired += 1;
+            }
+            Kind::Class => report.to_class += 1,
+        }
+    }
     report
 }
 
 /// Carry out the moves: the definition leaves its file, its target owns its
 /// lines, and the hashes of the target and of every class around it fold the
-/// body in.
-fn apply(files: &mut [FileExtraction], moves: &[Move]) {
+/// body in. Returns, for each move, whether it was made.
+///
+/// A move is made only if both ends exist, and never into a target that is
+/// itself being moved (the body would go with it and be lost); a definition
+/// whose move is not made stays where it is. Definitions are removed from
+/// their files after every move has been looked at, so the positions used
+/// while moving stay valid, and each file's id map is built once.
+fn apply(files: &mut [FileExtraction], moves: &[Move]) -> Vec<bool> {
+    let index: Vec<HashMap<String, usize>> = files
+        .iter()
+        .map(|f| {
+            f.symbols
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (s.id.clone(), i))
+                .collect()
+        })
+        .collect();
+    let being_moved: HashSet<(usize, &str)> = moves
+        .iter()
+        .map(|mv| (mv.from_file, mv.definition.as_str()))
+        .collect();
+
+    let mut applied = vec![false; moves.len()];
+    let mut removals: Vec<HashSet<&str>> = vec![HashSet::new(); files.len()];
     // What each target (and each class around it) takes in: the hashes of the
     // bodies. Sorted before use, so the order bodies are written in, and the
     // order files are visited in, moves nothing.
     let mut bodies: HashMap<(usize, String), Vec<String>> = HashMap::new();
-    for mv in moves {
+    for (k, mv) in moves.iter().enumerate() {
+        if being_moved.contains(&(mv.to_file, mv.target.as_str())) {
+            continue;
+        }
+        let (Some(&d), Some(&t)) = (
+            index[mv.from_file].get(&mv.definition),
+            index[mv.to_file].get(&mv.target),
+        ) else {
+            continue;
+        };
         let from_path = files[mv.from_file].rel_path.clone();
-        let Some(at) = files[mv.from_file]
-            .symbols
-            .iter()
-            .position(|s| s.id == mv.definition)
-        else {
-            continue;
-        };
-        let def = files[mv.from_file].symbols.remove(at);
-        let to = &mut files[mv.to_file];
-        let ids: HashMap<String, usize> = to
-            .symbols
-            .iter()
-            .enumerate()
-            .map(|(i, s)| (s.id.clone(), i))
-            .collect();
-        let Some(&t) = ids.get(&mv.target) else {
-            continue;
-        };
-        let target = &mut to.symbols[t];
+        let def = files[mv.from_file].symbols[d].clone();
+        let target = &mut files[mv.to_file].symbols[t];
         target.other_file_spans.push((from_path.clone(), def.lines));
         target.other_file_spans.extend(
             def.extra_spans
@@ -251,21 +313,34 @@ fn apply(files: &mut [FileExtraction], moves: &[Move]) {
         }
         target.docstring = target.docstring.take().or(def.docstring);
         // The body's hash goes into the target and every class around it.
-        let mut at_id = Some(target.id.clone());
-        while let Some(id) = at_id {
+        let mut at = Some(t);
+        while let Some(i) = at {
+            let sym = &files[mv.to_file].symbols[i];
             bodies
-                .entry((mv.to_file, id.clone()))
+                .entry((mv.to_file, sym.id.clone()))
                 .or_default()
                 .push(def.source_hash.clone());
-            at_id = ids.get(&id).and_then(|&i| to.symbols[i].parent.clone());
+            at = sym
+                .parent
+                .as_ref()
+                .and_then(|p| index[mv.to_file].get(p).copied());
         }
+        removals[mv.from_file].insert(mv.definition.as_str());
+        applied[k] = true;
     }
     for ((fi, id), mut hashes) in bodies {
         hashes.sort();
-        if let Some(sym) = files[fi].symbols.iter_mut().find(|s| s.id == id) {
+        if let Some(&i) = index[fi].get(&id) {
+            let sym = &mut files[fi].symbols[i];
             sym.source_hash = hash_text(&format!("{}\n{}", sym.source_hash, hashes.join("\n")));
         }
     }
+    for (file, gone) in files.iter_mut().zip(&removals) {
+        if !gone.is_empty() {
+            file.symbols.retain(|s| !gone.contains(s.id.as_str()));
+        }
+    }
+    applied
 }
 
 #[cfg(test)]
@@ -664,6 +739,58 @@ mod tests {
                 .is_some_and(|d| d.contains("Looks the key up")),
             "{:?}",
             get.docstring
+        );
+    }
+
+    #[test]
+    fn a_move_whose_target_is_gone_leaves_the_definition_in_place_and_is_not_counted() {
+        // Moves are planned before any is made; one that cannot be carried
+        // out must not take the definition out of its file and lose it.
+        let (mut files, _) = build(&[("db.h", DB_H), ("db.cc", DB_CC)]);
+        let mv = Move {
+            from_file: 1,
+            definition: "db.cc::DB::Get".to_string(),
+            to_file: 0,
+            target: "db.h::DB::NoSuchMember".to_string(),
+            kind: Kind::Member,
+        };
+        let before = files.clone();
+        assert_eq!(apply(&mut files, &[mv]), [false]);
+        assert_eq!(files, before, "nothing changed");
+    }
+
+    #[test]
+    fn a_body_is_never_moved_into_a_symbol_that_is_itself_being_moved() {
+        // `t.h::f` has a body and is moved into the prototype `p.h::f`;
+        // `c.cc::f` was planned to go into `t.h::f`. Whichever is handled
+        // first, the body must not end up on a symbol that is removed.
+        let (mut files, _) = build(&[
+            ("c.cc", "void f() { }\n"),
+            ("p.h", "void f();\n"),
+            ("t.h", "inline void f() { }\n"),
+        ]);
+        let moves = [
+            Move {
+                from_file: 0,
+                definition: "c.cc::f".to_string(),
+                to_file: 2,
+                target: "t.h::f".to_string(),
+                kind: Kind::Member,
+            },
+            Move {
+                from_file: 2,
+                definition: "t.h::f".to_string(),
+                to_file: 1,
+                target: "p.h::f".to_string(),
+                kind: Kind::Free,
+            },
+        ];
+        assert_eq!(apply(&mut files, &moves), [false, true]);
+        assert_eq!(ids(&files, "c.cc"), ["c.cc::f"], "kept, not lost");
+        assert!(ids(&files, "t.h").is_empty());
+        assert_eq!(
+            find(&files, "p.h::f").other_file_spans,
+            [("t.h".to_string(), [1, 1])]
         );
     }
 

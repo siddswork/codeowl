@@ -1220,25 +1220,52 @@ fn plain_name(text: &str) -> String {
     without_template_arguments(&name)
 }
 
-/// Where the `operator` keyword of a function name is: outside any template
-/// arguments (an `operator[]` inside `is_contiguous<…>` is an expression in an
-/// argument, not what is being declared) and as a word of its own (not the
-/// letters inside `is_operator`).
-fn operator_keyword(name: &str) -> Option<usize> {
-    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
-    let mut depth = 0usize;
-    for (at, c) in name.char_indices() {
+/// For each character of a name: whether it is inside a `<…>` group (the
+/// brackets themselves included) and whether it is inside parentheses. A `>`
+/// closes a group only when it is not part of `->` and not inside
+/// parentheses, and a `<` opens one only outside parentheses, so
+/// `X<decltype(a->b)>` and `S<(N>0)>` are read as one group each.
+fn groups(text: &str) -> Vec<(usize, char, bool, bool)> {
+    let (mut angle, mut paren) = (0usize, 0usize);
+    let mut previous = None;
+    let mut out = Vec::new();
+    for (at, c) in text.char_indices() {
+        let (mut in_angle, mut in_paren) = (angle > 0, paren > 0);
         match c {
-            '<' => depth += 1,
-            '>' => depth = depth.saturating_sub(1),
-            'o' if depth == 0 && name[at..].starts_with("operator") => {
-                let before = name[..at].chars().next_back();
-                let after = name[at + "operator".len()..].chars().next();
-                if !word(before) && !word(after) {
-                    return Some(at);
-                }
+            '(' => {
+                paren += 1;
+                in_paren = true;
+            }
+            ')' => paren = paren.saturating_sub(1),
+            '<' if paren == 0 => {
+                angle += 1;
+                in_angle = true;
+            }
+            '>' if paren == 0 && previous != Some('-') && angle > 0 => {
+                angle -= 1;
+                in_angle = true;
             }
             _ => {}
+        }
+        out.push((at, c, in_angle, in_paren));
+        previous = Some(c);
+    }
+    out
+}
+
+/// Where the `operator` keyword of a function name is: outside any template
+/// arguments and parentheses (an `operator[]` inside `is_contiguous<…>` is an
+/// expression in an argument, not what is being declared) and as a word of
+/// its own (not the letters inside `is_operator`).
+fn operator_keyword(name: &str) -> Option<usize> {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    for (at, c, in_angle, in_paren) in groups(name) {
+        if c == 'o' && !in_angle && !in_paren && name[at..].starts_with("operator") {
+            let before = name[..at].chars().next_back();
+            let after = name[at + "operator".len()..].chars().next();
+            if !word(before) && !word(after) {
+                return Some(at);
+            }
         }
     }
     None
@@ -1246,17 +1273,11 @@ fn operator_keyword(name: &str) -> Option<usize> {
 
 /// `text` with every `<…>` group (nested ones too) taken out.
 fn without_template_arguments(text: &str) -> String {
-    let mut out = String::new();
-    let mut depth = 0usize;
-    for c in text.chars() {
-        match c {
-            '<' => depth += 1,
-            '>' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => out.push(c),
-            _ => {}
-        }
-    }
-    out
+    groups(text)
+        .into_iter()
+        .filter(|&(_, _, in_angle, _)| !in_angle)
+        .map(|(_, c, _, _)| c)
+        .collect()
 }
 
 /// Whether the declaration is `const` or `constexpr`.
@@ -1586,6 +1607,21 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
         assert_eq!(plain_name("operator<=>"), "operator<=>");
         assert_eq!(plain_name("V::operator bool"), "V::operator bool");
         assert_eq!(plain_name("V<T>::operator()"), "V::operator()");
+        // A `>` that is an arrow or a comparison closes no argument list.
+        assert_eq!(
+            plain_name("X<decltype(a->b), decltype(c.operator[](0))>"),
+            "X"
+        );
+        assert_eq!(plain_name("X<decltype(a->b)>"), "X");
+        assert_eq!(
+            plain_name("enable_if<(N>0)>::value_type"),
+            "enable_if::value_type"
+        );
+        assert_eq!(plain_name("S<(N>0)>::operator()"), "S::operator()");
+        // An operator whose own symbol has `>` in it.
+        assert_eq!(plain_name("A::operator->"), "A::operator->");
+        assert_eq!(plain_name("A<T>::operator>="), "A::operator>=");
+        assert_eq!(plain_name("A<T>::operator->*"), "A::operator->*");
         // A name that merely contains the letters is no operator.
         assert_eq!(plain_name("is_operator<T>"), "is_operator");
         assert_eq!(
