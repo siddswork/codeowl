@@ -96,7 +96,31 @@ pub(crate) fn merged_symbol_spans(graph: &Graph, sym: &Symbol) -> Vec<[usize; 2]
         }
     }
     spans.extend(sym.extra_spans.iter().copied());
+    // A span the pairing step recorded in the symbol's own file is just
+    // another span of it.
+    spans.extend(
+        descendant_other_spans(graph, sym)
+            .into_iter()
+            .filter(|(file, _)| *file == sym.file)
+            .map(|(_, span)| span),
+    );
     merge_spans(spans)
+}
+
+/// Every `other_file_spans` entry of `sym` and of the members under it,
+/// however deep, with the file each names.
+fn descendant_other_spans<'g>(graph: &'g Graph, sym: &'g Symbol) -> Vec<(&'g str, [usize; 2])> {
+    let mut out = Vec::new();
+    let mut todo = vec![sym];
+    while let Some(s) = todo.pop() {
+        out.extend(
+            s.other_file_spans
+                .iter()
+                .map(|(file, span)| (file.as_str(), *span)),
+        );
+        todo.extend(s.children.iter().filter_map(|&c| graph.get_symbol(c)));
+    }
+    out
 }
 
 /// Sort `spans` by start line and join those that touch, overlap or sit
@@ -123,17 +147,24 @@ fn merge_spans(mut spans: Vec<[usize; 2]>) -> Vec<[usize; 2]> {
 pub(crate) fn other_file_blocks(graph: &Graph, sym: &Symbol) -> Vec<(String, Vec<[usize; 2]>)> {
     let mut by_file: std::collections::BTreeMap<&str, Vec<[usize; 2]>> =
         std::collections::BTreeMap::new();
-    let mut todo = vec![sym];
-    while let Some(s) = todo.pop() {
-        for (file, span) in &s.other_file_spans {
-            by_file.entry(file.as_str()).or_default().push(*span);
+    // A span in the symbol's own file is not "another file's": it is read as
+    // the symbol's own text (`merged_symbol_spans`), once.
+    for (file, span) in descendant_other_spans(graph, sym) {
+        if file != sym.file {
+            by_file.entry(file).or_default().push(span);
         }
-        todo.extend(s.children.iter().filter_map(|&c| graph.get_symbol(c)));
     }
     by_file
         .into_iter()
         .map(|(file, spans)| (file.to_string(), merge_spans(spans)))
         .collect()
+}
+
+/// The part of `sym`'s source that is in its own file, and nothing else.
+pub(crate) fn symbol_home_text(root: &Path, graph: &Graph, sym: &Symbol) -> Result<String> {
+    let content = std::fs::read_to_string(root.join(&sym.file))
+        .with_context(|| format!("reading {}", sym.file))?;
+    Ok(render_spans(&content, &merged_symbol_spans(graph, sym)))
 }
 
 /// `sym`'s source file by file, home file first, without any label: what a
@@ -144,13 +175,7 @@ pub(crate) fn symbol_file_texts(
     graph: &Graph,
     sym: &Symbol,
 ) -> Result<Vec<(String, String)>> {
-    let mut texts = Vec::new();
-    let home = std::fs::read_to_string(root.join(&sym.file))
-        .with_context(|| format!("reading {}", sym.file))?;
-    texts.push((
-        sym.file.clone(),
-        render_spans(&home, &merged_symbol_spans(graph, sym)),
-    ));
+    let mut texts = vec![(sym.file.clone(), symbol_home_text(root, graph, sym)?)];
     for (file, spans) in other_file_blocks(graph, sym) {
         let content = std::fs::read_to_string(root.join(&file))
             .with_context(|| format!("reading {file}, part of {}", sym.id))?;
@@ -440,13 +465,9 @@ mod tests {
 
     use crate::spec::test_support::{BIG_JAVA, java_graph, paired_graph};
 
-    fn paired(suffix: &str) -> (Graph, std::path::PathBuf) {
-        paired_graph(suffix)
-    }
-
     #[test]
     fn a_symbol_with_spans_in_another_file_reads_that_file_after_its_own() {
-        let (graph, dir) = paired("text");
+        let (graph, dir) = paired_graph("text");
         let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
         let text = symbol_span_text(&dir, &graph, "a.h", a).unwrap();
         // The header's own text, then one labelled block from `a.cc`: the
@@ -468,8 +489,47 @@ mod tests {
     }
 
     #[test]
+    fn a_span_that_names_the_symbols_own_file_is_read_once_as_its_own_text() {
+        use crate::graph::FileExtraction;
+        use crate::symbol::{ExtractedSymbol, SymbolKind};
+        let dir = std::env::temp_dir().join(format!("codeowl-own-file-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let text = "int f();\nint g();\n\n\n\nint f() { return 1; }\n";
+        std::fs::write(dir.join("a.h"), text).unwrap();
+        let graph = Graph::build(vec![FileExtraction {
+            rel_path: "a.h".to_string(),
+            source_hash: crate::hash::hash_text(text),
+            symbols: vec![ExtractedSymbol {
+                id: "a.h::f".to_string(),
+                kind: SymbolKind::Callable,
+                raw: "function".to_string(),
+                file: "a.h".to_string(),
+                lines: [1, 1],
+                signature: "int f()".to_string(),
+                docstring: None,
+                is_exported: true,
+                source_hash: crate::hash::hash_text("f"),
+                interface_hash: None,
+                markers: Vec::new(),
+                extra_spans: Vec::new(),
+                // The pairing step may name the file the symbol is in.
+                other_file_spans: vec![("a.h".to_string(), [6, 6])],
+                parent: None,
+                children: Vec::new(),
+            }],
+        }]);
+        let f = graph.get_symbol(graph.find("a.h::f").unwrap()).unwrap();
+        assert!(other_file_blocks(&graph, f).is_empty());
+        let out = symbol_span_text(&dir, &graph, "a.h", f).unwrap();
+        assert_eq!(out, "int f();\n\nint f() { return 1; }");
+        assert!(!out.contains("// from"), "{out}");
+        assert_eq!(symbol_file_texts(&dir, &graph, f).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_container_gathers_its_members_spans_in_other_files() {
-        let (graph, dir) = paired("blocks");
+        let (graph, dir) = paired_graph("blocks");
         let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
         assert_eq!(
             other_file_blocks(&graph, a),
@@ -487,7 +547,7 @@ mod tests {
 
     #[test]
     fn the_dependency_scope_reads_each_files_edges_against_that_files_text() {
-        let (graph, dir) = paired("deps");
+        let (graph, dir) = paired_graph("deps");
         let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
         let deps = symbol_scoped_deps(&dir, &graph, a).unwrap();
         let mut targets: Vec<&str> = deps.resolved.iter().map(|(t, _)| t.as_str()).collect();

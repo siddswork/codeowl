@@ -78,13 +78,19 @@ fn dependency_hash(graph: &Graph, root: &Path, file_id: SymbolId, sym: &Symbol) 
 /// `None` when the symbol's file node or source text can't be read -- the
 /// case `dependency_hash` has always answered with an empty string rather
 /// than the hash of an empty list, which a stored `deps_hash` still reflects.
+/// Also `None` when `file_id` is not the file `sym` is declared in: the text
+/// and the edges are read from `sym`'s own files, so a wrong file id would
+/// otherwise be ignored without a word.
 pub(crate) fn try_dependency_pairs(
     graph: &Graph,
     root: &Path,
     file_id: SymbolId,
     sym: &Symbol,
 ) -> Option<Vec<(String, String)>> {
-    if !matches!(graph.get(file_id), Node::File(_)) {
+    let Node::File(file) = graph.get(file_id) else {
+        return None;
+    };
+    if file.id != sym.file {
         return None;
     }
     // The symbol's text file by file (its own file, then any other file that
@@ -275,6 +281,11 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+        // The file id must be the symbol's own file: a caller that passes
+        // another file's gets no answer, not the symbol's edges under a wrong
+        // file.
+        let other = graph.find("a.cc").unwrap();
+        assert!(try_dependency_pairs(&graph, &dir, other, a).is_none());
         // The stored hash moves when a target of the *other* file's edge does.
         let before = hash_dependency_pairs(&pairs);
         let mut changed = pairs.clone();

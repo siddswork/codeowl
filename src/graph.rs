@@ -298,11 +298,7 @@ pub struct FileExtraction {
 /// defined below its class in the same file stays that class's member when
 /// the two fold, a qualified static member is `qualified_variable`, and a
 /// spec section heading keeps the namespaces. Every cached C++ id changes.
-/// 30 = `ExtractedSymbol` and `Symbol` gain `other_file_spans`, the parts of a
-/// symbol's source that sit in another file, read by the generation task,
-/// `get_source`, the size check and the dependency scope. Nothing fills it
-/// yet, and an empty one is left out of the serialised cache.
-pub const FORMAT_VERSION: u32 = 30;
+pub const FORMAT_VERSION: u32 = 29;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

@@ -1319,13 +1319,32 @@ impl CodeOwlServer {
         let mut graph_in_sync = graph_in_sync;
         if let Node::Symbol(sym) = graph.get(id) {
             for (other_file, other_spans) in crate::spec::other_file_blocks(&graph, sym) {
-                let other = std::fs::read_to_string(self.root.join(&other_file))
-                    .map_err(|e| format!("reading {other_file}: {e}"))?;
+                // The home file is intact (it was read above); one of the
+                // others may have been removed since the last reindex. That
+                // is a flagged gap in the answer, not a failed call.
+                let Ok(other) = std::fs::read_to_string(self.root.join(&other_file)) else {
+                    graph_in_sync = false;
+                    source_text.push_str(&format!(
+                        "\n\n// from {other_file}: could not be read (changed or removed since the last reindex)"
+                    ));
+                    elsewhere.extend(other_spans.into_iter().map(|lines| OtherFileSpan {
+                        file: other_file.clone(),
+                        lines,
+                    }));
+                    continue;
+                };
                 graph_in_sync &= graph
                     .find(&other_file)
                     .and_then(|file_id| graph.get_file(file_id))
                     .is_some_and(|f| f.source_hash == crate::hash::hash_text(&other));
-                for span in other_spans {
+                let other_total = other.lines().count().max(1);
+                for [start, end] in other_spans {
+                    // The same context the home span gets, clamped to this
+                    // file's own length.
+                    let span = [
+                        start.saturating_sub(context_lines).clamp(1, other_total),
+                        (end + context_lines).min(other_total),
+                    ];
                     source_text.push_str("\n\n");
                     source_text.push_str(&crate::spec::other_block_text(&other_file, &other, span));
                     elsewhere.push(OtherFileSpan {
@@ -4543,6 +4562,60 @@ mod tests {
                 .graph_in_sync,
             "an edit to the other file must not read as in sync"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_source_still_answers_when_another_file_of_the_symbol_is_gone() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("get-source-gone");
+        let server = CodeOwlServer::new(dir.clone(), graph);
+        std::fs::remove_file(dir.join("a.cc")).unwrap();
+        let result = server
+            .get_source(Parameters(SourceRequest {
+                id: "a.h::A".to_string(),
+                context_lines: None,
+            }))
+            .await
+            .expect("the header is intact, so there is still an answer")
+            .0;
+        assert!(result.source.starts_with("class A {"), "{}", result.source);
+        assert!(
+            result.source.contains("// from a.cc: could not be read"),
+            "{}",
+            result.source
+        );
+        assert!(!result.graph_in_sync);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[tokio::test]
+    async fn get_source_widens_the_other_files_parts_by_context_lines_and_clamps_them() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("get-source-context");
+        let server = CodeOwlServer::new(dir.clone(), graph);
+        let get = |context_lines| {
+            server.get_source(Parameters(SourceRequest {
+                id: "a.h::A::f".to_string(),
+                context_lines: Some(context_lines),
+            }))
+        };
+        // `f`'s body is lines 2-4 of the 8-line `a.cc`.
+        let one = get(1).await.unwrap().0;
+        assert_eq!(
+            one.elsewhere,
+            [OtherFileSpan {
+                file: "a.cc".to_string(),
+                lines: [1, 5]
+            }]
+        );
+        assert!(
+            one.source
+                .contains("// from a.cc, lines 1-5\n#include \"a.h\"\nint A::f(int x) {"),
+            "{}",
+            one.source
+        );
+        // Asking for more than the file has stops at its ends.
+        let many = get(20).await.unwrap().0;
+        assert_eq!(many.elsewhere[0].lines, [1, 8]);
         std::fs::remove_dir_all(&dir).ok();
     }
 

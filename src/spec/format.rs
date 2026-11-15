@@ -403,9 +403,10 @@ pub(super) fn dependency_lines(
 /// as a markdown link to the spec of the file it comes from where such a spec
 /// can exist. This is what the rendered spec shows; `dependency_lines` stays
 /// plain text because the quality check (`file_spec_smells`) reads it. (The
-/// generation task builds its own dependency list from `scoped_symbol_deps`
-/// directly, not from either of these.) The `externals:` line has no spec to
-/// point at and stays as it is.
+/// generation task builds its own dependency list from `symbol_scoped_deps`
+/// directly, not from either of these; so do both of these, so the three read
+/// a symbol that is split over several files the same way.) The `externals:`
+/// line has no spec to point at and stays as it is.
 pub(super) fn linked_dependency_lines(
     graph: &Graph,
     root: &Path,
