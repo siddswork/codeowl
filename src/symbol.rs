@@ -115,6 +115,16 @@ pub struct Symbol {
     /// See [`ExtractedSymbol::extra_spans`].
     #[serde(default)]
     pub extra_spans: Vec<[usize; 2]>,
+    /// Line ranges (1-based, inclusive) of this symbol's source that sit in
+    /// **another file**, each with that file's repo-relative path: a C++
+    /// method's body in the `.cc` that implements the class its header
+    /// declares. Everything that reads a symbol's text (the generation task,
+    /// `get_source`, the size check, the dependency scope) reads these after
+    /// the symbol's own file. Empty for every symbol of every pack but a
+    /// paired C++ one, and then left out of the serialised cache, so a cache
+    /// of any other pack is byte-for-byte what it was.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other_file_spans: Vec<(String, [usize; 2])>,
     pub parent: Option<SymbolId>,
     pub children: Vec<SymbolId>,
 }
@@ -156,6 +166,9 @@ pub struct ExtractedSymbol {
     /// and shown as source. Empty for every other symbol.
     #[serde(default)]
     pub extra_spans: Vec<[usize; 2]>,
+    /// See [`Symbol::other_file_spans`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other_file_spans: Vec<(String, [usize; 2])>,
     pub parent: Option<String>,
     pub children: Vec<String>,
 }

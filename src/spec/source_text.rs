@@ -96,9 +96,14 @@ pub(crate) fn merged_symbol_spans(graph: &Graph, sym: &Symbol) -> Vec<[usize; 2]
         }
     }
     spans.extend(sym.extra_spans.iter().copied());
+    merge_spans(spans)
+}
+
+/// Sort `spans` by start line and join those that touch, overlap or sit
+/// within two lines of each other (a blank line or two between a `struct`
+/// and its `impl` shouldn't split the block).
+fn merge_spans(mut spans: Vec<[usize; 2]>) -> Vec<[usize; 2]> {
     spans.sort_by_key(|s| s[0]);
-    // Merge spans that touch or overlap (a blank line or two between a
-    // `struct` and its `impl` shouldn't split the block).
     let mut merged: Vec<[usize; 2]> = Vec::new();
     for s in spans {
         match merged.last_mut() {
@@ -107,6 +112,51 @@ pub(crate) fn merged_symbol_spans(graph: &Graph, sym: &Symbol) -> Vec<[usize; 2]
         }
     }
     merged
+}
+
+/// The parts of `sym`'s source that sit in other files, one entry per file in
+/// path order, each with its merged line spans: `sym`'s own
+/// `other_file_spans` and those of every member under it, however deep (a
+/// class gathers the bodies of its methods). Empty for every symbol whose
+/// whole source is in its own file, which is every symbol of every pack but a
+/// paired C++ one.
+pub(crate) fn other_file_blocks(graph: &Graph, sym: &Symbol) -> Vec<(String, Vec<[usize; 2]>)> {
+    let mut by_file: std::collections::BTreeMap<&str, Vec<[usize; 2]>> =
+        std::collections::BTreeMap::new();
+    let mut todo = vec![sym];
+    while let Some(s) = todo.pop() {
+        for (file, span) in &s.other_file_spans {
+            by_file.entry(file.as_str()).or_default().push(*span);
+        }
+        todo.extend(s.children.iter().filter_map(|&c| graph.get_symbol(c)));
+    }
+    by_file
+        .into_iter()
+        .map(|(file, spans)| (file.to_string(), merge_spans(spans)))
+        .collect()
+}
+
+/// `sym`'s source file by file, home file first, without any label: what a
+/// scan of the symbol's own text (its dependencies) reads, since an edge is
+/// from a file and its word must be written in that file's part.
+pub(crate) fn symbol_file_texts(
+    root: &Path,
+    graph: &Graph,
+    sym: &Symbol,
+) -> Result<Vec<(String, String)>> {
+    let mut texts = Vec::new();
+    let home = std::fs::read_to_string(root.join(&sym.file))
+        .with_context(|| format!("reading {}", sym.file))?;
+    texts.push((
+        sym.file.clone(),
+        render_spans(&home, &merged_symbol_spans(graph, sym)),
+    ));
+    for (file, spans) in other_file_blocks(graph, sym) {
+        let content = std::fs::read_to_string(root.join(&file))
+            .with_context(|| format!("reading {file}, part of {}", sym.id))?;
+        texts.push((file, render_spans(&content, &spans)));
+    }
+    Ok(texts)
 }
 
 /// Read `spans` (1-based, inclusive line ranges) out of already-read file
@@ -141,7 +191,61 @@ pub(crate) fn symbol_span_text(
     let merged = merged_symbol_spans(graph, sym);
     let content = std::fs::read_to_string(root.join(rel_path))
         .with_context(|| format!("reading {rel_path}"))?;
-    Ok(render_spans(&content, &merged))
+    let mut text = render_spans(&content, &merged);
+    // The parts of the source that live in other files follow, each under one
+    // line that names where it is from, so the reader knows which file a body
+    // is in.
+    for (file, spans) in other_file_blocks(graph, sym) {
+        let other = std::fs::read_to_string(root.join(&file))
+            .with_context(|| format!("reading {file}, part of {}", sym.id))?;
+        for span in spans {
+            text.push_str("\n\n");
+            text.push_str(&other_block_text(&file, &other, span));
+        }
+    }
+    Ok(text)
+}
+
+/// One block of a symbol's source from a file other than its own, under the
+/// line that says where it is from. `content` is that file's text. The one
+/// place the label is written, so the generation task and `get_source` show
+/// a block the same way.
+pub(crate) fn other_block_text(file: &str, content: &str, [start, end]: [usize; 2]) -> String {
+    format!(
+        "// from {file}, lines {start}-{end}\n{}",
+        render_spans(content, &[[start, end]])
+    )
+}
+
+/// `sym`'s resolved and external dependencies, scoped by whole-word search
+/// over its own text **in each file it has text in**: an edge is from one
+/// file, so it counts for `sym` only when its word is written in that file's
+/// part of the symbol (a header's edge to `Foo` does not count because the
+/// `.cc` half of the class says `Foo`). The one helper the rendered `Depends
+/// on` list, the generation task and the staleness hash all read, so they
+/// cannot disagree.
+pub(crate) fn symbol_scoped_deps(root: &Path, graph: &Graph, sym: &Symbol) -> Result<ScopedDeps> {
+    let self_id = graph.find(&sym.id);
+    let mut resolved: Vec<(String, String)> = Vec::new();
+    let mut externals: Vec<String> = Vec::new();
+    for (file, text) in symbol_file_texts(root, graph, sym)? {
+        let scoped = scoped_symbol_deps(graph, &file, &text, self_id);
+        for dep in scoped.resolved {
+            if !resolved.contains(&dep) {
+                resolved.push(dep);
+            }
+        }
+        for ext in scoped.externals {
+            if !externals.contains(&ext) {
+                externals.push(ext);
+            }
+        }
+    }
+    externals.sort();
+    Ok(ScopedDeps {
+        resolved,
+        externals,
+    })
 }
 
 /// Above this many bytes, a Container's generation-task `source` is
@@ -334,7 +438,81 @@ pub(super) fn contains_identifier(text: &str, name: &str) -> bool {
 mod tests {
     use super::*;
 
-    use crate::spec::test_support::{BIG_JAVA, java_graph};
+    use crate::spec::test_support::{BIG_JAVA, java_graph, paired_graph};
+
+    fn paired(suffix: &str) -> (Graph, std::path::PathBuf) {
+        paired_graph(suffix)
+    }
+
+    #[test]
+    fn a_symbol_with_spans_in_another_file_reads_that_file_after_its_own() {
+        let (graph, dir) = paired("text");
+        let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
+        let text = symbol_span_text(&dir, &graph, "a.h", a).unwrap();
+        // The header's own text, then one labelled block from `a.cc`: the
+        // two member spans (2-4 and 6-8) are one block, as two spans of one
+        // file are when they sit two lines apart.
+        assert_eq!(
+            text,
+            "class A {\n  int f(Foo x);\n  int g();\n};\n\n\
+             // from a.cc, lines 2-8\n\
+             int A::f(int x) {\n  return Bar() + 1;\n}\n\nint A::g() {\n  return 2;\n}"
+        );
+        // A member sees its own declaration and only its own body.
+        let f = graph.get_symbol(graph.find("a.h::A::f").unwrap()).unwrap();
+        assert_eq!(
+            symbol_span_text(&dir, &graph, "a.h", f).unwrap(),
+            "  int f(Foo x);\n\n// from a.cc, lines 2-4\nint A::f(int x) {\n  return Bar() + 1;\n}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_container_gathers_its_members_spans_in_other_files() {
+        let (graph, dir) = paired("blocks");
+        let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
+        assert_eq!(
+            other_file_blocks(&graph, a),
+            [("a.cc".to_string(), vec![[2, 8]])]
+        );
+        let f = graph.get_symbol(graph.find("a.h::A::f").unwrap()).unwrap();
+        assert_eq!(
+            other_file_blocks(&graph, f),
+            [("a.cc".to_string(), vec![[2, 4]])]
+        );
+        let foo = graph.get_symbol(graph.find("foo.h::Foo").unwrap()).unwrap();
+        assert!(other_file_blocks(&graph, foo).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_dependency_scope_reads_each_files_edges_against_that_files_text() {
+        let (graph, dir) = paired("deps");
+        let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
+        let deps = symbol_scoped_deps(&dir, &graph, a).unwrap();
+        let mut targets: Vec<&str> = deps.resolved.iter().map(|(t, _)| t.as_str()).collect();
+        targets.sort();
+        // `Foo` is written in the header, `Bar` in the source file. The decoy
+        // edges (the header's `Bar`, the source file's `Foo`) name words the
+        // other file's text holds, so neither counts.
+        assert_eq!(targets, ["bar.h::Bar", "foo.h::Foo"]);
+        assert_eq!(
+            deps.resolved.len(),
+            2,
+            "no target twice: {:?}",
+            deps.resolved
+        );
+        // `f` alone has `Foo` in its declaration and `Bar` in its body; `g`
+        // has neither.
+        let g = graph.get_symbol(graph.find("a.h::A::g").unwrap()).unwrap();
+        assert!(
+            symbol_scoped_deps(&dir, &graph, g)
+                .unwrap()
+                .resolved
+                .is_empty()
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn cap_generation_text_leaves_short_text_untouched() {

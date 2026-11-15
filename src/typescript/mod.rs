@@ -219,6 +219,7 @@ fn visit_type_decl(
         is_exported,
         markers: Vec::new(),
         extra_spans: Vec::new(),
+        other_file_spans: Vec::new(),
         parent: None,
         children: Vec::new(),
     });
@@ -335,6 +336,7 @@ fn visit_function(
         is_exported,
         markers: Vec::new(),
         extra_spans: Vec::new(),
+        other_file_spans: Vec::new(),
         parent: None,
         children: Vec::new(),
     });
@@ -382,6 +384,7 @@ fn visit_class(
                     interface_hash: None,
                     markers: Vec::new(),
                     extra_spans: Vec::new(),
+                    other_file_spans: Vec::new(),
                     parent: Some(class_id.clone()),
                     children: Vec::new(),
                 });
@@ -412,6 +415,7 @@ fn visit_class(
                     interface_hash: None,
                     markers: Vec::new(),
                     extra_spans: Vec::new(),
+                    other_file_spans: Vec::new(),
                     parent: Some(class_id.clone()),
                     children: Vec::new(),
                 });
@@ -481,6 +485,7 @@ fn visit_class(
         is_exported,
         markers: Vec::new(),
         extra_spans: Vec::new(),
+        other_file_spans: Vec::new(),
         parent: None,
         children: member_ids,
     });
@@ -571,6 +576,7 @@ fn visit_lexical(
                 is_exported,
                 markers: Vec::new(),
                 extra_spans: Vec::new(),
+                other_file_spans: Vec::new(),
                 parent: None,
                 children: Vec::new(),
             });

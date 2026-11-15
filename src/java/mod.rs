@@ -299,6 +299,7 @@ fn visit_container(
             interface_hash: is_exported.then(|| hash_text(&iface_rollup)),
             markers: annotations(node, source),
             extra_spans: Vec::new(),
+            other_file_spans: Vec::new(),
             parent: parent_id.map(str::to_string),
             children: member_ids,
         },
@@ -356,6 +357,7 @@ fn push_named_leaf(
         interface_hash: is_exported.then(|| hash_text(&sig)),
         markers: annotations(node, source),
         extra_spans: Vec::new(),
+        other_file_spans: Vec::new(),
         parent: parent_id.map(str::to_string),
         children: Vec::new(),
     });

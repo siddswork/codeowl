@@ -8,7 +8,7 @@ use super::layout::{
     file_is_spec_bearing, link_destination, section_anchor, short_name, spec_link, spec_path,
     symbol_file,
 };
-use super::source_text::{scoped_symbol_deps, symbol_span_text};
+use super::source_text::symbol_scoped_deps;
 use crate::graph::{Graph, Node, SymbolId};
 use crate::symbol::Symbol;
 
@@ -445,10 +445,11 @@ fn dependency_lines_with(
     let Node::File(file) = graph.get(file_id) else {
         return Vec::new();
     };
-    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
+    // Read per file, so a class whose bodies are in another file lists what
+    // those bodies name too.
+    let Ok(scoped) = symbol_scoped_deps(root, graph, sym) else {
         return Vec::new();
     };
-    let scoped = scoped_symbol_deps(graph, &file.id, &symbol_text, graph.find(&sym.id));
     let mut lines: Vec<String> = scoped
         .resolved
         .iter()
@@ -713,6 +714,24 @@ mod tests {
     };
 
     use std::path::Path;
+
+    #[test]
+    fn the_depends_on_list_of_a_symbol_split_over_two_files_names_both_files_targets() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("depends-on");
+        let file_id = graph.find("a.h").unwrap();
+        let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
+        let lines = dependency_lines(&graph, &dir, file_id, a);
+        assert!(
+            lines.iter().any(|l| l.contains("foo.h::Foo")),
+            "header's: {lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.contains("bar.h::Bar")),
+            "the source file's: {lines:?}"
+        );
+        assert_eq!(lines.len(), 2, "the decoy edges add nothing: {lines:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     /// Build a one-file Rust graph and return that file's span text for `name`.
     fn rust_span_text(src: &str, name: &str) -> String {

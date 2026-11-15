@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use super::format::HashPair;
-use super::source_text::{contains_identifier, symbol_span_text};
+use super::source_text::{contains_identifier, symbol_file_texts};
 use crate::graph::{Graph, Node, SymbolId};
 use crate::hash::hash_text;
 use crate::symbol::Symbol;
@@ -84,25 +84,28 @@ pub(crate) fn try_dependency_pairs(
     file_id: SymbolId,
     sym: &Symbol,
 ) -> Option<Vec<(String, String)>> {
-    let Node::File(file) = graph.get(file_id) else {
+    if !matches!(graph.get(file_id), Node::File(_)) {
         return None;
-    };
-    let Ok(symbol_text) = symbol_span_text(root, graph, &file.id, sym) else {
-        return None;
-    };
+    }
+    // The symbol's text file by file (its own file, then any other file that
+    // holds part of it): an edge counts when its word is written in the part
+    // of the symbol that lives in the edge's own file.
+    let texts = symbol_file_texts(root, graph, sym).ok()?;
     // Excludes a resolved import whose target is `sym` itself -- see the
     // identical exclusion in `scoped_symbol_deps`'s own doc comment for
     // why this can happen and why it's never a real dependency.
     let self_id = graph.find(&sym.id);
-    let targets = graph
-        .imports()
-        .iter()
-        .filter(|imp| {
-            imp.from_file == file.id
-                && contains_identifier(&symbol_text, &imp.imported_name)
-                && imp.target != self_id
-        })
-        .filter_map(|imp| imp.target);
+    let targets = texts.iter().flat_map(|(file, text)| {
+        graph
+            .imports()
+            .iter()
+            .filter(move |imp| {
+                imp.from_file == *file
+                    && contains_identifier(text, &imp.imported_name)
+                    && imp.target != self_id
+            })
+            .filter_map(|imp| imp.target)
+    });
     Some(dependency_target_pairs(graph, targets))
 }
 
@@ -253,6 +256,32 @@ mod tests {
     use super::*;
     use crate::fixtures::build_graph_from_sources;
     use crate::spec::format::{HashPair, dependency_lines};
+
+    #[test]
+    fn a_symbol_with_a_body_in_another_file_depends_on_what_either_file_names() {
+        let (graph, dir) = crate::spec::test_support::paired_graph("stale-deps");
+        let file_id = graph.find("a.h").unwrap();
+        let a = graph.get_symbol(graph.find("a.h::A").unwrap()).unwrap();
+        let pairs = try_dependency_pairs(&graph, &dir, file_id, a).unwrap();
+        // `Foo` is written in the header, `Bar` only in `a.cc`; the decoy
+        // edges (each word is in the other file's text) add nothing.
+        let ids: Vec<&str> = pairs.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, ["bar.h::Bar", "foo.h::Foo"]);
+        // A member whose declaration names neither and whose body names
+        // neither depends on nothing.
+        let g = graph.get_symbol(graph.find("a.h::A::g").unwrap()).unwrap();
+        assert!(
+            try_dependency_pairs(&graph, &dir, file_id, g)
+                .unwrap()
+                .is_empty()
+        );
+        // The stored hash moves when a target of the *other* file's edge does.
+        let before = hash_dependency_pairs(&pairs);
+        let mut changed = pairs.clone();
+        changed[0].1 = "a different interface".to_string();
+        assert_ne!(hash_dependency_pairs(&changed), before);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     fn stored_for(graph: &Graph, file: &str, fingerprint: &str, raw: &str) -> HashPair {
         HashPair {
