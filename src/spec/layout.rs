@@ -351,13 +351,15 @@ pub(super) fn spec_bearing_files_in(graph: &Graph, dir_path: &str) -> Vec<Symbol
         .collect()
 }
 
-/// The name a section heading uses — the part of a top-level symbol's stable
-/// id after `file::`. For most packs that is one word. A C++ id carries its
-/// namespaces (`db.h::leveldb::DB`), and the heading keeps them, because a
-/// spec finds a section by its heading: `big::FromHost` and
-/// `little::FromHost` in one file must not both read `FromHost`.
+/// The name a section heading uses for a top-level symbol, as the pack that
+/// reads its file says (`StackPack::section_name`): the last `::` segment of
+/// the id for most packs, the whole part after `file::` for C++, whose ids
+/// carry namespaces (`db.h::leveldb::DB`). A spec finds a section by its
+/// heading, so `big::FromHost` and `little::FromHost` in one file must not
+/// both read `FromHost`; and a Rust spec already on disk must keep the
+/// heading it has.
 pub(super) fn short_name(id: &str) -> &str {
-    id.split_once("::").map_or(id, |(_, rest)| rest)
+    crate::stack::section_name(id)
 }
 
 #[cfg(test)]
@@ -369,6 +371,16 @@ mod tests {
     fn a_heading_keeps_the_namespaces_of_a_cpp_id_and_its_anchor_drops_the_colons() {
         assert_eq!(short_name("src/graph.rs::Graph"), "Graph");
         assert_eq!(short_name("db.h::leveldb::DB"), "leveldb::DB");
+        // Other packs keep the heading their stored specs already have, even
+        // when it looks odd: a Rust trait impl's id has `::` in the type path
+        // and its section is headed by the last segment (CodeOwl's own
+        // `docs/specs/src/mcp.rs.md` has such headings).
+        assert_eq!(
+            short_name("src/mcp.rs::impl From<crate::spec::Orphan> for Response"),
+            "Orphan> for Response"
+        );
+        assert_eq!(short_name("A.java::A"), "A");
+        assert_eq!(short_name("pkg/mod.py::helper"), "helper");
         // Two sections that end in one name get distinct headings and anchors.
         let headings: Vec<String> = [
             "db.h",

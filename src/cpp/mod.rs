@@ -181,6 +181,8 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
     // the result does not depend on the order the declarations were written
     // in nor on which one outranked the others.
     let mut parts: HashMap<usize, (Vec<String>, Vec<String>)> = HashMap::new();
+    // Folded members: whether the member itself is exported, by folded index.
+    let mut member_export: HashMap<usize, bool> = HashMap::new();
     for mut sym in symbols {
         let Some(&at) = index.get(&sym.id) else {
             index.insert(sym.id.clone(), folded.len());
@@ -214,24 +216,35 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         // declaration supplies the body: keep the member's parent and kind,
         // or the symbol would be a child of its class and a second top-level
         // symbol of the file.
-        let member = match (&first.parent, &sym.parent) {
-            (None, Some(_)) => Some((sym.parent.clone(), sym.raw.clone())),
-            (Some(_), None) => Some((first.parent.clone(), first.raw.clone())),
+        let bodiless = |s: &ExtractedSymbol| s.markers.iter().any(|m| m == "declaration");
+        let both_bodiless = bodiless(first) && bodiless(&sym);
+        // What the symbol is once folded: its parent and kind, and for a member
+        // whether it is exported (a member never is by itself; the
+        // definition's namespace-scope export must not be OR-ed into it).
+        let identity = match (&first.parent, &sym.parent) {
+            (None, Some(_)) => Some((sym.parent.clone(), sym.raw.clone(), Some(sym.is_exported))),
+            (Some(_), None) => Some((
+                first.parent.clone(),
+                first.raw.clone(),
+                Some(first.is_exported),
+            )),
             // Two declarations at namespace scope, one of them written with
             // its name qualified (`void absl::f() {…}` beside `namespace
             // absl { void f(); }`): the plain one shows it is the namespace's
             // own function and not a class member's definition, so it is not
             // marked qualified (nothing would ever target a marked one).
             (None, None) => {
-                let plain = |raw: &str| match raw {
-                    "qualified_function" => "function".to_string(),
-                    "qualified_variable" => "variable".to_string(),
-                    other => other.to_string(),
-                };
                 let q = |raw: &str| raw.starts_with("qualified_");
                 (q(&first.raw) != q(&sym.raw)).then(|| {
                     let marked = if q(&first.raw) { &first.raw } else { &sym.raw };
-                    (None, plain(marked))
+                    let raw = match marked.as_str() {
+                        // Bodiless on both sides: still a prototype.
+                        "qualified_function" if both_bodiless => "prototype",
+                        "qualified_function" => "function",
+                        "qualified_variable" => "variable",
+                        other => other,
+                    };
+                    (None, raw.to_string(), None)
                 })
             }
             _ => None,
@@ -239,9 +252,12 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         if rank(&sym) > rank(first) {
             std::mem::swap(first, &mut sym);
         }
-        if let Some((parent, raw)) = member {
+        if let Some((parent, raw, member_exported)) = identity {
             first.parent = parent;
             first.raw = raw;
+            if let Some(exported) = member_exported {
+                member_export.insert(at, exported);
+            }
         }
         first.docstring = first.docstring.take().or(sym.docstring);
         first.is_exported |= sym.is_exported;
@@ -267,6 +283,14 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
         ifaces.sort();
         folded[at].source_hash = hash_text(&sources.join("\n"));
         folded[at].interface_hash = (!ifaces.is_empty()).then(|| hash_text(&ifaces.join("\n")));
+    }
+    // A member defined outside its class is no more exported for it: the
+    // definition's own flag and interface hash were folded in above.
+    for (at, exported) in member_export {
+        folded[at].is_exported = exported;
+        if !exported {
+            folded[at].interface_hash = None;
+        }
     }
     // A class that lists a member in both `#if` branches names it twice.
     for sym in &mut folded {
@@ -362,8 +386,16 @@ impl<'a> Cx<'a> {
                     inner.chain.extend(
                         self.text(name)
                             .split("::")
-                            .map(|part| part.trim().to_string())
-                            .filter(|part| !part.is_empty()),
+                            .map(str::trim)
+                            // C++20 `namespace a::inline v1` marks one segment
+                            // inline, like `inline namespace v1`.
+                            .filter(|part| {
+                                !part.is_empty()
+                                    && !part
+                                        .strip_prefix("inline")
+                                        .is_some_and(|rest| rest.starts_with(char::is_whitespace))
+                            })
+                            .map(str::to_string),
                     );
                 }
                 if let Some(body) = node.child_by_field_name("body") {
@@ -1517,6 +1549,39 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
         // Alone, the same definition stays marked: it may be a class member.
         let alone = header("void absl::SleepFor(int d) {}\n");
         assert_eq!(alone[0].raw, "qualified_function");
+    }
+
+    #[test]
+    fn a_private_member_folded_with_its_definition_is_still_not_exported() {
+        // The definition below the class sits at namespace scope, which in a
+        // header is exported; the member it defines is private and is not.
+        let src = "namespace n {\nclass A { private: int g(); static int s; int h; };\n}\n\
+                   int n::A::g() { return 1; }\nint n::A::s = 3;\n";
+        let syms = header(src);
+        for id in ["db.h::n::A::g", "db.h::n::A::s", "db.h::n::A::h"] {
+            let s = get(&syms, id);
+            assert_eq!(s.parent.as_deref(), Some("db.h::n::A"), "{id}");
+            assert!(!s.is_exported, "{id} is private");
+            assert!(s.interface_hash.is_none(), "{id} has no interface");
+        }
+        assert_eq!(get(&syms, "db.h::n::A::g").raw, "method");
+        assert_eq!(get(&syms, "db.h::n::A::s").raw, "field");
+    }
+
+    #[test]
+    fn two_bodiless_declarations_of_one_function_stay_a_prototype() {
+        let src = "namespace absl { void f(); }\nvoid absl::f();\n";
+        let syms = header(src);
+        assert_eq!(ids(&syms), ["db.h::absl::f"]);
+        assert_eq!(syms[0].raw, "prototype");
+        assert!(syms[0].markers.iter().any(|m| m == "declaration"));
+    }
+
+    #[test]
+    fn an_inline_namespace_inside_the_nested_form_is_looked_through() {
+        let src = "namespace a::inline v1 { int f(); }\nnamespace b::inline c::d { int g(); }\n";
+        // `inline` marks the segment after it (`c`), which is looked through.
+        assert_eq!(ids(&header(src)), ["db.h::a::f", "db.h::b::d::g"]);
     }
 
     #[test]
