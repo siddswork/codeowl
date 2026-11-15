@@ -305,7 +305,11 @@ pub struct FileExtraction {
 /// out-of-class definition with the member or function it defines, in the
 /// index's graph build; a template class's arguments are also taken out of an
 /// operator's qualification (`btree<P>::operator=` is `btree::operator=`).
-pub const FORMAT_VERSION: u32 = 30;
+/// 31 = a C++ qualified definition (`int A::f() {…}`) carries a `chain:N`
+/// marker, how many leading segments of its id are the namespaces around it,
+/// so pairing can find a declaration when the name is written with an
+/// enclosing namespace again (`absl::Status::X` inside `namespace absl`).
+pub const FORMAT_VERSION: u32 = 31;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
