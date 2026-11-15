@@ -288,8 +288,10 @@ pub struct FileExtraction {
 /// unmerged hashes. 26 = the C++ lexer ends a preprocessor directive after
 /// a block comment that runs on past its line, and ignores `/*` inside a
 /// string in a directive, which can move what a C++ file's declarations are
-/// read as.
-pub const FORMAT_VERSION: u32 = 26;
+/// read as. 27 = the C++ pack reads `#include`s and the words a file uses
+/// (`FileImports.identifiers`) and resolves them to symbol edges, so a cached
+/// C++ graph has no edges and its files carry no imports.
+pub const FORMAT_VERSION: u32 = 27;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

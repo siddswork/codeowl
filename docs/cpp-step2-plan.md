@@ -200,3 +200,17 @@ The resolution kill criterion (more than one second on `abseil`) is two orders o
 
 **Part B, after review.** Fixed: a `/*` inside a trailing `//` comment on a directive line made the lexer swallow the lines after it (a regression of the part A lexer fix: the directive scan now skips a line comment, backslash continuations included); a CRLF line continuation inside a string in a directive; a block comment between `#include` and the path; an absolute path (never a repository file) and backslash separators in an include; the sibling directory tried twice for a file at the root; one allocation per repeated word; `IncludeGraph::unresolved` is an accessor. Declined, with data: dropping the suffix match for an angle include that has a directory. Across the four repositories 883 such includes resolve, 880 by a root and 3 by suffix alone (vendored `gtest`/`gmock` under `test/gtest`, a versioned header under `tests/abi`), all correct, and a missed edge is the dangerous kind where a false one only over-reports. Declined: replacing the directive word scan with the lexer (its apostrophe rule swallows `don't stop Here`, which a test requires; a raw string in a directive can still leak its words, accepted). The accuracy check equals the baseline after the lexer changes.
 
+
+**Part C** (`src/cpp/edges.rs`, wired into `CppStack`; 2026-11-15): `cpp::edges::resolve` builds the `IncludeGraph`, and for each file and each file in its `reach` emits one `ResolvedImport` per (file, top-level symbol, word written): `specifier` the header's repository path, `imported_name` the word (an enumerator reaches its enum), `target` the symbol. An out-of-class definition (a name with `::` after the file prefix) is no target; macros, prototypes and typedefs are. No self edge; an unresolved include gives nothing. `FORMAT_VERSION` 27. 9 tests through `RepoIndex::open` (`tests/cpp_edges.rs`), written red first (7 failed before the code); with the narrowing check forced true, 5 fail (the negative control).
+
+Acceptance and cost, measured on copies of `abseil` and `json` with their Python scripts removed (so `detect` accepts them), release build, master against this branch:
+
+| Measure | `abseil` (880 files) | `json` (628 files) |
+|---|---|---|
+| File-level edges, master then branch | 0, then 4,942 | 0, then 4,061 |
+| Edges (import statements) | 12,638 | 8,367 |
+| Graph build plus statistics, master then branch | 6.6 s, 6.9 s | 5.9 s, 6.5 s |
+| `.codeowl/index`, master then branch | 17.8 MB, 20.7 MB (+16 %) | 11.2 MB, 12.6 MB (+12 %) |
+| `.codeowl/graph`, master then branch | 18.2 MB, 20.5 MB | 11.1 MB, 12.7 MB |
+
+Kill criteria: resolution adds well under a second (0.3 to 0.6 s including the larger graph), and the cache is far from doubling. `graph_stats` on the seven repositories of the other four packs that exist locally (`bat`, `commons-lang`, `full-stack-fastapi-template`, `graphify`, `quarkus-quickstarts`, `quarkus-super-heroes`, `ripgrep`) is byte-identical on master and the branch. **Not measured:** the coverage-time row (`get_spec_coverage` scans the edge list once per symbol; it needs the server and specs), and the accuracy check against the compiler (part E).

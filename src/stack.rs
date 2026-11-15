@@ -753,12 +753,14 @@ impl StackPack for PythonStack {
 /// grammar-breaking macros were blanked first (`cpp/macros.rs`). Planned in
 /// `docs/cpp-pack-plan.md`; decisions in `DECISIONS.md` question 28.
 ///
-/// **What it does not do yet.** `#include` is not read, so a C++ graph has
-/// symbols and no edges between files: nothing goes stale because of
-/// another file, and `get_callers` finds nothing. A method defined outside
-/// its class is a separate top-level symbol until pairing folds it in. Both
-/// are later steps of the plan; do not generate specs for a C++ repository
-/// before them.
+/// **Edges.** `#include` is read, resolved to repository files and closed
+/// over (`cpp::resolve`), then narrowed to the symbols a file writes the
+/// name of (`cpp::edges`), so a header edit makes stale only the files that
+/// name what changed.
+///
+/// **What it does not do yet.** A method defined outside its class is a
+/// separate top-level symbol until pairing folds it in (a later step of the
+/// plan); do not generate specs for a C++ repository before it.
 ///
 /// No feature model (the trait's default `None`): the first target is a
 /// library. No fingerprint rule: the whole text, like Java and Python.
@@ -829,20 +831,17 @@ impl StackPack for CppStack {
         crate::cpp::extract_counted(source, rel_path)
     }
 
-    fn extract_imports(&self, _rel_path: &str, _source: &str) -> FileImports {
-        // Includes are the next step of the plan. Reporting none (instead of
-        // reporting them and resolving none) keeps the unresolved-import
-        // count honest: zero read, not hundreds failed.
-        FileImports::default()
+    fn extract_imports(&self, _rel_path: &str, source: &str) -> FileImports {
+        crate::cpp::includes::extract(source)
     }
 
     fn resolve_imports(
         &self,
         _root: &Path,
-        _file_imports: &HashMap<String, FileImports>,
-        _graph: &Graph,
+        file_imports: &HashMap<String, FileImports>,
+        graph: &Graph,
     ) -> Vec<ResolvedImport> {
-        Vec::new()
+        crate::cpp::edges::resolve(file_imports, graph)
     }
 }
 
@@ -1082,10 +1081,10 @@ mod tests {
         assert_eq!(syms[0].kind, crate::symbol::SymbolKind::Container);
         assert_eq!(syms[1].id, "db.h::DB::Get");
 
-        // Includes are a later step: no import is reported yet, so nothing
-        // is resolved and nothing is recorded as unresolved.
-        let imports = pack.extract_imports("db.cc", "#include \"db.h\"\n");
-        assert_eq!(imports, FileImports::default());
+        let imports = pack.extract_imports("db.cc", "#include \"db.h\"\nDB d;\n");
+        assert_eq!(imports.imports.len(), 1);
+        assert_eq!(imports.imports[0].specifier, "\"db.h\"");
+        assert!(imports.identifiers.contains(&"DB".to_string()));
         assert!(pack.extract_flow_edges("db.cc", "").is_empty());
     }
 
