@@ -27,14 +27,22 @@ fn targets(graph: &Graph, file: &str) -> Vec<(String, SymbolId)> {
         let Some(sym) = graph.get_symbol(id) else {
             continue;
         };
-        let Some(name) = sym.id.strip_prefix(&prefix) else {
+        if !sym.id.starts_with(&prefix) {
             continue;
-        };
-        // A `DB::Open` defined outside its class has `::` in its name, and
-        // no word a file writes ever does, so it is never matched: it is
-        // reached through its class (pairing, a later step, folds it in).
-        // Likewise a free `operator==` is never matched, because the word
-        // list holds identifiers and not punctuation (plan section 9).
+        }
+        // A definition written outside its class (`DB::Open`, `int C::n`) is
+        // marked by the extractor: it belongs to its class, which is what a
+        // file names, so it is never a target. A free `operator==` is never
+        // matched either, because the word list holds identifiers and not
+        // punctuation (plan section 9).
+        if matches!(
+            sym.raw.as_str(),
+            "qualified_function" | "qualified_variable"
+        ) {
+            continue;
+        }
+        // The id is `<file>::<namespaces>::<name>`; a file writes the name.
+        let name = sym.id.rsplit("::").next().unwrap_or_default();
         out.push((name.to_string(), id));
         // An enumerator is written without its enum, so it is a word that
         // reaches the enum. Only an enum: the constants of an anonymous enum

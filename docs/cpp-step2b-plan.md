@@ -1,6 +1,6 @@
 # C++ step 2b: one spec per class, across files
 
-Step 2b of `docs/cpp-pack-plan.md` (§4.6 pairing, §4.7 shared ids across files). Written 2026-11-15 after tracing the core, before any code. **N1 (namespaces in ids) was decided by the owner on 2026-11-15 and reverses D3 of the pack plan; it is built first (part 0).** P1 to P8 (section 5) are proposals the owner has not yet settled; nothing but part 0 is to be built until they are.
+Step 2b of `docs/cpp-pack-plan.md` (§4.6 pairing, §4.7 shared ids across files). Written 2026-11-15 after tracing the core, before any code. **N1 (namespaces in ids) was decided by the owner on 2026-11-15 and reverses D3 of the pack plan; it is built first (part 0).** P1 to P8 (section 5) were approved as recommended by the owner on 2026-11-15.
 
 ## 1. What this step delivers
 
@@ -202,4 +202,22 @@ Each part: tests first (red, then green), a negative control where it applies, `
 
 ## 11. Progress
 
-2026-11-15: the plan, with the core traced and the pairing rule and the namespace question measured on the four repositories. N1 decided by the owner. Nothing built.
+2026-11-15: the plan, with the core traced and the pairing rule and the namespace question measured on the four repositories. N1 decided by the owner; P1 to P8 approved as recommended.
+
+**Part 0, namespaces in ids (built 2026-11-15, `FORMAT_VERSION` 29).** The chain rules of section 4.0 as written, in `cpp/mod.rs` (`Scope.chain`, set by `namespace_definition`, used by `id()`), `qualified_variable` beside `qualified_function`, `edges.rs` reading the marker and the last segment, `cpp_probe` and `compare.py` reading the marker. 13 new tests in `cpp/mod.rs` (red first), 4 in `tests/cpp_edges.rs`, one in `tests/cpp_spec_sections.rs`, one in `spec/layout.rs`; the old id assertions changed with the rule (a `standards.rs` expectation of two symbols for a namespaced prototype and its qualified definition is now one, which is the right reading).
+
+Three things the work found that the plan had not:
+
+- **A spec section is found by its heading, and the heading was the last `::` segment.** With namespaces in ids, `big::FromHost` and `little::FromHost` in one file would both read `FromHost`, and the second section's prose would have been read from the first's block, silently. `short_name` now returns everything after the file prefix; a test through the real `submit` loop failed before the change and passes after. Anchors drop the colons (`bigfromhost`), checked.
+- **The same-id fold made a member that is defined below its class a second top-level symbol** (the survivor was the definition, with no parent, while the class still listed it as a child). The defect was already on `master` for un-namespaced code (`class A { int f(); }; int A::f() {…}`); the chain makes the case more common (a definition written `shapes::Circle::area` outside `namespace shapes` now shares the member's id). The fold keeps the member's parent and kind.
+- **A prototype in `namespace absl { }` and a definition written `absl::f()` fold into one symbol, which the fold left marked `qualified_function`,** so no edge could ever point at the real function. When one declaration is qualified and the other is not, the plain one shows it is the namespace's own function, and the marker is dropped.
+
+Measured, `leveldb` / `abseil` / `fmt` / `json`:
+
+| | Before | After |
+|---|---|---|
+| Top-level ids spanning different namespaces (same-id groups) | 0 / 62 / 24 / 45 | **0 / 7 / 0 / 1** |
+| `utility/cpp_accuracy/run.sh`: the pack's classes, functions, edges, recall, precision | the figures of 2026-11-15 | **identical** (753 / 814 / 1,046 / 1,403 edges; recall 97.1 / 89.8 / 92.7 / 97.9 %; precision 98.8 / 73.2 / 49.5 / 69.6 %) |
+| `graph_stats` on the seven other-pack repositories | | byte-identical to `master` |
+
+The 8 groups left are not collisions of unrelated entities. Three are a prototype in a namespace folded with its qualified definition (`absl::SleepFor`, `SpinLockDelay`, `SpinLockWake`: one entity, correctly one symbol). Five differ only by an **anonymous namespace** (`AbslParseFlag`, `AbslUnparseFlag`, `Vector128` and `VLogLevel` on `abseil`, `operator==` in a `json` test): about 5 of 16,000 top-level declarations, so the anonymous namespace stays omitted from the id, as section 4.0 said to decide on this count. The stand-in's figures for `fmt` and `json` differ from the 2026-11-12 baseline because of the earlier directive-comment fix, not this part; the figures the targets judge are the pack's own, and they are unchanged.

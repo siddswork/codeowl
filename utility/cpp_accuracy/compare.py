@@ -64,7 +64,9 @@ def read_probe(path):
             elif tag == "E" and len(p) >= 4:
                 pack_edges.add((p[1], p[2], p[3]))
             elif tag == "S" and len(p) >= 6:
-                symbols.append((p[1], p[2], p[3], p[5] == "1"))
+                # The 7th field (a definition written outside its class) is
+                # absent from a probe older than namespaces in ids.
+                symbols.append((p[1], p[2], p[3], p[5] == "1", len(p) > 6 and p[6] == "1"))
     return files, symbols, includes, enumerators, pack_edges
 
 
@@ -101,7 +103,7 @@ def compare(repo, truth, probe_path):
     )
     got = collections.Counter(
         (f, k, norm(n))
-        for f, k, n, top in symbols
+        for f, k, n, top, _q in symbols
         if f in scope and k in ("class", "enum", "func")
     )
 
@@ -181,11 +183,13 @@ def compare(repo, truth, probe_path):
         return seen
 
     top_names = collections.defaultdict(set)
-    for f, k, n, top in symbols:
+    for f, k, n, top, qualified in symbols:
         if f not in scope or not top:
             continue
-        if k == "func" and "::" in n and "operator" not in n:
-            continue  # an out-of-class definition belongs to its class
+        # An out-of-class definition belongs to its class. The probe marks it
+        # (`::` in the name now also means a namespace).
+        if k == "func" and qualified and "operator" not in n:
+            continue
         nn = norm(n)
         if re.fullmatch(r"[A-Za-z_]\w*", nn):
             top_names[f].add(nn)

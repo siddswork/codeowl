@@ -351,16 +351,38 @@ pub(super) fn spec_bearing_files_in(graph: &Graph, dir_path: &str) -> Vec<Symbol
         .collect()
 }
 
-/// The short name a section heading uses — the part of a top-level
-/// symbol's stable id after `file::`.
+/// The name a section heading uses — the part of a top-level symbol's stable
+/// id after `file::`. For most packs that is one word. A C++ id carries its
+/// namespaces (`db.h::leveldb::DB`), and the heading keeps them, because a
+/// spec finds a section by its heading: `big::FromHost` and
+/// `little::FromHost` in one file must not both read `FromHost`.
 pub(super) fn short_name(id: &str) -> &str {
-    id.rsplit("::").next().unwrap_or(id)
+    id.split_once("::").map_or(id, |(_, rest)| rest)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fixtures::build_graph_from_sources;
+
+    #[test]
+    fn a_heading_keeps_the_namespaces_of_a_cpp_id_and_its_anchor_drops_the_colons() {
+        assert_eq!(short_name("src/graph.rs::Graph"), "Graph");
+        assert_eq!(short_name("db.h::leveldb::DB"), "leveldb::DB");
+        // Two sections that end in one name get distinct headings and anchors.
+        let headings: Vec<String> = [
+            "db.h",
+            "Summary",
+            "big::FromHost",
+            "Summary",
+            "little::FromHost",
+        ]
+        .map(String::from)
+        .to_vec();
+        let anchors = heading_anchors(&headings);
+        assert_eq!(anchors[2], "bigfromhost");
+        assert_eq!(anchors[4], "littlefromhost");
+    }
 
     #[test]
     fn the_file_part_of_a_symbol_id_is_everything_before_the_double_colon() {

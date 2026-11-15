@@ -11,8 +11,15 @@
 //! - **Every configuration is kept.** Both branches of an `#if` are walked,
 //!   so a symbol defined once per platform appears once per branch, sharing
 //!   an id the way an overload does.
-//! - **A namespace is not a symbol** and does not appear in an id. An
-//!   anonymous namespace only makes what is inside it file-local.
+//! - **A namespace is not a symbol, but it is in the id**: `db.h::leveldb::DB`
+//!   (`docs/cpp-step2b-plan.md` section 4.0). The chain is the enclosing
+//!   named namespaces, outermost first; an `inline` one (an ABI version) is
+//!   looked through, and an anonymous one adds nothing but file-locality. So
+//!   `big::FromHost` and `little::FromHost` are two symbols. A namespace a
+//!   macro opens (`FMT_BEGIN_NAMESPACE`) is not seen until the macro table.
+//!   A definition written outside its class (`int DB::Open()`) keeps the
+//!   chain of where it is written and is marked (`qualified_function`,
+//!   `qualified_variable`): a `::` in the name no longer says so.
 //! - **"Exported" follows inclusion, not linkage.** Everything at the top
 //!   level of a header can be used by any file that includes it, `static`
 //!   or not. In a source file, only a name with external linkage can be
@@ -133,6 +140,7 @@ fn extract_with(source: &str, rel_path: &str, blank: bool) -> (Vec<ExtractedSymb
     let mut out = Vec::new();
     let mut scope = Scope {
         parent: None,
+        chain: Vec::new(),
         anon: false,
         access: None,
     };
@@ -201,8 +209,39 @@ fn fold_same_id(symbols: Vec<ExtractedSymbol>) -> Vec<ExtractedSymbol> {
                 !private,
             )
         };
+        // A member declared in its class and defined below it (`int A::f()
+        // {…}`) shares one id. It is still the class's member, whichever
+        // declaration supplies the body: keep the member's parent and kind,
+        // or the symbol would be a child of its class and a second top-level
+        // symbol of the file.
+        let member = match (&first.parent, &sym.parent) {
+            (None, Some(_)) => Some((sym.parent.clone(), sym.raw.clone())),
+            (Some(_), None) => Some((first.parent.clone(), first.raw.clone())),
+            // Two declarations at namespace scope, one of them written with
+            // its name qualified (`void absl::f() {…}` beside `namespace
+            // absl { void f(); }`): the plain one shows it is the namespace's
+            // own function and not a class member's definition, so it is not
+            // marked qualified (nothing would ever target a marked one).
+            (None, None) => {
+                let plain = |raw: &str| match raw {
+                    "qualified_function" => "function".to_string(),
+                    "qualified_variable" => "variable".to_string(),
+                    other => other.to_string(),
+                };
+                let q = |raw: &str| raw.starts_with("qualified_");
+                (q(&first.raw) != q(&sym.raw)).then(|| {
+                    let marked = if q(&first.raw) { &first.raw } else { &sym.raw };
+                    (None, plain(marked))
+                })
+            }
+            _ => None,
+        };
         if rank(&sym) > rank(first) {
             std::mem::swap(first, &mut sym);
+        }
+        if let Some((parent, raw)) = member {
+            first.parent = parent;
+            first.raw = raw;
         }
         first.docstring = first.docstring.take().or(sym.docstring);
         first.is_exported |= sym.is_exported;
@@ -279,6 +318,10 @@ struct Cx<'a> {
 struct Scope {
     /// The id of the enclosing class, or `None` at namespace scope.
     parent: Option<String>,
+    /// The enclosing named namespaces, outermost first, an `inline` one left
+    /// out. It is part of the id of everything at namespace scope; a class's
+    /// members get it through their parent's id.
+    chain: Vec<String>,
     /// Inside an anonymous namespace.
     anon: bool,
     /// The access level in force inside a class body (`public`, `protected`,
@@ -309,7 +352,20 @@ impl<'a> Cx<'a> {
         match node.kind() {
             "namespace_definition" => {
                 let mut inner = scope.clone();
-                inner.anon = scope.anon || node.child_by_field_name("name").is_none();
+                let name = node.child_by_field_name("name");
+                inner.anon = scope.anon || name.is_none();
+                // `namespace a::b` is `a` then `b`. An `inline` namespace (an
+                // ABI version, `v11`) is looked through, so it adds nothing.
+                let mut cursor = node.walk();
+                let inline = node.children(&mut cursor).any(|c| c.kind() == "inline");
+                if let (Some(name), false) = (name, inline) {
+                    inner.chain.extend(
+                        self.text(name)
+                            .split("::")
+                            .map(|part| part.trim().to_string())
+                            .filter(|part| !part.is_empty()),
+                    );
+                }
                 if let Some(body) = node.child_by_field_name("body") {
                     self.visit_children(body, &mut inner, out);
                 }
@@ -423,7 +479,8 @@ impl<'a> Cx<'a> {
     fn id(&self, scope: &Scope, name: &str) -> String {
         match &scope.parent {
             Some(parent) => format!("{parent}::{name}"),
-            None => format!("{}::{name}", self.file),
+            None if scope.chain.is_empty() => format!("{}::{name}", self.file),
+            None => format!("{}::{}::{name}", self.file, scope.chain.join("::")),
         }
     }
 
@@ -513,6 +570,7 @@ impl<'a> Cx<'a> {
         let before = out.len();
         let mut inner = Scope {
             parent: Some(id.clone()),
+            chain: scope.chain.clone(),
             anon: scope.anon,
             // What a member gets before the first `public:` / `private:`.
             access: Some(if raw == "class" { "private" } else { "public" }),
@@ -549,6 +607,7 @@ impl<'a> Cx<'a> {
         let inner = match &id {
             Some(id) => Scope {
                 parent: Some(id.clone()),
+                chain: scope.chain.clone(),
                 anon: scope.anon,
                 // An enumerator is as visible as its enum.
                 access: Some("public"),
@@ -764,6 +823,11 @@ impl<'a> Cx<'a> {
             } else {
                 let raw = if scope.parent.is_some() {
                     "field"
+                } else if d.name.contains("::") {
+                    // `int C::count = 0;`: a static member defined outside
+                    // its class. It belongs to the class, as a qualified
+                    // function does.
+                    "qualified_variable"
                 } else {
                     "variable"
                 };
@@ -1347,7 +1411,7 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
 }
 ";
         let syms = source(src);
-        let open = get(&syms, "db.cc::DB::Open");
+        let open = get(&syms, "db.cc::leveldb::DB::Open");
         assert_eq!(open.raw, "qualified_function");
         assert_eq!(open.parent, None);
         assert_eq!(
@@ -1355,20 +1419,139 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
             "Status DB::Open(const Options& options, DB** dbptr)"
         );
         assert_eq!(
-            get(&syms, "db.cc::DBImpl::~DBImpl").raw,
+            get(&syms, "db.cc::leveldb::DBImpl::~DBImpl").raw,
             "qualified_function"
         );
         // The initialiser list is body, not signature.
         assert_eq!(
-            get(&syms, "db.cc::DBImpl::DBImpl").signature,
+            get(&syms, "db.cc::leveldb::DBImpl::DBImpl").signature,
             "DBImpl::DBImpl(const Options& o)"
         );
     }
 
     #[test]
-    fn namespaces_are_walked_and_do_not_appear_in_ids() {
+    fn the_chain_of_named_namespaces_is_in_the_id() {
+        // Nested blocks and the `a::b` form read the same.
         let src = "namespace a { namespace b { int f(); } }\nnamespace c::d { struct S {}; }\n";
-        assert_eq!(ids(&header(src)), ["db.h::f", "db.h::S"]);
+        assert_eq!(ids(&header(src)), ["db.h::a::b::f", "db.h::c::d::S"]);
+        let src = "namespace a::b { int f(); }\nint g();\n";
+        assert_eq!(ids(&header(src)), ["db.h::a::b::f", "db.h::g"]);
+    }
+
+    #[test]
+    fn an_inline_namespace_is_transparent_and_an_anonymous_one_is_omitted() {
+        let src = "namespace fmt { inline namespace v11 { int f(); } }\n\
+                   namespace { int h(); }\n\
+                   namespace a { namespace { int k(); } }\n";
+        assert_eq!(ids(&header(src)), ["db.h::fmt::f", "db.h::h", "db.h::a::k"]);
+        // Still file-local in a source file.
+        let syms = source("namespace a { namespace { int k() { return 1; } } }\n");
+        assert!(!get(&syms, "db.cc::a::k").is_exported);
+    }
+
+    #[test]
+    fn members_carry_the_chain_through_their_class() {
+        let src = "namespace leveldb { class DB { public: int Get(); struct Opt {}; }; }\n";
+        let syms = header(src);
+        let get_ = get(&syms, "db.h::leveldb::DB::Get");
+        assert_eq!(get_.parent.as_deref(), Some("db.h::leveldb::DB"));
+        assert_eq!(
+            get(&syms, "db.h::leveldb::DB").children,
+            ["db.h::leveldb::DB::Get", "db.h::leveldb::DB::Opt"]
+        );
+    }
+
+    #[test]
+    fn an_out_of_class_definition_is_marked_and_keeps_the_chain_of_where_it_is_written() {
+        // Inside the namespace and outside it, the id is the same.
+        let inside = source("namespace leveldb { int DBImpl::Get() { return 1; } }\n");
+        let outside = source("int leveldb::DBImpl::Get() { return 1; }\n");
+        assert_eq!(ids(&inside), ["db.cc::leveldb::DBImpl::Get"]);
+        assert_eq!(ids(&outside), ["db.cc::leveldb::DBImpl::Get"]);
+        assert_eq!(inside[0].raw, "qualified_function");
+        assert_eq!(outside[0].raw, "qualified_function");
+        // A static data member defined outside its class is marked too.
+        let data = source("namespace a { int C::count = 0; }\n");
+        assert_eq!(ids(&data), ["db.cc::a::C::count"]);
+        assert_eq!(data[0].raw, "qualified_variable");
+        // A plain function and a plain variable are not.
+        let plain = source("namespace a { int f() { return 1; } int v = 2; }\n");
+        assert_eq!(plain[0].raw, "function");
+        assert_eq!(plain[1].raw, "variable");
+    }
+
+    #[test]
+    fn the_same_name_in_different_namespaces_stays_two_symbols() {
+        let src = "namespace big { int FromHost(int x); }\n\
+                   namespace little { int FromHost(int x); }\n\
+                   int FromHost(int x);\n";
+        let syms = header(src);
+        assert_eq!(
+            ids(&syms),
+            [
+                "db.h::big::FromHost",
+                "db.h::little::FromHost",
+                "db.h::FromHost"
+            ]
+        );
+        for s in &syms {
+            assert!(s.extra_spans.is_empty(), "nothing folded: {}", s.id);
+        }
+    }
+
+    #[test]
+    fn a_namespace_function_defined_qualified_beside_its_prototype_is_not_marked_qualified() {
+        // `absl::SleepFor` is the function itself, declared in its namespace
+        // and defined with its name written out. The marker is for a
+        // definition that may belong to a class; here the prototype says it
+        // does not, or an edge could never point at the function.
+        let src = "namespace absl { void SleepFor(int d); extern int n; }\n\
+                   void absl::SleepFor(int d) {}\n\
+                   int absl::n = 0;\n";
+        let syms = header(src);
+        assert_eq!(ids(&syms), ["db.h::absl::SleepFor", "db.h::absl::n"]);
+        let f = get(&syms, "db.h::absl::SleepFor");
+        assert_eq!(f.raw, "function");
+        assert!(!f.markers.iter().any(|m| m == "declaration"));
+        assert_eq!(get(&syms, "db.h::absl::n").raw, "variable");
+        // Alone, the same definition stays marked: it may be a class member.
+        let alone = header("void absl::SleepFor(int d) {}\n");
+        assert_eq!(alone[0].raw, "qualified_function");
+    }
+
+    #[test]
+    fn a_member_defined_below_its_class_in_the_same_file_stays_a_member() {
+        // Same id, so one symbol; it must stay the class's member (parent,
+        // access, kind), not become a second top-level symbol.
+        let src = "namespace n {\nclass A { public: int f(); };\nint A::f() { return 1; }\n}\n";
+        let syms = header(src);
+        assert_eq!(ids(&syms), ["db.h::n::A", "db.h::n::A::f"]);
+        let f = get(&syms, "db.h::n::A::f");
+        assert_eq!(f.parent.as_deref(), Some("db.h::n::A"));
+        assert_eq!(f.raw, "method");
+        assert!(f.markers.iter().any(|m| m == "public"));
+        assert!(
+            !f.markers.iter().any(|m| m == "declaration"),
+            "it has a body"
+        );
+        assert_eq!(f.signature, "int A::f()");
+        assert_eq!(f.extra_spans, [[2, 2]]);
+        assert_eq!(get(&syms, "db.h::n::A").children, ["db.h::n::A::f"]);
+    }
+
+    #[test]
+    fn the_same_name_in_both_branches_of_an_if_still_folds_within_a_namespace() {
+        let src = "namespace a {\n#if X\nint f();\n#else\nint f(int);\n#endif\n}\n";
+        let syms = header(src);
+        assert_eq!(ids(&syms), ["db.h::a::f"]);
+        assert_eq!(syms[0].extra_spans.len(), 1);
+    }
+
+    #[test]
+    fn a_template_specialisation_in_another_namespace_is_its_own_symbol() {
+        let src = "namespace detail { template <class T> struct hash {}; }\n\
+                   namespace std { template <> struct hash<int> {}; }\n";
+        assert_eq!(ids(&header(src)), ["db.h::detail::hash", "db.h::std::hash"]);
     }
 
     #[test]

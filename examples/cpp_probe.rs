@@ -9,7 +9,7 @@
 //! |---|---|
 //! | `F` | file, parse errors, line count |
 //! | `I` | file, `q` (quotes) or `a` (angle brackets), the include path |
-//! | `S` | file, kind (`class` `enum` `func` `proto` `macro` `test` `alias` `var`), name, line, 1 if at namespace scope |
+//! | `S` | file, kind (`class` `enum` `func` `proto` `macro` `test` `alias` `var`), name (with its namespaces: `leveldb::DB`), line, 1 if at namespace scope, 1 if a definition written outside its class |
 //! | `N` | file, name of a top-level enum, one of its enumerators |
 //! | `E` | the pack's own edge: file, the file of the target, the target symbol's name |
 //!
@@ -102,9 +102,10 @@ fn main() {
             println!("I\t{rel}\t{form}\t{path}");
         }
 
-        let raw_of: HashMap<&str, &str> = symbols
+        // id to (raw, whether it is a top-level symbol of the file).
+        let raw_of: HashMap<&str, (&str, bool)> = symbols
             .iter()
-            .map(|s| (s.id.as_str(), s.raw.as_str()))
+            .map(|s| (s.id.as_str(), (s.raw.as_str(), s.parent.is_none())))
             .collect();
         let prefix = format!("{rel}::");
         for sym in &symbols {
@@ -125,10 +126,11 @@ fn main() {
                 (_, "test") => "test",
                 (_, "enumerator") => {
                     if let Some(p) = &sym.parent
-                        && raw_of.get(p.as_str()) == Some(&"enum")
-                        && let Some(owner) = p.strip_prefix(&prefix)
-                        && !owner.contains("::")
+                        && raw_of.get(p.as_str()) == Some(&("enum", true))
+                        && p.starts_with(&prefix)
                     {
+                        // The enum as a file writes it, without its namespaces.
+                        let owner = p.rsplit("::").next().unwrap_or(p);
                         println!("N\t{rel}\t{owner}\t{name}");
                     }
                     if top { "var" } else { continue }
@@ -138,10 +140,17 @@ fn main() {
                 (_, "typedef" | "using" | "concept") => "alias",
                 _ => "var",
             };
+            // A definition written outside its class: the id has the
+            // namespaces in it too, so a `::` no longer says which this is.
+            let qualified = matches!(
+                sym.raw.as_str(),
+                "qualified_function" | "qualified_variable"
+            );
             println!(
-                "S\t{rel}\t{kind}\t{name}\t{}\t{}",
+                "S\t{rel}\t{kind}\t{name}\t{}\t{}\t{}",
                 sym.lines[0],
-                u8::from(top)
+                u8::from(top),
+                u8::from(qualified)
             );
         }
     }

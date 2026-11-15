@@ -59,7 +59,6 @@ template <class T> typename T::value_type first(const T& c) { return *c.begin();
     has(
         &syms,
         &[
-            ("helper", Callable),
             ("Buffer", Container),
             ("Buffer::operator[]", Callable),
             ("Shape", Container),
@@ -185,7 +184,7 @@ void k(std::map<int, int>& m) { if (auto it = m.find(1); it != m.end()) { auto& 
     has(
         &extract(src),
         &[
-            ("v", Value),
+            ("a::b::c::v", Value),
             ("sum", Callable),
             ("Box", Container),
             ("Box::Box", Callable),
@@ -276,11 +275,10 @@ double shapes::Circle::area() const { return 0; }
     assert_eq!(
         ids,
         [
-            "shapes.cppm::Circle",
-            "shapes.cppm::Circle::area",
+            "shapes.cppm::shapes::Circle",
+            "shapes.cppm::shapes::Circle::area",
             "shapes.cppm::ident",
             "shapes.cppm::exported_fn",
-            "shapes.cppm::shapes::Circle::area",
         ]
     );
     // Known limit: the signature starts at the declaration the grammar saw,
