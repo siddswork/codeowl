@@ -2164,6 +2164,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_callers_on_a_cpp_class_lists_the_including_and_implementing_file() {
+        let server = test_server(&[
+            ("widget.h", "class Widget { public: int size(); };\n"),
+            (
+                "user.cc",
+                "#include \"widget.h\"\nint f(Widget& w) { return w.size(); }\n",
+            ),
+            (
+                "widget.cc",
+                "#include \"widget.h\"\nint Widget::size() { return 1; }\n",
+            ),
+        ]);
+        let result = server
+            .get_callers(Parameters(IdRequest {
+                id: "widget.h::Widget".to_string(),
+            }))
+            .await
+            .unwrap();
+        let mut callers = result.0.callers;
+        callers.sort_by(|a, b| a.from_file.cmp(&b.from_file));
+        let caller = |file: &str| CallerInfo {
+            from_file: file.to_string(),
+            imported_name: "Widget".to_string(),
+        };
+        assert_eq!(callers, vec![caller("user.cc"), caller("widget.cc")]);
+    }
+
+    #[tokio::test]
     async fn get_callees_lists_the_files_imports_with_resolution() {
         // Query via "a.ts::marker" (not "helper") to confirm callees is
         // keyed off the containing FILE, not the queried symbol itself.

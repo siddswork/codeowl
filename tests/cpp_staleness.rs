@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 const HEADER: &str =
     "class Widget {\npublic:\n  int size();\nprivate:\n  int n_;\n};\nint other_fn();\n";
 const USER: &str = "#include \"widget.h\"\nint use_widget(Widget& w) { return w.size(); }\n";
+const PROSE: &str = "### Summary\nReturns the size of the widget it is given.\n### Behavior\nAsks the widget for its size and hands that value back unchanged.\n";
+const FILE_PROSE: &str = "Wraps the widget class for callers that only need its size.";
 const IMPL: &str = "#include \"widget.h\"\nint Widget::size() { return n_; }\n";
 
 struct Repo(PathBuf);
@@ -63,15 +65,16 @@ fn changes_of_symbol(
 fn a_header_edit_stales_only_the_dependants_that_name_what_changed() {
     let repo = Repo::new("stale");
     let graph = repo.graph();
-    let prose = "### Summary\nReturns the size of the widget it is given.\n### Behavior\nAsks the widget for its size and hands that value back unchanged.\n";
-    let sym_pair = submit(&graph, &repo.0, "user.cc::use_widget", prose).unwrap();
-    let file_pair = submit(
-        &graph,
-        &repo.0,
-        "user.cc",
-        "Wraps the widget class for callers that only need its size.",
-    )
-    .unwrap();
+    // The edge exists, so the "nobody moves" steps below mean something.
+    assert!(
+        graph
+            .imports()
+            .iter()
+            .any(|e| e.from_file == "user.cc" && e.imported_name == "Widget")
+    );
+    let sym_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
+    let file_pair = submit(&graph, &repo.0, "user.cc", FILE_PROSE).unwrap();
+    let impl_pair = submit(&graph, &repo.0, "widget.cc::Widget::size", PROSE).unwrap();
     let file_id = graph.find("user.cc").unwrap();
     assert!(changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &sym_pair).is_empty());
     assert!(file_changes(&graph, file_id, &file_pair).is_empty());
@@ -93,6 +96,11 @@ fn a_header_edit_stales_only_the_dependants_that_name_what_changed() {
     repo.write("widget.h", &HEADER.replace("int n_;", "long n_;"));
     let graph = repo.graph();
     assert!(changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &sym_pair).is_empty());
+    // KNOWN LIMIT until pairing (step 2b): `Widget::size` in widget.cc reads
+    // `n_`, but a private member is no part of the class's interface hash and
+    // the method is its own symbol, so it stays current. Pairing should make
+    // this stale; when it does, change this assertion.
+    assert!(changes_of_symbol(&graph, &repo.0, "widget.cc::Widget::size", &impl_pair).is_empty());
 
     // A public member's signature: the user symbol and its file both move.
     repo.write("widget.h", &HEADER.replace("int size();", "long size();"));
@@ -109,17 +117,57 @@ fn a_header_edit_stales_only_the_dependants_that_name_what_changed() {
 }
 
 #[test]
-fn callers_of_the_class_are_the_including_and_the_implementing_file() {
+fn the_class_is_reached_by_one_edge_from_the_including_and_the_implementing_file() {
     let repo = Repo::new("callers");
     let graph = repo.graph();
     let id = graph.find("widget.h::Widget").unwrap();
-    // `get_callers` is exactly this filter over the graph's edges.
-    let mut callers: Vec<&str> = graph
+    let mut edges: Vec<(&str, &str)> = graph
         .imports()
         .iter()
         .filter(|e| e.target == Some(id))
-        .map(|e| e.from_file.as_str())
+        .map(|e| (e.from_file.as_str(), e.imported_name.as_str()))
         .collect();
-    callers.sort();
-    assert_eq!(callers, ["user.cc", "widget.cc"]);
+    edges.sort();
+    // One edge per file and word, no duplicate.
+    assert_eq!(edges, [("user.cc", "Widget"), ("widget.cc", "Widget")]);
+}
+
+#[test]
+fn a_comment_only_header_edit_stales_nobody() {
+    let repo = Repo::new("comment");
+    let graph = repo.graph();
+    let sym_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
+    let file_pair = submit(&graph, &repo.0, "user.cc", FILE_PROSE).unwrap();
+    // The edge must exist, or "nobody is stale" would hold for any pack.
+    assert!(graph.imports().iter().any(|e| e.from_file == "user.cc"));
+
+    repo.write(
+        "widget.h",
+        &HEADER.replace("  int size();", "  // How many items.\n  int size();   "),
+    );
+    let graph = repo.graph();
+    let file_id = graph.find("user.cc").unwrap();
+    assert!(changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &sym_pair).is_empty());
+    assert!(file_changes(&graph, file_id, &file_pair).is_empty());
+}
+
+#[test]
+fn a_transitive_dependant_goes_stale_through_the_header_in_between() {
+    let repo = Repo::new("transitive");
+    repo.write("mid.h", "#include \"widget.h\"\nclass Mid {};\n");
+    repo.write(
+        "far.cc",
+        "#include \"mid.h\"\nint far(Widget& w) { return w.size(); }\n",
+    );
+    let graph = repo.graph();
+    let sym_pair = submit(&graph, &repo.0, "far.cc::far", PROSE).unwrap();
+    assert!(changes_of_symbol(&graph, &repo.0, "far.cc::far", &sym_pair).is_empty());
+
+    // `mid.h` never changes; the edit is two includes away.
+    repo.write("widget.h", &HEADER.replace("int size();", "long size();"));
+    let graph = repo.graph();
+    assert_eq!(
+        changes_of_symbol(&graph, &repo.0, "far.cc::far", &sym_pair),
+        ["changed:dependencies"]
+    );
 }
