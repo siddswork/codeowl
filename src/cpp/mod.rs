@@ -39,6 +39,7 @@
 pub mod edges;
 pub mod includes;
 mod macros;
+pub mod pairing;
 pub mod resolve;
 #[cfg(test)]
 mod standards;
@@ -1198,7 +1199,7 @@ fn one_line(text: &str) -> String {
 fn plain_name(text: &str) -> String {
     let name: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let name = name.trim_start_matches("::");
-    if let Some(at) = name.find("operator") {
+    if let Some(at) = operator_keyword(name) {
         // `operator+`, `operator()`: no space. `operator new`, `operator
         // delete[]`, `operator bool`: the keyword stays a separate word.
         let (head, rest) = name.split_at(at + "operator".len());
@@ -1209,13 +1210,45 @@ fn plain_name(text: &str) -> String {
         } else {
             rest.split_whitespace().collect()
         };
-        return format!("{head}{rest}");
+        // What is written before `operator` is the class (`btree<P>::`): its
+        // template arguments go, as they do for any other member, or the id
+        // would differ from the class's own `btree::operator=`.
+        let head: String = head.split_whitespace().collect();
+        return format!("{}{rest}", without_template_arguments(&head));
     }
     let name: String = name.split_whitespace().collect();
-    let name = name.as_str();
+    without_template_arguments(&name)
+}
+
+/// Where the `operator` keyword of a function name is: outside any template
+/// arguments (an `operator[]` inside `is_contiguous<…>` is an expression in an
+/// argument, not what is being declared) and as a word of its own (not the
+/// letters inside `is_operator`).
+fn operator_keyword(name: &str) -> Option<usize> {
+    let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let mut depth = 0usize;
+    for (at, c) in name.char_indices() {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            'o' if depth == 0 && name[at..].starts_with("operator") => {
+                let before = name[..at].chars().next_back();
+                let after = name[at + "operator".len()..].chars().next();
+                if !word(before) && !word(after) {
+                    return Some(at);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// `text` with every `<…>` group (nested ones too) taken out.
+fn without_template_arguments(text: &str) -> String {
     let mut out = String::new();
     let mut depth = 0usize;
-    for c in name.chars() {
+    for c in text.chars() {
         match c {
             '<' => depth += 1,
             '>' => depth = depth.saturating_sub(1),
@@ -1532,6 +1565,33 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
         for s in &syms {
             assert!(s.extra_spans.is_empty(), "nothing folded: {}", s.id);
         }
+    }
+
+    #[test]
+    fn template_arguments_are_taken_out_of_a_name_and_an_operator_keeps_its_symbol() {
+        // An `operator` inside the arguments is not the name's operator: this
+        // is a specialisation of fmt's `is_contiguous`, as written.
+        assert_eq!(
+            plain_name(
+                "detail::is_contiguous<T, void_t<decltype(std::declval<T&>().data()), \
+                 decltype(std::declval<T&>().operator[](size_t()))>>"
+            ),
+            "detail::is_contiguous"
+        );
+        // The class's arguments before an operator go; the operator's own
+        // `<`, `<<` and `<=>` stay.
+        assert_eq!(plain_name("btree<P>::operator="), "btree::operator=");
+        assert_eq!(plain_name("A<X, Y>::operator<"), "A::operator<");
+        assert_eq!(plain_name("A<X>::operator<<"), "A::operator<<");
+        assert_eq!(plain_name("operator<=>"), "operator<=>");
+        assert_eq!(plain_name("V::operator bool"), "V::operator bool");
+        assert_eq!(plain_name("V<T>::operator()"), "V::operator()");
+        // A name that merely contains the letters is no operator.
+        assert_eq!(plain_name("is_operator<T>"), "is_operator");
+        assert_eq!(
+            plain_name("operator_name<T>::value"),
+            "operator_name::value"
+        );
     }
 
     #[test]

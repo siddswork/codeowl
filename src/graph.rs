@@ -156,6 +156,7 @@ impl Node {
 
 /// One walked file's extraction output, plus the hash of its raw text —
 /// everything `Graph::build` needs to turn a file into arena nodes.
+#[derive(Debug, Clone, PartialEq)]
 pub struct FileExtraction {
     pub rel_path: String,
     pub source_hash: String,
@@ -298,7 +299,13 @@ pub struct FileExtraction {
 /// defined below its class in the same file stays that class's member when
 /// the two fold, a qualified static member is `qualified_variable`, and a
 /// spec section heading keeps the namespaces. Every cached C++ id changes.
-pub const FORMAT_VERSION: u32 = 29;
+/// 30 = `ExtractedSymbol` and `Symbol` gain `other_file_spans`, the parts of a
+/// symbol's source in another file (read by the generation task, `get_source`,
+/// the size check and the dependency scope), and the C++ pack pairs an
+/// out-of-class definition with the member or function it defines, in the
+/// index's graph build; a template class's arguments are also taken out of an
+/// operator's qualification (`btree<P>::operator=` is `btree::operator=`).
+pub const FORMAT_VERSION: u32 = 30;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
