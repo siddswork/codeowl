@@ -49,6 +49,16 @@ pub trait StackPack: Send + Sync + std::fmt::Debug {
     /// Replaces the scattered `is_test_path` / `is_ui_primitive`.
     fn classify(&self, rel_path: &str) -> FileRole;
 
+    /// The name a spec section for the top-level symbol `id` is headed by,
+    /// and found by when the spec is read back. The default is the last
+    /// `::` segment of the id, which is the heading every stored spec of the
+    /// other packs already has (a Rust trait impl's id has `::` in its type
+    /// path, and its heading is cut at the last one). A pack whose ids carry
+    /// a qualifier that tells two symbols of a file apart overrides it.
+    fn section_name<'a>(&self, id: &'a str) -> &'a str {
+        id.rsplit("::").next().unwrap_or(id)
+    }
+
     /// Parse one file into its declarations. The pack picks the grammar
     /// and maps its node kinds onto `SymbolKind`.
     fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol>;
@@ -448,6 +458,22 @@ pub fn for_graph(graph: &Graph) -> Box<dyn StackPack> {
     })
 }
 
+/// The heading of the spec section for the top-level symbol `id`: the answer
+/// of the pack that reads the id's file (`StackPack::section_name`). Found by
+/// the file's extension and not through a graph, because a stored spec is
+/// parsed without one. A file no pack reads gets the default.
+pub fn section_name(id: &str) -> &str {
+    let file = id.split("::").next().unwrap_or(id);
+    registered_packs()
+        .iter()
+        .map(|entry| (entry.build)())
+        .find(|pack| pack.source_kind(Path::new(file)).is_some())
+        .map_or_else(
+            || id.rsplit("::").next().unwrap_or(id),
+            |pack| pack.section_name(id),
+        )
+}
+
 /// The Rust stack (M14): `tree-sitter-rust` extraction over `.rs` files,
 /// exercised on CodeOwl's own repo. No feature layer (`feature_model()`
 /// takes the trait default `None` — CodeOwl has cross-cutting workflows
@@ -820,6 +846,12 @@ impl StackPack for CppStack {
 
     fn extract_symbols(&self, rel_path: &str, source: &str) -> Vec<ExtractedSymbol> {
         crate::cpp::extract_file(source, rel_path)
+    }
+
+    /// The namespaces stay: `big::FromHost` and `little::FromHost` are two
+    /// sections of one file, and a spec finds a section by its heading.
+    fn section_name<'a>(&self, id: &'a str) -> &'a str {
+        id.split_once("::").map_or(id, |(_, rest)| rest)
     }
 
     fn extract_symbols_counted(

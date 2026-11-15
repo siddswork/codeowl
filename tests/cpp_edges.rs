@@ -246,3 +246,101 @@ fn naming_the_class_still_links_it_and_a_named_enum_still_links_through_its_cons
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_namespaced_symbol_is_a_target_under_its_last_segment() {
+    let (dir, graph) = repo(
+        "namespaced",
+        &[
+            (
+                "db.h",
+                "namespace leveldb { class DB {}; enum Mode { kFast }; }\n",
+            ),
+            (
+                "a.cc",
+                "#include \"db.h\"\nvoid f() { leveldb::DB d; int m = leveldb::kFast; }\n",
+            ),
+        ],
+    );
+    let mut got: Vec<(String, String)> = edges_from(&graph, "a.cc")
+        .iter()
+        .map(|e| (e.imported_name.clone(), target_id(&graph, e)))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("DB".to_string(), "db.h::leveldb::DB".to_string()),
+            ("kFast".to_string(), "db.h::leveldb::Mode".to_string())
+        ]
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_qualified_definition_in_a_namespace_is_never_a_target() {
+    // `run` is a word `a.cc` writes, and `db.cc::n::C::run` ends in it, but it
+    // is a definition that belongs to its class, not something to name.
+    let (dir, graph) = repo(
+        "qualified-in-ns",
+        &[
+            (
+                "db.cc",
+                "namespace n { void C::run() {} int C::count = 0; }\n",
+            ),
+            (
+                "a.cc",
+                "#include \"db.cc\"\nvoid f() { run(); int x = count; }\n",
+            ),
+        ],
+    );
+    assert!(
+        edges_from(&graph, "a.cc").is_empty(),
+        "{:?}",
+        graph.imports()
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn two_namespaces_with_one_name_give_two_targets() {
+    let (dir, graph) = repo(
+        "two-ns",
+        &[
+            (
+                "e.h",
+                "namespace big { int FromHost(int); }\nnamespace little { int FromHost(int); }\n",
+            ),
+            ("a.cc", "#include \"e.h\"\nint x = FromHost(1);\n"),
+        ],
+    );
+    let mut got: Vec<String> = edges_from(&graph, "a.cc")
+        .iter()
+        .map(|e| target_id(&graph, e))
+        .collect();
+    got.sort();
+    assert_eq!(got, ["e.h::big::FromHost", "e.h::little::FromHost"]);
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_namespace_function_defined_qualified_beside_its_prototype_is_a_target() {
+    let (dir, graph) = repo(
+        "qualified-beside-prototype",
+        &[
+            (
+                "c.h",
+                "namespace absl { void SleepFor(int d); }\nvoid absl::SleepFor(int d) {}\n",
+            ),
+            (
+                "a.cc",
+                "#include \"c.h\"\nvoid f() { absl::SleepFor(1); }\n",
+            ),
+        ],
+    );
+    let edges = edges_from(&graph, "a.cc");
+    assert_eq!(edges.len(), 1, "{edges:?}");
+    assert_eq!(edges[0].imported_name, "SleepFor");
+    assert_eq!(target_id(&graph, edges[0]), "c.h::absl::SleepFor");
+    std::fs::remove_dir_all(&dir).ok();
+}

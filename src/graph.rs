@@ -293,8 +293,12 @@ pub struct FileExtraction {
 /// C++ graph has no edges and its files carry no imports. 28 = the C++ pack
 /// blanks block comments inside a directive continued over several lines
 /// before parsing, so a `#define` with `/* … */ \` is no longer dropped by
-/// tree-sitter and becomes a macro symbol.
-pub const FORMAT_VERSION: u32 = 28;
+/// tree-sitter and becomes a macro symbol. 29 = a C++ symbol's id carries the
+/// chain of its enclosing named namespaces (`db.h::leveldb::DB`), a member
+/// defined below its class in the same file stays that class's member when
+/// the two fold, a qualified static member is `qualified_variable`, and a
+/// spec section heading keeps the namespaces. Every cached C++ id changes.
+pub const FORMAT_VERSION: u32 = 29;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
