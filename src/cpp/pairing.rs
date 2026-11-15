@@ -34,6 +34,39 @@ fn is_pairable(sym: &crate::symbol::ExtractedSymbol) -> bool {
     qualified || free
 }
 
+/// The ids, after the file, that a definition may name, innermost namespace
+/// first.
+///
+/// A definition's id is the namespaces around it followed by the name as
+/// written, and the extractor records how many segments are the namespaces
+/// (`chain:N`). C++ looks the first written name up from the innermost
+/// enclosing namespace outward, so `absl::Status::X` written inside
+/// `namespace absl` (id `absl::absl::Status::X`) is `absl::Status::X`: the
+/// ids to try are the written name behind the first `N`, `N - 1`, … down to 0
+/// of the enclosing namespaces. A definition with no record (a plain
+/// function) can only name its own id.
+fn names_to_try(def: &crate::symbol::ExtractedSymbol, suffix: &str) -> Vec<String> {
+    let chain = def
+        .markers
+        .iter()
+        .find_map(|m| m.strip_prefix("chain:")?.parse::<usize>().ok());
+    let segments: Vec<&str> = suffix.split("::").collect();
+    match chain {
+        Some(n) if n <= segments.len() => (0..=n)
+            .rev()
+            .map(|k| {
+                segments[..k]
+                    .iter()
+                    .chain(&segments[n..])
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .join("::")
+            })
+            .collect(),
+        _ => vec![suffix.to_string()],
+    }
+}
+
 /// What a pass did, for the accuracy probe and the tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct PairingReport {
@@ -171,27 +204,37 @@ pub fn pair(
             };
             let wanted_field = def.raw == "qualified_variable";
             let reachable = |&&(g, _): &&(usize, usize)| reach.contains(&g);
-            let candidates: Vec<(usize, usize)> = declarations
-                .get(suffix)
-                .map(|v| {
-                    v.iter()
-                        .filter(reachable)
-                        .filter(|&&(g, s)| {
-                            let cand = &files[g].symbols[s];
-                            if (cand.raw == "field") != wanted_field {
-                                return false;
-                            }
-                            // A plain function with a body is the
-                            // implementation of a bare prototype. Another
-                            // function with a body is no prototype (an
-                            // overload, or a second definition).
-                            qualified
-                                || cand.raw == "field"
-                                || cand.markers.iter().any(|m| m == "declaration")
+            // The ids this definition may name, innermost namespace first. The
+            // first one with a declaration decides, as C++ lookup would.
+            let names = names_to_try(def, suffix);
+            let candidates: Vec<(usize, usize)> = names
+                .iter()
+                .map(|name| {
+                    declarations
+                        .get(name.as_str())
+                        .map(|v| {
+                            v.iter()
+                                .filter(reachable)
+                                .filter(|&&(g, s)| {
+                                    let cand = &files[g].symbols[s];
+                                    if (cand.raw == "field") != wanted_field {
+                                        return false;
+                                    }
+                                    // A plain function with a body is the
+                                    // implementation of a bare prototype.
+                                    // Another function with a body is no
+                                    // prototype (an overload, or a second
+                                    // definition).
+                                    qualified
+                                        || cand.raw == "field"
+                                        || cand.markers.iter().any(|m| m == "declaration")
+                                })
+                                .copied()
+                                .collect::<Vec<_>>()
                         })
-                        .copied()
-                        .collect()
+                        .unwrap_or_default()
                 })
+                .find(|found| !found.is_empty())
                 .unwrap_or_default();
             match candidates.as_slice() {
                 [(g, s)] => {
@@ -215,10 +258,16 @@ pub fn pair(
             if !qualified {
                 continue;
             }
-            let class_name = suffix.rsplit_once("::").map(|(class, _)| class);
-            let owners: Vec<(usize, usize)> = class_name
-                .and_then(|name| classes.get(name))
-                .map(|v| v.iter().filter(reachable).copied().collect())
+            let owners: Vec<(usize, usize)> = names
+                .iter()
+                .filter_map(|name| name.rsplit_once("::").map(|(class, _)| class))
+                .map(|class| {
+                    classes
+                        .get(class)
+                        .map(|v| v.iter().filter(reachable).copied().collect::<Vec<_>>())
+                        .unwrap_or_default()
+                })
+                .find(|found| !found.is_empty())
                 .unwrap_or_default();
             match owners.as_slice() {
                 [(g, s)] => {
@@ -605,6 +654,50 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn a_name_written_with_the_enclosing_namespace_again_still_pairs() {
+        // abseil's status.cc: inside `namespace absl`, `absl::Status::Make`.
+        // C++ finds `absl` by looking outward from the innermost namespace,
+        // so the entity is `absl::Status::Make`, not `absl::absl::Status::Make`.
+        let h = "namespace absl {\nclass Status {\n public:\n  static int Make(int m);\n};\n}\n";
+        let cc =
+            "#include \"s.h\"\nnamespace absl {\nint absl::Status::Make(int m) { return m; }\n}\n";
+        let (files, report) = paired(&[("s.h", h), ("s.cc", cc)]);
+        assert_eq!(report.paired, 1, "{report:?}");
+        assert_eq!(report.unmatched, 0);
+        assert!(ids(&files, "s.cc").is_empty(), "{:?}", ids(&files, "s.cc"));
+        assert_eq!(
+            find(&files, "s.h::absl::Status::Make").other_file_spans,
+            [("s.cc".to_string(), [3, 3])]
+        );
+    }
+
+    #[test]
+    fn the_repeated_namespace_may_be_an_inner_one() {
+        // Inside `namespace a { namespace b {`, `b::C::f` is `a::b::C::f`.
+        let h = "namespace a {\nnamespace b {\nclass C {\n public:\n  int f();\n};\n}\n}\n";
+        let cc =
+            "#include \"c.h\"\nnamespace a {\nnamespace b {\nint b::C::f() { return 1; }\n}\n}\n";
+        let (files, report) = paired(&[("c.h", h), ("c.cc", cc)]);
+        assert_eq!(report.paired, 1, "{report:?}");
+        assert_eq!(find(&files, "c.h::a::b::C::f").other_file_spans.len(), 1);
+    }
+
+    #[test]
+    fn the_innermost_namespace_that_holds_the_name_wins() {
+        // `a::Status` is found before `::Status` from inside `namespace a`:
+        // only the inner one gets the body, and it is not ambiguous.
+        let outer = "class Status {\n public:\n  int f();\n};\n";
+        let inner = "namespace a {\nclass Status {\n public:\n  int f();\n};\n}\n";
+        let cc =
+            "#include \"o.h\"\n#include \"i.h\"\nnamespace a {\nint Status::f() { return 1; }\n}\n";
+        let (files, report) = paired(&[("o.h", outer), ("i.h", inner), ("c.cc", cc)]);
+        assert_eq!(report.paired, 1, "{report:?}");
+        assert_eq!(report.ambiguous, 0);
+        assert_eq!(find(&files, "i.h::a::Status::f").other_file_spans.len(), 1);
+        assert!(find(&files, "o.h::Status::f").other_file_spans.is_empty());
     }
 
     #[test]

@@ -566,6 +566,14 @@ impl<'a> Cx<'a> {
                     && !has_storage_class(span, self.src, "extern")));
         let is_exported =
             !internal && self.exported(scope, has_storage_class(span, self.src, "static"));
+        let mut markers = Self::markers(scope);
+        if raw.starts_with("qualified_") {
+            // How many leading segments of the id are the namespaces around
+            // the definition; the rest is the name as written. Pairing needs
+            // the split to try shorter prefixes (`absl::Status::X` written
+            // inside `namespace absl`).
+            markers.push(format!("chain:{}", scope.chain.len()));
+        }
         out.push(ExtractedSymbol {
             id: self.id(scope, name),
             kind,
@@ -577,7 +585,7 @@ impl<'a> Cx<'a> {
             is_exported,
             source_hash: hash_text(self.text(span)),
             interface_hash: is_exported.then(|| hash_text(&sig)),
-            markers: Self::markers(scope),
+            markers,
             extra_spans: Vec::new(),
             other_file_spans: Vec::new(),
             parent: scope.parent.clone(),
@@ -1628,6 +1636,37 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
             plain_name("operator_name<T>::value"),
             "operator_name::value"
         );
+    }
+
+    #[test]
+    fn a_qualified_definition_records_how_many_segments_of_its_id_are_namespaces() {
+        // The id joins the namespaces around the definition and the name as
+        // written; pairing needs to tell them apart to try shorter prefixes.
+        let chain = |src: &str| -> Vec<String> {
+            source(src)[0]
+                .markers
+                .iter()
+                .filter(|m| m.starts_with("chain:"))
+                .cloned()
+                .collect()
+        };
+        assert_eq!(chain("int A::f() { return 1; }\n"), ["chain:0"]);
+        assert_eq!(
+            chain("namespace a { int A::f() { return 1; } }\n"),
+            ["chain:1"]
+        );
+        assert_eq!(
+            chain("namespace a { namespace b { int a::A::f() { return 1; } } }\n"),
+            ["chain:2"]
+        );
+        assert_eq!(
+            chain("namespace a::b { int A::C::f() { return 1; } }\n"),
+            ["chain:2"]
+        );
+        assert_eq!(chain("namespace a { int A::count = 0; }\n"), ["chain:1"]);
+        // Only a qualified definition carries it.
+        let plain = source("namespace a { int f() { return 1; } }\n");
+        assert!(plain[0].markers.iter().all(|m| !m.starts_with("chain:")));
     }
 
     #[test]
