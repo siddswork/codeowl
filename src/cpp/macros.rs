@@ -52,6 +52,9 @@ pub(super) enum Kind {
 pub fn blank_macros(source: &str) -> String {
     let mut bytes = source.as_bytes().to_vec();
     let mut toks = lex(source);
+    for t in toks.iter().filter(|t| t.kind == Kind::Preproc) {
+        blank_comments_in_continued_directive(&mut bytes, t.start, t.end);
+    }
     // A blanked macro can expose another (two annotations in a row), so the
     // rules run again on what is left. Four passes is far more than any real
     // declaration needs; the bound only guarantees termination.
@@ -72,6 +75,70 @@ pub fn blank_macros(source: &str) -> String {
     // Only whole tokens are overwritten, and each byte of one becomes an
     // ASCII space, so the buffer is still valid UTF-8.
     String::from_utf8(bytes).unwrap_or_else(|_| source.to_string())
+}
+
+/// Replace each block comment inside a directive that continues over several
+/// lines (a backslash joins two of its lines) with spaces, keeping line
+/// breaks. tree-sitter-cpp fails on `/* … */ \` inside a `#define` and drops
+/// the macro, and a comment in a directive means nothing to any later step.
+/// A single-line directive parses fine and is left alone. A string and a
+/// `//` comment hide a `/*`, as the lexer's own directive scan reads them.
+fn blank_comments_in_continued_directive(bytes: &mut [u8], start: usize, end: usize) {
+    let continued = bytes[start..end]
+        .windows(2)
+        .any(|w| w[0] == b'\\' && (w[1] == b'\n' || w[1] == b'\r'));
+    if !continued {
+        return;
+    }
+    let mut i = start;
+    while i < end {
+        match (bytes[i], bytes.get(i + 1).copied()) {
+            (b'"', _) => {
+                i += 1;
+                while i < end && bytes[i] != b'"' && bytes[i] != b'\n' {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            (b'\'', _) => {
+                // `'x'` and `'\x'` are characters, so a `"` or `/*` in one is
+                // not a string or a comment. Anything else (a digit
+                // separator, `1'000`) is stepped over.
+                i += match (bytes.get(i + 1), bytes.get(i + 2), bytes.get(i + 3)) {
+                    (Some(b'\\'), _, Some(b'\'')) => 4,
+                    (Some(c), Some(b'\''), _) if *c != b'\\' => 3,
+                    _ => 1,
+                };
+            }
+            (b'/', Some(b'/')) => {
+                // To the end of the line, or of the lines a backslash joins
+                // (LF or CRLF).
+                while i < end && bytes[i] != b'\n' {
+                    i += if bytes[i] == b'\\' && bytes.get(i + 1) == Some(&b'\n') {
+                        2
+                    } else if bytes[i] == b'\\' && bytes[i + 1..].starts_with(b"\r\n") {
+                        3
+                    } else {
+                        1
+                    };
+                }
+            }
+            (b'/', Some(b'*')) => {
+                let from = i;
+                i += 2;
+                while i < end && !(bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/')) {
+                    i += 1;
+                }
+                i = (i + 2).min(end);
+                for b in &mut bytes[from..i] {
+                    if *b != b'\n' && *b != b'\r' {
+                        *b = b' ';
+                    }
+                }
+            }
+            _ => i += 1,
+        }
+    }
 }
 
 /// Split `source` into tokens, dropping whitespace and comments.
@@ -981,6 +1048,50 @@ mod tests {
 
     fn unchanged(src: &str) {
         assert_eq!(blank(src), src);
+    }
+
+    #[test]
+    fn a_block_comment_inside_a_continued_directive_is_blanked() {
+        // tree-sitter-cpp fails on `/* … */ \` inside a `#define` and drops
+        // the macro (measured: `NLOHMANN_JSON_NAMESPACE_END`, 74 of the 232
+        // reference edges the pack missed).
+        let src = "#define E \\\n  }  /* c */ \\\n  }\nint x;\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
+        // A comment that spans lines keeps its line breaks.
+        let src = "#define F \\\n  a /* one\n two */ \\\n  b\n";
+        assert_eq!(blank(src), spaced(src, &["/* one\n two */"]));
+    }
+
+    #[test]
+    fn a_comment_marker_inside_a_string_of_a_continued_directive_is_kept() {
+        unchanged("#define S \\\n  \"/* not a comment */\" \\\n  x\n");
+        // A line comment hides a `/*` after it.
+        unchanged("#define L \\\n  a // see /* here \\\n  b\n");
+    }
+
+    #[test]
+    fn a_character_literal_in_a_continued_directive_does_not_open_a_string() {
+        // `'"'` is a character, not the start of a string: the comment after
+        // it must still be blanked.
+        let src = "#define Q '\"' /* c */ \\\n  x\nint y;\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
+        let src = "#define R '\\'' /* c */ \\\n  x\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
+    }
+
+    #[test]
+    fn crlf_line_endings_in_a_continued_directive() {
+        // A `//` comment continued by a backslash and CRLF swallows the next
+        // line, so the `/*` on it is not a comment of its own; a block
+        // comment before a CRLF continuation is blanked.
+        unchanged("#define L a // note \\\r\n  b /* x */ \\\r\n  c\r\n");
+        let src = "#define E \\\r\n  }  /* c */ \\\r\n  }\r\nint x;\r\n";
+        assert_eq!(blank(src), spaced(src, &["/* c */"]));
+    }
+
+    #[test]
+    fn a_comment_in_a_single_line_directive_is_left_alone() {
+        unchanged("#define G 1 /* c */\nint x;\n");
     }
 
     #[test]

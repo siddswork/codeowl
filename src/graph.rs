@@ -290,8 +290,11 @@ pub struct FileExtraction {
 /// string in a directive, which can move what a C++ file's declarations are
 /// read as. 27 = the C++ pack reads `#include`s and the words a file uses
 /// (`FileImports.identifiers`) and resolves them to symbol edges, so a cached
-/// C++ graph has no edges and its files carry no imports.
-pub const FORMAT_VERSION: u32 = 27;
+/// C++ graph has no edges and its files carry no imports. 28 = the C++ pack
+/// blanks block comments inside a directive continued over several lines
+/// before parsing, so a `#define` with `/* … */ \` is no longer dropped by
+/// tree-sitter and becomes a macro symbol.
+pub const FORMAT_VERSION: u32 = 28;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.

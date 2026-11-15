@@ -195,3 +195,54 @@ fn macros_prototypes_and_typedefs_are_targets() {
     assert_eq!(got, ["u.h::Handle", "u.h::LIMIT", "u.h::compute"]);
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn an_enumerator_inside_a_class_is_not_a_word_that_reaches_the_class() {
+    // `buffer_size` is a member constant of `Buf`; another file writing the
+    // same word names something of its own, not `Buf`.
+    let (dir, graph) = repo(
+        "class-enum",
+        &[
+            (
+                "buf.h",
+                "class Buf { public: enum { buffer_size = 8 }; };\n",
+            ),
+            ("a.cc", "#include \"buf.h\"\nint buffer_size = 4;\n"),
+        ],
+    );
+    assert!(edges_from(&graph, "a.cc").is_empty());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn naming_the_class_still_links_it_and_a_named_enum_still_links_through_its_constants() {
+    // The positive controls of the test above: without them "no edge" would
+    // hold if `buf.h` stopped resolving at all.
+    let (dir, graph) = repo(
+        "class-enum-control",
+        &[
+            (
+                "buf.h",
+                "class Buf { public: enum { buffer_size = 8 }; };\n",
+            ),
+            ("mode.h", "enum Mode { kFast };\n"),
+            (
+                "a.cc",
+                "#include \"buf.h\"\n#include \"mode.h\"\nBuf b; int x = kFast;\n",
+            ),
+        ],
+    );
+    let mut got: Vec<(String, String)> = edges_from(&graph, "a.cc")
+        .iter()
+        .map(|e| (e.imported_name.clone(), target_id(&graph, e)))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got,
+        [
+            ("Buf".to_string(), "buf.h::Buf".to_string()),
+            ("kFast".to_string(), "mode.h::Mode".to_string())
+        ]
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

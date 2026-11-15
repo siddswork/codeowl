@@ -37,7 +37,12 @@ fn targets(graph: &Graph, file: &str) -> Vec<(String, SymbolId)> {
         // list holds identifiers and not punctuation (plan section 9).
         out.push((name.to_string(), id));
         // An enumerator is written without its enum, so it is a word that
-        // reaches the enum.
+        // reaches the enum. Only an enum: the constants of an anonymous enum
+        // inside a class are members of the class, and the same word in
+        // another file names something else (measured on `fmt` and `json`).
+        if sym.raw != "enum" {
+            continue;
+        }
         for &child in graph.children_ids(id) {
             if let Some(c) = graph.get_symbol(child)
                 && c.raw == "enumerator"

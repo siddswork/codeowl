@@ -150,6 +150,7 @@ Step 2 is **not** judged by the section 7 targets of the main plan: the hard rep
 - **Fan-in is inflated.** `file_fan_in` counts edges, and this step emits one per word, so a file that uses ten enumerators of one enum adds ten to that header's count, which feeds generation priority. Not changed here (it is shared code and the other packs' order would move); see section 10.
 - **A free operator is never a target** (found by the part C review). `operator==`, `operator<<` and the like are symbols whose name is not an identifier, and the word list holds identifiers, so a file that writes `a == b` or `os << x` gets no edge to the operator declared in a header; editing it leaves that file current. Fixing it needs a rule over punctuation tokens (any use of the symbol for an `operator` symbol), a later step; measure how many such headers a repository has before choosing.
 - **An implementing file does not learn a private member changed** (found by the part D review, pinned in `tests/cpp_staleness.rs`). `Widget::size` defined in `widget.cc` reads the private `n_`, but a private member is outside the class's interface hash and the method is a separate symbol until pairing, so editing `n_` in the header leaves the method's spec current. Fix with pairing (step 2b): the out-of-class method belongs to its class and should depend on the whole class text, not its interface.
+- **A class constant is reached only through its class's name.** The constants of an anonymous enum inside a class are not words that reach the class (a file writing `buffer_size` for its own variable made 9 false edges on `fmt` and 22 on `json`). A derived class that uses the constant unqualified still names the class in its base clause, which gives the edge; a constant reached through an alias or typedef alone would not. The measurement cannot see such a miss (the reference holds no constant-to-class edges), so it is recorded here, not tested.
 - **The cache shape changes.** Every repository rebuilds its cache once after the `FORMAT_VERSION` bump.
 
 ## 10. To look at again later
@@ -220,3 +221,47 @@ Kill criteria: resolution adds well under a second (0.3 to 0.6 s including the l
 **Part D** (`tests/cpp_staleness.rs`; 2026-11-15): two end-to-end tests through `RepoIndex::open` and the real `submit`. A header `widget.h` (class `Widget` with a public and a private member, plus an unrelated `other_fn`), a user file and an implementing file. After a symbol spec and a file spec are stored for the user file: editing the unrelated symbol, and editing a private member, leave both current; editing the public member's signature makes the user symbol and its file report `changed:dependencies`. `get_callers`' filter on `Widget` lists the including and the implementing file. With edge resolution stubbed out both tests fail (negative control).
 
 **Part D, after review.** Added: a comment-only header edit stales nobody; a transitive dependant (two includes away, the middle header unchanged) goes stale; the edge is asserted to exist before the "nobody moves" steps (so they cannot pass for a pack with no edges); the callers check names the word and would show a duplicate edge; a real `get_callers` call on a C++ class in `mcp.rs`. Negative control, run by hand: replace the body of `CppStack::resolve_imports` with `Vec::new()` and run `cargo test --test cpp_staleness` and `cargo test get_callers_on_a_cpp`: the edge, the staleness and the callers tests fail. Found and recorded (section 9): an implementing file does not learn a private member changed; pinned in the test until pairing. Declined: building the fixture elsewhere than `std::env::temp_dir()` (every integration test does the same; a `TMPDIR` inside an ignoring repository is hypothetical).
+
+**Part E** (2026-11-15): `cpp_probe` prints the pack's own edges (`E` lines: the same `includes::extract`, folded symbols and `edges::resolve` the index runs, called directly because three of the four repositories have two stacks), and `compare.py` scores them (`edges_pack`) beside the stand-in; the targets now judge the pack's edges. Result, `leveldb` / `abseil` / `fmt` / `json`:
+
+| | Stand-in | Pack |
+|---|---|---|
+| Recall | 97.1 / 89.8 / 92.7 / 89.9 % | **97.1 / 89.8 / 92.7 / 89.9 %** (equal) |
+| Precision | 98.8 / 69.0 / 32.3 / 53.1 % | 98.8 / 73.2 / 48.9 / 62.2 % |
+| Edges found | 753 / 864 / 1,604 / 1,689 | 753 / 814 / 1,059 / 1,443 |
+| Only one side has | | 0 only the pack's; 0 / 50 / 545 / 246 only the stand-in's |
+
+The acceptance bar was recall and precision within one point of the stand-in. Recall is equal; precision is higher by 0 / 4.2 / 16.6 / 9.1 points, which the bar says to investigate and explain. Every edge only the stand-in has was classified (a script over the probe and the sources; none of them is an edge of the compiler's reference, which is why recall did not move):
+
+| Cause | `abseil` | `fmt` | `json` | Which side is right |
+|---|---|---|---|---|
+| A self edge: the stand-in's closure contains the file itself when includes form a cycle | 0 | 518 | 87 | The pack: no self edge by design |
+| The word `operator` against symbols the stand-in reads as `operator` | 42 | 0 | 36 | The pack. See the free-operator risk, section 9: it is a missed edge in theory, but the reference holds none |
+| A qualified definition (`static_const::value`) the stand-in reads as a top-level `value` | 8 | 20 | 48 | The pack |
+| A word only in an `#include` path or a directive keyword (`json` from `<nlohmann/json.hpp>`, `else` from `#else`) | 0 | 7 | 73 | The pack (the part A review fix) |
+| A character literal (`'m'`) the stand-in's regex does not strip | 0 | 0 | 2 | The pack |
+
+**A defect the check found.** Before this measurement the pack had 9 edges (`fmt`) and 22 (`json`) that the stand-in lacked, none of them the compiler's: the constants of an anonymous enum inside a class (`format_int`, `iterator_buffer`) were words that reached the class, so any file writing `buffer_size` linked to it. Fixed: only an enum's enumerators are words that reach it; test `an_enumerator_inside_a_class_is_not_a_word_that_reaches_the_class` (red first). No `FORMAT_VERSION` bump: `RepoIndex::open` always calls `rebuild`, which re-runs `resolve_imports` over the cached words and symbols (neither changed), and `.codeowl/graph` is only written, never read back (`Graph::load` has no caller in `src/`). A change that starts loading the saved graph must bump the version for any change to edge resolution.
+
+The targets of the main plan's section 7 are still missed on the three hard repositories (recall 89.8 / 92.7 / 89.9 % against 93; precision 73.2 / 48.9 / 62.2 % against 80); step 2 is not judged by them (section 7 above), and step 4 raises precision. Recall did not move: the stand-in and the pack find the same true edges. Why the rest are missed is investigated in the next paragraphs, and one cause fixed. The K11 row is in `NORTHSTAR.md`.
+
+**Part E, the recall gap investigated and one cause fixed** (2026-11-15). Every one of the 232 reference edges the pack missed (22 / 68 / 41 / 101) was classified by what was absent, with throwaway scripts over the probe output and the sources:
+
+| Cause | `leveldb` | `abseil` | `fmt` | `json` | Total |
+|---|---|---|---|---|---|
+| **A.** The pack extracts no symbol of that name in the header | 4 | 5 | 12 | 100 | 121 |
+| **B.** Symbol and include path exist; the file never writes the word | 18 | 63 | 29 | 1 | 111 |
+
+A, in detail: `NLOHMANN_JSON_NAMESPACE_END` alone is 74 (a `#define` with `/* … */ \` makes tree-sitter-cpp report an error and drop the macro; reproduced on the exact text); `basic_memory_buffer` 9 on `fmt` and `FastIntToBuffer` 4 on `abseil` (a class and a function behind an `absl_nonnull` annotation, both in K11's missing lists); `class Env;` and `class WriteBatch;` forward declarations on `leveldb` (4; whether a forward declaration should be a target is a design question: a user of one does not depend on the class body); about 30 others not examined one by one. B, in detail: 41 come through a macro expansion (the word is in the body of a macro the file uses: 32 `abseil`, 9 `fmt`), 70 are neither written nor brought by a macro. For the 70 the likely cause is a type the file never names (`db_impl.cc` uses `options_.block_cache` and `NewLRUCache(...)`, both `Cache*`, and never writes `Cache`; checked for that example and sampled, not verified for all), plus macros with token pasting that the check does not follow.
+
+**Fixed here: a block comment inside a continued directive.** `blank_macros` now blanks block comments inside a directive that a backslash continues over several lines (string and `//` comment aware, same length, line breaks kept) before the rules run. Two tests written red first (the lexer rule, and the `json` text end to end through `extract_counted`: no parse error, the macro is a symbol), three that must stay unchanged (a marker in a string, after a `//`, in a single-line directive). `FORMAT_VERSION` 28. After it, `leveldb` / `abseil` / `fmt` / `json`:
+
+| | Before | After |
+|---|---|---|
+| Classes | 100 / 96.6 / 92.5 / 95.9 % | 100 / 96.6 / 92.5 / 96.2 % |
+| Functions | 100 / 95.4 / 97.4 / 95.7 % | 100 / 95.4 / 97.4 / 95.9 % |
+| Edge recall | 97.1 / 89.8 / 92.7 / 89.9 % | 97.1 / 89.8 / 92.7 / **97.9 %** |
+| Edge precision | 98.8 / 73.2 / 48.9 / 62.2 % | 98.8 / 73.2 / 49.5 / 69.6 % |
+| Files partly read | 7 / 46 / 15 / 32 | 7 / 43 / 15 / 31 |
+
+`json` recall rises by 8.0 points, more than the 74 edges alone would give (7.4), because the dropped macro also hid the declarations after it; it now meets the 93 % target. Nothing fell. `fmt` finds 13 fewer edges (1,059 to 1,046) and precision rises 0.6 points. Diffing the probe's `E` lines before and after: 14 edges are gone, all from files that write the keyword `struct` to a symbol named `struct` in `format.h` (the old mis-parse of the dropped macro had left a bogus symbol of that name), and one is gained, `compile.h` to the real macro `FMT_STRING_IMPL`. The loss is false edges; none of the reference's edges was affected (recall 92.7 % both times). What is left of the gap, by the table above: macro expansion (step 3, the macro table), types never written (needs type analysis, a ceiling of a name-based pack), and the K11 missing classes and functions (extraction).

@@ -10,8 +10,9 @@ What is measured (``experiments/exp-08-cpp-tree-sitter-or-compiler.md``):
   sees defined in the files in scope, how many the pack also reports. Matched
   by (file, kind, name), counted with multiplicity so overloads count.
 * **Edges**: a file depends on a top-level symbol of another repository file.
-  The pack has no edges of its own yet (includes are plan step 2), so this
-  measures the *method the plan proposes*: follow ``#include`` transitively
+  ``edges_pack`` scores the pack's own edges (the probe's ``E`` lines);
+  ``edges_direct`` and ``edges_transitive`` score a regex stand-in, kept as a
+  cross-check: follow ``#include`` transitively
   and link to each top-level symbol of an included file whose name is written
   in the including file. Recall is the share of the compiler's edges found;
   precision the share of the found edges the compiler also has. Precision is
@@ -49,6 +50,7 @@ def strip_comments_and_strings(text):
 def read_probe(path):
     """Parse the probe's output into per-file facts (every file the probe saw)."""
     files, symbols, includes, enumerators = {}, [], collections.defaultdict(list), collections.defaultdict(list)
+    pack_edges = set()
     with open(path, errors="replace") as fh:
         for line in fh:
             p = line.rstrip("\n").split("\t")
@@ -59,9 +61,11 @@ def read_probe(path):
                 includes[p[1]].append((p[3], p[2]))
             elif tag == "N" and len(p) >= 4:
                 enumerators[p[1]].append((p[2], p[3]))
+            elif tag == "E" and len(p) >= 4:
+                pack_edges.add((p[1], p[2], p[3]))
             elif tag == "S" and len(p) >= 6:
                 symbols.append((p[1], p[2], p[3], p[5] == "1"))
-    return files, symbols, includes, enumerators
+    return files, symbols, includes, enumerators, pack_edges
 
 
 def _ratio(a, b):
@@ -72,13 +76,14 @@ def _ratio(a, b):
 
 def compare(repo, truth, probe_path):
     scope = set(truth["files"])
-    all_files, symbols, includes, enumerators = read_probe(probe_path)
+    all_files, symbols, includes, enumerators, pack_edges = read_probe(probe_path)
     # A broken reference (libclang finding no headers, nothing parsing) would
     # otherwise show up as a perfect score.
-    if not truth["defs"] or not truth["edges"] or not all_files:
+    if not truth["defs"] or not truth["edges"] or not all_files or not pack_edges:
         raise SystemExit(
             f"the check is not valid: the reference has {len(truth['defs'])} definitions and "
-            f"{len(truth['edges'])} edges, the probe saw {len(all_files)} files. "
+            f"{len(truth['edges'])} edges, the probe saw {len(all_files)} files and "
+            f"{len(pack_edges)} edges of the pack (an old probe prints none). "
             "Look at the compiler's diagnostics (--refresh to rebuild the reference)."
         )
 
@@ -215,14 +220,34 @@ def compare(repo, truth, probe_path):
         return found_edges
 
     out["reference_edges"] = len(tedges)
+    standin = set()
     for label, reach in (("direct", lambda f: direct.get(f, set())), ("transitive", closure)):
         h = edges_over(reach)
+        if label == "transitive":
+            standin = h
         tp = len(h & tedges)
         out[f"edges_{label}"] = {
             "found": len(h),
             "recall": _ratio(tp, len(tedges)),
             "precision": _ratio(tp, len(h)),
         }
+    # The pack's own edges (`E` lines of the probe), on the stand-in's terms:
+    # both ends in scope, the target named by a plain identifier.
+    pedges = {
+        (a, b, norm(n))
+        for a, b, n in pack_edges
+        if a in scope and b in scope and re.fullmatch(r"[A-Za-z_]\w*", norm(n))
+    }
+    ptp = len(pedges & tedges)
+    out["edges_pack"] = {
+        "found": len(pedges),
+        "recall": _ratio(ptp, len(tedges)),
+        "precision": _ratio(ptp, len(pedges)),
+        "only_pack": len(pedges - standin),
+        "only_standin": len(standin - pedges),
+        "only_pack_examples": [list(e) for e in sorted(pedges - standin)[:8]],
+        "only_standin_examples": [list(e) for e in sorted(standin - pedges)[:8]],
+    }
     file_ref = {(a, b) for a, b, n in tedges}
     out["file_level"] = {
         "pairs": len(file_ref),
@@ -237,7 +262,7 @@ def judge(measures, targets):
     got = {
         "classes": measures["classes"]["percent"],
         "functions": measures["functions"]["percent"],
-        "recall": measures["edges_transitive"]["recall"],
-        "precision": measures["edges_transitive"]["precision"],
+        "recall": measures["edges_pack"]["recall"],
+        "precision": measures["edges_pack"]["precision"],
     }
     return {name: (got[name], want, got[name] >= want) for name, want in targets.items()}
