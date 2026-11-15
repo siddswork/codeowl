@@ -525,6 +525,7 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
         // rules that would read `(cond)` as the macro's own arguments.
         let found = shim(toks, i, prev)
             .or_else(|| macro_after_if(toks, i, prev))
+            .or_else(|| statement_block_macro(toks, i, prev))
             .or_else(|| class_macro(toks, i, prev))
             .or_else(|| annotation_after_params(toks, i, prev))
             .or_else(|| annotation_after_member(toks, i, prev))
@@ -935,7 +936,8 @@ fn macro_before_declaration(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Optio
     // a constructor, so the macro is not its return type. A plain
     // `MY_TYPE make(int)` has neither mark and is kept.
     if let Some(close) = matching_paren(toks, last + 2) {
-        let is_constructor = is_word(prev, "explicit") || is_punct(toks.get(close + 1), ":");
+        let initialiser_list = skip_constructor_specifiers(toks, close + 1);
+        let is_constructor = is_word(prev, "explicit") || is_punct(toks.get(initialiser_list), ":");
         return is_constructor.then_some(last);
     }
     // `MACRO Type name…`: what follows `t1` decides. `MY_TYPE value;`,
@@ -947,6 +949,72 @@ fn macro_before_declaration(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Optio
         _ => false,
     };
     still_a_type.then_some(last)
+}
+
+/// The index of the first token after what a constructor may carry between
+/// its parameter list and its initialiser list: `noexcept`, `noexcept(…)`,
+/// `throw(…)` and `[[…]]` (`FMT_CONSTEXPR buffer(int n) noexcept : n_(n) {}`).
+fn skip_constructor_specifiers(toks: &[Tok], mut at: usize) -> usize {
+    loop {
+        match toks.get(at) {
+            Some(t) if t.kind == Kind::Ident && matches!(t.text, "noexcept" | "throw") => {
+                at += 1;
+                if is_punct(toks.get(at), "(") {
+                    match matching_paren(toks, at) {
+                        Some(close) => at = close + 1,
+                        None => return at,
+                    }
+                }
+            }
+            Some(t) if is_punct(Some(t), "[[") => {
+                match toks[at..].iter().position(|t| is_punct(Some(t), "]]")) {
+                    Some(end) => at += end + 1,
+                    None => return at,
+                }
+            }
+            _ => return at,
+        }
+    }
+}
+
+/// `FMT_TRY { … } FMT_CATCH(...) { … }`: macros that stand for `try` and
+/// `catch`. Positional, like the rest: a macro-looking name that starts a
+/// statement and is followed directly by a block can only be a statement
+/// macro. With no arguments (`FMT_TRY {`, `ABSL_INTERNAL_CATCH_ANY {`) that
+/// is enough. With arguments (`FMT_CATCH(...) {`) it looks like the head of a
+/// test (`TEST_F(A, B) {`), so it is taken only after the `}` of a block that
+/// a macro or `try` opened.
+fn statement_block_macro(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option<usize> {
+    if !is_macro_name(&toks[i]) {
+        return None;
+    }
+    if !prev.is_some_and(|p| p.kind == Kind::Punct && matches!(p.text, ";" | "}" | "{")) {
+        return None;
+    }
+    let last = macro_end(toks, i);
+    if !is_punct(toks.get(last + 1), "{") {
+        return None;
+    }
+    if last == i {
+        return Some(last);
+    }
+    // `CATCH(args) {`: the `}` before it closes a block opened by `TRY` or `try`.
+    let close = i - 1;
+    if !is_punct(Some(&toks[close]), "}") {
+        return None;
+    }
+    let mut depth = 0usize;
+    let open = (0..=close).rev().find(|&k| {
+        if is_punct(Some(&toks[k]), "}") {
+            depth += 1;
+        } else if is_punct(Some(&toks[k]), "{") {
+            depth -= 1;
+        }
+        depth == 0
+    })?;
+    let before = toks.get(open.checked_sub(1)?)?;
+    (is_word(Some(before), "try") || (before.kind == Kind::Ident && is_macro_name(before)))
+        .then_some(last)
 }
 
 /// `if MACRO (cond)`: `if FMT_CONSTEXPR20 (…)`.
@@ -1244,6 +1312,64 @@ mod tests {
             blank(src),
             spaced(src, &["FMT_CONSTEXPR", "FMT_INLINE", "FMT_API"])
         );
+    }
+
+    #[test]
+    fn a_constructor_behind_a_macro_with_noexcept_before_its_initialiser_list() {
+        // fmt/core.h: `FMT_CONSTEXPR buffer(grow_fun grow, size_t sz) noexcept
+        // : size_(sz) {…}`. The `:` is not right after the parameter list.
+        let src = "struct V {\n  FMT_CONSTEXPR V(int a) noexcept : x_(a) {}\n\
+                   \x20 FMT_CONSTEXPR V(int a, int b) noexcept(true) : x_(a) {}\n\
+                   \x20 FMT_CONSTEXPR V(long a) throw() : x_(a) {}\n\
+                   \x20 FMT_CONSTEXPR V(char a) [[deprecated]] : x_(a) {}\n\
+                   \x20 MY_TYPE make(int a) noexcept;\n};\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &[
+                    "FMT_CONSTEXPR",
+                    "FMT_CONSTEXPR",
+                    "FMT_CONSTEXPR",
+                    "FMT_CONSTEXPR"
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn macros_standing_for_try_and_catch_are_blanked() {
+        // fmt: `FMT_TRY { … } FMT_CATCH(...) {}`; abseil: `ABSL_INTERNAL_TRY
+        // { … } ABSL_INTERNAL_CATCH_ANY { … }`; json: `JSON_CATCH (E&) { … }`.
+        let src = "void f() {\n  FMT_TRY { flush(); }\n  FMT_CATCH(...) {}\n\
+                   \x20 ABSL_INTERNAL_TRY { g(); }\n  ABSL_INTERNAL_CATCH_ANY { h(); }\n\
+                   \x20 JSON_TRY { k(); }\n  JSON_CATCH (std::exception&) { m(); }\n}\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &[
+                    "FMT_TRY",
+                    "FMT_CATCH(...)",
+                    "ABSL_INTERNAL_TRY",
+                    "ABSL_INTERNAL_CATCH_ANY",
+                    "JSON_TRY",
+                    "JSON_CATCH (std::exception&)"
+                ]
+            )
+        );
+        // After a plain `try` block too.
+        let src = "void f() {\n  try { a(); }\n  MY_CATCH(e) { b(); }\n}\n";
+        assert_eq!(blank(src), spaced(src, &["MY_CATCH(e)"]));
+    }
+
+    #[test]
+    fn a_macro_with_arguments_before_a_block_is_left_alone_unless_a_macro_try_precedes() {
+        // gtest: the heads of test blocks, one after another.
+        unchanged("TEST_F(A, B) {\n}\nTEST_F(A, C) {\n}\n");
+        unchanged("void f() {\n  if (x) { a(); }\n  FOR_EACH(i, v) { b(); }\n}\n");
+        // An initialiser is no statement.
+        unchanged("int a[] = { 1, 2 };\nint b = BASE_VALUE + 1;\n");
     }
 
     #[test]

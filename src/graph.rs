@@ -309,7 +309,14 @@ pub struct FileExtraction {
 /// marker, how many leading segments of its id are the namespaces around it,
 /// so pairing can find a declaration when the name is written with an
 /// enclosing namespace again (`absl::Status::X` inside `namespace absl`).
-pub const FORMAT_VERSION: u32 = 31;
+/// 32 = the C++ blanking rule that recognises a constructor behind a macro
+/// skips `noexcept`, `noexcept(…)`, `throw(…)` and `[[…]]` between the
+/// parameter list and the initialiser list, so `FMT_CONSTEXPR buffer(int n)
+/// noexcept : n_(n) {}` loses its macro like the other members, and the
+/// declarations after it keep their namespace, and a macro standing for `try`
+/// or `catch` (`FMT_TRY { … } FMT_CATCH(...) { … }`, `ABSL_INTERNAL_TRY`,
+/// `JSON_TRY`) is blanked, so the class around it is no longer lost.
+pub const FORMAT_VERSION: u32 = 32;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
