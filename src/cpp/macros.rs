@@ -804,15 +804,77 @@ fn class_macro(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option<usize> {
     follows.then_some(last)
 }
 
+/// Words after which a name is an operand, not a parameter's name.
+const EXPRESSION_WORDS: &[&str] = &[
+    "and",
+    "or",
+    "not",
+    "xor",
+    "and_eq",
+    "or_eq",
+    "xor_eq",
+    "not_eq",
+    "bitand",
+    "bitor",
+    "compl",
+    "new",
+    "delete",
+    "throw",
+    "return",
+    "sizeof",
+    "alignof",
+    "typeid",
+    "co_await",
+    "co_return",
+    "co_yield",
+    "case",
+    "else",
+    "do",
+    "goto",
+    "typename",
+];
+
 /// `void f(T&& value MACRO)`: an annotation after a parameter's name, as
-/// the last thing before the `)` or a `,`. A macro-looking name that follows
-/// a name and is followed by the end of the parameter has no other reading.
+/// the last thing before the `)` or a `,`. Only inside parentheses (a
+/// template parameter `size_t N_MAX,` has none), and not after a word that
+/// takes an expression (`a and FLAG_ON)`, `new MY_TYPE)`). A parameter named
+/// like a macro (`int N_MAX)`) loses its name; names are not symbols.
 fn annotation_after_parameter(toks: &[Tok], i: usize) -> Option<usize> {
     if !is_macro_name(&toks[i]) {
         return None;
     }
     let before = toks.get(i.checked_sub(1)?)?;
-    if before.kind != Kind::Ident || DECL_KEYWORDS.contains(&before.text) {
+    if before.kind != Kind::Ident
+        || DECL_KEYWORDS.contains(&before.text)
+        || EXPRESSION_WORDS.contains(&before.text)
+    {
+        return None;
+    }
+    // The innermost open bracket must be a `(`; a `;` or a brace first
+    // means this is no parameter list.
+    let mut depth = 0usize;
+    let inside_parens = toks[..i].iter().rev().find_map(|t| {
+        if t.kind == Kind::Preproc {
+            return None;
+        }
+        if t.kind != Kind::Punct {
+            return None;
+        }
+        match t.text {
+            ")" => {
+                depth += 1;
+                None
+            }
+            "(" if depth == 0 => Some(true),
+            "(" => {
+                depth -= 1;
+                None
+            }
+            ";" | "{" | "}" => Some(false),
+            _ => None,
+        }
+    })?;
+    if !inside_parens {
         return None;
     }
     let last = macro_end(toks, i);
@@ -1037,19 +1099,20 @@ fn skip_constructor_specifiers(toks: &[Tok], mut at: usize) -> usize {
 /// after `template` must not be `<`. Taken only where a statement starts, and
 /// only up to a `;` met before any `{`.
 fn explicit_instantiation(toks: &[Tok], i: usize) -> Option<usize> {
-    // After a directive (`#endif`) a statement starts too.
-    let after_directive = i
-        .checked_sub(1)
-        .is_some_and(|p| toks[p].kind == Kind::Preproc);
-    if i != 0 && !after_directive && !starts_a_statement(toks, i) {
-        return None;
-    }
+    // The cheap word test first: this runs on every identifier.
     let template_at = if is_word(toks.get(i), "extern") {
         i + 1
     } else {
         i
     };
     if !is_word(toks.get(template_at), "template") {
+        return None;
+    }
+    // After a directive (`#endif`) a statement starts too.
+    let after_directive = i
+        .checked_sub(1)
+        .is_some_and(|p| toks[p].kind == Kind::Preproc);
+    if i != 0 && !after_directive && !starts_a_statement(toks, i) {
         return None;
     }
     let after = toks.get(template_at + 1)?;
@@ -1063,6 +1126,11 @@ fn explicit_instantiation(toks: &[Tok], i: usize) -> Option<usize> {
     }
     let mut depth = 0usize;
     for (k, t) in toks.iter().enumerate().skip(template_at + 1) {
+        // A directive inside the statement (`#if` between its parts) is not
+        // ours to blank: the conditional pass must still see it.
+        if t.kind == Kind::Preproc {
+            return None;
+        }
         if t.kind != Kind::Punct {
             continue;
         }
@@ -1222,6 +1290,48 @@ mod tests {
         let rows = |s: &str| s.bytes().filter(|&b| b == b'\n').count();
         assert_eq!(rows(&out), rows(src), "line breaks must not change");
         out
+    }
+
+    #[test]
+    fn an_annotation_after_a_parameter_is_blanked_before_a_paren_or_a_comma() {
+        let src = "void f(T&& v MY_ANNOT, U u MY_CALL(1, 2), int w);\n";
+        assert_eq!(
+            blank(src),
+            spaced(src, &["MY_ANNOT", "MY_CALL(1, 2)"]),
+            "both forms, before `,` and before `)`"
+        );
+    }
+
+    #[test]
+    fn a_name_after_an_operator_word_or_in_a_template_parameter_list_is_kept() {
+        for src in [
+            "void g(int a) { if (a and FLAG_ON) { } }\n",
+            "void g(int a) { if (not FLAG_ON) { } }\n",
+            "void g() { f(new MY_TYPE); }\n",
+            "void g() { h(throw MY_ERR); }\n",
+            "template <size_t N_MAX, typename T> struct S {};\n",
+        ] {
+            assert_eq!(blank(src), src, "{src}");
+        }
+    }
+
+    #[test]
+    fn an_explicit_instantiation_is_blanked_to_its_semicolon_and_not_across_a_directive() {
+        let src = "extern template class Foo<int>;\ntemplate struct Bar<char>;\n\
+                   template <class T> struct S;\ntemplate <> struct S<int> {};\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &[
+                    "extern template class Foo<int>;",
+                    "template struct Bar<char>;"
+                ]
+            )
+        );
+        // A directive inside the statement is left for the conditional pass.
+        let split = "extern template class Foo<\n#if A\nint\n#else\nchar\n#endif\n>;\n";
+        assert_eq!(blank(split), split);
     }
 
     /// `src` with the first occurrence of each given piece replaced by
