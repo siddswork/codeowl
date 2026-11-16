@@ -844,35 +844,123 @@ const EXPRESSION_WORDS: &[&str] = &[
     "typename",
 ];
 
-/// `if (cond)`, `while (cond)`, `for (…)` or `switch (cond)` followed at once
-/// by the end of a conditional (`#endif`, `#else`, `#elif`): the head was
+/// `if (cond)`, `while (cond)`, `for (…)` or `switch (cond)` (also
+/// `if constexpr (cond)`) followed at once by the end of a conditional
+/// (`#endif`, `#else`, `#elif`, `#elifdef`, `#elifndef`): the head was
 /// compiled with one branch and the block belongs to all of them, which the
-/// grammar cannot read. Returns the head's `)`.
+/// grammar cannot read. Returns the head's `)`. The `while` that ends a
+/// `do { … } while (cond)` is not a head and is left alone.
 fn split_control_head(toks: &[Tok], i: usize) -> Option<usize> {
     if !matches!(toks[i].text, "if" | "while" | "for" | "switch") {
         return None;
     }
-    let close = matching_paren(toks, i + 1)?;
+    let open = if is_word(toks.get(i + 1), "constexpr") && toks[i].text == "if" {
+        i + 2
+    } else {
+        i + 1
+    };
+    let close = matching_paren(toks, open)?;
     let next = toks.get(close + 1)?;
-    (next.kind == Kind::Preproc && matches!(directive(next), "endif" | "else" | "elif"))
-        .then_some(close)
+    if !(next.kind == Kind::Preproc
+        && matches!(
+            directive(next),
+            "endif" | "else" | "elif" | "elifdef" | "elifndef"
+        ))
+    {
+        return None;
+    }
+    if toks[i].text == "while" && ends_a_do_block(toks, i) {
+        return None;
+    }
+    Some(close)
+}
+
+/// Whether the `}` just before `toks[i]` closes the block of a `do`.
+fn ends_a_do_block(toks: &[Tok], i: usize) -> bool {
+    let Some(close) = i.checked_sub(1).filter(|&c| is_punct(Some(&toks[c]), "}")) else {
+        return false;
+    };
+    let mut depth = 0usize;
+    let open = (0..=close).rev().find(|&k| {
+        if is_punct(Some(&toks[k]), "}") {
+            depth += 1;
+        } else if is_punct(Some(&toks[k]), "{") {
+            depth -= 1;
+        }
+        depth == 0
+    });
+    open.and_then(|o| o.checked_sub(1))
+        .is_some_and(|h| is_word(Some(&toks[h]), "do"))
+}
+
+/// The words in front of the innermost `{` that is still open at `toks[i]`
+/// (`["namespace", "detail"]`, `["class", "A"]`), or `None` at file scope. A
+/// scan back to the previous `;`, `}` or `{`.
+fn enclosing_head<'a>(toks: &[Tok<'a>], i: usize) -> Option<Vec<&'a str>> {
+    let mut depth = 0usize;
+    let open = (0..i).rev().find(|&k| {
+        if is_punct(Some(&toks[k]), "}") {
+            depth += 1;
+            false
+        } else if is_punct(Some(&toks[k]), "{") {
+            if depth == 0 {
+                true
+            } else {
+                depth -= 1;
+                false
+            }
+        } else {
+            false
+        }
+    })?;
+    let mut words = Vec::new();
+    for t in toks[..open].iter().rev() {
+        if t.kind == Kind::Preproc {
+            continue;
+        }
+        if t.kind == Kind::Punct && matches!(t.text, ";" | "{" | "}") {
+            break;
+        }
+        if t.kind == Kind::Ident {
+            words.push(t.text);
+        }
+    }
+    Some(words)
 }
 
 /// `DEFINE_DECORATOR(timeout, double, 0);`: a macro call that is a statement
-/// of its own. Taken only when an argument is a bare literal (`0`, `""`),
-/// which no parameter list can hold (`f(int a = 0)` has an `=` before its
-/// literal), so a prototype written as `NAME(Type, Type);` is untouched.
-/// The `;` goes with it.
+/// of its own, at file or namespace scope. Taken only when one of the call's
+/// own arguments is a bare literal (`0`, `""`), which no parameter list can
+/// hold (`f(int a = 0)` has an `=` before its literal), so a prototype
+/// written as `NAME(Type, Type);` is untouched. The `;` goes with it.
+///
+/// A declaration such as `ABSL_FLAG(int, n, 5, "doc");` is lost with it: the
+/// pack could not read it before either, and the alternative was to lose the
+/// namespaces of everything after.
 fn statement_macro_call(toks: &[Tok], i: usize) -> Option<usize> {
     if !is_macro_name(&toks[i]) || !starts_a_statement_or_directive(toks, i) {
+        return None;
+    }
+    if enclosing_head(toks, i).is_some_and(|h| !h.contains(&"namespace")) {
         return None;
     }
     let close = matching_paren(toks, i + 1)?;
     if !is_punct(toks.get(close + 1), ";") {
         return None;
     }
-    let literal_argument = (i + 2..close).any(|k| {
-        matches!(toks[k].kind, Kind::Number | Kind::Str)
+    let mut depth = 0usize;
+    let literal_argument = (i + 1..=close).any(|k| {
+        let t = &toks[k];
+        if t.kind == Kind::Punct {
+            match t.text {
+                "(" | "[" | "{" => depth += 1,
+                ")" | "]" | "}" => depth -= 1,
+                _ => {}
+            }
+            return false;
+        }
+        depth == 1
+            && matches!(t.kind, Kind::Number | Kind::Str)
             && (is_punct(toks.get(k - 1), "(") || is_punct(toks.get(k - 1), ","))
             && (is_punct(toks.get(k + 1), ",") || k + 1 == close)
     });
@@ -892,6 +980,13 @@ fn starts_a_statement_or_directive(toks: &[Tok], i: usize) -> bool {
 /// list are not touched.
 fn access_label_macro(toks: &[Tok], i: usize) -> Option<usize> {
     if !is_macro_name(&toks[i]) || !is_punct(toks.get(i + 1), ":") {
+        return None;
+    }
+    // A label belongs in a class; `END_LABEL:` in a function body is a
+    // `goto` target.
+    if !enclosing_head(toks, i)
+        .is_some_and(|h| h.iter().any(|w| matches!(*w, "class" | "struct" | "union")))
+    {
         return None;
     }
     let before = i.checked_sub(1).map(|p| &toks[p]);
@@ -1447,6 +1542,36 @@ mod tests {
                 ]
             )
         );
+    }
+
+    #[test]
+    fn every_control_head_split_by_a_directive_is_blanked_and_a_do_while_is_not() {
+        for (head, dir) in [
+            ("while (x)", "#endif"),
+            ("for (;;)", "#else"),
+            ("switch (x)", "#elif B"),
+            ("if constexpr (x)", "#endif"),
+            ("if (x)", "#elifdef B"),
+            ("if (x)", "#elifndef B"),
+        ] {
+            let src = format!("void f() {{\n#if A\n  {head}\n{dir}\n  {{ g(); }}\n#endif\n}}\n");
+            assert_eq!(blank(&src), spaced(&src, &[head]), "{head} / {dir}");
+        }
+        // The `while` that ends a `do`, and a head with a statement after it.
+        let keep = "void f() {\n  do { x(); } while (c)\n#endif\n  ;\n  if (y) z();\n#endif\n}\n";
+        assert_eq!(blank(keep), keep, "do-while");
+    }
+
+    #[test]
+    fn a_literal_nested_in_an_argument_or_a_statement_inside_a_body_does_not_blank_the_call() {
+        for src in [
+            "namespace n {\nMY_MACRO(Foo(1, 2), x);\n}\n",
+            "void f() {\n  LOG_INFO(\"x\");\n  CHECK_EQ(g(x), 0);\n}\n",
+            "struct S {\n  MEMBER_MACRO(int, 3);\n};\n",
+            "void f() {\n  goto END_LABEL;\n  END_LABEL:\n  return;\n}\n",
+        ] {
+            assert_eq!(blank(src), src, "{src}");
+        }
     }
 
     /// `src` with the first occurrence of each given piece replaced by
