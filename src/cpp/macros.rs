@@ -521,12 +521,21 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
             i = close + 1;
             continue;
         }
+        // `extern template …;` and `template class X<…>;`: explicit
+        // instantiations, which declare nothing new and which the grammar
+        // cannot read.
+        if let Some(last) = explicit_instantiation(toks, i) {
+            out.push((t.start, toks[last].end));
+            i = last + 1;
+            continue;
+        }
         // Order matters once: `if MACRO (cond)` must be tried before the
         // rules that would read `(cond)` as the macro's own arguments.
         let found = shim(toks, i, prev)
             .or_else(|| macro_after_if(toks, i, prev))
             .or_else(|| statement_block_macro(toks, i, prev))
             .or_else(|| class_macro(toks, i, prev))
+            .or_else(|| annotation_after_parameter(toks, i))
             .or_else(|| annotation_after_params(toks, i, prev))
             .or_else(|| annotation_after_member(toks, i, prev))
             .or_else(|| macro_alone_on_line(toks, i, prev))
@@ -795,6 +804,22 @@ fn class_macro(toks: &[Tok], i: usize, prev: Option<&Tok>) -> Option<usize> {
     follows.then_some(last)
 }
 
+/// `void f(T&& value MACRO)`: an annotation after a parameter's name, as
+/// the last thing before the `)` or a `,`. A macro-looking name that follows
+/// a name and is followed by the end of the parameter has no other reading.
+fn annotation_after_parameter(toks: &[Tok], i: usize) -> Option<usize> {
+    if !is_macro_name(&toks[i]) {
+        return None;
+    }
+    let before = toks.get(i.checked_sub(1)?)?;
+    if before.kind != Kind::Ident || DECL_KEYWORDS.contains(&before.text) {
+        return None;
+    }
+    let last = macro_end(toks, i);
+    let next = toks.get(last + 1)?;
+    (next.kind == Kind::Punct && matches!(next.text, ")" | ",")).then_some(last)
+}
+
 /// `void f() MACRO(args);`: an annotation after a declarator's parameter
 /// list (and any `const` / `noexcept` / `override`).
 fn annotation_after_params(toks: &[Tok], i: usize, _prev: Option<&Tok>) -> Option<usize> {
@@ -999,6 +1024,57 @@ fn skip_constructor_specifiers(toks: &[Tok], mut at: usize) -> usize {
             _ => return at,
         }
     }
+}
+
+/// An explicit instantiation: `extern template void f<int>(int);` (a
+/// declaration) or `template class X<int>;` / `template struct X<int>;` (a
+/// definition). Both name something declared elsewhere, so nothing is lost by
+/// blanking them to the `;`. tree-sitter-cpp reports an error for each, and
+/// several of them followed by a directive leave the enclosing namespaces
+/// unclosed in the tree (abseil `raw_hash_set.h`, `status.h`).
+///
+/// `template <…>` (a template or a specialisation) never matches: the word
+/// after `template` must not be `<`. Taken only where a statement starts, and
+/// only up to a `;` met before any `{`.
+fn explicit_instantiation(toks: &[Tok], i: usize) -> Option<usize> {
+    // After a directive (`#endif`) a statement starts too.
+    let after_directive = i
+        .checked_sub(1)
+        .is_some_and(|p| toks[p].kind == Kind::Preproc);
+    if i != 0 && !after_directive && !starts_a_statement(toks, i) {
+        return None;
+    }
+    let template_at = if is_word(toks.get(i), "extern") {
+        i + 1
+    } else {
+        i
+    };
+    if !is_word(toks.get(template_at), "template") {
+        return None;
+    }
+    let after = toks.get(template_at + 1)?;
+    if after.kind == Kind::Punct {
+        return None;
+    }
+    // `extern template` takes any declaration; a bare `template` only a
+    // class-key (`template void f<int>(int);` already parses).
+    if template_at == i && !matches!(after.text, "class" | "struct" | "union") {
+        return None;
+    }
+    let mut depth = 0usize;
+    for (k, t) in toks.iter().enumerate().skip(template_at + 1) {
+        if t.kind != Kind::Punct {
+            continue;
+        }
+        match t.text {
+            "(" | "[" => depth += 1,
+            ")" | "]" => depth = depth.saturating_sub(1),
+            "{" | "}" => return None,
+            ";" if depth == 0 => return Some(k),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// `FMT_TRY { … } FMT_CATCH(...) { … }`: macros that stand for `try` and

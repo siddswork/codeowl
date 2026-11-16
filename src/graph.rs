@@ -316,7 +316,13 @@ pub struct FileExtraction {
 /// declarations after it keep their namespace, and a macro standing for `try`
 /// or `catch` (`FMT_TRY { … } FMT_CATCH(...) { … }`, `ABSL_INTERNAL_TRY`,
 /// `JSON_TRY`) is blanked, so the class around it is no longer lost.
-pub const FORMAT_VERSION: u32 = 32;
+/// 33 = the C++ blanking rule for explicit instantiations: `extern template
+/// …;` and `template class X<…>;` are blanked to the `;`. The grammar cannot
+/// read them, and several followed by a directive left the namespaces around
+/// them unclosed, so the declarations before them lost their namespaces.
+/// An annotation macro after a parameter's name (`T&& value MACRO)`) is
+/// blanked for the same reason.
+pub const FORMAT_VERSION: u32 = 33;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
