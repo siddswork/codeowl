@@ -529,6 +529,14 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
             i = last + 1;
             continue;
         }
+        // `if (cond)` / `#endif` / `{ … }`: a condition whose block lies
+        // outside the conditional that holds the head. Blank the head and
+        // the block stands alone.
+        if let Some(close) = split_control_head(toks, i) {
+            out.push((t.start, toks[close].end));
+            i = close + 1;
+            continue;
+        }
         // Order matters once: `if MACRO (cond)` must be tried before the
         // rules that would read `(cond)` as the macro's own arguments.
         let found = access_label_macro(toks, i)
@@ -539,6 +547,7 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
             .or_else(|| annotation_after_parameter(toks, i))
             .or_else(|| annotation_after_params(toks, i, prev))
             .or_else(|| annotation_after_member(toks, i, prev))
+            .or_else(|| statement_macro_call(toks, i))
             .or_else(|| macro_alone_on_line(toks, i, prev))
             .or_else(|| macro_before_declaration(toks, i, prev));
         match found {
@@ -834,6 +843,46 @@ const EXPRESSION_WORDS: &[&str] = &[
     "goto",
     "typename",
 ];
+
+/// `if (cond)`, `while (cond)`, `for (…)` or `switch (cond)` followed at once
+/// by the end of a conditional (`#endif`, `#else`, `#elif`): the head was
+/// compiled with one branch and the block belongs to all of them, which the
+/// grammar cannot read. Returns the head's `)`.
+fn split_control_head(toks: &[Tok], i: usize) -> Option<usize> {
+    if !matches!(toks[i].text, "if" | "while" | "for" | "switch") {
+        return None;
+    }
+    let close = matching_paren(toks, i + 1)?;
+    let next = toks.get(close + 1)?;
+    (next.kind == Kind::Preproc && matches!(directive(next), "endif" | "else" | "elif"))
+        .then_some(close)
+}
+
+/// `DEFINE_DECORATOR(timeout, double, 0);`: a macro call that is a statement
+/// of its own. Taken only when an argument is a bare literal (`0`, `""`),
+/// which no parameter list can hold (`f(int a = 0)` has an `=` before its
+/// literal), so a prototype written as `NAME(Type, Type);` is untouched.
+/// The `;` goes with it.
+fn statement_macro_call(toks: &[Tok], i: usize) -> Option<usize> {
+    if !is_macro_name(&toks[i]) || !starts_a_statement_or_directive(toks, i) {
+        return None;
+    }
+    let close = matching_paren(toks, i + 1)?;
+    if !is_punct(toks.get(close + 1), ";") {
+        return None;
+    }
+    let literal_argument = (i + 2..close).any(|k| {
+        matches!(toks[k].kind, Kind::Number | Kind::Str)
+            && (is_punct(toks.get(k - 1), "(") || is_punct(toks.get(k - 1), ","))
+            && (is_punct(toks.get(k + 1), ",") || k + 1 == close)
+    });
+    literal_argument.then_some(close + 1)
+}
+
+/// [`starts_a_statement`], or the start of the file, or just after a directive.
+fn starts_a_statement_or_directive(toks: &[Tok], i: usize) -> bool {
+    i == 0 || toks[i - 1].kind == Kind::Preproc || starts_a_statement(toks, i)
+}
 
 /// A macro that stands for an access label: `JSON_PRIVATE_UNLESS_TESTED:`
 /// (expands to `public` or `private`), or `public Q_SLOTS:`. Which label it is
@@ -1382,6 +1431,22 @@ mod tests {
         ] {
             assert_eq!(blank(src), src, "{src}");
         }
+    }
+
+    #[test]
+    fn a_statement_macro_call_is_blanked_only_with_a_literal_argument() {
+        let src = "struct a {};\nDEFINE_DECO(timeout, double, 0);\nDEFINE_DECO(d, const char*, \"\");\n\
+                   int f(int x = 0);\nSOME_CALL(x);\nvoid g(int, int);\n";
+        assert_eq!(
+            blank(src),
+            spaced(
+                src,
+                &[
+                    "DEFINE_DECO(timeout, double, 0);",
+                    "DEFINE_DECO(d, const char*, \"\");"
+                ]
+            )
+        );
     }
 
     /// `src` with the first occurrence of each given piece replaced by
