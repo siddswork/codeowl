@@ -1675,6 +1675,68 @@ int outside();
         assert!(have.contains(&"core.h::detail::after"), "{have:?}");
     }
 
+    /// abseil `raw_hash_set.h`, reduced from 4849 lines: the grammar cannot
+    /// read `extern template …;`; with three of them and a directive after
+    /// the namespace the namespaces never close in the tree, and every id
+    /// before them lost `absl::container_internal`.
+    const EXPLICIT_INSTANTIATIONS: &str = "\
+namespace absl {
+namespace container_internal {
+struct Probe { int x; };
+extern template void* Grow<1, true>(CommonFields&, const PolicyFunctions&, EncodedHashKey, HashForKeyFn, bool);
+extern template void* Grow<2, true>(CommonFields&, const PolicyFunctions&, EncodedHashKey, HashForKeyFn, bool);
+extern template void* Grow<3, true>(CommonFields&, const PolicyFunctions&, EncodedHashKey, HashForKeyFn, bool);
+template class Widget<int>;
+#if defined(X)
+extern template class Gadget<char>;
+#endif
+template struct Gadget<char>;
+}  // namespace container_internal
+}  // namespace absl
+#undef SOME_MACRO
+";
+
+    #[test]
+    fn explicit_instantiations_do_not_cost_the_declarations_before_them_their_namespaces() {
+        let (syms, errors) = extract_counted(EXPLICIT_INSTANTIATIONS, "raw_hash_set.h");
+        let have = ids(&syms);
+        assert!(
+            have.contains(&"raw_hash_set.h::absl::container_internal::Probe"),
+            "{have:?}"
+        );
+        assert_eq!(errors, 0, "nothing is left for the grammar to fail on");
+    }
+
+    #[test]
+    fn an_annotation_after_a_parameter_does_not_cost_what_follows_its_namespace() {
+        // abseil `raw_hash_set.h` `insert(T&& value ABSL_INTERNAL_ATTRIBUTE_
+        // CAPTURED_BY_THIS)`: the macro sat between the name and the `)`, the
+        // grammar failed, and the namespaces of everything after were lost.
+        let src = "namespace absl {\nnamespace inner {\nclass C {\n public:\n  \
+                   template <class T, int&..., std::enable_if_t<A<T>::value, int> = 0>\n  \
+                   std::pair<int, bool> insert(\n      T&& value ABSL_CAPTURED_BY_THIS)\n      \
+                   ABSL_LIFETIME_BOUND {\n    return {};\n  }\n private:\n  int x_;\n};\n\
+                   struct after { int y; };\n}\n}\n";
+        let (syms, errors) = extract_counted(src, "h.h");
+        let have = ids(&syms);
+        assert!(have.contains(&"h.h::absl::inner::after"), "{have:?}");
+        assert_eq!(errors, 0);
+    }
+
+    #[test]
+    fn a_template_declaration_that_looks_like_an_instantiation_is_kept() {
+        // `template <typename T> struct S;` and a full specialisation both
+        // declare something; only `template class X<…>;` (no `<` after
+        // `template`) instantiates.
+        let src = "template <typename T> struct S;\ntemplate <> struct S<int> { int x; };\n\
+                   template <typename T> void f(T);\ntemplate <> void f<int>(int) {}\n";
+        let (syms, errors) = extract_counted(src, "t.h");
+        assert_eq!(errors, 0);
+        let have = ids(&syms);
+        assert!(have.contains(&"t.h::S"), "{have:?}");
+        assert!(have.contains(&"t.h::f"), "{have:?}");
+    }
+
     #[test]
     fn a_constructor_behind_a_macro_does_not_cost_the_declarations_after_it_their_namespace() {
         let (syms, errors) = extract_counted(LOST_NAMESPACE, "core.h");
