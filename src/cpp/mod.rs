@@ -1724,6 +1724,46 @@ template struct Gadget<char>;
     }
 
     #[test]
+    fn a_macro_access_label_does_not_cost_the_class_its_namespace() {
+        // nlohmann `iter_impl.hpp`: the label macro made the grammar fail and
+        // the class and everything after lost `detail`.
+        let src = "namespace detail {\ntemplate <typename T>\nclass iter_impl {\n public:\n  \
+                   JSON_PRIVATE_UNLESS_TESTED:\n    void set_end() noexcept { }\n  public:\n    \
+                   bool operator<(const iter_impl& o) const { return true; }\n};\n}\n";
+        let (syms, errors) = extract_counted(src, "i.hpp");
+        let have = ids(&syms);
+        assert!(have.contains(&"i.hpp::detail::iter_impl"), "{have:?}");
+        assert_eq!(errors, 0);
+    }
+
+    #[test]
+    fn a_condition_split_by_a_directive_does_not_cost_what_follows_its_namespaces() {
+        // nlohmann `view/scan.hpp`: `#if X` / `if (cond)` / `#endif` / `{ … }`,
+        // the head in one branch and the block outside it.
+        let src = "namespace detail {\nnamespace view {\nint scan(int p) {\n  for (;;) {\n\
+                   #if !SSE2\nstop:\n#endif\n    if (p < 1) {\n    }\n\
+                   #if VECTOR\n#if DISPATCH\n    if (LIKELY(cpu()))\n#endif\n    {\n      return 1;\n    }\n#endif\n  }\n}\n\
+                   int skip(int p) {\n  while (p >= 16) {\n#define STEP(i) if (is_digit(p[i])) {} else { return 1; }\n  }\n  return 0;\n}\n\
+                   }\n}\n";
+        let (syms, _) = extract_counted(src, "scan.hpp");
+        let have = ids(&syms);
+        assert!(have.contains(&"scan.hpp::detail::view::skip"), "{have:?}");
+    }
+
+    #[test]
+    fn a_macro_call_with_a_literal_argument_does_not_cost_what_follows_its_namespace() {
+        // doctest `DOCTEST_DEFINE_DECORATOR(timeout, double, 0);` at
+        // namespace scope: not a declaration, and the grammar failed on it.
+        let src = "namespace doctest {\nstruct a { int x; };\n\
+                   DEFINE_DECORATOR(description, const char*, \"\");\n\
+                   DEFINE_DECORATOR(timeout, double, 0);\n}\nstruct z {};\n";
+        let (syms, errors) = extract_counted(src, "d.h");
+        let have = ids(&syms);
+        assert!(have.contains(&"d.h::z"), "{have:?}");
+        assert_eq!(errors, 0);
+    }
+
+    #[test]
     fn a_template_declaration_that_looks_like_an_instantiation_is_kept() {
         // `template <typename T> struct S;` and a full specialisation both
         // declare something; only `template class X<…>;` (no `<` after

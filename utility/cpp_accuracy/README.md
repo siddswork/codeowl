@@ -63,6 +63,35 @@ about a second. Re-running after a change to the pack is therefore cheap.
   classes, 99 % of functions, 97 % recall, 98 % precision; on macro- and
   template-heavy code 95 %, 97 %, 93 %, 80 %.
 
+## Why a namespace was lost
+
+A declaration whose id lacks the namespaces around it means the grammar
+could not read something near it, and the recovery dropped the scope. Each
+cause found so far is a blanking rule (`src/cpp/macros.rs`); the tools here
+find the next one. They need `cargo build --release --example cpp_ids
+--example cpp_probe` and the test repositories.
+
+```
+# 1. count the ids that lack their namespaces, per repository
+target/release/examples/cpp_probe ../test-repos/abseil-cpp > /tmp/abseil.tsv
+python3 utility/cpp_accuracy/reduce/chainmeasure.py ../test-repos/abseil-cpp /tmp/abseil.tsv
+
+# 2. shrink one file that has them to the smallest that still does
+python3 utility/cpp_accuracy/reduce/reduce.py ../test-repos/abseil-cpp/absl/log/internal/log_message.h /tmp/reduced.h
+```
+
+`chainmeasure.py` reads the namespaces from the braces (comments, strings and
+directives out) and compares them with the id the pack gave; it is the
+oracle, and it knows nothing of the pack's blanking. A file with namespaces
+opened in both branches of an `#if` can be flagged wrongly, and a redundantly
+qualified definition (`doctest::Context::Context` inside `namespace doctest`)
+keeps its written name by design. `reduce.py` drops whole declarations level
+by level, and a `#if` … `#endif` region as one unit, never single lines (line
+reductions came out incoherent and proved nothing). Then vary the reduced
+file by hand, one construct at a time, to find which one breaks it, write the
+rule's failing test first, and measure all four repositories again.
+`examples/cpp_ids.rs` is what the oracle calls: the pack's ids for one file.
+
 ## Limits
 
 * **One build configuration.** The compiler sees what one invocation sees:
