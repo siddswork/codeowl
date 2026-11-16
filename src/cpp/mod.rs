@@ -1638,6 +1638,56 @@ DBImpl::DBImpl(const Options& o) : options_(o), count_(0) {}
         );
     }
 
+    /// `fmt/core.h` in miniature, found by reducing the real header: a macro
+    /// before a constructor whose `noexcept` comes before its initialiser
+    /// list, a statement in its body, and a member after it. The constructor's
+    /// macro was left in place, the grammar read it as a return type, and the
+    /// recovery dropped `namespace detail` from every declaration after.
+    const LOST_NAMESPACE: &str = "\
+namespace detail {
+template <typename T> class buffer {
+ protected:
+  FMT_CONSTEXPR buffer(int grow, size_t sz) noexcept
+      : size_(sz), capacity_(sz), grow_(grow) {
+    if (FMT_MSC_VERSION != 0) ptr_ = nullptr;
+  }
+ public:
+  auto end() noexcept -> T* { return ptr_ + size_; }
+};
+struct buffer_traits {
+};
+}
+int outside();
+";
+
+    #[test]
+    fn try_and_catch_macros_do_not_cost_the_class_and_what_follows_their_namespace() {
+        // fmt/core.h `iterator_buffer`: the whole class was lost, and with it
+        // the namespace of every declaration after.
+        let src = "namespace detail {\ntemplate <typename T> class ib {\n public:\n  ~ib() {\n    \
+                   FMT_TRY { flush(); }\n    FMT_CATCH(...) {}\n  }\n  auto out() -> int { return 1; }\n};\n\
+                   struct after { int x; };\n}\nint outside();\n";
+        let (syms, errors) = extract_counted(src, "core.h");
+        assert_eq!(errors, 0);
+        let have = ids(&syms);
+        assert!(have.contains(&"core.h::detail::ib"), "{have:?}");
+        assert!(have.contains(&"core.h::detail::ib::out"), "{have:?}");
+        assert!(have.contains(&"core.h::detail::after"), "{have:?}");
+    }
+
+    #[test]
+    fn a_constructor_behind_a_macro_does_not_cost_the_declarations_after_it_their_namespace() {
+        let (syms, errors) = extract_counted(LOST_NAMESPACE, "core.h");
+        assert_eq!(
+            errors, 0,
+            "the macro is blanked, so nothing is left to break"
+        );
+        let have = ids(&syms);
+        assert!(have.contains(&"core.h::detail::buffer"), "{have:?}");
+        assert!(have.contains(&"core.h::detail::buffer_traits"), "{have:?}");
+        assert!(have.contains(&"core.h::outside"), "{have:?}");
+    }
+
     #[test]
     fn a_qualified_definition_records_how_many_segments_of_its_id_are_namespaces() {
         // The id joins the namespaces around the definition and the name as
