@@ -531,7 +531,8 @@ fn find_ranges(toks: &[Tok]) -> Vec<(usize, usize)> {
         }
         // Order matters once: `if MACRO (cond)` must be tried before the
         // rules that would read `(cond)` as the macro's own arguments.
-        let found = shim(toks, i, prev)
+        let found = access_label_macro(toks, i)
+            .or_else(|| shim(toks, i, prev))
             .or_else(|| macro_after_if(toks, i, prev))
             .or_else(|| statement_block_macro(toks, i, prev))
             .or_else(|| class_macro(toks, i, prev))
@@ -833,6 +834,31 @@ const EXPRESSION_WORDS: &[&str] = &[
     "goto",
     "typename",
 ];
+
+/// A macro that stands for an access label: `JSON_PRIVATE_UNLESS_TESTED:`
+/// (expands to `public` or `private`), or `public Q_SLOTS:`. Which label it is
+/// cannot be known, so it is blanked and the label before it keeps governing.
+/// With no keyword before it the colon goes too. Only where a statement
+/// starts, so a conditional's `:`, a `case` label and a constructor's initialiser
+/// list are not touched.
+fn access_label_macro(toks: &[Tok], i: usize) -> Option<usize> {
+    if !is_macro_name(&toks[i]) || !is_punct(toks.get(i + 1), ":") {
+        return None;
+    }
+    let before = i.checked_sub(1).map(|p| &toks[p]);
+    if before.is_some_and(|t| {
+        t.kind == Kind::Ident && matches!(t.text, "public" | "protected" | "private")
+    }) {
+        return Some(i);
+    }
+    // After another label (`public:` then the macro) a statement starts too.
+    let after_label = before.is_some_and(|t| t.kind == Kind::Punct && t.text == ":")
+        && i.checked_sub(2).is_some_and(|k| {
+            toks[k].kind == Kind::Ident
+                && matches!(toks[k].text, "public" | "protected" | "private")
+        });
+    (after_label || starts_a_statement(toks, i)).then_some(i + 1)
+}
 
 /// `void f(T&& value MACRO)`: an annotation after a parameter's name, as
 /// the last thing before the `)` or a `,`. Only inside parentheses (a
@@ -1332,6 +1358,30 @@ mod tests {
         // A directive inside the statement is left for the conditional pass.
         let split = "extern template class Foo<\n#if A\nint\n#else\nchar\n#endif\n>;\n";
         assert_eq!(blank(split), split);
+    }
+
+    #[test]
+    fn a_macro_standing_for_an_access_label_is_blanked_with_its_colon() {
+        // nlohmann `JSON_PRIVATE_UNLESS_TESTED:` expands to `public` or
+        // `private`; the label before it keeps governing.
+        let src =
+            "class A {\n  JSON_PRIVATE_UNLESS_TESTED:\n    void f();\n public:\n  int x;\n};\n";
+        assert_eq!(blank(src), spaced(src, &["JSON_PRIVATE_UNLESS_TESTED:"]));
+        // Qt: `public Q_SLOTS:` keeps its keyword and colon.
+        let qt = "class B {\n public Q_SLOTS:\n  void g();\n};\n";
+        assert_eq!(blank(qt), spaced(qt, &["Q_SLOTS"]));
+    }
+
+    #[test]
+    fn a_macro_before_a_colon_that_is_not_a_label_is_kept() {
+        for src in [
+            "int f(int a) { return a ? ONE_X : TWO_X; }\n",
+            "int f(int a) { switch (a) { case CASE_A: return 1; } return 0; }\n",
+            "struct S { S() : MEMBER_X(1) {} };\n",
+            "namespace n { FLAG_A::type x; }\n",
+        ] {
+            assert_eq!(blank(src), src, "{src}");
+        }
     }
 
     /// `src` with the first occurrence of each given piece replaced by

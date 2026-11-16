@@ -1724,6 +1724,19 @@ template struct Gadget<char>;
     }
 
     #[test]
+    fn a_macro_access_label_does_not_cost_the_class_its_namespace() {
+        // nlohmann `iter_impl.hpp`: the label macro made the grammar fail and
+        // the class and everything after lost `detail`.
+        let src = "namespace detail {\ntemplate <typename T>\nclass iter_impl {\n public:\n  \
+                   JSON_PRIVATE_UNLESS_TESTED:\n    void set_end() noexcept { }\n  public:\n    \
+                   bool operator<(const iter_impl& o) const { return true; }\n};\n}\n";
+        let (syms, errors) = extract_counted(src, "i.hpp");
+        let have = ids(&syms);
+        assert!(have.contains(&"i.hpp::detail::iter_impl"), "{have:?}");
+        assert_eq!(errors, 0);
+    }
+
+    #[test]
     fn a_template_declaration_that_looks_like_an_instantiation_is_kept() {
         // `template <typename T> struct S;` and a full specialisation both
         // declare something; only `template class X<…>;` (no `<` after

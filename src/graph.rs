@@ -322,7 +322,9 @@ pub struct FileExtraction {
 /// them unclosed, so the declarations before them lost their namespaces.
 /// An annotation macro after a parameter's name (`T&& value MACRO)`) is
 /// blanked for the same reason.
-pub const FORMAT_VERSION: u32 = 33;
+/// 34 = a macro standing for an access label (`JSON_PRIVATE_UNLESS_TESTED:`,
+/// `public Q_SLOTS:`) is blanked, so the class around it keeps its namespace.
+pub const FORMAT_VERSION: u32 = 34;
 
 /// One "this file reaches that thing" edge the structural import graph
 /// can't see: a `fetch("/api/…")`, a `.from("table")`, a `<Component/>`.
