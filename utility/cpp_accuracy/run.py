@@ -4,12 +4,17 @@ Normally started through ``run.sh``, which prepares the Python environment.
 For each repository in ``config.json``: get it at the pinned commit, get the
 compiler's reference (cached), run the pack on it, compare, print.
 
-    run.sh                      all repositories
+    run.sh                      the four measurement repositories
     run.sh leveldb fmt          some
+    run.sh --controls           the control repositories only (docs/cpp-pack-plan.md
+                                section 7a); never part of a default run. Their
+                                failures are not printed: they are never a source
+                                of rules
     run.sh --refresh            rebuild the compiler reference (slow)
     run.sh --check              exit 1 when a target of the plan is missed
 
-Writes ``target/cpp-accuracy/results.json``.
+Writes ``target/cpp-accuracy/results.json`` (the measurement repositories) and
+``results-controls.json`` (the controls), so neither run erases the other.
 """
 
 import argparse
@@ -85,6 +90,11 @@ def tool_versions():
     return {"g++": gpp, "libclang": version("libclang")}
 
 
+# What the compiler's reading depends on; a comment or the `control` flag is
+# not one of them and must not invalidate the cache.
+COMPILER_FIELDS = ("std", "include_dirs", "skip", "only", "limit", "extra_args", "generated")
+
+
 def reference(name, path, cfg, extra, head, refresh):
     """The compiler's reading, from the cache when nothing it depends on changed:
     the configuration, the commit actually checked out, the generated headers,
@@ -96,7 +106,7 @@ def reference(name, path, cfg, extra, head, refresh):
     key = hashlib.sha256(
         json.dumps(
             [
-                cfg,
+                {k: cfg.get(k) for k in COMPILER_FIELDS},
                 extra,
                 head,
                 templates,
@@ -138,10 +148,17 @@ def main():
     ap.add_argument("repos", nargs="*")
     ap.add_argument("--refresh", action="store_true")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--controls", action="store_true")
     opts = ap.parse_args()
 
     config = json.load(open(os.path.join(HERE, "config.json")))
-    names = opts.repos or list(config["repos"])
+    controls = [n for n, c in config["repos"].items() if c.get("control")]
+    if opts.controls and (opts.repos or opts.check):
+        ap.error("--controls runs every control and judges none: it takes no repository names and no --check")
+    if opts.controls:
+        names = controls
+    else:
+        names = opts.repos or [n for n in config["repos"] if n not in controls]
     for n in names:
         if n not in config["repos"]:
             sys.exit(f"unknown repository `{n}`; known: {', '.join(config['repos'])}")
@@ -168,16 +185,43 @@ def main():
             k: {"measured": round(v[0], 1), "target": v[1], "met": v[2]}
             for k, v in compare.judge(measures, config["targets"][cfg["class"]]).items()
         }
-        missed |= not all(v["met"] for v in measures["judged"].values())
+        measures["control"] = bool(cfg.get("control"))
+        if cfg.get("control"):
+            # Reported against the targets, never judged: the file must not
+            # read as a failure (`met` flags) that `--check` ignores.
+            measures["reported_against_targets"] = measures.pop("judged")
+        else:
+            missed |= not all(v["met"] for v in measures["judged"].values())
+        if cfg.get("control"):
+            redact(measures)
         results[name] = measures
         report(name, cfg, measures)
 
     os.makedirs(WORK, exist_ok=True)
-    out = os.path.join(WORK, "results.json")
-    json.dump({"codeowl": codeowl_head, "repos": results}, open(out, "w"), indent=2)
-    print(f"\nwrote {out}  (codeowl {codeowl_head})")
+    # Two files, so a run of one kind never erases the other's numbers.
+    for fname, want_control in (("results.json", False), ("results-controls.json", True)):
+        part = {n: m for n, m in results.items() if m["control"] == want_control}
+        if part:
+            out = os.path.join(WORK, fname)
+            json.dump({"codeowl": codeowl_head, "repos": part}, open(out, "w"), indent=2)
+            print(f"\nwrote {out}  (codeowl {codeowl_head})")
     if opts.check and missed:
         sys.exit(1)
+
+
+def redact(measures):
+    """Remove every example a control's result holds (any key ending in
+    `_examples`, at any depth): a name is a lead to a rule, and a control is
+    never a source of rules. One place, so a field added to `compare` later is
+    caught by its name."""
+    if isinstance(measures, dict):
+        for k in [k for k in measures if k.endswith("_examples")]:
+            measures[k] = []
+        for v in measures.values():
+            redact(v)
+    elif isinstance(measures, list):
+        for v in measures:
+            redact(v)
 
 
 def report(name, cfg, m):
@@ -190,7 +234,10 @@ def report(name, cfg, m):
           f"{m['parse']['error_places']} places")
     print(f"  classes {pct(m['classes'])}   enums {pct(m['enums'])}   functions {pct(m['functions'])}")
     if m["missing_by_kind"]:
-        print(f"  not found: {m['missing_by_kind']}  e.g. {m['missing_examples'][:4]}")
+        # A control's misses are counted, never named: a name is a lead to a
+        # rule, and a control is never a source of rules.
+        shown = "" if cfg.get("control") else f"  e.g. {m['missing_examples'][:4]}"
+        print(f"  not found: {m['missing_by_kind']}{shown}")
     print(f"  includes resolved in the repository: {m['includes_resolved']}")
     print(f"  reference edges {m['reference_edges']}; file pairs covered by direct includes "
           f"{m['file_level']['direct']:.1f}%, by transitive {m['file_level']['transitive']:.1f}%")
@@ -202,8 +249,11 @@ def report(name, cfg, m):
     print(f"  edges of the pack itself: {e['found']} found, recall {e['recall']:.1f}%, "
           f"precision {e['precision']:.1f}%; {e['only_pack']} only the pack's, "
           f"{e['only_standin']} only the stand-in's")
-    for k, v in m["judged"].items():
-        print(f"  target {k:<10} {v['measured']:>6.1f}% vs {v['target']:.0f}%  {'ok' if v['met'] else 'MISSED'}")
+    for k, v in (m.get("judged") or m["reported_against_targets"]).items():
+        verdict = "ok" if v["met"] else "MISSED"
+        if cfg.get("control"):
+            verdict += " (a control: reported, not judged)"
+        print(f"  target {k:<10} {v['measured']:>6.1f}% vs {v['target']:.0f}%  {verdict}")
 
 
 if __name__ == "__main__":

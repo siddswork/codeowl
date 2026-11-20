@@ -53,6 +53,34 @@
       "only": "^include/",
       "limit": 0,
       "extra_args": []
+    },
+    "ninja": {
+      "_comment": "A CONTROL repository (docs/cpp-pack-plan.md section 7a, chosen 2026-11-20 and not looked at before): an application, not Google style. Never a source of rules; run only with --controls.",
+      "control": true,
+      "dir": "ninja",
+      "url": "https://github.com/ninja-build/ninja",
+      "commit": "1a8fee23135e57cda12d47aedb19f795353fa13c",
+      "class": "clean",
+      "std": "c++17",
+      "include_dirs": ["src"],
+      "skip": "(_test\\.cc$|_perftest\\.cc$|^tests/|^misc/|^windows/|win32|msvc|getopt)",
+      "only": "^src/",
+      "limit": 0,
+      "extra_args": []
+    },
+    "cppcheck": {
+      "_comment": "A CONTROL repository (section 7a, chosen 2026-11-20 and not looked at before): a C++ application with macros, conditional compilation and its own vendored libraries. The Qt gui is out of scope. Never a source of rules; run only with --controls.",
+      "control": true,
+      "dir": "cppcheck",
+      "url": "https://github.com/danmar/cppcheck",
+      "commit": "554fa44db3ae46bcd35a6fb16c69ce0552042c53",
+      "class": "hard",
+      "std": "c++17",
+      "include_dirs": ["lib", "cli", "externals", "externals/simplecpp", "externals/tinyxml2", "externals/picojson", "frontend"],
+      "skip": "(^test/|^gui/|^tools/|^samples/|^democlient/|^oss-fuzz/|win32|windows|^lib/pcre)",
+      "only": "^(lib|cli|frontend|externals/simplecpp|externals/tinyxml2)/",
+      "limit": 0,
+      "extra_args": []
     }
   }
 }

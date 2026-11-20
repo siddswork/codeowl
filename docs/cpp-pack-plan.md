@@ -228,6 +228,15 @@ Every blanking rule so far was found by reducing a file of the four measurement 
 
 **When.** Before the `leveldb` dogfood, so the dogfood has a before and after on unseen code. It does not block step 2b part C.
 
+**Chosen 2026-11-20, baselined once.** The machine has no Qt, Boost or CMake, so a Qt application would not compile under the check and was not taken; instead:
+
+| Control | Why | Pinned at |
+|---|---|---|
+| `ninja` | An application, small, not Google style: the clean counterpart of `leveldb` | `1a8fee2` |
+| `cppcheck` | An application with macros, conditional compilation and vendored libraries (`simplecpp`, `tinyxml2`); the Qt `gui` is out of scope | `554fa44` |
+
+Both are in `utility/cpp_accuracy/config.json` with `"control": true`. **`run.sh --controls` runs them and nothing else does** (a default run skips them, so nothing measures them by accident); it prints their counts and never names a failure, and the results file holds no example (a name is a lead to a rule). Their misses of the targets are reported, not judged: `--check` ignores them. The baseline is in the K11 log (2026-11-20). The configuration (which files are in scope, which include directories) was written from the repositories' layout alone, before any run. The next measurement of the controls is after the `leveldb` dogfood.
+
 ## 8. Risks
 
 - **A blanking rule may blank something real**, such as an all-capitals type name. Each rule gets tests with such names, and the per-repository measurement catches a rule that costs more than it gains.
