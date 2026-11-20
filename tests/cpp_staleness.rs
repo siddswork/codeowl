@@ -195,6 +195,70 @@ fn a_body_edit_in_the_source_file_stales_the_class_and_nothing_else() {
 }
 
 #[test]
+fn a_dependency_only_a_body_uses_stales_the_class_and_not_its_users() {
+    // C2: `crc.h` is included by widget.cc alone, and only `size`'s body
+    // calls `Checksum`.
+    let repo = Repo::new("bodydep");
+    repo.write("crc.h", "int Checksum(int k);\n");
+    repo.write(
+        "widget.cc",
+        "#include \"widget.h\"\n#include \"crc.h\"\nint Widget::size() { return Checksum(n_); }\n",
+    );
+    let graph = repo.graph();
+    // The edge is the `.cc`'s, so the class's dependency can only come from
+    // reading the body in the other file.
+    assert!(
+        graph
+            .imports()
+            .iter()
+            .any(|e| e.from_file == "widget.cc" && e.imported_name == "Checksum")
+    );
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
+    let user_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
+
+    repo.write("crc.h", "long Checksum(int k);\n");
+    let graph = repo.graph();
+    assert_eq!(
+        changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair),
+        ["changed:dependencies"],
+        "the body's dependency is the class's"
+    );
+    assert!(
+        changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &user_pair).is_empty(),
+        "the user never named Checksum"
+    );
+}
+
+#[test]
+fn a_body_that_starts_calling_a_new_function_stales_the_class_on_its_dependencies() {
+    // C4: the call is new, the include is old; only the body changes.
+    let repo = Repo::new("newcall");
+    repo.write("crc.h", "int Checksum(int k);\n");
+    repo.write(
+        "widget.cc",
+        "#include \"widget.h\"\n#include \"crc.h\"\nint Widget::size() { return n_; }\n",
+    );
+    let graph = repo.graph();
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
+    assert!(changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair).is_empty());
+
+    repo.write(
+        "widget.cc",
+        "#include \"widget.h\"\n#include \"crc.h\"\nint Widget::size() { return Checksum(n_); }\n",
+    );
+    let graph = repo.graph();
+    let changes = changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair);
+    assert!(
+        changes.contains(&"changed:dependencies".to_string()),
+        "{changes:?}"
+    );
+    assert!(
+        changes.contains(&"changed:source".to_string()),
+        "{changes:?}"
+    );
+}
+
+#[test]
 fn a_transitive_dependant_goes_stale_through_the_header_in_between() {
     let repo = Repo::new("transitive");
     repo.write("mid.h", "#include \"widget.h\"\nclass Mid {};\n");
