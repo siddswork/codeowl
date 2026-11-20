@@ -63,6 +63,29 @@ about a second. Re-running after a change to the pack is therefore cheap.
   classes, 99 % of functions, 97 % recall, 98 % precision; on macro- and
   template-heavy code 95 %, 97 %, 93 %, 80 %.
 
+## Control repositories
+
+`ninja` and `cppcheck` are controls (`"control": true` in `config.json`;
+`docs/cpp-pack-plan.md` section 7a): repositories the work was never fitted
+to, so a number there says whether the pack generalises. They follow rules
+that keep them unseen.
+
+```
+utility/cpp_accuracy/run.sh --controls      # only these; a default run skips them
+```
+
+* **Run at milestones only** (after the `leveldb` dogfood, after step 3 or 4,
+  before C++ is called done), never after each change.
+* **Never a source of rules.** The run prints counts and no name of anything
+  missed, and the results file holds none. Do not reduce their files or read
+  their parse errors to find a cause; if one is ever used to fix something,
+  it joins the measurement repositories and a new control is chosen.
+* Their misses of the targets are reported, not judged, and `--check` ignores
+  them.
+* The configuration was written from each repository's layout alone. It is
+  a choice (scope, include directories) that can cost a number without the
+  pack being at fault; say so when reading one.
+
 ## Why a namespace was lost
 
 A declaration whose id lacks the namespaces around it means the grammar

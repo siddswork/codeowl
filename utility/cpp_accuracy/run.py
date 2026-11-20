@@ -4,8 +4,12 @@ Normally started through ``run.sh``, which prepares the Python environment.
 For each repository in ``config.json``: get it at the pinned commit, get the
 compiler's reference (cached), run the pack on it, compare, print.
 
-    run.sh                      all repositories
+    run.sh                      the four measurement repositories
     run.sh leveldb fmt          some
+    run.sh --controls           the control repositories only (docs/cpp-pack-plan.md
+                                section 7a); never part of a default run. Their
+                                failures are not printed: they are never a source
+                                of rules
     run.sh --refresh            rebuild the compiler reference (slow)
     run.sh --check              exit 1 when a target of the plan is missed
 
@@ -138,10 +142,15 @@ def main():
     ap.add_argument("repos", nargs="*")
     ap.add_argument("--refresh", action="store_true")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--controls", action="store_true")
     opts = ap.parse_args()
 
     config = json.load(open(os.path.join(HERE, "config.json")))
-    names = opts.repos or list(config["repos"])
+    controls = [n for n, c in config["repos"].items() if c.get("control")]
+    if opts.controls:
+        names = controls
+    else:
+        names = opts.repos or [n for n in config["repos"] if n not in controls]
     for n in names:
         if n not in config["repos"]:
             sys.exit(f"unknown repository `{n}`; known: {', '.join(config['repos'])}")
@@ -168,7 +177,12 @@ def main():
             k: {"measured": round(v[0], 1), "target": v[1], "met": v[2]}
             for k, v in compare.judge(measures, config["targets"][cfg["class"]]).items()
         }
-        missed |= not all(v["met"] for v in measures["judged"].values())
+        if not cfg.get("control"):
+            missed |= not all(v["met"] for v in measures["judged"].values())
+        measures["control"] = bool(cfg.get("control"))
+        if cfg.get("control"):
+            # Not even in the results file: a name is a lead to a rule.
+            measures["missing_examples"] = []
         results[name] = measures
         report(name, cfg, measures)
 
@@ -190,7 +204,10 @@ def report(name, cfg, m):
           f"{m['parse']['error_places']} places")
     print(f"  classes {pct(m['classes'])}   enums {pct(m['enums'])}   functions {pct(m['functions'])}")
     if m["missing_by_kind"]:
-        print(f"  not found: {m['missing_by_kind']}  e.g. {m['missing_examples'][:4]}")
+        # A control's misses are counted, never named: a name is a lead to a
+        # rule, and a control is never a source of rules.
+        shown = "" if cfg.get("control") else f"  e.g. {m['missing_examples'][:4]}"
+        print(f"  not found: {m['missing_by_kind']}{shown}")
     print(f"  includes resolved in the repository: {m['includes_resolved']}")
     print(f"  reference edges {m['reference_edges']}; file pairs covered by direct includes "
           f"{m['file_level']['direct']:.1f}%, by transitive {m['file_level']['transitive']:.1f}%")
@@ -203,7 +220,10 @@ def report(name, cfg, m):
           f"precision {e['precision']:.1f}%; {e['only_pack']} only the pack's, "
           f"{e['only_standin']} only the stand-in's")
     for k, v in m["judged"].items():
-        print(f"  target {k:<10} {v['measured']:>6.1f}% vs {v['target']:.0f}%  {'ok' if v['met'] else 'MISSED'}")
+        verdict = "ok" if v["met"] else "MISSED"
+        if cfg.get("control"):
+            verdict += " (a control: reported, not judged)"
+        print(f"  target {k:<10} {v['measured']:>6.1f}% vs {v['target']:.0f}%  {verdict}")
 
 
 if __name__ == "__main__":
