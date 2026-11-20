@@ -157,6 +157,44 @@ fn a_comment_only_header_edit_stales_nobody() {
 }
 
 #[test]
+fn a_body_edit_in_the_source_file_stales_the_class_and_nothing_else() {
+    // Step 2b part C, C1: what a user sees after editing an implementation.
+    // `Widget::size`'s body lives in widget.cc and belongs to the class.
+    let repo = Repo::new("body");
+    let graph = repo.graph();
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
+    let header_pair = submit(&graph, &repo.0, "widget.h", FILE_PROSE).unwrap();
+    let user_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
+    let user_file_pair = submit(&graph, &repo.0, "user.cc", FILE_PROSE).unwrap();
+    // widget.cc holds only a paired body: no symbol, so nothing to submit.
+    assert!(
+        graph
+            .children_ids(graph.find("widget.cc").unwrap())
+            .is_empty()
+    );
+
+    repo.write("widget.cc", &IMPL.replace("return n_;", "return n_ + 1;"));
+    let graph = repo.graph();
+    assert_eq!(
+        changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair),
+        ["changed:source"],
+        "the class's spec describes the body that changed"
+    );
+    assert!(
+        changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &user_pair).is_empty(),
+        "a user reads the interface, which did not change"
+    );
+    let user_file = graph.find("user.cc").unwrap();
+    assert!(file_changes(&graph, user_file, &user_file_pair).is_empty());
+    // P8: the header's file summary describes the header, which is unchanged.
+    let header = graph.find("widget.h").unwrap();
+    assert!(
+        file_changes(&graph, header, &header_pair).is_empty(),
+        "the header's file summary stays current"
+    );
+}
+
+#[test]
 fn a_transitive_dependant_goes_stale_through_the_header_in_between() {
     let repo = Repo::new("transitive");
     repo.write("mid.h", "#include \"widget.h\"\nclass Mid {};\n");
