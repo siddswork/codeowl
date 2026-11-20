@@ -157,6 +157,108 @@ fn a_comment_only_header_edit_stales_nobody() {
 }
 
 #[test]
+fn a_body_edit_in_the_source_file_stales_the_class_and_nothing_else() {
+    // Step 2b part C, C1: what a user sees after editing an implementation.
+    // `Widget::size`'s body lives in widget.cc and belongs to the class.
+    let repo = Repo::new("body");
+    let graph = repo.graph();
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
+    let header_pair = submit(&graph, &repo.0, "widget.h", FILE_PROSE).unwrap();
+    let user_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
+    let user_file_pair = submit(&graph, &repo.0, "user.cc", FILE_PROSE).unwrap();
+    // widget.cc holds only a paired body: no symbol, so nothing to submit.
+    assert!(
+        graph
+            .children_ids(graph.find("widget.cc").unwrap())
+            .is_empty()
+    );
+
+    repo.write("widget.cc", &IMPL.replace("return n_;", "return n_ + 1;"));
+    let graph = repo.graph();
+    assert_eq!(
+        changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair),
+        ["changed:source"],
+        "the class's spec describes the body that changed"
+    );
+    assert!(
+        changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &user_pair).is_empty(),
+        "a user reads the interface, which did not change"
+    );
+    let user_file = graph.find("user.cc").unwrap();
+    assert!(file_changes(&graph, user_file, &user_file_pair).is_empty());
+    // P8: the header's file summary describes the header, which is unchanged.
+    let header = graph.find("widget.h").unwrap();
+    assert!(
+        file_changes(&graph, header, &header_pair).is_empty(),
+        "the header's file summary stays current"
+    );
+}
+
+#[test]
+fn a_dependency_only_a_body_uses_stales_the_class_and_not_its_users() {
+    // C2: `crc.h` is included by widget.cc alone, and only `size`'s body
+    // calls `Checksum`.
+    let repo = Repo::new("bodydep");
+    repo.write("crc.h", "int Checksum(int k);\n");
+    repo.write(
+        "widget.cc",
+        "#include \"widget.h\"\n#include \"crc.h\"\nint Widget::size() { return Checksum(n_); }\n",
+    );
+    let graph = repo.graph();
+    // The edge is the `.cc`'s, so the class's dependency can only come from
+    // reading the body in the other file.
+    assert!(
+        graph
+            .imports()
+            .iter()
+            .any(|e| e.from_file == "widget.cc" && e.imported_name == "Checksum")
+    );
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
+    let user_pair = submit(&graph, &repo.0, "user.cc::use_widget", PROSE).unwrap();
+
+    repo.write("crc.h", "long Checksum(int k);\n");
+    let graph = repo.graph();
+    assert_eq!(
+        changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair),
+        ["changed:dependencies"],
+        "the body's dependency is the class's"
+    );
+    assert!(
+        changes_of_symbol(&graph, &repo.0, "user.cc::use_widget", &user_pair).is_empty(),
+        "the user never named Checksum"
+    );
+}
+
+#[test]
+fn a_body_that_starts_calling_a_new_function_stales_the_class_on_its_dependencies() {
+    // C4: the call is new, the include is old; only the body changes.
+    let repo = Repo::new("newcall");
+    repo.write("crc.h", "int Checksum(int k);\n");
+    repo.write(
+        "widget.cc",
+        "#include \"widget.h\"\n#include \"crc.h\"\nint Widget::size() { return n_; }\n",
+    );
+    let graph = repo.graph();
+    let class_pair = submit(&graph, &repo.0, "widget.h::Widget", PROSE).unwrap();
+    assert!(changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair).is_empty());
+
+    repo.write(
+        "widget.cc",
+        "#include \"widget.h\"\n#include \"crc.h\"\nint Widget::size() { return Checksum(n_); }\n",
+    );
+    let graph = repo.graph();
+    let changes = changes_of_symbol(&graph, &repo.0, "widget.h::Widget", &class_pair);
+    assert!(
+        changes.contains(&"changed:dependencies".to_string()),
+        "{changes:?}"
+    );
+    assert!(
+        changes.contains(&"changed:source".to_string()),
+        "{changes:?}"
+    );
+}
+
+#[test]
 fn a_transitive_dependant_goes_stale_through_the_header_in_between() {
     let repo = Repo::new("transitive");
     repo.write("mid.h", "#include \"widget.h\"\nclass Mid {};\n");

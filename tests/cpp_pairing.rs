@@ -92,3 +92,89 @@ fn editing_a_body_in_the_source_file_moves_the_class_and_not_its_interface() {
         "its users read the interface, which did not"
     );
 }
+
+#[test]
+fn the_watchers_incremental_path_re_pairs_on_a_body_edit_a_removed_definition_and_a_deleted_file() {
+    // C3: every other test builds the index from scratch with `open`; the
+    // watcher goes through `apply_changes`, which rebuilds from cached
+    // per-file extractions.
+    let repo = Repo::new("watch");
+    let (mut index, graph, _) = RepoIndex::open(&repo.0).unwrap();
+    let class_before = graph
+        .get_symbol(graph.find("db.h::leveldb::DB").unwrap())
+        .unwrap()
+        .clone();
+    let spans = |g: &Graph, id: &str| {
+        g.get_symbol(g.find(id).unwrap())
+            .unwrap()
+            .other_file_spans
+            .clone()
+    };
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Put"),
+        [("db.cc".to_string(), [6, 8])]
+    );
+
+    // A body edit: the class's source hash moves, its interface hash does not.
+    let cc = repo.0.join("db.cc");
+    std::fs::write(&cc, DB_CC.replace("return k + 1;", "return k + 2;")).unwrap();
+    let (graph, caught) = index
+        .apply_changes(std::slice::from_ref(&cc))
+        .unwrap()
+        .unwrap();
+    assert_eq!(caught.modified, ["db.cc"]);
+    let class_after = graph
+        .get_symbol(graph.find("db.h::leveldb::DB").unwrap())
+        .unwrap();
+    assert_ne!(class_before.source_hash, class_after.source_hash);
+    assert_eq!(class_before.interface_hash, class_after.interface_hash);
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Put"),
+        [("db.cc".to_string(), [6, 8])]
+    );
+
+    // A line inserted above `Put`'s body: its span moves with it, and `Get`'s
+    // (above the insertion) does not. A cached pre-edit span would show here.
+    std::fs::write(&cc, DB_CC.replace("int DB::Put", "// a note\nint DB::Put")).unwrap();
+    let (graph, _) = index
+        .apply_changes(std::slice::from_ref(&cc))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Put"),
+        [("db.cc".to_string(), [7, 9])]
+    );
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Get"),
+        [("db.cc".to_string(), [3, 5])]
+    );
+
+    // One definition removed from the source file: its member has no body in
+    // another file any more, the other still has, and nothing is left behind.
+    std::fs::write(
+        &cc,
+        "#include \"db.h\"\nnamespace leveldb {\nint DB::Get(int k) {\n  return k;\n}\n}\n",
+    )
+    .unwrap();
+    let (graph, _) = index
+        .apply_changes(std::slice::from_ref(&cc))
+        .unwrap()
+        .unwrap();
+    assert!(spans(&graph, "db.h::leveldb::DB::Put").is_empty());
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Get"),
+        [("db.cc".to_string(), [3, 5])]
+    );
+    assert!(
+        graph.symbols().all(|s| s.file != "db.cc"),
+        "no symbol of the source file is left: every definition is paired or gone"
+    );
+
+    // The source file deleted: no member keeps a span in it, and nothing panics.
+    std::fs::remove_file(&cc).unwrap();
+    let (graph, caught) = index.apply_changes(&[cc]).unwrap().unwrap();
+    assert_eq!(caught.removed, ["db.cc"]);
+    assert!(graph.find("db.cc").is_none());
+    assert!(spans(&graph, "db.h::leveldb::DB::Get").is_empty());
+    assert!(graph.find("db.h::leveldb::DB::Get").is_some());
+}
