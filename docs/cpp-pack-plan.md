@@ -176,6 +176,8 @@ Each step is its own branch and pull request, tests first, `utility/check.sh` be
 | 7 | **The compiler layer**, as the spike decides | Edges for covered files equal the reference; an index older than a file falls back to the base layer for that file, with a test |
 | 8 | **Dogfood and docs.** `/codeowl-generate` on `leveldb`, then on part of `abseil`; the owner reads about ten specs from each. `ARCHITECTURE.md` §9 and open question 1, `GLOSSARY.md`, `REQUIREMENTS.md`, the roadmap's test-repo table, `setup/USAGE.md`, the README, `NORTHSTAR.md` | The owner judges the specs; D2 is confirmed or reopened; open question 1 is closed for C++ with the numbers |
 
+**Order from 2026-11-20 (owner's decision).** Finish step 2b (its part C), choose and baseline the control repositories (section 7a), then the first half of step 8 (`/codeowl-generate` on `leveldb`, the owner reads about ten specs), then step 2c, then the `abseil` half of step 8, and let what the dogfood shows choose between steps 3 and 4. Why: `leveldb` is C++ only, so it can be indexed without 2c; its ids are stable (no id lacks its namespace, no namespace comes from a macro), so specs written on it will not be orphaned by later extraction work; and a real spec is the first test of whether the pack is good, which no extraction count can stand in for. **The namespace bisect is stopped** (`docs/cpp-step2b-plan.md` section 11): a new blanking rule is added only when it moves a K11 figure or the paired share, or fixes a file the dogfood reaches. An id count alone is not a reason, and K11 cannot see namespaces at all (`compare.py` matches by the last `::` segment).
+
 Steps 1, 2, 2b, 2c and 8 alone give a working C++ pack. (2c is not C++ work as such, but three of the four measurement repositories cannot be indexed without it, so steps 3 to 5 cannot be measured before it.) Steps 3 to 7 are what make it the strong suit, and each has a measurement that can stop it.
 
 `FORMAT_VERSION`: step 1 adds a pack and needs no bump if `graph_stats` is identical on the other repositories; every later step that changes what the C++ pack produces bumps it.
@@ -208,11 +210,29 @@ Measured against the compiler reference on the four repositories, tests excluded
 
 The hard-code precision target is the one most likely to be missed; if it is, the compiler layer becomes the recommended setup for such repositories and the docs say so.
 
+## 7a. Control repositories (owner's decision, 2026-11-20)
+
+Every blanking rule so far was found by reducing a file of the four measurement repositories, so the pack may fit them rather than C++. One or two repositories the work has never looked at measure that. Not a machine-learning project, but the same discipline as a held-out set.
+
+| Rule | Why |
+|---|---|
+| Chosen and pinned at a commit **before** more C++ work, and measured once then as the baseline | So the baseline cannot be shaped by what we already know about it |
+| **Never a source of rules.** Its figures are read; its files are never reduced, its parse errors never read to find a cause | A fix made because of it makes it one more training repository |
+| Measured **at milestones only**: after the `leveldb` dogfood, after step 3 or 4, before C++ is called done | Looking after every change turns it into a training set by degrees |
+| Success is judged on both halves: K11 through `utility/cpp_accuracy/run.sh` (not in the targets' averages, reported beside them), and a few specs read by the owner in the dogfood | Specs are the product; extraction counts only stand in for them |
+| When one has been used to fix something, it joins the measurement repositories and a new control is chosen | Keeps one unseen repository at all times |
+
+**What kind.** An application, not a library (all four are libraries); not Google style (`leveldb` and `abseil` share one); ideally something none of the four has: generated code (Qt's `moc`, protobuf) or heavy conditional compilation. It must work with the accuracy check, which compiles each file alone with the machine's `g++` headers, so a repository whose files need headers that only a full build generates may not qualify; that is checked before it is chosen.
+
+**Candidates, to verify** (size, a commit to pin, whether the compiler reference runs): `ninja` as the clean one, the counterpart of `leveldb`; a Qt application such as `keepassxc` as the messy one (`Q_OBJECT`, `signals:`, `slots:`), or another non-Google application if Qt cannot be compiled by the check. `bitcoin` is probably too large for a quick run.
+
+**When.** Before the `leveldb` dogfood, so the dogfood has a before and after on unseen code. It does not block step 2b part C.
+
 ## 8. Risks
 
 - **A blanking rule may blank something real**, such as an all-capitals type name. Each rule gets tests with such names, and the per-repository measurement catches a rule that costs more than it gains.
 - **The precision reference is imperfect.** A compiler does not resolve names inside templates that are never instantiated, so a "false" edge may be real. Step 4 must check a sample by hand before optimising against the number.
-- **The four repositories are all libraries.** No application, no code generator (`moc`, protobuf), no kernel-style conditional compilation. A fifth repository of that kind should be added before C++ is called done; none is chosen.
+- **The four repositories are all libraries.** No application, no code generator (`moc`, protobuf), no kernel-style conditional compilation. A fifth repository of that kind should be added before C++ is called done; none is chosen. **Answered by section 7a (control repositories, 2026-11-20).**
 - **The compiler layer cuts against two design properties**: the single self-contained binary and the index that is always live. That is why it is optional, loaded and never run by CodeOwl, and decided by a spike.
 - **Scope.** This is several times the work of the Java or Python pack. Steps 1, 2, 2b and 8 are the minimum useful cut; the rest can be stopped at any measurement.
 - **Pairing changes the core, not only the pack.** A symbol that owns a span in a second file touches hashing, `get_source`, the watcher and the spec layout for every language. It is the riskiest step in the minimum cut, which is why it gets its own detailed plan and why `graph_stats` on the other repositories is its control.
