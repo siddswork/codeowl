@@ -345,3 +345,48 @@ Parts A and B already built most of what section 6 listed for part C, so this se
 ### 12.3 Done when
 
 C1 to C4 pass (red first or with a mutation check); the measurements are in section 11; `utility/check.sh`; `graph_stats` identical on the seven other-pack repositories (no production code is expected to change; if one does, the bump rule applies); `/code-review`. Then step 2b is finished and the next step is the `leveldb` dogfood (`docs/cpp-pack-plan.md` section 5, order of 2026-11-20).
+
+### 12.4 Result (2026-11-20)
+
+**Tests.** C1 to C4 are in `tests/cpp_staleness.rs` (C1, C2, C4) and `tests/cpp_pairing.rs` (C3). **None was red first**: parts A and B had already made the behaviour hold, so each passed on its first run, and each is pinned by a mutation instead:
+
+| Test | Mutation that makes it fail |
+|---|---|
+| C1 | pairing switched off; the body hash not folded into the class; the body leaking into the interface hash (each fails a different assertion) |
+| C2, C4 | the staleness dependency scope reduced to the symbol's home file (`try_dependency_pairs`). **My first mutation was on `symbol_scoped_deps`, which staleness does not call, and changed nothing**; the check is what showed it |
+| C3 | `apply_changes` not refreshing a modified file's cache entry; not dropping a deleted file's entry |
+
+No production code changed: `graph_stats` is unaffected by construction (tests only).
+
+**Measurements** (a throwaway probe built from `cpp_probe`'s graph building, deleted; `abseil`, `fmt` and `json` cannot be opened by `RepoIndex` before step 2c):
+
+| | `leveldb` | `abseil` | `fmt` | `json` |
+|---|---|---|---|---|
+| Pairing time | 3 ms | 40 ms | 5 ms | 16 ms |
+| Serialised graph, unpaired to paired | 2.45 to 2.22 MB (**-9.2 %**) | 18.8 to 18.0 MB (**-4.1 %**) | 6.5 to 6.2 MB (**-4.5 %**) | 11.59 to 11.59 MB (-0.1 %) |
+
+Pairing shrinks the graph (the criterion was growth over 10 %).
+
+**Coverage time on `leveldb`**, `get_spec_coverage`'s function, five runs each, before step 2b (`0ea3883`) and now: **10 to 17 ms before, 9 to 11 ms now**; no slowdown from reading a symbol's other file. Items 138 to 124: the 14 fewer are the file specs and sections of `.cc` files whose symbols were bodies only.
+
+**Largest paired classes** (bytes of the class's own text plus the bodies in other files), against the 4,000-byte outline threshold and the 8,000-byte task cap (P5):
+
+| Repository | Largest, bytes (of which in other files) |
+|---|---|
+| `leveldb` | `DBImpl` 48,970 (42,385); `VersionSet` 26,758 (21,424); `Version` 14,249 (10,378); `log::Reader` 11,656 |
+| `abseil` | `Cord` 68,062 (29,595); `Mutex` 63,610 (44,815); `CordRepBtree` 55,392 (28,471); `FlagImpl` 30,420 |
+| `fmt` | gtest classes (not the library) 18,319 and below |
+
+**So `DBImpl`'s generation task will be the outline (signatures and docstrings, no bodies), 12 times the cap before reduction.** P5 predicted that and chose not to build a ladder first; the `leveldb` dogfood is where to see whether the outline is enough to write a useful spec for a class whose behaviour is its bodies. That is the thing to read first there.
+
+**Hand check, 30 cross-file pairings on `abseil`** (seeded random sample of the 1,254 in the probe, `random.Random(20261120)`; each judged by the body's first line against the declaration it was attached to):
+
+| Result | Count |
+|---|---|
+| Right entity (same class or namespace, same name) | 30 of 30 |
+| Of those, the body is an **overload or a specialisation whose parameter list differs from the declaration it joined** | 4 (`time_internal::operator<<(…, CivilSecond)` onto `…CivilYear`; `CrcCordState::operator=(&&)` onto `(const&)`; `FormatTime(Time, TimeZone)` onto `FormatTime(string_view, …)`; `Generator<std::string>::operator()` onto the primary template's) |
+| Wrong class | 0 |
+
+No body went to the wrong class, which was the risk of section 9. The 4 are the known limit of section 10 ("a free function's overload with no prototype is paired with the same-named symbol"), and it is **not rare: 13 % of this sample**. The consequence is bounded (one id means one spec describing the overloads together, the stance the same-file fold already takes), but the spec of such a symbol can describe a signature the header does not declare. Revisit when a dogfood spec shows it going wrong; the fix would be normalising parameter text, which default arguments and names defeat.
+
+**`leveldb` end to end.** `RepoIndex::open` and the coverage function on `leveldb` run without error; `db/db_impl.cc` still has a file entry (7 generations) because it holds symbols with no declaration elsewhere (static helpers, private types), as designed; its paired method bodies are not listed.
