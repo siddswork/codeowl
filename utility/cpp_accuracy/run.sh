@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The C++ accuracy check: the pack against the compiler (libclang).
-# See utility/cpp_accuracy/README.md. Usage: run.sh [--refresh] [--check] [repo ...]
+# See utility/cpp_accuracy/README.md. Usage: run.sh [--refresh] [--check] [repo ...] | run.sh --controls
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

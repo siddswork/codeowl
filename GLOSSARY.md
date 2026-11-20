@@ -844,6 +844,22 @@ checking that the socket didn't have to change shape to fit them.
   `children: []` meaning "this pack doesn't look" rather than "there are
   none." See `experiments/exp-04-agent-reliance.md`.
 
+**Control repository** (C++ accuracy check)
+: A repository the C++ pack was never fitted to, kept so a number on it says
+  whether the pack generalises or only fits the four *measurement
+  repositories* (`leveldb`, `abseil`, `fmt`, `json`), whose files every
+  blanking rule was found in. Named 2026-11-20 (`ninja` and `cppcheck`;
+  `docs/cpp-pack-plan.md` section 7a), on the model of a held-out set in
+  machine learning, though CodeOwl is not one.
+
+  Three rules keep it a control: **never a source of rules** (its failures
+  are counted and never named, so there is no lead to follow); **measured at
+  milestones only** (looking after every change turns it into a training set
+  by degrees); and **promoted when used** (a fix made because of it makes it
+  a measurement repository, and a new control is chosen). Not the same as a
+  *negative control* in a test, which is a case that must not match. Run
+  with `utility/cpp_accuracy/run.sh --controls`.
+
 **`structural_sweep.py`**
 : The tool that proves a refactor changed nothing a consumer can observe.
   It builds two versions of CodeOwl (before and after the change), runs

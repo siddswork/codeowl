@@ -9,9 +9,11 @@ utility/cpp_accuracy/run.sh                 # all four repositories
 utility/cpp_accuracy/run.sh leveldb fmt     # some
 utility/cpp_accuracy/run.sh --check         # exit 1 if a target of the plan is missed
 utility/cpp_accuracy/run.sh --refresh       # rebuild the compiler's reference
+utility/cpp_accuracy/run.sh --controls      # the control repositories only (below)
 ```
 
-Results are printed and written to `target/cpp-accuracy/results.json`.
+Results are printed and written to `target/cpp-accuracy/results.json`; a
+control run writes `results-controls.json` instead, so neither erases the other.
 
 ## What it needs
 
