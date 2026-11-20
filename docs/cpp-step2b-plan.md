@@ -163,7 +163,7 @@ Each part: tests first (red, then green), a negative control where it applies, `
 | 0 | **Namespaces in ids** (section 4.0, N1). The extractor tracks the chain of named namespaces (inline ones transparent, anonymous omitted) and puts it in every top-level id and in its members' ids; a qualified definition is marked (`qualified_function`, new `qualified_variable`); `edges.rs`, `cpp_probe` and `compare.py` read the marker and the last segment instead of looking for `::`. `FORMAT_VERSION` bump. The existing id assertions change with the rule | Tests first: each row of the chain table in section 4.0 (nested and `a::b` forms, inline, anonymous, a class member, an out-of-class definition written inside and outside its namespace, two same-named declarations in different namespaces stay two symbols, the same name in `#if` branches of one namespace still folds); `edges.rs` never targets a qualified definition and does target a namespaced class by its last segment; a heading and an anchor for `leveldb::DB`. On the four repositories: **no two symbols of one file share an id across different namespaces**, the count of ids still shared only by an anonymous-namespace difference is recorded, and `utility/cpp_accuracy/run.sh` equals the figures of 2026-11-15 exactly (classes, functions, recall, precision). `graph_stats` identical on the seven other-pack repositories |
 | A | **The core.** The new field on `ExtractedSymbol` and `Symbol`, carried by `Graph::build`; per-file spans and text in `source_text.rs`; the per-file dependency scope (one helper for staleness, `Depends on` and the task); `get_source` per P4. No `FORMAT_VERSION` bump (part B's) | Tests on a hand-built graph with a symbol whose span is in a second file (no C++ needed): its text has both blocks with the file line; its dependency scope takes the second file's edges against the second file's text only; `get_source` returns both and flags a changed second file. `graph_stats` identical on the seven other-pack repositories |
 | B | **The pairing pass.** The `pair_definitions` hook, called in `rebuild`; `cpp/pairing.rs` with rules 1 to 4 and section 4.3; `FORMAT_VERSION` 30 (with the note part A's section 11 gives) | A test for each row of the pack plan's §4.6 table that pairing touches (bodies in the header: no pairing; some bodies in a `.cc`; bodies below the class in one file; a `.cc` with private classes and functions; a free function with a prototype; a `static` helper; a class implemented across two `.cc` files), plus: two reachable classes of one name stay unpaired; a namespace-qualified function pairs to its prototype; a `std::` specialisation stays; a static data member pairs to the class |
-| C | **End to end and measurement.** Rewritten 2026-11-20 after checking what parts A and B already built: section 12 | Section 12's tests pass; its measurements recorded in section 11 |
+| C | **End to end and measurement.** Rewritten 2026-11-20 after checking what parts A and B already built: section 12 | Section 12's tests pass; its measurements recorded in section 12.4 |
 
 ## 7. Acceptance
 
@@ -335,7 +335,7 @@ Parts A and B already built most of what section 6 listed for part C, so this se
 
 | Measure | How | Kill criterion / use |
 |---|---|---|
-| Pairing time | Recorded already (12 / 100 / 82 / 32 ms) | Done |
+| Pairing time | Recorded in part B (12 / 100 / 82 / 32 ms); measured again in 12.4 (3 / 40 / 5 / 16 ms), see the note there | Done, with the discrepancy noted |
 | Graph size with and without pairing on `abseil` | `cpp_probe` serialises both graphs (`abseil` cannot be indexed by `codeowl` before step 2c, so not `.codeowl/graph`); say so in the record | Growth over 10 % is investigated |
 | Largest paired class | Text size of `DBImpl` on `leveldb`, and of the largest on `abseil`, against the 4,000-byte outline threshold and the 8,000-byte cap | Informs P5 before the dogfood: if `DBImpl`'s task is outline-only, the dogfood shows whether that is enough |
 | Coverage time on `leveldb` | `get_spec_coverage` (or its function) timed on `leveldb`, `master` before part A against now | The part A review deferred it here; over twice the old time is investigated |
@@ -344,17 +344,22 @@ Parts A and B already built most of what section 6 listed for part C, so this se
 
 ### 12.3 Done when
 
-C1 to C4 pass (red first or with a mutation check); the measurements are in section 11; `utility/check.sh`; `graph_stats` identical on the seven other-pack repositories (no production code is expected to change; if one does, the bump rule applies); `/code-review`. Then step 2b is finished and the next step is the `leveldb` dogfood (`docs/cpp-pack-plan.md` section 5, order of 2026-11-20).
+C1 to C4 pass (red first or with a mutation check); the measurements are in section 12.4; `utility/check.sh`; `graph_stats` identical on the seven other-pack repositories (no production code is expected to change; if one does, the bump rule applies); `/code-review`. Then step 2b is finished and the next step is the `leveldb` dogfood (`docs/cpp-pack-plan.md` section 5, order of 2026-11-20).
 
 ### 12.4 Result (2026-11-20)
 
 **Tests.** C1 to C4 are in `tests/cpp_staleness.rs` (C1, C2, C4) and `tests/cpp_pairing.rs` (C3). **None was red first**: parts A and B had already made the behaviour hold, so each passed on its first run, and each is pinned by a mutation instead:
 
-| Test | Mutation that makes it fail |
-|---|---|
-| C1 | pairing switched off; the body hash not folded into the class; the body leaking into the interface hash (each fails a different assertion) |
-| C2, C4 | the staleness dependency scope reduced to the symbol's home file (`try_dependency_pairs`). **My first mutation was on `symbol_scoped_deps`, which staleness does not call, and changed nothing**; the check is what showed it |
-| C3 | `apply_changes` not refreshing a modified file's cache entry; not dropping a deleted file's entry |
+| Test | Mutation | The assertion that failed |
+|---|---|---|
+| C1 | pairing switched off | `widget.cc` still has symbols (`children_ids(…).is_empty()`) |
+| C1 | the body hash not folded into the class | the class reads `[]`, not `["changed:source"]` ("the class's spec describes the body that changed") |
+| C1 | the body leaking into the interface hash | the user symbol went stale ("a user reads the interface, which did not change") |
+| C2 and C4 | the staleness dependency scope reduced to the symbol's home file (`try_dependency_pairs`) | both tests fail (2 of 7 in the file). **My first mutation was on `symbol_scoped_deps`, which staleness does not call; all 7 still passed**, which is how I found the right function |
+| C3 | `apply_changes` not refreshing a modified file's cache entry | the class's source hash did not move (`assert_ne!`, "left != right") |
+| C3 | `apply_changes` not dropping a deleted file's entry | `graph.find("db.cc").is_none()` |
+
+These were run once, by hand; the table is the record (the raw output was not kept). A later refactor can repeat them the same way.
 
 No production code changed: `graph_stats` is unaffected by construction (tests only).
 
@@ -367,6 +372,8 @@ No production code changed: `graph_stats` is unaffected by construction (tests o
 
 Pairing shrinks the graph (the criterion was growth over 10 %).
 
+**The pairing times differ from part B's (12 / 100 / 82 / 32 ms) by up to 16 times (`fmt` 82 to 5 ms), and I did not establish why.** The new ones come from a release build of a probe; part B's build is not recorded, and a debug build would explain a factor of that size, but I did not re-run it to check. `pair` has changed since only by the qualification fix and its review (a per-level lookup), which does not make it 16 times faster. Treat both as "well under the one-second criterion"; do not compare them.
+
 **Coverage time on `leveldb`**, `get_spec_coverage`'s function, five runs each, before step 2b (`0ea3883`) and now: **10 to 17 ms before, 9 to 11 ms now**; no slowdown from reading a symbol's other file. Items 138 to 124: the 14 fewer are the file specs and sections of `.cc` files whose symbols were bodies only.
 
 **Largest paired classes** (bytes of the class's own text plus the bodies in other files), against the 4,000-byte outline threshold and the 8,000-byte task cap (P5):
@@ -377,15 +384,17 @@ Pairing shrinks the graph (the criterion was growth over 10 %).
 | `abseil` | `Cord` 68,062 (29,595); `Mutex` 63,610 (44,815); `CordRepBtree` 55,392 (28,471); `FlagImpl` 30,420 |
 | `fmt` | gtest classes (not the library) 18,319 and below |
 
-**So `DBImpl`'s generation task will be the outline (signatures and docstrings, no bodies), 12 times the cap before reduction.** P5 predicted that and chose not to build a ladder first; the `leveldb` dogfood is where to see whether the outline is enough to write a useful spec for a class whose behaviour is its bodies. That is the thing to read first there.
+**So `DBImpl`'s generation task will be the outline (signatures and docstrings, no bodies): its text is about 6 times the 8,000-byte cap (12 times the 4,000-byte outline threshold).** P5 predicted that and chose not to build a ladder first; the `leveldb` dogfood is where to see whether the outline is enough to write a useful spec for a class whose behaviour is its bodies. That is the thing to read first there.
 
 **Hand check, 30 cross-file pairings on `abseil`** (seeded random sample of the 1,254 in the probe, `random.Random(20261120)`; each judged by the body's first line against the declaration it was attached to):
 
 | Result | Count |
 |---|---|
-| Right entity (same class or namespace, same name) | 30 of 30 |
-| Of those, the body is an **overload or a specialisation whose parameter list differs from the declaration it joined** | 4 (`time_internal::operator<<(…, CivilSecond)` onto `…CivilYear`; `CrcCordState::operator=(&&)` onto `(const&)`; `FormatTime(Time, TimeZone)` onto `FormatTime(string_view, …)`; `Generator<std::string>::operator()` onto the primary template's) |
-| Wrong class | 0 |
+| Same class or namespace, same name, same signature | 26 of 30 |
+| Same class or namespace and name, but **a different overload or a specialisation** than the declaration it joined | 4 of 30 (`time_internal::operator<<(…, CivilSecond)` onto `…CivilYear`, a different function; `CrcCordState::operator=(&&)` onto `(const&)`; `FormatTime(Time, TimeZone)` onto `FormatTime(string_view, …)`; `Generator<std::string>::operator()` onto the primary template's) |
+| Wrong class or namespace | 0 |
+
+**The criterion of 12.2 ("one wrong pairing is investigated before the dogfood") applies to the 4**: each is a body attached to a declaration that is not its own overload. I read them (above) and they are the section 10 limit exactly; I did not find a way to fix them cheaply, so **the decision to go on to the dogfood with this known is the owner's**, and the sentence "30 of 30" elsewhere means the entity, not the overload.
 
 No body went to the wrong class, which was the risk of section 9. The 4 are the known limit of section 10 ("a free function's overload with no prototype is paired with the same-named symbol"), and it is **not rare: 13 % of this sample**. The consequence is bounded (one id means one spec describing the overloads together, the stance the same-file fold already takes), but the spec of such a symbol can describe a signature the header does not declare. Revisit when a dogfood spec shows it going wrong; the fix would be normalising parameter text, which default arguments and names defeat.
 

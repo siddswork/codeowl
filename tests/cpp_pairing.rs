@@ -133,6 +133,22 @@ fn the_watchers_incremental_path_re_pairs_on_a_body_edit_a_removed_definition_an
         [("db.cc".to_string(), [6, 8])]
     );
 
+    // A line inserted above `Put`'s body: its span moves with it, and `Get`'s
+    // (above the insertion) does not. A cached pre-edit span would show here.
+    std::fs::write(&cc, DB_CC.replace("int DB::Put", "// a note\nint DB::Put")).unwrap();
+    let (graph, _) = index
+        .apply_changes(std::slice::from_ref(&cc))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Put"),
+        [("db.cc".to_string(), [7, 9])]
+    );
+    assert_eq!(
+        spans(&graph, "db.h::leveldb::DB::Get"),
+        [("db.cc".to_string(), [3, 5])]
+    );
+
     // One definition removed from the source file: its member has no body in
     // another file any more, the other still has, and nothing is left behind.
     std::fs::write(
@@ -149,7 +165,10 @@ fn the_watchers_incremental_path_re_pairs_on_a_body_edit_a_removed_definition_an
         spans(&graph, "db.h::leveldb::DB::Get"),
         [("db.cc".to_string(), [3, 5])]
     );
-    assert!(graph.find("db.cc::leveldb::DB::Put").is_none());
+    assert!(
+        graph.symbols().all(|s| s.file != "db.cc"),
+        "no symbol of the source file is left: every definition is paired or gone"
+    );
 
     // The source file deleted: no member keeps a span in it, and nothing panics.
     std::fs::remove_file(&cc).unwrap();

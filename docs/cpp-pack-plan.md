@@ -216,7 +216,7 @@ Every blanking rule so far was found by reducing a file of the four measurement 
 
 | Rule | Why |
 |---|---|
-| Chosen and pinned at a commit **before** more C++ work, and measured once then as the baseline | So the baseline cannot be shaped by what we already know about it |
+| Chosen and pinned at a commit **before any change to extraction, blanking or pairing**, and measured once then as the baseline. Allowed before it: step 2b part C (tests and measurements only, no pack change) | So the baseline cannot be shaped by what we already know about it |
 | **Never a source of rules.** Its figures are read; its files are never reduced, its parse errors never read to find a cause | A fix made because of it makes it one more training repository |
 | Measured **at milestones only**: after the `leveldb` dogfood, after step 3 or 4, before C++ is called done | Looking after every change turns it into a training set by degrees |
 | Success is judged on both halves: K11 through `utility/cpp_accuracy/run.sh` (not in the targets' averages, reported beside them), and a few specs read by the owner in the dogfood | Specs are the product; extraction counts only stand in for them |
